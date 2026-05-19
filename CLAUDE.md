@@ -1,0 +1,1 @@
+/opt/firma/CLAUDE.md

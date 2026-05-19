@@ -1,0 +1,29 @@
+import sqlite3
+from pathlib import Path
+
+PRODUCTION_DB = Path("/opt/ai-os/data/production.db")
+FINANCE_DB = Path("/opt/fin-agent/data/finance.db")
+
+
+def get_production():
+    conn = sqlite3.connect(PRODUCTION_DB)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def get_finance():
+    conn = sqlite3.connect(FINANCE_DB)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def ensure_customer_schema():
+    conn = get_production()
+    try:
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(customers)").fetchall()}
+        for column in ("wiki_ref", "finagent_ref"):
+            if column not in existing:
+                conn.execute(f"ALTER TABLE customers ADD COLUMN {column} TEXT")
+        conn.commit()
+    finally:
+        conn.close()

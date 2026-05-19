@@ -1,0 +1,23 @@
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/.npm/
+frontend/.vite/
+**/node_modules/
+
+# Build output
+**/__pycache__/
+**/*.py[cod]
+**/*.log
+**/*.tmp
+**/*.swp
+**/dist/
+
+# System files
+.DS_Store
+.idea/
+.vscode/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.env*
