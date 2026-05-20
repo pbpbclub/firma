@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { financeApi } from "../api";
-import { Search } from "lucide-react";
+import { MagnifyingGlass } from "@phosphor-icons/react";
 
 function fmt(n: number) {
   return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(Math.abs(n)) + " ₽";
@@ -43,9 +43,6 @@ export default function Finance() {
 
       {/* Header */}
       <div style={{ padding: "24px 28px 20px", borderBottom: "1px solid #EDEBE6" }}>
-        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>
-          {new Date().toLocaleDateString("ru-RU", { month: "short", year: "numeric" }).toUpperCase().replace(" ", "'")}
-        </div>
         <div style={{ fontSize: 26, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em" }}>
           ДДС
         </div>
@@ -110,7 +107,7 @@ export default function Finance() {
       {/* Filters */}
       <div style={{ padding: "12px 28px", borderBottom: "1px solid #EDEBE6", display: "flex", gap: 12, alignItems: "center" }}>
         <div style={{ position: "relative" }}>
-          <Search size={13} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "#A89070" }} />
+          <MagnifyingGlass size={13} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "#A89070" }} />
           <input
             style={{
               paddingLeft: 28, paddingRight: 10, paddingTop: 6, paddingBottom: 6,

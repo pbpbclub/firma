@@ -69,9 +69,6 @@ export default function Dashboard() {
 
       {/* Header */}
       <div style={{ padding: "24px 28px 20px", borderBottom: "1px solid #EDEBE6" }}>
-        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>
-          {new Date().toLocaleDateString("ru-RU", { month: "short", year: "numeric" }).toUpperCase().replace(" ", "'")}
-        </div>
         <div style={{ fontSize: 26, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em" }}>
           {new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })}
         </div>

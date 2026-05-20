@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { taxApi } from "../api";
-import { AlertCircle, CheckCircle } from "lucide-react";
+import { WarningCircle, CheckCircle } from "@phosphor-icons/react";
 
 function fmt(n: number) {
   return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) + " ₽";
@@ -43,7 +43,7 @@ export default function Taxes() {
         borderLeft: `3px solid ${data.tax_to_pay > 0 ? "#E8592A" : "#4A7C59"}`,
       }}>
         {data.tax_to_pay > 0
-          ? <AlertCircle size={17} style={{ color: "#E8592A", flexShrink: 0, marginTop: 1 }} />
+          ? <WarningCircle size={17} style={{ color: "#E8592A", flexShrink: 0, marginTop: 1 }} />
           : <CheckCircle size={17} style={{ color: "#4A7C59", flexShrink: 0, marginTop: 1 }} />
         }
         <div>

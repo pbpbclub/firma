@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, HTTPException
 from typing import Optional
 from db import get_production
 
@@ -25,6 +25,7 @@ PRIORITY_LABELS = {
 def list_orders(
     status: Optional[str] = None,
     search: Optional[str] = None,
+    archived: bool = False,
     limit: int = Query(50, le=200),
 ):
     conn = get_production()
@@ -33,6 +34,7 @@ def list_orders(
             SELECT
                 o.id, o.number, o.title, o.status, o.priority,
                 o.deadline, o.price_plan, o.cost_plan, o.created_at,
+                o.archived,
                 c.id AS customer_id,
                 c.name AS customer_name,
                 c.full_name AS customer_full_name,
@@ -45,9 +47,9 @@ def list_orders(
             FROM orders o
             LEFT JOIN customers c ON c.id = o.customer_id
             LEFT JOIN payments p ON p.order_id = o.id
-            WHERE 1=1
+            WHERE o.archived = ?
         """
-        params = []
+        params: list = [1 if archived else 0]
         if status:
             sql += " AND o.status = ?"
             params.append(status)
@@ -165,5 +167,33 @@ def get_estimate(order_id: str):
             result.append({**dict(s), "items": items_data})
 
         return result
+    finally:
+        conn.close()
+
+
+@router.patch("/{order_id}/archive")
+def archive_order(order_id: str):
+    conn = get_production()
+    try:
+        r = conn.execute("SELECT id FROM orders WHERE id = ? OR number = ?", (order_id, order_id)).fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="Not found")
+        conn.execute("UPDATE orders SET archived = 1, updated_at = datetime('now') WHERE id = ?", (r["id"],))
+        conn.commit()
+        return {"ok": True, "archived": True}
+    finally:
+        conn.close()
+
+
+@router.patch("/{order_id}/unarchive")
+def unarchive_order(order_id: str):
+    conn = get_production()
+    try:
+        r = conn.execute("SELECT id FROM orders WHERE id = ? OR number = ?", (order_id, order_id)).fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="Not found")
+        conn.execute("UPDATE orders SET archived = 0, updated_at = datetime('now') WHERE id = ?", (r["id"],))
+        conn.commit()
+        return {"ok": True, "archived": False}
     finally:
         conn.close()

@@ -1,22 +1,22 @@
 import { useState } from "react";
 import { NavLink } from "react-router-dom";
 import {
-  LayoutDashboard,
+  SquaresFour,
   FileText,
-  TrendingUp,
+  TrendUp,
   Package,
   Calculator,
   Users,
   User,
-  LogOut,
-  Menu,
-} from "lucide-react";
+  SignOut,
+  List,
+} from "@phosphor-icons/react";
 import { getUser, logout } from "../auth";
 
 const nav = [
-  { to: "/", icon: LayoutDashboard, label: "Главная" },
+  { to: "/", icon: SquaresFour, label: "Главная" },
   { to: "/orders", icon: FileText, label: "Заказы" },
-  { to: "/finance", icon: TrendingUp, label: "ДДС" },
+  { to: "/finance", icon: TrendUp, label: "ДДС" },
   { to: "/debtors", icon: Users, label: "Долги" },
   { to: "/customers", icon: User, label: "Клиенты" },
   { to: "/catalog", icon: Package, label: "Каталог" },
@@ -76,7 +76,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             onMouseEnter={(e) => (e.currentTarget.style.color = "#1A1A1A")}
             onMouseLeave={(e) => (e.currentTarget.style.color = "#A89070")}
           >
-            <Menu size={18} />
+            <List size={18} />
           </button>
 
           {/* Nav */}
@@ -160,7 +160,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               onMouseEnter={(e) => (e.currentTarget.style.color = "#E8592A")}
               onMouseLeave={(e) => (e.currentTarget.style.color = "#C8C0B0")}
             >
-              <LogOut size={15} />
+              <SignOut size={15} />
             </button>
           </div>
         </aside>

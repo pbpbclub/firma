@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { ordersApi } from "../api";
-import { Search, MoreHorizontal } from "lucide-react";
+import { MagnifyingGlass, DotsThree } from "@phosphor-icons/react";
 
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
   draft:         { label: "Черновик",       color: "#A89070" },
@@ -49,15 +49,12 @@ export default function Orders() {
       {/* Header */}
       <div style={{ padding: "24px 28px 20px", borderBottom: "1px solid #EDEBE6", display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
         <div>
-          <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>
-            {new Date().toLocaleDateString("ru-RU", { month: "short", year: "numeric" }).toUpperCase().replace(" ", "'")}
-          </div>
           <div style={{ fontSize: 26, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em" }}>Заказы</div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ fontSize: 12, color: "#A89070" }}>{(data as any[]).length} заказов</div>
           <div style={{ position: "relative" }}>
-            <Search size={13} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "#A89070" }} />
+            <MagnifyingGlass size={13} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "#A89070" }} />
             <input
               style={{
                 paddingLeft: 28, paddingRight: 10, paddingTop: 6, paddingBottom: 6,
@@ -129,7 +126,7 @@ export default function Orders() {
                   {o.debt > 0 ? fmt(o.debt) : "—"}
                 </div>
                 <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                  <MoreHorizontal size={14} style={{ color: "#C8C0B0" }} />
+                  <DotsThree size={14} style={{ color: "#C8C0B0" }} />
                 </div>
               </div>
             );

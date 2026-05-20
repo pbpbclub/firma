@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useParams, useNavigate } from "react-router-dom";
 import { ordersApi } from "../api";
-import { ArrowLeft, Phone } from "lucide-react";
+import { ArrowLeft, Phone } from "@phosphor-icons/react";
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-gray-100 text-gray-600",

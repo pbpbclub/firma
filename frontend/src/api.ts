@@ -21,10 +21,12 @@ api.interceptors.response.use(
 );
 
 export const ordersApi = {
-  list: (params?: Record<string, string>) =>
+  list: (params?: Record<string, string | boolean>) =>
     api.get("/orders", { params }).then((r) => r.data),
   get: (id: string) => api.get(`/orders/${id}`).then((r) => r.data),
   estimate: (id: string) => api.get(`/orders/${id}/estimate`).then((r) => r.data),
+  archive: (id: string) => api.patch(`/orders/${id}/archive`).then((r) => r.data),
+  unarchive: (id: string) => api.patch(`/orders/${id}/unarchive`).then((r) => r.data),
 };
 
 export const customersApi = {
@@ -52,6 +54,13 @@ export const catalogApi = {
     api.get("/catalog", { params: search ? { search } : {} }).then((r) => r.data),
   materials: (search?: string) =>
     api.get("/catalog/materials", { params: search ? { search } : {} }).then((r) => r.data),
+  items: {
+    list:   ()                      => api.get("/catalog/items").then((r) => r.data),
+    get:    (id: string)            => api.get(`/catalog/items/${id}`).then((r) => r.data),
+    create: (data: any)             => api.post("/catalog/items", data).then((r) => r.data),
+    update: (id: string, data: any) => api.put(`/catalog/items/${id}`, data).then((r) => r.data),
+    delete: (id: string)            => api.delete(`/catalog/items/${id}`).then((r) => r.data),
+  },
 };
 
 export const authApi = {
