@@ -756,25 +756,50 @@ export default function OrdersV2() {
                     Клиент
                   </button>
                 )}
-                {detail?.estimate_sets?.length > 0 ? (
-                  (detail.estimate_sets as any[]).map((s: any, i: number) => (
-                    <button
-                      key={s.id}
-                      onClick={() => navigate(`/orders/${selected.id}/estimate?set=${s.id}`)}
-                      style={{ padding: "5px 10px", border: "1px solid #E8592A", background: "transparent", color: "#E8592A", fontSize: 11, cursor: "pointer", fontWeight: 600 }}
-                    >
-                      {detail.estimate_sets.length === 1 ? "Смета" : `Смета ${i + 1}`}
-                      {s.status === "approved" && " ✓"}
-                    </button>
-                  ))
-                ) : (
-                  <button
-                    onClick={() => navigate(`/orders/${selected.id}/estimate`)}
-                    style={{ padding: "5px 10px", border: "1px solid #E8592A", background: "transparent", color: "#E8592A", fontSize: 11, cursor: "pointer", fontWeight: 600 }}
-                  >
-                    Сметы
-                  </button>
-                )}
+                {(() => {
+                  const sets: any[] = detail?.estimate_sets ?? [];
+                  const [open, setOpen] = useState(false);
+                  const ref = useRef<HTMLDivElement>(null);
+                  useEffect(() => {
+                    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+                    document.addEventListener("mousedown", h);
+                    return () => document.removeEventListener("mousedown", h);
+                  }, []);
+                  const STATUS_LABEL: Record<string, string> = { approved: "Согласована", draft: "Черновик" };
+                  return (
+                    <div ref={ref} style={{ position: "relative" }}>
+                      <button
+                        onClick={() => sets.length === 1 ? navigate(`/orders/${selected.id}/estimate?set=${sets[0].id}`) : setOpen(v => !v)}
+                        style={{ padding: "5px 10px", border: "1px solid #E8592A", background: "transparent", color: "#E8592A", fontSize: 11, cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}
+                      >
+                        Сметы{sets.length > 0 && <span style={{ fontSize: 10, opacity: 0.8 }}>({sets.length})</span>}
+                      </button>
+                      {open && (
+                        <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 300, background: "#fff", border: "1px solid #EDEBE6", boxShadow: "0 4px 16px rgba(0,0,0,0.10)", minWidth: 200 }}>
+                          {sets.length === 0 ? (
+                            <div
+                              onClick={() => { navigate(`/orders/${selected.id}/estimate`); setOpen(false); }}
+                              style={{ padding: "10px 14px", fontSize: 12, color: "#A89070", cursor: "pointer" }}
+                              onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")}
+                              onMouseLeave={e => (e.currentTarget.style.background = "")}
+                            >Создать смету...</div>
+                          ) : sets.map((s: any, i: number) => (
+                            <div
+                              key={s.id}
+                              onClick={() => { navigate(`/orders/${selected.id}/estimate?set=${s.id}`); setOpen(false); }}
+                              style={{ padding: "9px 14px", fontSize: 12, cursor: "pointer", borderBottom: i < sets.length - 1 ? "1px solid #F2EFE9" : "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}
+                              onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")}
+                              onMouseLeave={e => (e.currentTarget.style.background = "")}
+                            >
+                              <span style={{ color: "#1A1A1A", fontWeight: 500 }}>Смета {i + 1}</span>
+                              <span style={{ fontSize: 10, color: s.status === "approved" ? "#4A7C59" : "#A89070" }}>{STATUS_LABEL[s.status] ?? s.status}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
                 <button
                   onClick={handleArchive}
                   disabled={archiving}
