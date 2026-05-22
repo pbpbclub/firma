@@ -289,17 +289,20 @@ function CustomerDetail({ customerId, onClose }: { customerId: string; onClose: 
           </div>
           {customer.full_name && <div style={{ fontSize: 11, color: "#A89070" }}>{customer.full_name}</div>}
         </div>
-        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
           <button
             onClick={() => setEditing(true)}
-            style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", border: "1px solid #EDEBE6", background: "none", fontSize: 11, cursor: "pointer", color: "#6B6355" }}
+            title="Редактировать"
+            style={{ display: "flex", alignItems: "center", padding: 6, border: "none", background: "none", cursor: "pointer", color: "#C8C0B0" }}
+            onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
+            onMouseLeave={e => (e.currentTarget.style.color = "#C8C0B0")}
           >
-            <PencilSimple size={12} /> Редактировать
+            <PencilSimple size={16} />
           </button>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 4 }}
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 6 }}
             onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
             onMouseLeave={e => (e.currentTarget.style.color = "#C8C0B0")}>
-            <X size={18} />
+            <X size={16} />
           </button>
         </div>
       </div>
@@ -503,14 +506,17 @@ function MasterDetail({ masterId, onClose }: { masterId: string; onClose: () => 
             <div style={{ marginTop: 6, fontSize: 13, fontWeight: 700, color: "#8B3A3A" }}>Долг: {fmt(totalDebt)}</div>
           )}
         </div>
-        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
           <button
             onClick={() => setEditing(true)}
-            style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", border: "1px solid #EDEBE6", background: "none", fontSize: 11, cursor: "pointer", color: "#6B6355" }}
+            title="Редактировать"
+            style={{ display: "flex", alignItems: "center", padding: 6, border: "none", background: "none", cursor: "pointer", color: "#C8C0B0" }}
+            onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
+            onMouseLeave={e => (e.currentTarget.style.color = "#C8C0B0")}
           >
-            <PencilSimple size={12} /> Редактировать
+            <PencilSimple size={16} />
           </button>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 4 }}
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 6 }}
             onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
             onMouseLeave={e => (e.currentTarget.style.color = "#C8C0B0")}>
             <DotsThree size={20} />
