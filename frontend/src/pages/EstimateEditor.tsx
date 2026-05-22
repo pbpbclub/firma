@@ -485,6 +485,23 @@ export default function EstimateEditor() {
               >
                 {activeSet.status === "approved" ? "Согласована ✓" : "Согласовать"}
               </button>
+
+              {/* Сформировать счёт */}
+              <button
+                onClick={generateInvoice}
+                disabled={invoicing}
+                style={{
+                  display: "flex", alignItems: "center", gap: 5,
+                  padding: "4px 10px", fontSize: 11, fontWeight: 600,
+                  border: "1px solid #EDEBE6", background: "none",
+                  color: invoicing ? "#C8C0B0" : "#1A1A1A",
+                  cursor: invoicing ? "default" : "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                <FileText size={12} />
+                {invoicing ? "..." : "Счёт"}
+              </button>
             </>
           ) : (
             <button
@@ -629,24 +646,7 @@ export default function EstimateEditor() {
               <div />
               <div style={{ fontSize: 15, fontWeight: 700, color: "#E8592A", textAlign: "right" }}>{fmt(grandTotal)}</div>
               <div style={{ fontSize: 13, fontWeight: 600, color: "#4A7C59", textAlign: "right" }}>+{fmt(totalDelta)}</div>
-              <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                <button
-                  onClick={generateInvoice}
-                  disabled={invoicing}
-                  style={{
-                    background: invoicing ? "#C8C0B0" : "#1A1A1A",
-                    border: "none", color: "#FFFFFF",
-                    fontSize: 11, fontWeight: 600,
-                    cursor: invoicing ? "default" : "pointer",
-                    padding: "5px 10px",
-                    display: "flex", alignItems: "center", gap: 5,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  <FileText size={12} />
-                  {invoicing ? "..." : "Счёт"}
-                </button>
-              </div>
+              <div />
             </div>
           </div>
         </>
