@@ -252,6 +252,8 @@ function NewOrderModal({ onClose, onCreated }: {
   const [priority, setPriority] = useState("normal");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [newCustomerName, setNewCustomerName] = useState("");
+  const [creatingCustomer, setCreatingCustomer] = useState(false);
 
   const { data: customers = [] } = useQuery({
     queryKey: ["customers", ""],
@@ -292,11 +294,53 @@ function NewOrderModal({ onClose, onCreated }: {
           </div>
           <div>
             <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>КЛИЕНТ</div>
-            <select value={customerId} onChange={e => setCustomerId(e.target.value)}
-              style={{ width: "100%", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none", background: "#fff", color: customerId ? "#1A1A1A" : "#A89070" }}>
+            <select value={customerId} onChange={e => {
+              setCustomerId(e.target.value);
+              if (e.target.value !== "__new__") setNewCustomerName("");
+            }}
+              style={{ width: "100%", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none", background: "#fff", color: customerId && customerId !== "__new__" ? "#1A1A1A" : "#A89070" }}>
               <option value="">— не выбран —</option>
               {(customers as any[]).map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              <option value="__new__">+ добавить нового</option>
             </select>
+            {customerId === "__new__" && (
+              <div style={{ marginTop: 6, display: "flex", gap: 6 }}>
+                <input
+                  autoFocus
+                  placeholder="Имя клиента"
+                  value={newCustomerName}
+                  onChange={e => setNewCustomerName(e.target.value)}
+                  onKeyDown={async e => {
+                    if (e.key === "Escape") { setCustomerId(""); setNewCustomerName(""); }
+                    if (e.key === "Enter" && newCustomerName.trim()) {
+                      setCreatingCustomer(true);
+                      try {
+                        const c = await customersApi.create({ name: newCustomerName.trim() });
+                        qc.invalidateQueries({ queryKey: ["customers"] });
+                        setCustomerId(String(c.id));
+                        setNewCustomerName("");
+                      } finally { setCreatingCustomer(false); }
+                    }
+                  }}
+                  style={{ flex: 1, border: "1px solid #E8592A", padding: "6px 10px", fontSize: 13, outline: "none" }}
+                />
+                <button
+                  disabled={creatingCustomer || !newCustomerName.trim()}
+                  onClick={async () => {
+                    if (!newCustomerName.trim()) return;
+                    setCreatingCustomer(true);
+                    try {
+                      const c = await customersApi.create({ name: newCustomerName.trim() });
+                      qc.invalidateQueries({ queryKey: ["customers"] });
+                      setCustomerId(String(c.id));
+                      setNewCustomerName("");
+                    } finally { setCreatingCustomer(false); }
+                  }}
+                  style={{ padding: "6px 12px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600, opacity: creatingCustomer || !newCustomerName.trim() ? 0.5 : 1 }}>
+                  {creatingCustomer ? "..." : "Создать"}
+                </button>
+              </div>
+            )}
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <div>
