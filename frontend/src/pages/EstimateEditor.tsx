@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ordersApi, estimatesApi, catalogApi } from "../api";
 import {
@@ -326,8 +326,9 @@ function FooterRow({ cols, label, cost, sale, delta, deltaColor, saleColor, note
 export default function EstimateEditor() {
   const { orderId } = useParams<{ orderId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
-  const [selectedSetId, setSelectedSetId] = useState<string | null>(null);
+  const [selectedSetId, setSelectedSetId] = useState<string | null>(searchParams.get("set"));
   const [openItemId, setOpenItemId] = useState<string | null>(null);
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [invoicing, setInvoicing] = useState(false);

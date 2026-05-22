@@ -756,12 +756,25 @@ export default function OrdersV2() {
                     Клиент
                   </button>
                 )}
-                <button
-                  onClick={() => navigate(`/orders/${selected.id}/estimate`)}
-                  style={{ padding: "5px 10px", border: "1px solid #E8592A", background: "transparent", color: "#E8592A", fontSize: 11, cursor: "pointer", fontWeight: 600 }}
-                >
-                  Смета
-                </button>
+                {detail?.estimate_sets?.length > 0 ? (
+                  (detail.estimate_sets as any[]).map((s: any, i: number) => (
+                    <button
+                      key={s.id}
+                      onClick={() => navigate(`/orders/${selected.id}/estimate?set=${s.id}`)}
+                      style={{ padding: "5px 10px", border: "1px solid #E8592A", background: "transparent", color: "#E8592A", fontSize: 11, cursor: "pointer", fontWeight: 600 }}
+                    >
+                      {detail.estimate_sets.length === 1 ? "Смета" : `Смета ${i + 1}`}
+                      {s.status === "approved" && " ✓"}
+                    </button>
+                  ))
+                ) : (
+                  <button
+                    onClick={() => navigate(`/orders/${selected.id}/estimate`)}
+                    style={{ padding: "5px 10px", border: "1px solid #E8592A", background: "transparent", color: "#E8592A", fontSize: 11, cursor: "pointer", fontWeight: 600 }}
+                  >
+                    Сметы
+                  </button>
+                )}
                 <button
                   onClick={handleArchive}
                   disabled={archiving}
