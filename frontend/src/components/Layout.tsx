@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import {
   SquaresFour,
   FileText,
@@ -10,6 +10,8 @@ import {
   User,
   SignOut,
   List,
+  Vault,
+  HandCoins,
 } from "@phosphor-icons/react";
 import { getUser, logout } from "../auth";
 
@@ -17,17 +19,21 @@ const nav = [
   { to: "/", icon: SquaresFour, label: "Главная" },
   { to: "/orders", icon: FileText, label: "Заказы" },
   { to: "/finance", icon: TrendUp, label: "ДДС" },
-  { to: "/debtors", icon: Users, label: "Долги" },
+  { to: "/debtors", icon: Users, label: "Обязательства" },
   { to: "/customers", icon: User, label: "Клиенты" },
   { to: "/catalog", icon: Package, label: "Каталог" },
   { to: "/taxes", icon: Calculator, label: "Налоги" },
+  { to: "/funds", icon: Vault, label: "Фонды" },
+  { to: "/zenmoney", icon: HandCoins, label: "Личные" },
 ];
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const user = getUser();
+  const location = useLocation();
   const [expanded, setExpanded] = useState(false);
   const initials = user?.name ? user.name.slice(0, 2).toUpperCase() : "YN";
   const W = expanded ? 200 : 60;
+  const isAdmin = location.pathname === "/admin";
 
   return (
     /* Outer beige frame */
@@ -133,14 +139,21 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             alignItems: "center",
             gap: 4,
           }}>
-            <div style={{
-              width: 32, height: 32,
-              background: "#E8E4DA",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              flexShrink: 0,
-            }}>
-              <span style={{ fontSize: 11, fontWeight: 600, color: "#6B6355" }}>{initials}</span>
-            </div>
+            <NavLink
+              to="/admin"
+              title={!expanded ? "Настройки" : undefined}
+              style={{
+                width: 32, height: 32,
+                background: isAdmin ? "#E8592A" : "#E8E4DA",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                flexShrink: 0, textDecoration: "none",
+                transition: "background 0.15s",
+              }}
+              onMouseEnter={(e) => { if (!isAdmin) e.currentTarget.style.background = "#D8D4CA"; }}
+              onMouseLeave={(e) => { if (!isAdmin) e.currentTarget.style.background = "#E8E4DA"; }}
+            >
+              <span style={{ fontSize: 11, fontWeight: 600, color: isAdmin ? "#FFFFFF" : "#6B6355" }}>{initials}</span>
+            </NavLink>
             {expanded && (
               <div style={{ fontSize: 11, color: "#1A1A1A", fontWeight: 500, whiteSpace: "nowrap" }}>
                 {user?.name}

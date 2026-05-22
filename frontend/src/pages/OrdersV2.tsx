@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { ordersApi } from "../api";
-import { MagnifyingGlass, DotsThree, Plus, Files, CaretRight, Archive, ArrowCounterClockwise } from "@phosphor-icons/react";
+import { MagnifyingGlass, DotsThree, Plus, Files, CaretRight, Archive, ArrowCounterClockwise, CaretDown, Funnel } from "@phosphor-icons/react";
 
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
   draft:         { label: "Черновик",       color: "#A89070" },
@@ -39,6 +39,173 @@ function initials(name: string | undefined) {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
+const ALL_STATUSES = [
+  { value: "draft",         label: "Черновик",        color: "#A89070" },
+  { value: "estimate",      label: "Смета",            color: "#E8592A" },
+  { value: "project",       label: "Проект",           color: "#E8592A" },
+  { value: "in_production", label: "В производстве",   color: "#1A1A1A" },
+  { value: "completed",     label: "Завершён",         color: "#4A7C59" },
+  { value: "cancelled",     label: "Отменён",          color: "#8B3A3A" },
+];
+
+function StatusPicker({ orderId, current, onChange }: { orderId: string; current: string; onChange: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const st = ALL_STATUSES.find(s => s.value === current) || { label: current, color: "#A89070" };
+
+  const pick = async (value: string) => {
+    if (value === current) { setOpen(false); return; }
+    setSaving(true);
+    try {
+      await ordersApi.updateStatus(orderId, value);
+      onChange();
+    } finally {
+      setSaving(false);
+      setOpen(false);
+    }
+  };
+
+  return (
+    <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        disabled={saving}
+        style={{
+          display: "flex", alignItems: "center", gap: 5,
+          padding: "5px 10px", border: "1px solid #EDEBE6", background: "none",
+          fontSize: 11, cursor: "pointer", color: st.color, fontWeight: 600,
+        }}
+      >
+        {saving ? "..." : st.label}
+        <CaretDown size={10} style={{ color: "#A89070" }} />
+      </button>
+      {open && (
+        <div style={{
+          position: "absolute", top: "100%", left: 0, marginTop: 2,
+          background: "#fff", border: "1px solid #EDEBE6", zIndex: 100,
+          boxShadow: "0 4px 16px rgba(0,0,0,0.12)", minWidth: 160,
+        }}>
+          {ALL_STATUSES.map(s => (
+            <div
+              key={s.value}
+              onClick={() => pick(s.value)}
+              style={{
+                padding: "8px 14px", fontSize: 12, cursor: "pointer",
+                color: s.value === current ? "#1A1A1A" : s.color,
+                fontWeight: s.value === current ? 700 : 400,
+                background: s.value === current ? "#FAF8F5" : "transparent",
+              }}
+              onMouseEnter={(e) => { if (s.value !== current) (e.currentTarget as HTMLElement).style.background = "#FAF8F5"; }}
+              onMouseLeave={(e) => { if (s.value !== current) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+            >
+              {s.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ColumnFilter({ options, value, onChange, maxHeight }: {
+  options: string[];
+  value: string;
+  onChange: (v: string) => void;
+  maxHeight?: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+  useEffect(() => { if (!open) setQ(""); }, [open]);
+  const filtered = q ? options.filter(o => o.toLowerCase().includes(q.toLowerCase())) : options;
+  return (
+    <div ref={ref} style={{ position: "relative", display: "inline-flex" }}>
+      <button onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
+        style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", display: "flex", alignItems: "center", color: value ? "#E8592A" : "#C8C0B0" }}>
+        <Funnel size={11} weight={value ? "fill" : "regular"} />
+      </button>
+      {open && (
+        <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 200, background: "#FFFFFF", border: "1px solid #EDEBE6", boxShadow: "0 4px 16px rgba(0,0,0,0.10)", minWidth: 180 }}>
+          <div style={{ padding: "5px 8px", borderBottom: "1px solid #F2EFE9" }}>
+            <input autoFocus value={q} onChange={e => setQ(e.target.value)} onClick={e => e.stopPropagation()}
+              placeholder="Поиск..." style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 12, outline: "none", fontFamily: "inherit" }} />
+          </div>
+          <div style={{ maxHeight: maxHeight ?? 200, overflowY: "auto" }}>
+            <div onClick={() => { onChange(""); setOpen(false); }} style={{ padding: "8px 12px", fontSize: 12, cursor: "pointer", color: !value ? "#E8592A" : "#1A1A1A", fontWeight: !value ? 600 : 400, borderBottom: "1px solid #F2EFE9" }}
+              onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>Все</div>
+            {filtered.map(opt => (
+              <div key={opt} onClick={() => { onChange(opt); setOpen(false); }} style={{ padding: "8px 12px", fontSize: 12, cursor: "pointer", color: value === opt ? "#E8592A" : "#1A1A1A", fontWeight: value === opt ? 600 : 400 }}
+                onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>{opt}</div>
+            ))}
+            {filtered.length === 0 && <div style={{ padding: "8px 12px", fontSize: 12, color: "#C8C0B0" }}>Не найдено</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AmountFilter({ min, max, onChange }: {
+  min: string; max: string;
+  onChange: (min: string, max: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+  const active = !!min || !!max;
+  return (
+    <div ref={ref} style={{ position: "relative", display: "inline-flex" }}>
+      <button onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
+        style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", display: "flex", alignItems: "center", color: active ? "#E8592A" : "#C8C0B0" }}>
+        <Funnel size={11} weight={active ? "fill" : "regular"} />
+      </button>
+      {open && (
+        <div style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 200, background: "#FFFFFF", border: "1px solid #EDEBE6", boxShadow: "0 4px 16px rgba(0,0,0,0.10)", padding: "10px 12px", minWidth: 210 }}>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <input type="number" placeholder="От" value={min} onChange={e => onChange(e.target.value, max)} autoFocus
+              style={{ width: 84, border: "1px solid #EDEBE6", padding: "5px 8px", fontSize: 12, outline: "none" }} />
+            <span style={{ fontSize: 12, color: "#A89070" }}>—</span>
+            <input type="number" placeholder="До" value={max} onChange={e => onChange(min, e.target.value)}
+              style={{ width: 84, border: "1px solid #EDEBE6", padding: "5px 8px", fontSize: 12, outline: "none" }} />
+          </div>
+          {active && (
+            <button onClick={() => { onChange("", ""); setOpen(false); }}
+              style={{ marginTop: 8, width: "100%", padding: "5px", border: "none", background: "#FAF8F5", fontSize: 11, color: "#A89070", cursor: "pointer" }}>
+              Сбросить
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function IconBtn({ onClick, children, orange }: { onClick?: () => void; children: React.ReactNode; orange?: boolean }) {
   return (
     <button
@@ -68,6 +235,10 @@ export default function OrdersV2() {
   const [page, setPage] = useState(0);
   const [archiveMode, setArchiveMode] = useState(false);
   const [archiving, setArchiving] = useState(false);
+  const [customerFilter, setCustomerFilter] = useState("");
+  const [titleFilter, setTitleFilter] = useState("");
+  const [amountMin, setAmountMin] = useState("");
+  const [amountMax, setAmountMax] = useState("");
 
   const { data = [], isLoading } = useQuery({
     queryKey: ["orders-v2", status, search, archiveMode],
@@ -106,17 +277,23 @@ export default function OrdersV2() {
   const pct = detail?.price_plan > 0 ? Math.min(100, (paidTotal / detail.price_plan) * 100) : 0;
 
   const allData = data as any[];
-  const totalCount = allData.length;
+  const uniqueCustomers = useMemo(() => [...new Set(allData.map((r: any) => r.customer_name).filter(Boolean))].sort() as string[], [allData]);
+  const uniqueTitles = useMemo(() => [...new Set(allData.map((r: any) => r.title).filter(Boolean))].sort() as string[], [allData]);
+  const filteredData = useMemo(() => {
+    let r = allData;
+    if (customerFilter) r = r.filter((o: any) => o.customer_name === customerFilter);
+    if (titleFilter) r = r.filter((o: any) => o.title === titleFilter);
+    if (amountMin) r = r.filter((o: any) => (o.price_plan || 0) >= parseFloat(amountMin));
+    if (amountMax) r = r.filter((o: any) => (o.price_plan || 0) <= parseFloat(amountMax));
+    return r;
+  }, [allData, customerFilter, titleFilter, amountMin, amountMax]);
+  const totalCount = filteredData.length;
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
-  const pageData = allData.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const pageData = filteredData.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   const cols = selected
     ? "2fr 1.2fr 100px 120px 40px"
     : "2fr 1.5fr 120px 130px 120px 40px";
-
-  const headers = selected
-    ? ["Название", "Клиент", "Статус", "Сумма", ""]
-    : ["Название", "Клиент", "Статус", "Сумма", "К получению", ""];
 
   function renderPageNums() {
     const pages: (number | "…")[] = [];
@@ -240,10 +417,22 @@ export default function OrdersV2() {
         </div>
 
         {/* Column headers */}
-        <div style={{ display: "grid", gridTemplateColumns: cols, padding: "8px 28px", borderBottom: "1px solid #F7F5F1" }}>
-          {headers.map((h, i) => (
-            <div key={i} style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>{h}</div>
-          ))}
+        <div style={{ display: "grid", gridTemplateColumns: cols, padding: "8px 28px", borderBottom: "1px solid #F7F5F1", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <span style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>НАЗВАНИЕ</span>
+            <ColumnFilter options={uniqueTitles} value={titleFilter} onChange={(v) => { setTitleFilter(v); setPage(0); }} />
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <span style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>КЛИЕНТ</span>
+            <ColumnFilter options={uniqueCustomers} value={customerFilter} onChange={(v) => { setCustomerFilter(v); setPage(0); }} />
+          </div>
+          <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>СТАТУС</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <span style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>СУММА</span>
+            <AmountFilter min={amountMin} max={amountMax} onChange={(mn, mx) => { setAmountMin(mn); setAmountMax(mx); setPage(0); }} />
+          </div>
+          {!selected && <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>К ПОЛУЧЕНИЮ</div>}
+          <div />
         </div>
 
         {/* Rows */}
@@ -273,7 +462,7 @@ export default function OrdersV2() {
                   onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = "#FAF8F5"; }}
                   onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "transparent"; }}
                 >
-                  <div style={{ fontSize: 11, fontWeight: 500, color: isActive ? "#FFFFFF" : "#1A1A1A", lineHeight: 1.4 }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: isActive ? "#FFFFFF" : "#1A1A1A", lineHeight: 1.4 }}>
                     {o.title}
                   </div>
                   <div style={{
@@ -288,14 +477,14 @@ export default function OrdersV2() {
                   }}>
                     {initials(o.customer_name)}
                   </div>
-                  <div style={{ fontSize: 10, color: isActive ? "#FFFFFF" : st.color, fontWeight: 500, lineHeight: 1.4 }}>
+                  <div style={{ fontSize: 11, color: isActive ? "#FFFFFF" : st.color, fontWeight: 500, lineHeight: 1.4 }}>
                     {st.label}
                   </div>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: isActive ? "#FFFFFF" : "#1A1A1A", lineHeight: 1.4 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: isActive ? "#FFFFFF" : "#1A1A1A", lineHeight: 1.4 }}>
                     {fmt(o.price_plan)}
                   </div>
                   {!selected && (
-                    <div style={{ fontSize: 11, fontWeight: 600, color: isActive ? "#FFFFFF" : (o.debt > 0 ? "#E8592A" : "#C8C0B0"), lineHeight: 1.4 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: isActive ? "#FFFFFF" : (o.debt > 0 ? "#E8592A" : "#C8C0B0"), lineHeight: 1.4 }}>
                       {o.debt > 0 ? fmt(o.debt) : "—"}
                     </div>
                   )}
@@ -364,20 +553,34 @@ export default function OrdersV2() {
               <div style={{ fontSize: 11, color: "#A89070", marginTop: 8 }}>
                 {[selected.number ? `№ ${selected.number}` : "", selected.customer_name].filter(Boolean).join(" · ")}
               </div>
-              <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap", alignItems: "center" }}>
+                <StatusPicker
+                  orderId={selected.id}
+                  current={detail?.status ?? selected.status}
+                  onChange={() => {
+                    qc.invalidateQueries({ queryKey: ["orders-v2"] });
+                    qc.invalidateQueries({ queryKey: ["order-detail-v2", selected.id] });
+                  }}
+                />
                 {selected.customer_id && (
                   <button
                     onClick={() => navigate(`/customers/${selected.customer_id}`)}
-                    style={{ padding: "6px 12px", border: "1px solid #EDEBE6", background: "transparent", color: "#1A1A1A", fontSize: 11, cursor: "pointer" }}
+                    style={{ padding: "5px 10px", border: "1px solid #EDEBE6", background: "transparent", color: "#1A1A1A", fontSize: 11, cursor: "pointer" }}
                   >
-                    Карточка клиента
+                    Клиент
                   </button>
                 )}
+                <button
+                  onClick={() => navigate(`/orders/${selected.id}/estimate`)}
+                  style={{ padding: "5px 10px", border: "1px solid #E8592A", background: "transparent", color: "#E8592A", fontSize: 11, cursor: "pointer", fontWeight: 600 }}
+                >
+                  Смета
+                </button>
                 <button
                   onClick={handleArchive}
                   disabled={archiving}
                   style={{
-                    padding: "6px 12px", border: "1px solid #EDEBE6", background: "transparent",
+                    padding: "5px 10px", border: "1px solid #EDEBE6", background: "transparent",
                     color: archiveMode ? "#4A7C59" : "#A89070", fontSize: 11, cursor: "pointer",
                     display: "flex", alignItems: "center", gap: 5,
                   }}

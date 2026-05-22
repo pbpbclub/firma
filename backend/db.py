@@ -3,6 +3,8 @@ from pathlib import Path
 
 PRODUCTION_DB = Path("/opt/ai-os/data/production.db")
 FINANCE_DB = Path("/opt/fin-agent/data/finance.db")
+ANALYTICS_DB = Path("/opt/fin-agent/data/analytics.db")
+ZENMONEY_DB = Path("/opt/fin-agent/data/zenmoney.db")
 
 
 def get_production():
@@ -17,11 +19,23 @@ def get_finance():
     return conn
 
 
+def get_analytics():
+    conn = sqlite3.connect(ANALYTICS_DB)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def get_zenmoney():
+    conn = sqlite3.connect(ZENMONEY_DB)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
 def ensure_customer_schema():
     conn = get_production()
     try:
         existing = {r[1] for r in conn.execute("PRAGMA table_info(customers)").fetchall()}
-        for column in ("wiki_ref", "finagent_ref"):
+        for column in ("wiki_ref", "finagent_ref", "source", "status"):
             if column not in existing:
                 conn.execute(f"ALTER TABLE customers ADD COLUMN {column} TEXT")
         conn.commit()

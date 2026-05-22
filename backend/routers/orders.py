@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Query, HTTPException
+from pydantic import BaseModel
 from typing import Optional
 from db import get_production
 
@@ -167,6 +168,29 @@ def get_estimate(order_id: str):
             result.append({**dict(s), "items": items_data})
 
         return result
+    finally:
+        conn.close()
+
+
+class StatusUpdate(BaseModel):
+    status: str
+
+
+VALID_STATUSES = {"draft", "estimate", "project", "in_production", "completed", "cancelled"}
+
+
+@router.patch("/{order_id}/status")
+def update_status(order_id: str, body: StatusUpdate):
+    if body.status not in VALID_STATUSES:
+        raise HTTPException(status_code=400, detail=f"Invalid status: {body.status}")
+    conn = get_production()
+    try:
+        r = conn.execute("SELECT id FROM orders WHERE id = ? OR number = ?", (order_id, order_id)).fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="Not found")
+        conn.execute("UPDATE orders SET status = ?, updated_at = datetime('now') WHERE id = ?", (body.status, r["id"]))
+        conn.commit()
+        return {"ok": True, "status": body.status}
     finally:
         conn.close()
 

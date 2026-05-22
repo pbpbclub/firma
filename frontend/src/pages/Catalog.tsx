@@ -1,7 +1,95 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { catalogApi } from "../api";
-import { MagnifyingGlass, Plus, X, Trash } from "@phosphor-icons/react";
+import { MagnifyingGlass, Plus, X, Trash, Funnel } from "@phosphor-icons/react";
+
+function ColumnFilter({ options, value, onChange, maxHeight }: {
+  options: string[];
+  value: string;
+  onChange: (v: string) => void;
+  maxHeight?: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+  useEffect(() => { if (!open) setQ(""); }, [open]);
+  const filtered = q ? options.filter(o => o.toLowerCase().includes(q.toLowerCase())) : options;
+  return (
+    <div ref={ref} style={{ position: "relative", display: "inline-flex" }}>
+      <button onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
+        style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", display: "flex", alignItems: "center", color: value ? "#E8592A" : "#C8C0B0" }}>
+        <Funnel size={11} weight={value ? "fill" : "regular"} />
+      </button>
+      {open && (
+        <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 200, background: "#FFFFFF", border: "1px solid #EDEBE6", boxShadow: "0 4px 16px rgba(0,0,0,0.10)", minWidth: 180 }}>
+          <div style={{ padding: "5px 8px", borderBottom: "1px solid #F2EFE9" }}>
+            <input autoFocus value={q} onChange={e => setQ(e.target.value)} onClick={e => e.stopPropagation()}
+              placeholder="Поиск..." style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 12, outline: "none", fontFamily: "inherit" }} />
+          </div>
+          <div style={{ maxHeight: maxHeight ?? 200, overflowY: "auto" }}>
+            <div onClick={() => { onChange(""); setOpen(false); }} style={{ padding: "8px 12px", fontSize: 12, cursor: "pointer", color: !value ? "#E8592A" : "#1A1A1A", fontWeight: !value ? 600 : 400, borderBottom: "1px solid #F2EFE9" }}
+              onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>Все</div>
+            {filtered.map(opt => (
+              <div key={opt} onClick={() => { onChange(opt); setOpen(false); }} style={{ padding: "8px 12px", fontSize: 12, cursor: "pointer", color: value === opt ? "#E8592A" : "#1A1A1A", fontWeight: value === opt ? 600 : 400 }}
+                onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>{opt}</div>
+            ))}
+            {filtered.length === 0 && <div style={{ padding: "8px 12px", fontSize: 12, color: "#C8C0B0" }}>Не найдено</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AmountFilter({ min, max, onChange }: {
+  min: string; max: string;
+  onChange: (min: string, max: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+  const active = !!min || !!max;
+  return (
+    <div ref={ref} style={{ position: "relative", display: "inline-flex" }}>
+      <button onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
+        style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", display: "flex", alignItems: "center", color: active ? "#E8592A" : "#C8C0B0" }}>
+        <Funnel size={11} weight={active ? "fill" : "regular"} />
+      </button>
+      {open && (
+        <div style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 200, background: "#FFFFFF", border: "1px solid #EDEBE6", boxShadow: "0 4px 16px rgba(0,0,0,0.10)", padding: "10px 12px", minWidth: 210 }}>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <input type="number" placeholder="От" value={min} onChange={e => onChange(e.target.value, max)} autoFocus
+              style={{ width: 84, border: "1px solid #EDEBE6", padding: "5px 8px", fontSize: 12, outline: "none" }} />
+            <span style={{ fontSize: 12, color: "#A89070" }}>—</span>
+            <input type="number" placeholder="До" value={max} onChange={e => onChange(min, e.target.value)}
+              style={{ width: 84, border: "1px solid #EDEBE6", padding: "5px 8px", fontSize: 12, outline: "none" }} />
+          </div>
+          {active && (
+            <button onClick={() => { onChange("", ""); setOpen(false); }}
+              style={{ marginTop: 8, width: "100%", padding: "5px", border: "none", background: "#FAF8F5", fontSize: 11, color: "#A89070", cursor: "pointer" }}>
+              Сбросить
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -453,7 +541,6 @@ function CalculatorModal({
 const tabs = ["Каталог", "Из смет"] as const;
 type Tab = typeof tabs[number];
 
-const fromSmetsHeaders = ["Изделие", "Категория", "Заказов", "Цена (ср.)", "Мин.", "Макс."];
 const fromSmetsCols = "2fr 1fr 80px 140px 120px 120px";
 
 export default function Catalog() {
@@ -462,6 +549,10 @@ export default function Catalog() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [modalItem, setModalItem] = useState<CatalogItemFull | null | "new">(undefined as any);
   const [modalOpen, setModalOpen] = useState(false);
+  const [catFilter, setCatFilter] = useState("");
+  const [nameFilter, setNameFilter] = useState("");
+  const [priceMin, setPriceMin] = useState("");
+  const [priceMax, setPriceMax] = useState("");
 
   const { data: savedItems = [], isLoading: loadingSaved } = useQuery<CatalogItem[]>({
     queryKey: ["catalog-items"],
@@ -498,7 +589,6 @@ export default function Catalog() {
       <div style={{ padding: "24px 28px 0", borderBottom: "1px solid #EDEBE6" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16 }}>
           <div>
-            <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>КАТАЛОГ</div>
             <div style={{ fontSize: 26, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em" }}>Изделия</div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, paddingBottom: 2 }}>
@@ -556,18 +646,40 @@ export default function Catalog() {
       {tab === "Каталог" && (
         <>
           {/* Column headers */}
-          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 130px 130px", padding: "8px 28px", borderBottom: "1px solid #EDEBE6" }}>
-            {["Изделие", "Категория", "Себестоимость", "Продажная цена"].map((h) => (
-              <div key={h} style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>{h}</div>
-            ))}
-          </div>
-          {loadingSaved ? (
-            <div style={{ padding: 48, textAlign: "center", color: "#A89070", fontSize: 13 }}>Загружаем...</div>
-          ) : savedItems.length === 0 ? (
-            <div style={{ padding: 48, textAlign: "center", color: "#A89070", fontSize: 13 }}>
-              Каталог пуст — нажмите + чтобы добавить первое изделие
-            </div>
-          ) : savedItems.map((item) => (
+          {(() => {
+            const uniqueCats = [...new Set(savedItems.map(i => i.category).filter(Boolean))].sort() as string[];
+            const uniqueNames = [...new Set(savedItems.map(i => i.title).filter(Boolean))].sort() as string[];
+            const filteredItems = savedItems.filter(i => {
+              if (catFilter && i.category !== catFilter) return false;
+              if (nameFilter && i.title !== nameFilter) return false;
+              if (priceMin && (i.sale_price || 0) < parseFloat(priceMin)) return false;
+              if (priceMax && (i.sale_price || 0) > parseFloat(priceMax)) return false;
+              return true;
+            });
+            return (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 130px 130px", padding: "8px 28px", borderBottom: "1px solid #EDEBE6", alignItems: "center" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <span style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ИЗДЕЛИЕ</span>
+                    <ColumnFilter options={uniqueNames} value={nameFilter} onChange={setNameFilter} />
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <span style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>КАТЕГОРИЯ</span>
+                    <ColumnFilter options={uniqueCats} value={catFilter} onChange={setCatFilter} />
+                  </div>
+                  <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>СЕБЕСТОИМОСТЬ</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <span style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ПРОДАЖНАЯ ЦЕНА</span>
+                    <AmountFilter min={priceMin} max={priceMax} onChange={(mn, mx) => { setPriceMin(mn); setPriceMax(mx); }} />
+                  </div>
+                </div>
+                {loadingSaved ? (
+                  <div style={{ padding: 48, textAlign: "center", color: "#A89070", fontSize: 13 }}>Загружаем...</div>
+                ) : filteredItems.length === 0 ? (
+                  <div style={{ padding: 48, textAlign: "center", color: "#A89070", fontSize: 13 }}>
+                    {catFilter ? "Нет изделий в этой категории" : "Каталог пуст — нажмите + чтобы добавить первое изделие"}
+                  </div>
+                ) : filteredItems.map((item) => (
             <div
               key={item.id}
               onClick={() => openEdit(item)}
@@ -581,22 +693,49 @@ export default function Catalog() {
               <div style={{ fontSize: 13, fontWeight: 700, color: "#E8592A" }}>{fmt(item.sale_price)}</div>
             </div>
           ))}
+              </>
+            );
+          })()}
         </>
       )}
 
       {/* Tab: Из смет */}
       {tab === "Из смет" && (
         <>
-          <div style={{ display: "grid", gridTemplateColumns: fromSmetsCols, padding: "8px 28px", borderBottom: "1px solid #EDEBE6" }}>
-            {fromSmetsHeaders.map((h) => (
-              <div key={h} style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>{h}</div>
-            ))}
+          {(() => {
+            const smetsUniqueCats = [...new Set((fromSmets as any[]).map((i: any) => i.category).filter(Boolean))].sort() as string[];
+            const smetsUniqueNames = [...new Set((fromSmets as any[]).map((i: any) => i.title).filter(Boolean))].sort() as string[];
+            const filteredSmets = (fromSmets as any[]).filter((i: any) => {
+              if (catFilter && i.category !== catFilter) return false;
+              if (nameFilter && i.title !== nameFilter) return false;
+              if (priceMin && (i.avg_price || 0) < parseFloat(priceMin)) return false;
+              if (priceMax && (i.avg_price || 0) > parseFloat(priceMax)) return false;
+              return true;
+            });
+            return (
+              <>
+          <div style={{ display: "grid", gridTemplateColumns: fromSmetsCols, padding: "8px 28px", borderBottom: "1px solid #EDEBE6", alignItems: "center" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <span style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ИЗДЕЛИЕ</span>
+              <ColumnFilter options={smetsUniqueNames} value={nameFilter} onChange={setNameFilter} />
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <span style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>КАТЕГОРИЯ</span>
+              <ColumnFilter options={smetsUniqueCats} value={catFilter} onChange={setCatFilter} />
+            </div>
+            <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ЗАКАЗОВ</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <span style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ЦЕНА (СР.)</span>
+              <AmountFilter min={priceMin} max={priceMax} onChange={(mn, mx) => { setPriceMin(mn); setPriceMax(mx); }} />
+            </div>
+            <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>МИН.</div>
+            <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>МАКС.</div>
           </div>
           {loadingSmets ? (
             <div style={{ padding: 48, textAlign: "center", color: "#A89070", fontSize: 13 }}>Загружаем...</div>
-          ) : (fromSmets as any[]).length === 0 ? (
+          ) : filteredSmets.length === 0 ? (
             <div style={{ padding: 48, textAlign: "center", color: "#A89070", fontSize: 13 }}>Ничего не найдено</div>
-          ) : (fromSmets as any[]).map((item: any, i: number) => (
+          ) : filteredSmets.map((item: any, i: number) => (
             <div
               key={i}
               style={{ display: "grid", gridTemplateColumns: fromSmetsCols, padding: "13px 28px", borderBottom: "1px solid #F2EFE9", alignItems: "center", transition: "background 0.1s" }}
@@ -611,6 +750,9 @@ export default function Catalog() {
               <div style={{ fontSize: 12, color: "#A89070" }}>{fmt(item.max_price)}</div>
             </div>
           ))}
+              </>
+            );
+          })()}
         </>
       )}
 

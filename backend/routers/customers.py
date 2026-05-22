@@ -16,6 +16,8 @@ class CustomerCreateRequest(BaseModel):
     notes: Optional[str] = None
     wiki_ref: Optional[str] = None
     finagent_ref: Optional[str] = None
+    source: Optional[str] = None
+    status: Optional[str] = None
 
 
 class CustomerUpdateRequest(BaseModel):
@@ -28,6 +30,8 @@ class CustomerUpdateRequest(BaseModel):
     notes: Optional[str] = None
     wiki_ref: Optional[str] = None
     finagent_ref: Optional[str] = None
+    source: Optional[str] = None
+    status: Optional[str] = None
 
 
 @router.get("")
@@ -81,12 +85,8 @@ def get_customer(customer_id: str):
     try:
         conditions = []
         params = []
-        if order_refs:
-            placeholders = ",".join("?" for _ in order_refs)
-            conditions.append(f"order_ref IN ({placeholders})")
-            params.extend(order_refs)
         if customer["name"]:
-            conditions.append("(counterparty LIKE ? OR description LIKE ?)")
+            conditions.append("(counterparty LIKE ? OR purpose LIKE ?)")
             params.extend([f"%{customer['name']}%", f"%{customer['name']}%"])
         if not conditions:
             transactions = []

@@ -5,8 +5,8 @@ from pathlib import Path
 
 from auth import get_current_user, init_admin
 from db import ensure_customer_schema
-from routers import orders, finance, catalog, taxes, users
-from routers import customers
+from routers import orders, finance, catalog, taxes, users, estimates, funds
+from routers import customers, masters, zenmoney, admin
 
 app = FastAPI(title="Firma API", version="1.0")
 
@@ -27,6 +27,11 @@ app.include_router(finance.router, prefix="/api/finance", tags=["finance"], **pr
 app.include_router(catalog.router, prefix="/api/catalog", tags=["catalog"], **protected)
 app.include_router(taxes.router, prefix="/api/taxes", tags=["taxes"], **protected)
 app.include_router(customers.router, prefix="/api/customers", tags=["customers"], **protected)
+app.include_router(estimates.router, prefix="/api/estimates", tags=["estimates"], **protected)
+app.include_router(funds.router, prefix="/api/funds", tags=["funds"], **protected)
+app.include_router(masters.router, prefix="/api/masters", tags=["masters"], **protected)
+app.include_router(zenmoney.router, prefix="/api/zenmoney", tags=["zenmoney"], **protected)
+app.include_router(admin.router, prefix="/api/admin", tags=["admin"], **protected)
 
 @app.get("/api/health")
 def health():
