@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query, HTTPException, Body, Depends
 from pydantic import BaseModel
 from typing import Optional
 from db import get_production
+from auth import get_current_user
 
 router = APIRouter()
 
@@ -219,5 +220,44 @@ def unarchive_order(order_id: str):
         conn.execute("UPDATE orders SET archived = 0, updated_at = datetime('now') WHERE id = ?", (r["id"],))
         conn.commit()
         return {"ok": True, "archived": False}
+    finally:
+        conn.close()
+
+
+@router.post("")
+async def create_order(body: dict = Body(...), user=Depends(get_current_user)):
+    title = (body.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title required")
+
+    conn = get_production()
+    try:
+        row = conn.execute(
+            "SELECT number FROM orders WHERE number LIKE 'ORD-%' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if row:
+            try:
+                last_num = int(row["number"].split("-")[1])
+                number = f"ORD-{last_num + 1:03d}"
+            except (IndexError, ValueError):
+                count = conn.execute("SELECT COUNT(*) as c FROM orders").fetchone()["c"]
+                number = f"ORD-{count + 1:03d}"
+        else:
+            number = "ORD-001"
+
+        cur = conn.execute(
+            """INSERT INTO orders (number, title, status, priority, deadline, customer_id, created_at)
+               VALUES (?, ?, 'draft', ?, ?, ?, datetime('now'))""",
+            (
+                number,
+                title,
+                body.get("priority", "normal"),
+                body.get("deadline") or None,
+                body.get("customer_id") or None,
+            ),
+        )
+        conn.commit()
+        order = dict(conn.execute("SELECT * FROM orders WHERE id = ?", (cur.lastrowid,)).fetchone())
+        return order
     finally:
         conn.close()

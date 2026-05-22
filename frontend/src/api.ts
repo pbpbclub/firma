@@ -28,6 +28,8 @@ export const ordersApi = {
   updateStatus: (id: string, status: string) => api.patch(`/orders/${id}/status`, { status }).then((r) => r.data),
   archive: (id: string) => api.patch(`/orders/${id}/archive`).then((r) => r.data),
   unarchive: (id: string) => api.patch(`/orders/${id}/unarchive`).then((r) => r.data),
+  create: (data: { title: string; customer_id?: number | null; deadline?: string | null; priority?: string }) =>
+    api.post("/orders", data).then((r) => r.data),
 };
 
 export const customersApi = {
@@ -123,6 +125,8 @@ export const zenmoneyApi = {
 
 export const adminApi = {
   system: () => api.get("/admin/system").then((r) => r.data),
+  imports: () => api.get("/admin/imports").then((r) => r.data),
+  deleteImport: (id: number) => api.delete(`/admin/imports/${id}`).then((r) => r.data),
   uploadSber: (file: File) => {
     const fd = new FormData();
     fd.append("file", file);

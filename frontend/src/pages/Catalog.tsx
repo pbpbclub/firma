@@ -49,6 +49,22 @@ function ColumnFilter({ options, value, onChange, maxHeight }: {
   );
 }
 
+function Checkbox({ checked, indeterminate = false, onChange }: {
+  checked: boolean; indeterminate?: boolean; onChange: () => void;
+}) {
+  return (
+    <div onClick={e => { e.stopPropagation(); onChange(); }} style={{
+      width: 14, height: 14, flexShrink: 0, cursor: "pointer",
+      border: `1.5px solid ${checked || indeterminate ? "#E8592A" : "#D0C8C0"}`,
+      background: checked ? "#E8592A" : "transparent",
+      display: "flex", alignItems: "center", justifyContent: "center",
+    }}>
+      {checked && <svg width="8" height="6" viewBox="0 0 8 6" fill="none"><path d="M1 3L3 5.5L7 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+      {!checked && indeterminate && <div style={{ width: 8, height: 1.5, background: "#E8592A" }} />}
+    </div>
+  );
+}
+
 function AmountFilter({ min, max, onChange }: {
   min: string; max: string;
   onChange: (min: string, max: string) => void;
@@ -541,7 +557,8 @@ function CalculatorModal({
 const tabs = ["Каталог", "Из смет"] as const;
 type Tab = typeof tabs[number];
 
-const fromSmetsCols = "2fr 1fr 80px 140px 120px 120px";
+const catalogCols = "28px 2fr 1fr 130px 130px";
+const fromSmetsCols = "28px 2fr 1fr 80px 140px 120px 120px";
 
 export default function Catalog() {
   const [tab, setTab] = useState<Tab>("Каталог");
@@ -551,8 +568,11 @@ export default function Catalog() {
   const [modalOpen, setModalOpen] = useState(false);
   const [catFilter, setCatFilter] = useState("");
   const [nameFilter, setNameFilter] = useState("");
+  const clearFilters = () => { setCatFilter(""); setNameFilter(""); setPriceMin(""); setPriceMax(""); setSelectedIds(new Set()); };
   const [priceMin, setPriceMin] = useState("");
   const [priceMax, setPriceMax] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
   const { data: savedItems = [], isLoading: loadingSaved } = useQuery<CatalogItem[]>({
     queryKey: ["catalog-items"],
@@ -658,7 +678,35 @@ export default function Catalog() {
             });
             return (
               <>
-                <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 130px 130px", padding: "8px 28px", borderBottom: "1px solid #EDEBE6", alignItems: "center" }}>
+                {(() => {
+                  const hasFilters = !!(catFilter || nameFilter || priceMin || priceMax);
+                  const canClear = hasFilters || selectedIds.size > 0;
+                  const selSum = filteredItems.filter(i => selectedIds.has(i.id)).reduce((s, i) => s + (i.sale_price || 0), 0);
+                  return (
+                    <div style={{ padding: "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+                      <div style={{ display: "flex", gap: 10, fontSize: 11, color: "#6B6355", alignItems: "center" }}>
+                        {selectedIds.size > 0 && <span style={{ color: "#E8592A", fontWeight: 600 }}>Выбрано {selectedIds.size}</span>}
+                        {selectedIds.size > 0 && selSum > 0 && <span>{fmt(selSum)}</span>}
+                        {selectedIds.size === 0 && <span>{filteredItems.length} изделий</span>}
+                      </div>
+                      <button onClick={canClear ? clearFilters : undefined} style={{ fontSize: 10, color: canClear ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: canClear ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
+                        <X size={10} /> Сбросить
+                      </button>
+                    </div>
+                  );
+                })()}
+
+                <div style={{ display: "grid", gridTemplateColumns: catalogCols, padding: "8px 28px", borderBottom: "1px solid #EDEBE6", alignItems: "center" }}>
+                  <div style={{ display: "flex", alignItems: "center" }}>
+                    <Checkbox
+                      checked={filteredItems.length > 0 && filteredItems.every(i => selectedIds.has(i.id))}
+                      indeterminate={filteredItems.some(i => selectedIds.has(i.id)) && !filteredItems.every(i => selectedIds.has(i.id))}
+                      onChange={() => {
+                        const allSel = filteredItems.every(i => selectedIds.has(i.id));
+                        setSelectedIds(allSel ? new Set() : new Set(filteredItems.map(i => i.id)));
+                      }}
+                    />
+                  </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                     <span style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ИЗДЕЛИЕ</span>
                     <ColumnFilter options={uniqueNames} value={nameFilter} onChange={setNameFilter} />
@@ -683,10 +731,13 @@ export default function Catalog() {
             <div
               key={item.id}
               onClick={() => openEdit(item)}
-              style={{ display: "grid", gridTemplateColumns: "2fr 1fr 130px 130px", padding: "13px 28px", borderBottom: "1px solid #F2EFE9", alignItems: "center", cursor: "pointer", transition: "background 0.1s" }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "#FAF8F5")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+              style={{ display: "grid", gridTemplateColumns: catalogCols, padding: "13px 28px", borderBottom: "1px solid #F2EFE9", alignItems: "center", cursor: "pointer", transition: "background 0.1s", background: selectedIds.has(item.id) ? "#FFF8F5" : "transparent" }}
+              onMouseEnter={(e) => { if (!selectedIds.has(item.id)) e.currentTarget.style.background = "#FAF8F5"; }}
+              onMouseLeave={(e) => { if (!selectedIds.has(item.id)) e.currentTarget.style.background = "transparent"; }}
             >
+              <div style={{ display: "flex", alignItems: "center" }}>
+                <Checkbox checked={selectedIds.has(item.id)} onChange={() => toggleSelect(item.id)} />
+              </div>
               <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>{item.title}</div>
               <div style={{ fontSize: 12, color: "#A89070" }}>{item.category || "—"}</div>
               <div style={{ fontSize: 12, color: "#6B6355" }}>{fmt(item.cost_total)}</div>
@@ -714,7 +765,34 @@ export default function Catalog() {
             });
             return (
               <>
+                {(() => {
+                  const hasFilters = !!(catFilter || nameFilter || priceMin || priceMax);
+                  const canClear = hasFilters || selectedIds.size > 0;
+                  const selSum = filteredSmets.filter((item: any) => selectedIds.has(item.title || "")).reduce((s: number, item: any) => s + (item.avg_price || 0), 0);
+                  return (
+                    <div style={{ padding: "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+                      <div style={{ display: "flex", gap: 10, fontSize: 11, color: "#6B6355", alignItems: "center" }}>
+                        {selectedIds.size > 0 && <span style={{ color: "#E8592A", fontWeight: 600 }}>Выбрано {selectedIds.size}</span>}
+                        {selectedIds.size > 0 && selSum > 0 && <span>{fmt(selSum)}</span>}
+                        {selectedIds.size === 0 && <span>{filteredSmets.length} изделий</span>}
+                      </div>
+                      <button onClick={canClear ? clearFilters : undefined} style={{ fontSize: 10, color: canClear ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: canClear ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
+                        <X size={10} /> Сбросить
+                      </button>
+                    </div>
+                  );
+                })()}
           <div style={{ display: "grid", gridTemplateColumns: fromSmetsCols, padding: "8px 28px", borderBottom: "1px solid #EDEBE6", alignItems: "center" }}>
+            <div style={{ display: "flex", alignItems: "center" }}>
+              <Checkbox
+                checked={filteredSmets.length > 0 && filteredSmets.every((item: any) => selectedIds.has(item.title || ""))}
+                indeterminate={filteredSmets.some((item: any) => selectedIds.has(item.title || "")) && !filteredSmets.every((item: any) => selectedIds.has(item.title || ""))}
+                onChange={() => {
+                  const allSel = filteredSmets.every((item: any) => selectedIds.has(item.title || ""));
+                  setSelectedIds(allSel ? new Set() : new Set(filteredSmets.map((item: any) => item.title || "")));
+                }}
+              />
+            </div>
             <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
               <span style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ИЗДЕЛИЕ</span>
               <ColumnFilter options={smetsUniqueNames} value={nameFilter} onChange={setNameFilter} />
@@ -735,13 +813,18 @@ export default function Catalog() {
             <div style={{ padding: 48, textAlign: "center", color: "#A89070", fontSize: 13 }}>Загружаем...</div>
           ) : filteredSmets.length === 0 ? (
             <div style={{ padding: 48, textAlign: "center", color: "#A89070", fontSize: 13 }}>Ничего не найдено</div>
-          ) : filteredSmets.map((item: any, i: number) => (
+          ) : filteredSmets.map((item: any, i: number) => {
+            const rowId = item.title || String(i);
+            return (
             <div
               key={i}
-              style={{ display: "grid", gridTemplateColumns: fromSmetsCols, padding: "13px 28px", borderBottom: "1px solid #F2EFE9", alignItems: "center", transition: "background 0.1s" }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "#FAF8F5")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+              style={{ display: "grid", gridTemplateColumns: fromSmetsCols, padding: "13px 28px", borderBottom: "1px solid #F2EFE9", alignItems: "center", transition: "background 0.1s", background: selectedIds.has(rowId) ? "#FFF8F5" : "transparent" }}
+              onMouseEnter={(e) => { if (!selectedIds.has(rowId)) e.currentTarget.style.background = "#FAF8F5"; }}
+              onMouseLeave={(e) => { if (!selectedIds.has(rowId)) e.currentTarget.style.background = "transparent"; }}
             >
+              <div style={{ display: "flex", alignItems: "center" }}>
+                <Checkbox checked={selectedIds.has(rowId)} onChange={() => toggleSelect(rowId)} />
+              </div>
               <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>{item.title}</div>
               <div style={{ fontSize: 12, color: "#A89070" }}>{item.category || "—"}</div>
               <div style={{ fontSize: 12, color: "#6B6355" }}>{item.times_ordered}</div>
@@ -749,7 +832,8 @@ export default function Catalog() {
               <div style={{ fontSize: 12, color: "#A89070" }}>{fmt(item.min_price)}</div>
               <div style={{ fontSize: 12, color: "#A89070" }}>{fmt(item.max_price)}</div>
             </div>
-          ))}
+            );
+          })}
               </>
             );
           })()}

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { financeApi } from "../api";
-import { MagnifyingGlass, Funnel } from "@phosphor-icons/react";
+import { MagnifyingGlass, Funnel, X } from "@phosphor-icons/react";
 
 function ColumnFilter({ options, value, onChange, maxHeight }: {
   options: string[];
@@ -49,7 +49,26 @@ function ColumnFilter({ options, value, onChange, maxHeight }: {
   );
 }
 
-function DateFilter({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function Checkbox({ checked, indeterminate = false, onChange }: {
+  checked: boolean; indeterminate?: boolean; onChange: () => void;
+}) {
+  return (
+    <div onClick={e => { e.stopPropagation(); onChange(); }} style={{
+      width: 14, height: 14, flexShrink: 0, cursor: "pointer",
+      border: `1.5px solid ${checked || indeterminate ? "#E8592A" : "#D0C8C0"}`,
+      background: checked ? "#E8592A" : "transparent",
+      display: "flex", alignItems: "center", justifyContent: "center",
+    }}>
+      {checked && <svg width="8" height="6" viewBox="0 0 8 6" fill="none"><path d="M1 3L3 5.5L7 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+      {!checked && indeterminate && <div style={{ width: 8, height: 1.5, background: "#E8592A" }} />}
+    </div>
+  );
+}
+
+function PeriodFilter({ from, to, onChange }: {
+  from: string; to: string;
+  onChange: (from: string, to: string) => void;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -60,19 +79,51 @@ function DateFilter({ value, onChange }: { value: string; onChange: (v: string) 
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
   }, [open]);
+  const active = !!from || !!to;
+  function iso(d: Date) { return d.toISOString().slice(0, 10); }
+  const PRESETS = [
+    { label: "Неделя",       get: (): [string,string] => { const d = new Date(); d.setDate(d.getDate()-6); return [iso(d), iso(new Date())]; } },
+    { label: "30 дней",      get: (): [string,string] => { const d = new Date(); d.setDate(d.getDate()-29); return [iso(d), iso(new Date())]; } },
+    { label: "Этот мес",     get: (): [string,string] => { const n = new Date(); return [`${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}-01`, iso(n)]; } },
+    { label: "Прошлый мес",  get: (): [string,string] => { const n = new Date(); return [iso(new Date(n.getFullYear(), n.getMonth()-1, 1)), iso(new Date(n.getFullYear(), n.getMonth(), 0))]; } },
+    { label: "Квартал",      get: (): [string,string] => { const n = new Date(); const q = Math.floor(n.getMonth()/3); return [iso(new Date(n.getFullYear(), q*3, 1)), iso(n)]; } },
+    { label: "Прошлый кв",   get: (): [string,string] => { const n = new Date(); const q = Math.floor(n.getMonth()/3); const pq = q === 0 ? 3 : q-1; const y = q === 0 ? n.getFullYear()-1 : n.getFullYear(); return [iso(new Date(y, pq*3, 1)), iso(new Date(y, pq*3+3, 0))]; } },
+    { label: "Этот год",     get: (): [string,string] => { const n = new Date(); return [`${n.getFullYear()}-01-01`, iso(n)]; } },
+    { label: "Прошлый год",  get: (): [string,string] => { const y = new Date().getFullYear()-1; return [`${y}-01-01`, `${y}-12-31`]; } },
+  ];
   return (
     <div ref={ref} style={{ position: "relative", display: "inline-flex" }}>
       <button onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
-        style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", display: "flex", alignItems: "center", color: value ? "#E8592A" : "#C8C0B0" }}>
-        <Funnel size={11} weight={value ? "fill" : "regular"} />
+        style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", display: "flex", alignItems: "center", color: active ? "#E8592A" : "#C8C0B0" }}>
+        <Funnel size={11} weight={active ? "fill" : "regular"} />
       </button>
       {open && (
-        <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 200, background: "#FFFFFF", border: "1px solid #EDEBE6", boxShadow: "0 4px 16px rgba(0,0,0,0.10)", padding: "10px 12px", minWidth: 190 }}>
-          <input type="date" value={value} onChange={e => onChange(e.target.value)} autoFocus
-            style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "6px 8px", fontSize: 12, color: "#1A1A1A", outline: "none" }} />
-          {value && (
-            <button onClick={() => { onChange(""); setOpen(false); }}
-              style={{ marginTop: 8, width: "100%", padding: "5px", border: "none", background: "#FAF8F5", fontSize: 11, color: "#A89070", cursor: "pointer" }}>
+        <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 200, background: "#FFFFFF", border: "1px solid #EDEBE6", boxShadow: "0 4px 16px rgba(0,0,0,0.10)", minWidth: 230 }}>
+          <div style={{ padding: "8px 10px 6px", borderBottom: "1px solid #F2EFE9", display: "flex", flexWrap: "wrap", gap: 4 }}>
+            {PRESETS.map(p => (
+              <button key={p.label}
+                onClick={() => { const [f,t] = p.get(); onChange(f,t); setOpen(false); }}
+                style={{ fontSize: 10, padding: "3px 8px", border: "1px solid #EDEBE6", background: "none", cursor: "pointer", color: "#6B6355" }}
+                onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")}
+                onMouseLeave={e => (e.currentTarget.style.background = "none")}
+              >{p.label}</button>
+            ))}
+          </div>
+          <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 10, color: "#A89070", width: 18, flexShrink: 0 }}>с</span>
+              <input type="date" value={from} onChange={e => onChange(e.target.value, to)}
+                style={{ flex: 1, border: "1px solid #EDEBE6", padding: "5px 6px", fontSize: 11, outline: "none", color: "#1A1A1A" }} />
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 10, color: "#A89070", width: 18, flexShrink: 0 }}>по</span>
+              <input type="date" value={to} onChange={e => onChange(from, e.target.value)}
+                style={{ flex: 1, border: "1px solid #EDEBE6", padding: "5px 6px", fontSize: 11, outline: "none", color: "#1A1A1A" }} />
+            </div>
+          </div>
+          {active && (
+            <button onClick={() => { onChange("", ""); setOpen(false); }}
+              style={{ width: "100%", padding: "6px", border: "none", borderTop: "1px solid #F2EFE9", background: "#FAF8F5", fontSize: 11, color: "#A89070", cursor: "pointer" }}>
               Сбросить
             </button>
           )}
@@ -157,10 +208,15 @@ export default function Finance() {
   const [direction, setDirection] = useState("");
   const [search, setSearch] = useState("");
   const [accountFilter, setAccountFilter] = useState("");
-  const [dateFilter, setDateFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [descFilter, setDescFilter] = useState("");
   const [amountMin, setAmountMin] = useState("");
   const [amountMax, setAmountMax] = useState("");
+  const clearFilters = () => { setAccountFilter(""); setDateFrom(""); setDateTo(""); setDescFilter(""); setAmountMin(""); setAmountMax(""); setSelectedIds(new Set()); };
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const FIN_GRID = "28px 110px 1fr 120px 120px";
 
   const { data: balance } = useQuery({ queryKey: ["balance"], queryFn: financeApi.balance });
   const { data: summary } = useQuery({ queryKey: ["dds-summary"], queryFn: financeApi.summary });
@@ -187,7 +243,8 @@ export default function Finance() {
         if (accountFilter === "Сбербанк" && t.bank !== "sber") return false;
         if (accountFilter !== "Фонды" && accountFilter !== "Т-Банк" && accountFilter !== "Сбербанк") return false;
       }
-      if (dateFilter && t.date !== dateFilter) return false;
+      if (dateFrom && t.date < dateFrom) return false;
+      if (dateTo && t.date > dateTo) return false;
       if (descFilter) {
         const desc = t.counterparty || t.purpose || (t.source === "fund" ? t.fund_name : "") || "";
         if (desc !== descFilter) return false;
@@ -196,7 +253,7 @@ export default function Finance() {
       if (amountMax && t.amount > parseFloat(amountMax)) return false;
       return true;
     });
-  }, [txs, accountFilter, dateFilter, descFilter, amountMin, amountMax]);
+  }, [txs, accountFilter, dateFrom, dateTo, descFilter, amountMin, amountMax]);
 
   const monthly: any[] = summary?.monthly_chart || [];
   const maxVal = monthly.length > 0 ? Math.max(...monthly.map((m: any) => Math.max(m.income, m.expense))) : 0;
@@ -252,11 +309,51 @@ export default function Finance() {
           </div>
         </div>
 
+        {/* Filter / selection bar — always visible to prevent layout shift */}
+        {(() => {
+          const hasFilters = !!(accountFilter || dateFrom || dateTo || descFilter || amountMin || amountMax);
+          const canClear = hasFilters || selectedIds.size > 0;
+          const fIn = filteredTxs.filter((t: any) => t.direction === "in").reduce((s: number, t: any) => s + t.amount, 0);
+          const fOut = filteredTxs.filter((t: any) => t.direction === "out").reduce((s: number, t: any) => s + t.amount, 0);
+          const selItems = filteredTxs.filter((t: any) => selectedIds.has(String(t.id)));
+          const selIn = selItems.filter((t: any) => t.direction === "in").reduce((s: number, t: any) => s + t.amount, 0);
+          const selOut = selItems.filter((t: any) => t.direction === "out").reduce((s: number, t: any) => s + t.amount, 0);
+          const selNet = selIn - selOut;
+          const net = fIn - fOut;
+          return (
+            <div style={{ padding: "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+              <div style={{ display: "flex", gap: 10, fontSize: 11, color: "#6B6355", alignItems: "center" }}>
+                {selectedIds.size > 0 && <span style={{ color: "#E8592A", fontWeight: 600 }}>Выбрано {selectedIds.size}</span>}
+                {selectedIds.size > 0 && selIn > 0 && <span style={{ color: "#4A7C59" }}>+{fmt(selIn)}</span>}
+                {selectedIds.size > 0 && selOut > 0 && <span style={{ color: "#8B3A3A" }}>−{fmt(selOut)}</span>}
+                {selectedIds.size > 0 && (selIn > 0 || selOut > 0) && <span style={{ color: selNet >= 0 ? "#4A7C59" : "#8B3A3A", fontWeight: 600 }}>{selNet >= 0 ? "+" : "−"}{fmt(Math.abs(selNet))}</span>}
+                {selectedIds.size === 0 && <span>{filteredTxs.length} транзакций</span>}
+                {selectedIds.size === 0 && hasFilters && fIn > 0 && <span style={{ color: "#4A7C59" }}>+{fmt(fIn)}</span>}
+                {selectedIds.size === 0 && hasFilters && fOut > 0 && <span style={{ color: "#8B3A3A" }}>−{fmt(fOut)}</span>}
+                {selectedIds.size === 0 && hasFilters && (fIn > 0 || fOut > 0) && <span style={{ color: net >= 0 ? "#4A7C59" : "#8B3A3A", fontWeight: 600 }}>{net >= 0 ? "+" : "−"}{fmt(Math.abs(net))}</span>}
+              </div>
+              <button onClick={canClear ? clearFilters : undefined} style={{ fontSize: 10, color: canClear ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: canClear ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
+                <X size={10} /> Сбросить
+              </button>
+            </div>
+          );
+        })()}
+
         {/* Column headers */}
-        <div style={{ display: "grid", gridTemplateColumns: "110px 1fr 120px 120px", padding: "8px 28px", borderBottom: "1px solid #EDEBE6", flexShrink: 0, alignItems: "center" }}>
+        <div style={{ display: "grid", gridTemplateColumns: FIN_GRID, padding: "8px 28px", borderBottom: "1px solid #EDEBE6", flexShrink: 0, alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center" }}>
+            <Checkbox
+              checked={filteredTxs.length > 0 && filteredTxs.every((t: any) => selectedIds.has(String(t.id)))}
+              indeterminate={filteredTxs.some((t: any) => selectedIds.has(String(t.id))) && !filteredTxs.every((t: any) => selectedIds.has(String(t.id)))}
+              onChange={() => {
+                const allSel = filteredTxs.every((t: any) => selectedIds.has(String(t.id)));
+                setSelectedIds(allSel ? new Set() : new Set(filteredTxs.map((t: any) => String(t.id))));
+              }}
+            />
+          </div>
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
             <span style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ДАТА</span>
-            <DateFilter value={dateFilter} onChange={setDateFilter} />
+            <PeriodFilter from={dateFrom} to={dateTo} onChange={(f, t) => { setDateFrom(f); setDateTo(t); }} />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
             <span style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ОПИСАНИЕ</span>
@@ -283,13 +380,17 @@ export default function Finance() {
               <div
                 key={t.id || i}
                 style={{
-                  display: "grid", gridTemplateColumns: "110px 1fr 120px 120px",
+                  display: "grid", gridTemplateColumns: FIN_GRID,
                   padding: "11px 28px", borderBottom: "1px solid #F2EFE9",
                   alignItems: "center", transition: "background 0.1s",
+                  background: selectedIds.has(String(t.id)) ? "#FFF8F5" : "transparent",
                 }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = "#FAF8F5")}
-                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                onMouseEnter={(e) => { if (!selectedIds.has(String(t.id))) e.currentTarget.style.background = "#FAF8F5"; }}
+                onMouseLeave={(e) => { if (!selectedIds.has(String(t.id))) e.currentTarget.style.background = "transparent"; }}
               >
+                <div style={{ display: "flex", alignItems: "center" }}>
+                  <Checkbox checked={selectedIds.has(String(t.id))} onChange={() => toggleSelect(String(t.id))} />
+                </div>
                 <div style={{ fontSize: 12, color: "#A89070" }}>{fmtDate(t.date)}</div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, overflow: "hidden" }}>
                   <BankBadge bank={t.bank || t.source || ""} />

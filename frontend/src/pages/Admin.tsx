@@ -309,6 +309,133 @@ function UsersSection() {
   );
 }
 
+// ── Import History ───────────────────────────────────────────────────────────
+
+function ImportsSection() {
+  const qc = useQueryClient();
+  const { data: imports = [], isLoading } = useQuery({
+    queryKey: ["admin-imports"],
+    queryFn: adminApi.imports,
+  });
+
+  const [confirmId, setConfirmId] = useState<number | null>(null);
+  const confirmImport = confirmId != null ? (imports as any[]).find((i: any) => i.id === confirmId) : null;
+
+  const deleteImport = useMutation({
+    mutationFn: (id: number) => adminApi.deleteImport(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-imports"] });
+      qc.invalidateQueries({ queryKey: ["admin-system"] });
+      qc.invalidateQueries({ queryKey: ["transactions"] });
+      qc.invalidateQueries({ queryKey: ["balance"] });
+      setConfirmId(null);
+    },
+  });
+
+  const SOURCE_LABELS: Record<string, string> = {
+    sber_1c:   "Сбер (1С)",
+    sber_csv:  "Сбер (CSV)",
+    tbank_api: "Т-Банк (API)",
+  };
+
+  function fmtDatetime(s: string) {
+    if (!s) return "—";
+    const d = new Date(s);
+    return d.toLocaleDateString("ru-RU", { day: "numeric", month: "short", year: "numeric" })
+      + " " + d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  }
+
+  return (
+    <div style={{ marginBottom: 40 }}>
+      <SectionLabel>ИСТОРИЯ ИМПОРТОВ</SectionLabel>
+
+      {isLoading ? (
+        <div style={{ color: "#A89070", fontSize: 13 }}>Загружаем...</div>
+      ) : (imports as any[]).length === 0 ? (
+        <div style={{ color: "#A89070", fontSize: 13 }}>Нет загруженных выписок</div>
+      ) : (
+        <div style={{ border: "1px solid #EDEBE6" }}>
+          {(imports as any[]).map((imp: any, i: number) => (
+            <div
+              key={imp.id}
+              style={{
+                display: "grid", gridTemplateColumns: "1fr auto auto auto",
+                padding: "11px 16px", gap: 16, alignItems: "center",
+                borderBottom: i < (imports as any[]).length - 1 ? "1px solid #F2EFE9" : "none",
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 12, color: "#1A1A1A", fontWeight: 500 }}>
+                  {imp.filename || SOURCE_LABELS[imp.source] || imp.source}
+                </div>
+                <div style={{ fontSize: 10, color: "#A89070", marginTop: 2 }}>
+                  {fmtDatetime(imp.imported_at)}
+                  {imp.date_from && imp.date_to && imp.date_from !== imp.imported_at?.slice(0,10) && (
+                    <span> · {imp.date_from === imp.date_to ? imp.date_from : `${imp.date_from} — ${imp.date_to}`}</span>
+                  )}
+                </div>
+              </div>
+              <div style={{ fontSize: 11, color: "#A89070", whiteSpace: "nowrap" }}>
+                {SOURCE_LABELS[imp.source] || imp.source}
+              </div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#4A7C59", whiteSpace: "nowrap" }}>
+                +{imp.rows_added} строк
+              </div>
+              <button
+                onClick={() => setConfirmId(imp.id)}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 4 }}
+                title="Удалить выписку"
+                onMouseEnter={e => (e.currentTarget.style.color = "#8B3A3A")}
+                onMouseLeave={e => (e.currentTarget.style.color = "#C8C0B0")}
+              >
+                <X size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Confirmation modal */}
+      {confirmImport && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ background: "#fff", width: 420, boxShadow: "0 8px 40px rgba(0,0,0,0.18)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 24px 16px", borderBottom: "1px solid #EDEBE6" }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "#1A1A1A" }}>Удалить выписку?</div>
+              <button onClick={() => setConfirmId(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070" }}><X size={18} /></button>
+            </div>
+            <div style={{ padding: "20px 24px" }}>
+              <div style={{ fontSize: 13, color: "#1A1A1A", marginBottom: 8 }}>
+                <strong>{confirmImport.filename || SOURCE_LABELS[confirmImport.source] || confirmImport.source}</strong>
+              </div>
+              <div style={{ fontSize: 12, color: "#A89070", marginBottom: 16 }}>
+                Загружена {fmtDatetime(confirmImport.imported_at)} · {confirmImport.rows_added} транзакций
+              </div>
+              <div style={{ fontSize: 13, color: "#6B6355", padding: "10px 14px", background: "#FFF8F5", border: "1px solid #F0D8C8", marginBottom: 20 }}>
+                Все транзакции этой выписки будут удалены из базы данных. Это действие нельзя отменить.
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <button
+                  onClick={() => setConfirmId(null)}
+                  style={{ padding: "7px 16px", border: "1px solid #EDEBE6", background: "none", fontSize: 12, cursor: "pointer", color: "#6B6355" }}
+                >
+                  Отмена
+                </button>
+                <button
+                  onClick={() => deleteImport.mutate(confirmImport.id)}
+                  disabled={deleteImport.isPending}
+                  style={{ padding: "7px 20px", border: "none", background: "#8B3A3A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600, opacity: deleteImport.isPending ? 0.7 : 1 }}
+                >
+                  {deleteImport.isPending ? "Удаляем..." : "Да, удалить"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Change Password ──────────────────────────────────────────────────────────
 
 function PasswordSection() {
@@ -395,6 +522,7 @@ export default function Admin() {
       </div>
 
       <UploadSection />
+      <ImportsSection />
       <SystemSection />
       <UsersSection />
       <PasswordSection />

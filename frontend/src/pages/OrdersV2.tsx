@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { ordersApi } from "../api";
-import { MagnifyingGlass, DotsThree, Plus, Files, CaretRight, Archive, ArrowCounterClockwise, CaretDown, Funnel } from "@phosphor-icons/react";
+import { ordersApi, customersApi } from "../api";
+import { MagnifyingGlass, DotsThree, Plus, Files, CaretRight, Archive, ArrowCounterClockwise, CaretDown, Funnel, X } from "@phosphor-icons/react";
 
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
   draft:         { label: "Черновик",       color: "#A89070" },
@@ -47,6 +47,22 @@ const ALL_STATUSES = [
   { value: "completed",     label: "Завершён",         color: "#4A7C59" },
   { value: "cancelled",     label: "Отменён",          color: "#8B3A3A" },
 ];
+
+function Checkbox({ checked, indeterminate = false, onChange }: {
+  checked: boolean; indeterminate?: boolean; onChange: () => void;
+}) {
+  return (
+    <div onClick={e => { e.stopPropagation(); onChange(); }} style={{
+      width: 14, height: 14, flexShrink: 0, cursor: "pointer",
+      border: `1.5px solid ${checked || indeterminate ? "#E8592A" : "#D0C8C0"}`,
+      background: checked ? "#E8592A" : "transparent",
+      display: "flex", alignItems: "center", justifyContent: "center",
+    }}>
+      {checked && <svg width="8" height="6" viewBox="0 0 8 6" fill="none"><path d="M1 3L3 5.5L7 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+      {!checked && indeterminate && <div style={{ width: 8, height: 1.5, background: "#E8592A" }} />}
+    </div>
+  );
+}
 
 function StatusPicker({ orderId, current, onChange }: { orderId: string; current: string; onChange: () => void }) {
   const [open, setOpen] = useState(false);
@@ -225,6 +241,94 @@ function IconBtn({ onClick, children, orange }: { onClick?: () => void; children
   );
 }
 
+function NewOrderModal({ onClose, onCreated }: {
+  onClose: () => void;
+  onCreated: (orderId: number) => void;
+}) {
+  const qc = useQueryClient();
+  const [title, setTitle] = useState("");
+  const [customerId, setCustomerId] = useState("");
+  const [deadline, setDeadline] = useState("");
+  const [priority, setPriority] = useState("normal");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const { data: customers = [] } = useQuery({
+    queryKey: ["customers", ""],
+    queryFn: () => customersApi.list(""),
+  });
+
+  async function handleSubmit() {
+    if (!title.trim()) { setError("Введите название заказа"); return; }
+    setSaving(true);
+    try {
+      const order = await ordersApi.create({
+        title: title.trim(),
+        customer_id: customerId ? parseInt(customerId) : null,
+        deadline: deadline || null,
+        priority,
+      });
+      qc.invalidateQueries({ queryKey: ["orders-v2"] });
+      onCreated(order.id);
+    } catch {
+      setError("Ошибка при создании заказа");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ background: "#fff", width: 440, boxShadow: "0 8px 40px rgba(0,0,0,0.18)", display: "flex", flexDirection: "column" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 24px 16px", borderBottom: "1px solid #EDEBE6" }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#1A1A1A" }}>Новый заказ</div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070" }}><X size={18} /></button>
+        </div>
+        <div style={{ padding: "16px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
+          <div>
+            <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>НАЗВАНИЕ *</div>
+            <input autoFocus value={title} onChange={e => { setTitle(e.target.value); setError(""); }}
+              onKeyDown={e => e.key === "Enter" && handleSubmit()}
+              style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${error && !title.trim() ? "#E8592A" : "#EDEBE6"}`, padding: "7px 10px", fontSize: 13, outline: "none" }} />
+          </div>
+          <div>
+            <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>КЛИЕНТ</div>
+            <select value={customerId} onChange={e => setCustomerId(e.target.value)}
+              style={{ width: "100%", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none", background: "#fff", color: customerId ? "#1A1A1A" : "#A89070" }}>
+              <option value="">— не выбран —</option>
+              {(customers as any[]).map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>ДЕДЛАЙН</div>
+              <input type="date" value={deadline} onChange={e => setDeadline(e.target.value)}
+                style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none" }} />
+            </div>
+            <div>
+              <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>ПРИОРИТЕТ</div>
+              <select value={priority} onChange={e => setPriority(e.target.value)}
+                style={{ width: "100%", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none", background: "#fff" }}>
+                <option value="low">Низкий</option>
+                <option value="normal">Обычный</option>
+                <option value="high">Высокий</option>
+                <option value="urgent">Срочный</option>
+              </select>
+            </div>
+          </div>
+          {error && <div style={{ fontSize: 11, color: "#8B3A3A" }}>{error}</div>}
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "14px 24px", borderTop: "1px solid #EDEBE6" }}>
+          <button onClick={onClose} style={{ padding: "7px 16px", border: "1px solid #EDEBE6", background: "none", fontSize: 12, cursor: "pointer", color: "#6B6355" }}>Отмена</button>
+          <button onClick={handleSubmit} disabled={saving}
+            style={{ padding: "7px 20px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, cursor: saving ? "default" : "pointer", fontWeight: 600, opacity: saving ? 0.7 : 1 }}>
+            {saving ? "Создаём..." : "Создать и открыть смету →"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function OrdersV2() {
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -237,8 +341,12 @@ export default function OrdersV2() {
   const [archiving, setArchiving] = useState(false);
   const [customerFilter, setCustomerFilter] = useState("");
   const [titleFilter, setTitleFilter] = useState("");
+  const clearFilters = () => { setCustomerFilter(""); setTitleFilter(""); setAmountMin(""); setAmountMax(""); setPage(0); setSelectedIds(new Set()); };
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [amountMin, setAmountMin] = useState("");
   const [amountMax, setAmountMax] = useState("");
+  const [showNewOrder, setShowNewOrder] = useState(false);
 
   const { data = [], isLoading } = useQuery({
     queryKey: ["orders-v2", status, search, archiveMode],
@@ -292,8 +400,8 @@ export default function OrdersV2() {
   const pageData = filteredData.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   const cols = selected
-    ? "2fr 1.2fr 100px 120px 40px"
-    : "2fr 1.5fr 120px 130px 120px 40px";
+    ? "28px 2fr 1.2fr 100px 120px 40px"
+    : "28px 2fr 1.5fr 120px 130px 120px 40px";
 
   function renderPageNums() {
     const pages: (number | "…")[] = [];
@@ -372,7 +480,7 @@ export default function OrdersV2() {
               <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                 <IconBtn onClick={() => setSearchOpen(true)}><MagnifyingGlass size={14} /></IconBtn>
                 <IconBtn><Files size={14} /></IconBtn>
-                <IconBtn orange><Plus size={14} /></IconBtn>
+                <IconBtn orange onClick={() => setShowNewOrder(true)}><Plus size={14} /></IconBtn>
               </div>
             )}
           </div>
@@ -416,8 +524,39 @@ export default function OrdersV2() {
           </div>
         </div>
 
+        {/* Filter / selection bar — always visible to prevent layout shift */}
+        {(() => {
+          const hasFilters = !!(titleFilter || customerFilter || amountMin || amountMax);
+          const canClear = hasFilters || selectedIds.size > 0;
+          const sum = filteredData.reduce((s: number, o: any) => s + (o.price_plan || 0), 0);
+          const selSum = filteredData.filter((o: any) => selectedIds.has(o.id)).reduce((s: number, o: any) => s + (o.price_plan || 0), 0);
+          return (
+            <div style={{ padding: "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+              <div style={{ display: "flex", gap: 10, fontSize: 11, color: "#6B6355", alignItems: "center" }}>
+                {selectedIds.size > 0 && <span style={{ color: "#E8592A", fontWeight: 600 }}>Выбрано {selectedIds.size}</span>}
+                {selectedIds.size > 0 && selSum > 0 && <span>{fmt(selSum)}</span>}
+                {selectedIds.size === 0 && <span>{filteredData.length} заказов</span>}
+                {selectedIds.size === 0 && hasFilters && sum > 0 && <span>{fmt(sum)}</span>}
+              </div>
+              <button onClick={canClear ? clearFilters : undefined} style={{ fontSize: 10, color: canClear ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: canClear ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
+                <X size={10} /> Сбросить
+              </button>
+            </div>
+          );
+        })()}
+
         {/* Column headers */}
         <div style={{ display: "grid", gridTemplateColumns: cols, padding: "8px 28px", borderBottom: "1px solid #F7F5F1", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center" }}>
+            <Checkbox
+              checked={pageData.length > 0 && pageData.every((o: any) => selectedIds.has(o.id))}
+              indeterminate={pageData.some((o: any) => selectedIds.has(o.id)) && !pageData.every((o: any) => selectedIds.has(o.id))}
+              onChange={() => {
+                const allSel = pageData.every((o: any) => selectedIds.has(o.id));
+                setSelectedIds(allSel ? new Set() : new Set(pageData.map((o: any) => o.id)));
+              }}
+            />
+          </div>
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
             <span style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>НАЗВАНИЕ</span>
             <ColumnFilter options={uniqueTitles} value={titleFilter} onChange={(v) => { setTitleFilter(v); setPage(0); }} />
@@ -455,13 +594,16 @@ export default function OrdersV2() {
                     padding: "10px 28px",
                     borderBottom: "1px solid #F7F5F1",
                     cursor: "pointer",
-                    background: isActive ? "#E8592A" : "transparent",
+                    background: isActive ? "#E8592A" : selectedIds.has(o.id) ? "#FFF8F5" : "transparent",
                     alignItems: "center",
                     transition: "background 0.1s",
                   }}
-                  onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = "#FAF8F5"; }}
-                  onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "transparent"; }}
+                  onMouseEnter={(e) => { if (!isActive && !selectedIds.has(o.id)) e.currentTarget.style.background = "#FAF8F5"; }}
+                  onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = selectedIds.has(o.id) ? "#FFF8F5" : "transparent"; }}
                 >
+                  <div style={{ display: "flex", alignItems: "center" }}>
+                    <Checkbox checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} />
+                  </div>
                   <div style={{ fontSize: 13, fontWeight: 500, color: isActive ? "#FFFFFF" : "#1A1A1A", lineHeight: 1.4 }}>
                     {o.title}
                   </div>
@@ -691,6 +833,13 @@ export default function OrdersV2() {
           to   { opacity: 1; transform: translateX(0); }
         }
       `}</style>
+
+      {showNewOrder && (
+        <NewOrderModal
+          onClose={() => setShowNewOrder(false)}
+          onCreated={(id) => { setShowNewOrder(false); navigate(`/orders/${id}/estimate`); }}
+        />
+      )}
     </div>
   );
 }

@@ -589,6 +589,7 @@ export default function Customers() {
   const [page, setPage] = useState(0);
   const [selectedMaster, setSelectedMaster] = useState<any>(null);
   const [nameFilter, setNameFilter] = useState("");
+  const clearFilters = () => { setNameFilter(""); setPage(0); };
 
   const { data: customers = [], isLoading: loadingC } = useQuery({
     queryKey: ["customers", search],
@@ -687,6 +688,20 @@ export default function Customers() {
             ))}
           </div>
         </div>
+
+        {(() => {
+          const hasFilters = !!nameFilter;
+          return (
+            <div style={{ padding: "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+              <div style={{ display: "flex", gap: 10, fontSize: 11, color: "#6B6355", alignItems: "center" }}>
+                <span>{filteredItems.length} контактов</span>
+              </div>
+              <button onClick={hasFilters ? clearFilters : undefined} style={{ fontSize: 10, color: hasFilters ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: hasFilters ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
+                <X size={10} /> Сбросить
+              </button>
+            </div>
+          );
+        })()}
 
         <div style={{ display: "grid", gridTemplateColumns: cols, padding: "8px 28px", borderBottom: "1px solid #F7F5F1", alignItems: "center" }}>
           <div />

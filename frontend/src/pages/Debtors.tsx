@@ -4,6 +4,22 @@ import { financeApi } from "../api";
 import { useNavigate } from "react-router-dom";
 import { Bank, X, Check, Plus, Funnel } from "@phosphor-icons/react";
 
+function Checkbox({ checked, indeterminate = false, onChange }: {
+  checked: boolean; indeterminate?: boolean; onChange: () => void;
+}) {
+  return (
+    <div onClick={e => { e.stopPropagation(); onChange(); }} style={{
+      width: 14, height: 14, flexShrink: 0, cursor: "pointer",
+      border: `1.5px solid ${checked || indeterminate ? "#E8592A" : "#D0C8C0"}`,
+      background: checked ? "#E8592A" : "transparent",
+      display: "flex", alignItems: "center", justifyContent: "center",
+    }}>
+      {checked && <svg width="8" height="6" viewBox="0 0 8 6" fill="none"><path d="M1 3L3 5.5L7 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+      {!checked && indeterminate && <div style={{ width: 8, height: 1.5, background: "#E8592A" }} />}
+    </div>
+  );
+}
+
 function ColumnFilter({ options, value, onChange, maxHeight }: {
   options: string[];
   value: string;
@@ -263,7 +279,7 @@ function PayCreditorModal({ item, onClose }: { item: any; onClose: () => void })
 
 // ── Вкладка: дебиторка ─────────────────────────────────────────────────────
 
-const debtorCols = "2fr 1fr 130px 150px 130px 100px";
+const debtorCols = "28px 2fr 1fr 130px 150px 130px 100px";
 
 function DebtorsTab() {
   const navigate = useNavigate();
@@ -271,6 +287,9 @@ function DebtorsTab() {
   const [statusFilter, setStatusFilter] = useState("");
   const [clientFilter, setClientFilter] = useState("");
   const [orderFilter, setOrderFilter] = useState("");
+  const clearFilters = () => { setStatusFilter(""); setClientFilter(""); setOrderFilter(""); setSelectedIds(new Set()); };
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
   const items: any[] = data?.items || [];
   const uniqueStatuses = [...new Set(items.map((r: any) => r.status_label || r.status).filter(Boolean))].sort() as string[];
@@ -292,7 +311,36 @@ function DebtorsTab() {
 
   return (
     <>
+      {(() => {
+        const hasFilters = !!(statusFilter || clientFilter || orderFilter);
+        const canClear = hasFilters || selectedIds.size > 0;
+        const selDebt = filtered.filter((d: any) => selectedIds.has(String(d.id || d.number))).reduce((s: number, d: any) => s + (d.debt || 0), 0);
+        return (
+          <div style={{ padding: "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+            <div style={{ display: "flex", gap: 10, fontSize: 11, color: "#6B6355", alignItems: "center" }}>
+              {selectedIds.size > 0 && <span style={{ color: "#E8592A", fontWeight: 600 }}>Выбрано {selectedIds.size}</span>}
+              {selectedIds.size > 0 && selDebt > 0 && <span style={{ color: "#E8592A" }}>долг {fmt(selDebt)}</span>}
+              {selectedIds.size === 0 && <span>{filtered.length} позиций</span>}
+              {selectedIds.size === 0 && hasFilters && total > 0 && <span style={{ color: "#E8592A" }}>долг {fmt(total)}</span>}
+            </div>
+            <button onClick={canClear ? clearFilters : undefined} style={{ fontSize: 10, color: canClear ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: canClear ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
+              <X size={10} /> Сбросить
+            </button>
+          </div>
+        );
+      })()}
+
       <div style={{ display: "grid", gridTemplateColumns: debtorCols, padding: "8px 28px", borderBottom: "1px solid #EDEBE6", alignItems: "center" }}>
+        <div style={{ display: "flex", alignItems: "center" }}>
+          <Checkbox
+            checked={filtered.length > 0 && filtered.every((d: any) => selectedIds.has(String(d.id || d.number)))}
+            indeterminate={filtered.some((d: any) => selectedIds.has(String(d.id || d.number))) && !filtered.every((d: any) => selectedIds.has(String(d.id || d.number)))}
+            onChange={() => {
+              const allSel = filtered.every((d: any) => selectedIds.has(String(d.id || d.number)));
+              setSelectedIds(allSel ? new Set() : new Set(filtered.map((d: any) => String(d.id || d.number))));
+            }}
+          />
+        </div>
         <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
           <span style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>КЛИЕНТ / ЗАКАЗ</span>
           <ColumnFilter options={uniqueClients} value={clientFilter} onChange={setClientFilter} />
@@ -314,7 +362,9 @@ function DebtorsTab() {
         </div>
       ) : (
         <>
-          {filtered.map((d: any, i: number) => (
+          {filtered.map((d: any, i: number) => {
+            const rowId = String(d.id || d.number || i);
+            return (
             <div
               key={i}
               onClick={() => navigate(`/orders/${d.number}`)}
@@ -322,10 +372,14 @@ function DebtorsTab() {
                 display: "grid", gridTemplateColumns: debtorCols,
                 padding: "13px 28px", borderBottom: "1px solid #F2EFE9",
                 cursor: "pointer", alignItems: "center", transition: "background 0.1s",
+                background: selectedIds.has(rowId) ? "#FFF8F5" : "transparent",
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "#FAF8F5")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+              onMouseEnter={(e) => { if (!selectedIds.has(rowId)) e.currentTarget.style.background = "#FAF8F5"; }}
+              onMouseLeave={(e) => { if (!selectedIds.has(rowId)) e.currentTarget.style.background = "transparent"; }}
             >
+              <div style={{ display: "flex", alignItems: "center" }}>
+                <Checkbox checked={selectedIds.has(rowId)} onChange={() => toggleSelect(rowId)} />
+              </div>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>{d.customer_name || "—"}</div>
                 <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>{d.title}</div>
@@ -339,13 +393,15 @@ function DebtorsTab() {
               <div style={{ fontSize: 13, fontWeight: 700, color: "#E8592A" }}>{fmt(d.debt)}</div>
               <div style={{ fontSize: 12, color: deadlineColor(d.deadline) }}>{fmtDate(d.deadline)}</div>
             </div>
-          ))}
+            );
+          })}
 
           <div style={{
             display: "grid", gridTemplateColumns: debtorCols,
             padding: "10px 28px", borderTop: "1px solid #EDEBE6",
             alignItems: "center", background: "#FAF8F5",
           }}>
+            <div />
             <div style={{ fontSize: 11, color: "#A89070" }}>{filtered.length} заказов</div>
             <div />
             <div style={{ fontSize: 12, color: "#6B6355", fontWeight: 500 }}>{fmt(totalPlan)}</div>
@@ -449,12 +505,15 @@ function ReceivablesSection() {
 
 // ── Вкладка: кредиторы ─────────────────────────────────────────────────────
 
-const creditorCols = "2fr 2fr 130px 130px 130px 100px";
+const creditorCols = "28px 2fr 2fr 130px 130px 130px 100px";
 
 function CreditorsTab() {
   const [addOpen, setAddOpen] = useState(false);
   const [editItem, setEditItem] = useState<any>(null);
   const [contragentFilter, setContragentFilter] = useState("");
+  const clearFilters = () => { setContragentFilter(""); setSelectedIds(new Set()); };
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const { data, isLoading } = useQuery({ queryKey: ["creditors"], queryFn: () => financeApi.creditors() });
 
   const items: any[] = data?.items || [];
@@ -480,7 +539,35 @@ function CreditorsTab() {
         </button>
       </div>
 
+      {(() => {
+        const hasFilters = !!contragentFilter;
+        const canClear = hasFilters || selectedIds.size > 0;
+        const selDebt = filteredItems.filter((c: any) => selectedIds.has(String(c.id))).reduce((s: number, c: any) => s + (c.debt || 0), 0);
+        return (
+          <div style={{ padding: "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+            <div style={{ display: "flex", gap: 10, fontSize: 11, color: "#6B6355", alignItems: "center" }}>
+              {selectedIds.size > 0 && <span style={{ color: "#E8592A", fontWeight: 600 }}>Выбрано {selectedIds.size}</span>}
+              {selectedIds.size > 0 && selDebt > 0 && <span style={{ color: "#8B3A3A" }}>{fmt(selDebt)}</span>}
+              {selectedIds.size === 0 && <span>{filteredItems.length} записей</span>}
+            </div>
+            <button onClick={canClear ? clearFilters : undefined} style={{ fontSize: 10, color: canClear ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: canClear ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
+              <X size={10} /> Сбросить
+            </button>
+          </div>
+        );
+      })()}
+
       <div style={{ display: "grid", gridTemplateColumns: creditorCols, padding: "8px 28px", borderBottom: "1px solid #EDEBE6", alignItems: "center" }}>
+        <div style={{ display: "flex", alignItems: "center" }}>
+          <Checkbox
+            checked={filteredItems.length > 0 && filteredItems.every((c: any) => selectedIds.has(String(c.id)))}
+            indeterminate={filteredItems.some((c: any) => selectedIds.has(String(c.id))) && !filteredItems.every((c: any) => selectedIds.has(String(c.id)))}
+            onChange={() => {
+              const allSel = filteredItems.every((c: any) => selectedIds.has(String(c.id)));
+              setSelectedIds(allSel ? new Set() : new Set(filteredItems.map((c: any) => String(c.id))));
+            }}
+          />
+        </div>
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <span style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>Контрагент</span>
           <ColumnFilter options={uniqueContragents} value={contragentFilter} onChange={setContragentFilter} />
@@ -498,7 +585,9 @@ function CreditorsTab() {
         </div>
       ) : (
         <>
-          {filteredItems.map((c: any, i: number) => (
+          {filteredItems.map((c: any, i: number) => {
+            const rowId = String(c.id);
+            return (
             <div
               key={i}
               onClick={() => setEditItem(c)}
@@ -506,10 +595,14 @@ function CreditorsTab() {
                 display: "grid", gridTemplateColumns: creditorCols,
                 padding: "13px 28px", borderBottom: "1px solid #F2EFE9",
                 cursor: "pointer", alignItems: "center", transition: "background 0.1s",
+                background: selectedIds.has(rowId) ? "#FFF8F5" : "transparent",
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "#FAF8F5")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+              onMouseEnter={(e) => { if (!selectedIds.has(rowId)) e.currentTarget.style.background = "#FAF8F5"; }}
+              onMouseLeave={(e) => { if (!selectedIds.has(rowId)) e.currentTarget.style.background = "transparent"; }}
             >
+              <div style={{ display: "flex", alignItems: "center" }}>
+                <Checkbox checked={selectedIds.has(rowId)} onChange={() => toggleSelect(rowId)} />
+              </div>
               <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>{c.name}</div>
               <div style={{ fontSize: 12, color: "#6B6355", paddingRight: 16, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {c.description || "—"}
@@ -521,13 +614,15 @@ function CreditorsTab() {
               </div>
               <div style={{ fontSize: 12, color: deadlineColor(c.due_date) }}>{fmtDate(c.due_date)}</div>
             </div>
-          ))}
+            );
+          })}
 
           <div style={{
             display: "grid", gridTemplateColumns: creditorCols,
             padding: "10px 28px", borderTop: "1px solid #EDEBE6",
             alignItems: "center", background: "#FAF8F5",
           }}>
+            <div />
             <div style={{ fontSize: 11, color: "#A89070" }}>{filteredItems.length} записей</div>
             <div />
             <div style={{ fontSize: 12, color: "#6B6355", fontWeight: 500 }}>{fmt(totalOwed)}</div>
