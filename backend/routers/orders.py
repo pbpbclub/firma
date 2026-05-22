@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Query, HTTPException, Body, Depends
 from pydantic import BaseModel
 from typing import Optional
+from uuid import uuid4
 from db import get_production
 from auth import get_current_user
 
@@ -233,22 +234,17 @@ async def create_order(body: dict = Body(...), user=Depends(get_current_user)):
     conn = get_production()
     try:
         row = conn.execute(
-            "SELECT number FROM orders WHERE number LIKE 'ORD-%' ORDER BY id DESC LIMIT 1"
+            "SELECT MAX(CAST(SUBSTR(number, 5) AS INTEGER)) as max_num FROM orders WHERE number LIKE 'ORD-%'"
         ).fetchone()
-        if row:
-            try:
-                last_num = int(row["number"].split("-")[1])
-                number = f"ORD-{last_num + 1:03d}"
-            except (IndexError, ValueError):
-                count = conn.execute("SELECT COUNT(*) as c FROM orders").fetchone()["c"]
-                number = f"ORD-{count + 1:03d}"
-        else:
-            number = "ORD-001"
+        max_num = row["max_num"] if row and row["max_num"] is not None else 0
+        number = f"ORD-{max_num + 1:03d}"
 
-        cur = conn.execute(
-            """INSERT INTO orders (number, title, status, priority, deadline, customer_id, created_at)
-               VALUES (?, ?, 'draft', ?, ?, ?, datetime('now'))""",
+        new_id = str(uuid4())
+        conn.execute(
+            """INSERT INTO orders (id, number, title, status, priority, deadline, customer_id, created_at)
+               VALUES (?, ?, ?, 'draft', ?, ?, ?, datetime('now'))""",
             (
+                new_id,
                 number,
                 title,
                 body.get("priority", "normal"),
@@ -257,7 +253,7 @@ async def create_order(body: dict = Body(...), user=Depends(get_current_user)):
             ),
         )
         conn.commit()
-        order = dict(conn.execute("SELECT * FROM orders WHERE id = ?", (cur.lastrowid,)).fetchone())
+        order = dict(conn.execute("SELECT * FROM orders WHERE id = ?", (new_id,)).fetchone())
         return order
     finally:
         conn.close()
