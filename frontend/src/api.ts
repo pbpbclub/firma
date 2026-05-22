@@ -38,6 +38,7 @@ export const customersApi = {
   get: (id: string) => api.get(`/customers/${id}`).then((r) => r.data),
   create: (data: Record<string, any>) => api.post("/customers", data).then((r) => r.data),
   update: (id: string, data: Record<string, any>) => api.put(`/customers/${id}`, data).then((r) => r.data),
+  delete: (id: string) => api.delete(`/customers/${id}`).then((r) => r.data),
 };
 
 export const financeApi = {
@@ -109,6 +110,7 @@ export const mastersApi = {
   list: () => api.get("/masters").then((r) => r.data),
   get: (id: string) => api.get(`/masters/${id}`).then((r) => r.data),
   update: (id: string, data: Record<string, any>) => api.patch(`/masters/${id}`, data).then((r) => r.data),
+  delete: (id: string) => api.delete(`/masters/${id}`).then((r) => r.data),
 };
 
 export const zenmoneyApi = {

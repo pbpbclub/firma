@@ -140,6 +140,20 @@ def create_customer(payload: CustomerCreateRequest):
         conn.close()
 
 
+@router.delete("/{customer_id}")
+def delete_customer(customer_id: str):
+    conn = get_production()
+    try:
+        existing = conn.execute("SELECT id FROM customers WHERE id = ?", (customer_id,)).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Customer not found")
+        conn.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
+        conn.commit()
+        return {"ok": True}
+    finally:
+        conn.close()
+
+
 @router.put("/{customer_id}")
 def update_customer(customer_id: str, payload: CustomerUpdateRequest):
     conn = get_production()

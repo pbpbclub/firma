@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   MagnifyingGlass, DotsThree, Plus, CaretRight,
-  PencilSimple, Check, X, FloppyDisk, Funnel,
+  PencilSimple, Check, X, FloppyDisk, Funnel, Trash,
 } from "@phosphor-icons/react";
 import { customersApi, mastersApi, financeApi } from "../api";
 
@@ -91,67 +91,107 @@ const ORDER_STATUS_LABELS: Record<string, string> = {
 type FieldDef = { key: string; label: string; type?: "text" | "textarea" | "select"; options?: { v: string; l: string }[] };
 
 function EditModal({
-  title, fields, initial, onSave, onClose, isPending,
+  title, fields, initial, onSave, onClose, onDelete, isPending,
 }: {
   title: string;
   fields: FieldDef[];
   initial: Record<string, any>;
   onSave: (data: Record<string, any>) => void;
   onClose: () => void;
+  onDelete?: () => void;
   isPending: boolean;
 }) {
   const [draft, setDraft] = useState<Record<string, any>>({ ...initial });
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const set = (key: string, val: string) => setDraft(d => ({ ...d, [key]: val }));
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ background: "#fff", width: 480, maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,0.18)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 24px 16px", borderBottom: "1px solid #EDEBE6" }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: "#1A1A1A" }}>{title}</div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070" }}><X size={18} /></button>
-        </div>
-        <div style={{ flex: 1, overflowY: "auto", padding: "16px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
-          {fields.map(f => (
-            <div key={f.key}>
-              <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>{f.label.toUpperCase()}</div>
-              {f.type === "textarea" ? (
-                <textarea
-                  value={draft[f.key] ?? ""}
-                  onChange={e => set(f.key, e.target.value)}
-                  rows={3}
-                  style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 12, outline: "none", resize: "vertical", fontFamily: "inherit" }}
-                />
-              ) : f.type === "select" ? (
-                <select
-                  value={draft[f.key] ?? ""}
-                  onChange={e => set(f.key, e.target.value)}
-                  style={{ width: "100%", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 12, outline: "none", background: "#fff" }}
-                >
-                  <option value="">—</option>
-                  {f.options?.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
-                </select>
-              ) : (
-                <input
-                  value={draft[f.key] ?? ""}
-                  onChange={e => set(f.key, e.target.value)}
-                  style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 12, outline: "none" }}
-                />
-              )}
+    <>
+      <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ background: "#fff", width: 480, maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,0.18)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 24px 16px", borderBottom: "1px solid #EDEBE6" }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#1A1A1A" }}>{title}</div>
+            <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070" }}><X size={18} /></button>
+          </div>
+          <div style={{ flex: 1, overflowY: "auto", padding: "16px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
+            {fields.map(f => (
+              <div key={f.key}>
+                <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>{f.label.toUpperCase()}</div>
+                {f.type === "textarea" ? (
+                  <textarea
+                    value={draft[f.key] ?? ""}
+                    onChange={e => set(f.key, e.target.value)}
+                    rows={3}
+                    style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 12, outline: "none", resize: "vertical", fontFamily: "inherit" }}
+                  />
+                ) : f.type === "select" ? (
+                  <select
+                    value={draft[f.key] ?? ""}
+                    onChange={e => set(f.key, e.target.value)}
+                    style={{ width: "100%", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 12, outline: "none", background: "#fff" }}
+                  >
+                    <option value="">—</option>
+                    {f.options?.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
+                  </select>
+                ) : (
+                  <input
+                    value={draft[f.key] ?? ""}
+                    onChange={e => set(f.key, e.target.value)}
+                    style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 12, outline: "none" }}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 24px", borderTop: "1px solid #EDEBE6" }}>
+            {onDelete ? (
+              <button onClick={() => setConfirmDelete(true)}
+                style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 12px", border: "1px solid #EDEBE6", background: "none", fontSize: 12, cursor: "pointer", color: "#8B3A3A" }}
+                onMouseEnter={e => { e.currentTarget.style.background = "#FFF5F5"; e.currentTarget.style.borderColor = "#8B3A3A"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "none"; e.currentTarget.style.borderColor = "#EDEBE6"; }}>
+                <Trash size={13} /> Удалить
+              </button>
+            ) : <div />}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={onClose} style={{ padding: "7px 16px", border: "1px solid #EDEBE6", background: "none", fontSize: 12, cursor: "pointer", color: "#6B6355" }}>Отмена</button>
+              <button
+                disabled={isPending}
+                onClick={() => onSave(Object.fromEntries(Object.entries(draft).map(([k, v]) => [k, (v as string)?.trim() || null])))}
+                style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 16px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600 }}
+              >
+                <FloppyDisk size={13} /> {isPending ? "Сохраняем..." : "Сохранить"}
+              </button>
             </div>
-          ))}
-        </div>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "14px 24px", borderTop: "1px solid #EDEBE6" }}>
-          <button onClick={onClose} style={{ padding: "7px 16px", border: "1px solid #EDEBE6", background: "none", fontSize: 12, cursor: "pointer", color: "#6B6355" }}>Отмена</button>
-          <button
-            disabled={isPending}
-            onClick={() => onSave(Object.fromEntries(Object.entries(draft).map(([k, v]) => [k, (v as string)?.trim() || null])))}
-            style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 16px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600 }}
-          >
-            <FloppyDisk size={13} /> {isPending ? "Сохраняем..." : "Сохранить"}
-          </button>
+          </div>
         </div>
       </div>
-    </div>
+
+      {confirmDelete && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1100, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ background: "#fff", width: 380, boxShadow: "0 8px 40px rgba(0,0,0,0.22)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 24px 16px", borderBottom: "1px solid #EDEBE6" }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "#1A1A1A" }}>Удалить?</div>
+              <button onClick={() => setConfirmDelete(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070" }}><X size={18} /></button>
+            </div>
+            <div style={{ padding: "18px 24px" }}>
+              <div style={{ fontSize: 13, color: "#6B6355", marginBottom: 20 }}>
+                Запись будет удалена. Это действие нельзя отменить.
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <button onClick={() => setConfirmDelete(false)}
+                  style={{ padding: "7px 16px", border: "1px solid #EDEBE6", background: "none", fontSize: 12, cursor: "pointer", color: "#6B6355" }}>
+                  Отмена
+                </button>
+                <button onClick={onDelete}
+                  style={{ padding: "7px 20px", border: "none", background: "#8B3A3A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
+                  Да, удалить
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -201,6 +241,14 @@ function CustomerDetail({ customerId, onClose }: { customerId: string; onClose: 
     },
   });
 
+  const del = useMutation({
+    mutationFn: () => customersApi.delete(customerId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["customers"] });
+      onClose();
+    },
+  });
+
   if (isLoading) return <div style={{ padding: 40, textAlign: "center", color: "#A89070", fontSize: 13 }}>Загружаем...</div>;
   const customer = data?.customer;
   if (!customer) return null;
@@ -224,6 +272,7 @@ function CustomerDetail({ customerId, onClose }: { customerId: string; onClose: 
           isPending={save.isPending}
           onSave={(d) => save.mutate(d)}
           onClose={() => setEditing(false)}
+          onDelete={() => del.mutate()}
         />
       )}
 
@@ -375,6 +424,14 @@ function MasterDetail({ masterId, onClose }: { masterId: string; onClose: () => 
     },
   });
 
+  const del = useMutation({
+    mutationFn: () => mastersApi.delete(masterId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["masters"] });
+      onClose();
+    },
+  });
+
   const saveCreditor = useMutation({
     mutationFn: (patch: any) => financeApi.updateCreditor(editCreditor.id, patch),
     onSuccess: () => {
@@ -428,6 +485,7 @@ function MasterDetail({ masterId, onClose }: { masterId: string; onClose: () => 
           isPending={save.isPending}
           onSave={(d) => save.mutate(d)}
           onClose={() => setEditing(false)}
+          onDelete={() => del.mutate()}
         />
       )}
 

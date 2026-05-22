@@ -124,6 +124,20 @@ def get_master(master_id: str):
         conn.close()
 
 
+@router.delete("/{master_id}")
+def delete_master(master_id: str):
+    conn = get_production()
+    try:
+        existing = conn.execute("SELECT id FROM masters WHERE id = ?", (master_id,)).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Master not found")
+        conn.execute("DELETE FROM masters WHERE id = ?", (master_id,))
+        conn.commit()
+        return {"ok": True}
+    finally:
+        conn.close()
+
+
 @router.patch("/{master_id}")
 def update_master(master_id: str, body: MasterUpdate):
     conn = get_production()
