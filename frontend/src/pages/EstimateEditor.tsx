@@ -27,13 +27,14 @@ function fmt(n: number | null | undefined) {
 }
 
 function EditCell({
-  value, onSave, numeric, placeholder, style,
+  value, onSave, numeric, placeholder, style, display,
 }: {
   value: string | number | null | undefined;
   onSave: (v: string) => void;
   numeric?: boolean;
   placeholder?: string;
   style?: React.CSSProperties;
+  display?: React.ReactNode;
 }) {
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState(String(value ?? ""));
@@ -48,9 +49,9 @@ function EditCell({
         onClick={e => { e.stopPropagation(); setEditing(true); }}
         style={{ cursor: "text", display: "inline-block", minWidth: 12, ...style }}
       >
-        {value !== null && value !== undefined && value !== ""
+        {display ?? (value !== null && value !== undefined && value !== ""
           ? value
-          : <span style={{ color: "#C8C0B0" }}>{placeholder || ""}</span>}
+          : <span style={{ color: "#C8C0B0" }}>{placeholder || ""}</span>)}
       </span>
     );
   }
@@ -581,16 +582,41 @@ export default function EstimateEditor() {
                   )}
                 </div>
 
-                <div style={{ fontSize: 12, color: "#6B6355" }}>
-                  ×{item.markup ?? 2}
+                <div onClick={e => e.stopPropagation()} style={{ fontSize: 12, color: "#6B6355" }}>
+                  {editMode ? (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+                      ×<EditCell
+                        value={item.markup ?? 2}
+                        numeric
+                        onSave={v => estimatesApi.updateItem(item.id, { markup: parseFloat(v) || 1 }).then(() => refetch())}
+                      />
+                    </span>
+                  ) : (
+                    `×${item.markup ?? 2}`
+                  )}
                 </div>
 
                 <div style={{ fontSize: 13, color: "#6B6355", textAlign: "right" }}>
                   {fmt(item.cost_total)}
                 </div>
 
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#1A1A1A", textAlign: "right" }}>
-                  {fmt(item.sale_price)}
+                <div onClick={e => e.stopPropagation()} style={{ fontSize: 13, fontWeight: 700, color: "#1A1A1A", textAlign: "right" }}>
+                  {editMode ? (
+                    <EditCell
+                      value={item.sale_price ?? 0}
+                      numeric
+                      display={fmt(item.sale_price)}
+                      style={{ fontWeight: 700, textAlign: "right" }}
+                      onSave={v => {
+                        const entered = parseFloat(v) || 0;
+                        const cost = item.cost_total || 0;
+                        const newMarkup = cost > 0 ? Math.round((entered / cost) * 1000) / 1000 : 1;
+                        estimatesApi.updateItem(item.id, { markup: newMarkup }).then(() => refetch());
+                      }}
+                    />
+                  ) : (
+                    fmt(item.sale_price)
+                  )}
                 </div>
 
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#4A7C59", textAlign: "right" }}>
