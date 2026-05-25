@@ -378,6 +378,8 @@ export default function EstimateEditor() {
   const [invoicing, setInvoicing] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [pendingSwitchId, setPendingSwitchId] = useState<string | null>(null);
+  const [editingSetId, setEditingSetId] = useState<string | null>(null);
+  const [editingSetName, setEditingSetName] = useState("");
   const blocker = useNavigationGuard(editMode);
 
   const switchSet = (id: string) => {
@@ -501,19 +503,57 @@ export default function EstimateEditor() {
         {activeSet && (
           <>
             <span style={{ color: "#EDEBE6" }}>·</span>
-            {(sets as any[]).map((s: any, i: number) => (
-              <button
-                key={s.id}
-                onClick={() => switchSet(s.id)}
-                style={{
-                  padding: "3px 8px", fontSize: 11, cursor: "pointer",
-                  border: "1px solid",
-                  borderColor: activeSetId === s.id ? "#E8592A" : "#EDEBE6",
-                  background: activeSetId === s.id ? "#FFF3EF" : "transparent",
-                  color: activeSetId === s.id ? "#E8592A" : "#A89070",
-                }}
-              >Смета {i + 1}</button>
-            ))}
+            {(sets as any[]).map((s: any, i: number) => {
+              const isActive = activeSetId === s.id;
+              const label = s.title || `Смета ${i + 1}`;
+              return (
+                <div
+                  key={s.id}
+                  style={{
+                    display: "inline-flex", alignItems: "center",
+                    border: "1px solid",
+                    borderColor: isActive ? "#E8592A" : "#EDEBE6",
+                    background: isActive ? "#FFF3EF" : "transparent",
+                  }}
+                >
+                  {editingSetId === s.id ? (
+                    <input
+                      autoFocus
+                      value={editingSetName}
+                      onChange={e => setEditingSetName(e.target.value)}
+                      onBlur={async () => {
+                        const name = editingSetName.trim();
+                        await estimatesApi.updateSet(s.id, { title: name || null });
+                        refetch();
+                        setEditingSetId(null);
+                      }}
+                      onKeyDown={async e => {
+                        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                        if (e.key === "Escape") setEditingSetId(null);
+                      }}
+                      style={{
+                        border: "none", outline: "none", background: "transparent",
+                        fontSize: 11, color: "#E8592A", fontFamily: "inherit",
+                        padding: "3px 8px", width: Math.max(60, editingSetName.length * 7 + 20),
+                      }}
+                    />
+                  ) : (
+                    <button
+                      onClick={() => isActive
+                        ? (setEditingSetId(s.id), setEditingSetName(s.title || ""))
+                        : switchSet(s.id)
+                      }
+                      title={isActive ? "Нажмите для переименования" : undefined}
+                      style={{
+                        padding: "3px 8px", fontSize: 11, cursor: "pointer",
+                        border: "none", background: "transparent",
+                        color: isActive ? "#E8592A" : "#A89070",
+                      }}
+                    >{label}</button>
+                  )}
+                </div>
+              );
+            })}
             <button
               onClick={createSet}
               title="Новая смета"
