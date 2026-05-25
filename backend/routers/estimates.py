@@ -11,16 +11,20 @@ router = APIRouter()
 # ─── helpers ────────────────────────────────────────────────────────────────
 
 def _recalc_item(conn, item_id: str):
-    cost_per_unit = conn.execute(
+    line_cost = conn.execute(
         "SELECT COALESCE(SUM(line_total), 0) FROM estimate_lines WHERE item_id = ?",
         (item_id,)
     ).fetchone()[0]
     row = conn.execute(
-        "SELECT markup, quantity FROM estimate_items WHERE id = ?", (item_id,)
+        "SELECT markup, quantity, cost_total FROM estimate_items WHERE id = ?", (item_id,)
     ).fetchone()
     markup = row["markup"] or 1.0
     quantity = row["quantity"] or 1
-    cost_total = round(cost_per_unit * quantity, 2)
+    # Only use line-calculated cost if lines actually exist
+    if line_cost > 0:
+        cost_total = round(line_cost * quantity, 2)
+    else:
+        cost_total = row["cost_total"] or 0
     sale = round(cost_total * markup, 2)
     conn.execute(
         "UPDATE estimate_items SET cost_total = ?, sale_price = ? WHERE id = ?",
@@ -64,6 +68,7 @@ class ItemUpdate(BaseModel):
     markup: Optional[float] = None
     quantity: Optional[int] = None
     sort_order: Optional[int] = None
+    cost_total: Optional[float] = None
 
 
 class LineCreate(BaseModel):
@@ -184,7 +189,13 @@ def update_item(item_id: str, body: ItemUpdate):
                 f"UPDATE estimate_items SET {set_clause} WHERE id = ?",
                 list(fields.values()) + [item_id]
             )
-        if "markup" in fields:
+        if "cost_total" in fields:
+            # Direct cost — recompute sale_price from new cost × markup
+            cur = conn.execute("SELECT markup FROM estimate_items WHERE id = ?", (item_id,)).fetchone()
+            markup = cur["markup"] or 1.0
+            sale = round(fields["cost_total"] * markup, 2)
+            conn.execute("UPDATE estimate_items SET sale_price = ? WHERE id = ?", (sale, item_id))
+        elif "markup" in fields or "quantity" in fields:
             _recalc_item(conn, item_id)
         conn.commit()
         return dict(conn.execute("SELECT * FROM estimate_items WHERE id = ?", (item_id,)).fetchone())

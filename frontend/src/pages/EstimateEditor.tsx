@@ -113,7 +113,7 @@ function ItemModal({ item, onClose, onRefetch }: {
           <div style={{ flex: 1, fontSize: 15, fontWeight: 700, color: "#1A1A1A" }}>
             <EditCell
               value={item.title}
-              placeholder="Название раздела"
+              placeholder="Название позиции"
               onSave={v => save(() => estimatesApi.updateItem(item.id, { title: v }))}
               style={{ fontSize: 15, fontWeight: 700 }}
             />
@@ -325,7 +325,6 @@ export default function EstimateEditor() {
   const [openItemId, setOpenItemId] = useState<string | null>(null);
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [invoicing, setInvoicing] = useState(false);
-  const [editMode, setEditMode] = useState(false);
 
   const { data: order } = useQuery({
     queryKey: ["order-detail-v2", orderId],
@@ -351,8 +350,8 @@ export default function EstimateEditor() {
   const isBank     = activeSet?.payment_type === "bank";
   const bankAdd    = isBank ? Math.round(totalSale * bankPct / 100) : 0;
   const grandTotal = totalSale + bankAdd;
-  const taxes      = isBank ? Math.round(grandTotal * 0.06) : 0;   // УСН 6%
-  const fund       = isBank ? Math.round(bankAdd - taxes) : 0;      // Фонд бухгалтерии
+  const taxes      = isBank ? Math.round(grandTotal * 0.06) : 0;
+  const fund       = isBank ? Math.round(bankAdd - taxes) : 0;
 
   const createSet = async () => {
     const s = await estimatesApi.createSet(orderId!);
@@ -366,11 +365,17 @@ export default function EstimateEditor() {
     refetch();
   };
 
-  const addItem = async () => {
+  const addItemWithModal = async () => {
     if (!activeSetId) return;
     const it = await estimatesApi.addItem(activeSetId, { title: "", markup: 2.0 });
     await refetch();
     setOpenItemId(it.id);
+  };
+
+  const addItemInline = async () => {
+    if (!activeSetId) return;
+    await estimatesApi.addItem(activeSetId, { title: "", markup: 2.0 });
+    refetch();
   };
 
   const importFromCatalog = async (catalogItemId: string) => {
@@ -394,7 +399,7 @@ export default function EstimateEditor() {
     }
   };
 
-  const colsMain = editMode ? "1fr 64px 80px 110px 110px 90px 28px" : "1fr 64px 80px 110px 110px 90px";
+  const colsMain = "1fr 64px 80px 110px 110px 90px 52px";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -409,6 +414,24 @@ export default function EstimateEditor() {
         >
           <ArrowLeft size={13} /> Заказы
         </button>
+
+        {/* Add item via calculator — near back arrow */}
+        {activeSet && (
+          <button
+            onClick={addItemWithModal}
+            title="Добавить изделие (калькулятор)"
+            style={{
+              background: "none", border: "1px solid #EDEBE6", cursor: "pointer",
+              color: "#6B6355", display: "flex", alignItems: "center", gap: 4,
+              fontSize: 11, padding: "3px 8px", flexShrink: 0,
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "#E8592A"; (e.currentTarget as HTMLElement).style.color = "#E8592A"; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "#EDEBE6"; (e.currentTarget as HTMLElement).style.color = "#6B6355"; }}
+          >
+            <Plus size={11} /> Изделие
+          </button>
+        )}
+
         <span style={{ color: "#EDEBE6" }}>·</span>
         <span style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>{order?.title ?? orderId}</span>
 
@@ -434,7 +457,6 @@ export default function EstimateEditor() {
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
           {activeSet ? (
             <>
-              {/* Нал / Безнал — фиксированная ширина чтобы не прыгало */}
               <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
                 {[{ v: "cash", l: "Нал" }, { v: "bank", l: "Безнал" }].map(pt => (
                   <button
@@ -452,7 +474,6 @@ export default function EstimateEditor() {
                 ))}
               </div>
 
-              {/* Зарезервированное место под % банка — всегда занимает одинаковую ширину */}
               <div style={{ width: 100, display: "flex", alignItems: "center", gap: 4 }}>
                 {activeSet.payment_type === "bank" && (
                   <>
@@ -468,7 +489,6 @@ export default function EstimateEditor() {
                 )}
               </div>
 
-              {/* Статус — кликабельный для переключения */}
               <button
                 onClick={() => updateSet({ status: activeSet.status === "approved" ? "draft" : "approved" })}
                 style={{
@@ -481,7 +501,6 @@ export default function EstimateEditor() {
                 {activeSet.status === "approved" ? "Согласована ✓" : "Согласовать"}
               </button>
 
-              {/* Сформировать счёт */}
               <button
                 onClick={generateInvoice}
                 disabled={invoicing}
@@ -497,24 +516,6 @@ export default function EstimateEditor() {
                 <FileText size={12} />
                 {invoicing ? "..." : "Счёт"}
               </button>
-
-              <div style={{ width: 1, height: 18, background: "#EDEBE6" }} />
-
-              {editMode ? (
-                <button
-                  onClick={() => setEditMode(false)}
-                  style={{ padding: "4px 14px", fontSize: 11, fontWeight: 600, border: "none", background: "#4A7C59", color: "#FFFFFF", cursor: "pointer", whiteSpace: "nowrap" }}
-                >
-                  Сохранить
-                </button>
-              ) : (
-                <button
-                  onClick={() => setEditMode(true)}
-                  style={{ padding: "4px 14px", fontSize: 11, fontWeight: 600, border: "1px solid #1A1A1A", background: "transparent", color: "#1A1A1A", cursor: "pointer", whiteSpace: "nowrap" }}
-                >
-                  Редактировать
-                </button>
-              )}
             </>
           ) : (
             <button
@@ -536,7 +537,7 @@ export default function EstimateEditor() {
         <>
           {/* ─ Column headers ─────────────────────────────────────────────── */}
           <div style={{ display: "grid", gridTemplateColumns: colsMain, padding: "7px 28px", gap: 12, borderBottom: "1px solid #EDEBE6", flexShrink: 0 }}>
-            {["Позиция", "Кол-во", "Наценка", "Себестоимость", "Клиенту", "Δ Доход", ...(editMode ? [""] : [])].map((h, i) => (
+            {["Позиция", "Кол-во", "Наценка", "Себестоимость", "Клиенту", "Δ Доход", ""].map((h, i) => (
               <div key={i} style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em", textAlign: i >= 3 ? "right" : "left" }}>{h}</div>
             ))}
           </div>
@@ -552,123 +553,129 @@ export default function EstimateEditor() {
             {items.map((item: any) => (
               <div
                 key={item.id}
-                onClick={editMode ? () => setOpenItemId(item.id) : undefined}
                 style={{
                   display: "grid", gridTemplateColumns: colsMain,
                   padding: "11px 28px", gap: 12,
                   borderBottom: "1px solid #F2EFE9",
-                  cursor: editMode ? "pointer" : "default", alignItems: "center",
-                  transition: "background 0.1s",
+                  alignItems: "center",
                 }}
-                onMouseEnter={e => { if (editMode) e.currentTarget.style.background = "#FAF8F5"; }}
+                onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")}
                 onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
               >
-                <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>
-                  {item.title || <span style={{ color: "#C8C0B0" }}>Без названия</span>}
+                {/* Title */}
+                <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }} onClick={e => e.stopPropagation()}>
+                  <EditCell
+                    value={item.title}
+                    placeholder="Без названия"
+                    onSave={v => estimatesApi.updateItem(item.id, { title: v }).then(() => refetch())}
+                  />
                 </div>
 
-                <div
-                  onClick={e => e.stopPropagation()}
-                  style={{ fontSize: 13, color: "#1A1A1A", fontWeight: 500 }}
-                >
-                  {editMode ? (
-                    <EditCell
-                      value={item.quantity ?? 1}
-                      numeric
-                      onSave={v => estimatesApi.updateItem(item.id, { quantity: parseInt(v) || 1 }).then(() => refetch())}
-                    />
-                  ) : (
-                    <span>{item.quantity ?? 1}</span>
-                  )}
+                {/* Qty */}
+                <div onClick={e => e.stopPropagation()} style={{ fontSize: 13, color: "#1A1A1A", fontWeight: 500 }}>
+                  <EditCell
+                    value={item.quantity ?? 1}
+                    numeric
+                    onSave={v => estimatesApi.updateItem(item.id, { quantity: parseInt(v) || 1 }).then(() => refetch())}
+                  />
                 </div>
 
+                {/* Markup */}
                 <div onClick={e => e.stopPropagation()} style={{ fontSize: 12, color: "#6B6355" }}>
-                  {editMode ? (
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
-                      ×<EditCell
-                        value={item.markup ?? 2}
-                        numeric
-                        onSave={v => estimatesApi.updateItem(item.id, { markup: parseFloat(v) || 1 }).then(() => refetch())}
-                      />
-                    </span>
-                  ) : (
-                    `×${item.markup ?? 2}`
-                  )}
-                </div>
-
-                <div style={{ fontSize: 13, color: "#6B6355", textAlign: "right" }}>
-                  {fmt(item.cost_total)}
-                </div>
-
-                <div onClick={e => e.stopPropagation()} style={{ fontSize: 13, fontWeight: 700, color: "#1A1A1A", textAlign: "right" }}>
-                  {editMode ? (
-                    <EditCell
-                      value={item.sale_price ?? 0}
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+                    ×<EditCell
+                      value={item.markup ?? 2}
                       numeric
-                      display={fmt(item.sale_price)}
-                      style={{ fontWeight: 700, textAlign: "right" }}
-                      onSave={v => {
-                        const entered = parseFloat(v) || 0;
-                        const cost = item.cost_total || 0;
-                        const newMarkup = cost > 0 ? Math.round((entered / cost) * 1000) / 1000 : 1;
-                        estimatesApi.updateItem(item.id, { markup: newMarkup }).then(() => refetch());
-                      }}
+                      onSave={v => estimatesApi.updateItem(item.id, { markup: parseFloat(v) || 1 }).then(() => refetch())}
                     />
-                  ) : (
-                    fmt(item.sale_price)
-                  )}
+                  </span>
                 </div>
 
+                {/* Cost */}
+                <div onClick={e => e.stopPropagation()} style={{ fontSize: 13, color: "#6B6355", textAlign: "right" }}>
+                  <EditCell
+                    value={item.cost_total ?? 0}
+                    numeric
+                    display={fmt(item.cost_total)}
+                    style={{ textAlign: "right" }}
+                    onSave={v => {
+                      const cost = parseFloat(v) || 0;
+                      estimatesApi.updateItem(item.id, { cost_total: cost }).then(() => refetch());
+                    }}
+                  />
+                </div>
+
+                {/* Sale price / Клиенту */}
+                <div onClick={e => e.stopPropagation()} style={{ fontSize: 13, fontWeight: 700, color: "#1A1A1A", textAlign: "right" }}>
+                  <EditCell
+                    value={item.sale_price ?? 0}
+                    numeric
+                    display={fmt(item.sale_price)}
+                    style={{ fontWeight: 700, textAlign: "right" }}
+                    onSave={v => {
+                      const entered = parseFloat(v) || 0;
+                      const cost = item.cost_total || 0;
+                      const newMarkup = cost > 0 ? Math.round((entered / cost) * 1000) / 1000 : 1;
+                      estimatesApi.updateItem(item.id, { markup: newMarkup }).then(() => refetch());
+                    }}
+                  />
+                </div>
+
+                {/* Delta */}
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#4A7C59", textAlign: "right" }}>
                   +{fmt((item.sale_price || 0) - (item.cost_total || 0))}
                 </div>
 
-                {editMode && (
-                  <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                    <button
-                      onClick={e => { e.stopPropagation(); estimatesApi.deleteItem(item.id).then(() => refetch()); }}
-                      style={{ background: "none", border: "none", cursor: "pointer", color: "#D0C8C0", padding: 2, display: "flex" }}
-                      onMouseEnter={e => (e.currentTarget.style.color = "#8B3A3A")}
-                      onMouseLeave={e => (e.currentTarget.style.color = "#D0C8C0")}
-                    >
-                      <Trash size={13} />
-                    </button>
-                  </div>
-                )}
+                {/* Actions: open calculator + delete */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 4 }}>
+                  <button
+                    onClick={e => { e.stopPropagation(); setOpenItemId(item.id); }}
+                    title="Открыть калькулятор"
+                    style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}
+                    onMouseEnter={e => (e.currentTarget.style.color = "#6B6355")}
+                    onMouseLeave={e => (e.currentTarget.style.color = "#C8C0B0")}
+                  >
+                    <Cube size={13} />
+                  </button>
+                  <button
+                    onClick={e => { e.stopPropagation(); estimatesApi.deleteItem(item.id).then(() => refetch()); }}
+                    style={{ background: "none", border: "none", cursor: "pointer", color: "#D0C8C0", padding: 2, display: "flex" }}
+                    onMouseEnter={e => (e.currentTarget.style.color = "#8B3A3A")}
+                    onMouseLeave={e => (e.currentTarget.style.color = "#D0C8C0")}
+                  >
+                    <Trash size={13} />
+                  </button>
+                </div>
               </div>
             ))}
 
-            {/* Add row — edit mode only */}
-            {editMode && (
-              <div style={{ padding: "10px 28px", display: "flex", gap: 10 }}>
-                <button
-                  onClick={addItem}
-                  style={{ background: "none", border: "1px solid #EDEBE6", cursor: "pointer", fontSize: 12, color: "#6B6355", padding: "6px 12px", display: "flex", alignItems: "center", gap: 5 }}
-                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "#1A1A1A"; }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "#EDEBE6"; }}
-                >
-                  <Plus size={11} /> Позиция
-                </button>
-                <button
-                  onClick={() => setCatalogOpen(true)}
-                  style={{ background: "none", border: "1px solid #EDEBE6", cursor: "pointer", fontSize: 12, color: "#6B6355", padding: "6px 12px", display: "flex", alignItems: "center", gap: 5 }}
-                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "#1A1A1A"; }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "#EDEBE6"; }}
-                >
-                  <Package size={11} /> Из каталога
-                </button>
-              </div>
-            )}
+            {/* Add row — always visible */}
+            <div style={{ padding: "10px 28px", display: "flex", gap: 10 }}>
+              <button
+                onClick={addItemInline}
+                style={{ background: "none", border: "1px solid #EDEBE6", cursor: "pointer", fontSize: 12, color: "#6B6355", padding: "6px 12px", display: "flex", alignItems: "center", gap: 5 }}
+                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "#1A1A1A"; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "#EDEBE6"; }}
+              >
+                <Plus size={11} /> Позиция
+              </button>
+              <button
+                onClick={() => setCatalogOpen(true)}
+                style={{ background: "none", border: "1px solid #EDEBE6", cursor: "pointer", fontSize: 12, color: "#6B6355", padding: "6px 12px", display: "flex", alignItems: "center", gap: 5 }}
+                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "#1A1A1A"; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "#EDEBE6"; }}
+              >
+                <Package size={11} /> Из каталога
+              </button>
+            </div>
           </div>
 
           {/* ─ Footer totals ──────────────────────────────────────────────── */}
           <div style={{ flexShrink: 0, borderTop: "1px solid #EDEBE6" }}>
 
-            {/* Итого */}
             <FooterRow cols={colsMain} label="Итого себестоимость"
               cost={fmt(totalCost)} sale={fmt(totalSale)} delta={`+${fmt(totalDelta)}`} deltaColor="#4A7C59" />
 
-            {/* Безнал секция */}
             {isBank && <>
               <FooterRow cols={colsMain} label={`Надбавка безнал ${bankPct}%`}
                 sale={`+${fmt(bankAdd)}`} saleColor="#1A1A1A" />
@@ -681,7 +688,6 @@ export default function EstimateEditor() {
               )}
             </>}
 
-            {/* К оплате */}
             <div style={{
               display: "grid", gridTemplateColumns: colsMain,
               padding: "10px 28px", gap: 12, alignItems: "center",
