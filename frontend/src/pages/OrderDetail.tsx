@@ -118,7 +118,7 @@ export default function OrderDetail() {
       brand: form.brand || null,
       priority: form.priority,
       deadline: form.deadline || null,
-      customer_id: form.customer_id && form.customer_id !== "__new__" ? parseInt(form.customer_id) : null,
+      customer_id: form.customer_id && form.customer_id !== "__new__" ? form.customer_id : null,
       price_plan: form.price_plan ? parseFloat(form.price_plan) : null,
       cost_plan: form.cost_plan ? parseFloat(form.cost_plan) : null,
     });
