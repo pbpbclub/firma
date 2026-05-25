@@ -225,7 +225,7 @@ def unarchive_order(order_id: str):
         conn.close()
 
 
-VALID_BRANDS = {"Мира", "PBPB", "Транзит"}
+VALID_BRANDS = {"MeRA", "pbpb", "Транзит"}
 
 
 class BrandUpdate(BaseModel):

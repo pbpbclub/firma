@@ -5,8 +5,8 @@ import { ordersApi, customersApi } from "../api";
 import { MagnifyingGlass, DotsThree, Plus, Files, CaretRight, Archive, ArrowCounterClockwise, CaretDown, Funnel, X, Trash } from "@phosphor-icons/react";
 
 const BRANDS: { value: string; color: string }[] = [
-  { value: "Мира",    color: "#2E6DA4" },
-  { value: "PBPB",    color: "#7B4F9E" },
+  { value: "MeRA",    color: "#2E6DA4" },
+  { value: "pbpb",    color: "#7B4F9E" },
   { value: "Транзит", color: "#3D8C6B" },
 ];
 const BRAND_COLOR: Record<string, string> = Object.fromEntries(BRANDS.map(b => [b.value, b.color]));
@@ -735,7 +735,17 @@ export default function OrdersV2() {
 
         {/* Brand filter chips */}
         <div style={{ padding: "8px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", gap: 6, alignItems: "center" }}>
-          <span style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginRight: 4 }}>БРЕНД</span>
+          <button
+            onClick={() => { setBrandFilter(""); setPage(0); }}
+            style={{
+              padding: "3px 10px", border: `1px solid ${!brandFilter ? "#1A1A1A" : "#EDEBE6"}`,
+              background: !brandFilter ? "#1A1A1A" : "transparent",
+              color: !brandFilter ? "#FFFFFF" : "#A89070",
+              fontSize: 11, cursor: "pointer", fontWeight: 600, transition: "all 0.1s",
+            }}
+          >
+            Все
+          </button>
           {BRANDS.map(b => (
             <button
               key={b.value}
