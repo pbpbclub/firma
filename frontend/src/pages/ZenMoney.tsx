@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Briefcase, MagnifyingGlass, Funnel, X, ArrowsClockwise } from "@phosphor-icons/react";
-import { zenmoneyApi } from "../api";
+import { Briefcase, MagnifyingGlass, Funnel, X, ArrowsClockwise, Tag, PencilSimple, Trash } from "@phosphor-icons/react";
+import { zenmoneyApi, payeeRulesApi } from "../api";
 
 function ColumnFilter({ options, value, onChange, maxHeight }: {
   options: string[];
@@ -191,6 +191,204 @@ function getCurrentMonth() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
 
+const MATCH_TYPE_LABELS: Record<string, string> = {
+  exact: "точное",
+  contains: "содержит",
+  prefix: "с начала",
+};
+
+const ENTITY_TYPE_LABELS: Record<string, string> = {
+  contractor: "Подрядчик",
+  customer: "Клиент",
+  master: "Мастер",
+  label: "Метка",
+  skip: "Игнорировать",
+};
+
+function PayeeRulePopup({ payee, ruleId, onClose }: {
+  payee: string;
+  ruleId: number | null;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const ref = useRef<HTMLDivElement>(null);
+  const [editing, setEditing] = useState(!ruleId);
+  const [form, setForm] = useState({
+    pattern: payee.toLowerCase(),
+    match_type: "exact",
+    display_name: "",
+    entity_type: "label",
+    entity_id: "",
+    entity_name: "",
+  });
+
+  const { data: existingRule } = useQuery({
+    queryKey: ["payee-rule", ruleId],
+    queryFn: () => ruleId ? payeeRulesApi.list({}).then((rules: any[]) => rules.find((r: any) => r.id === ruleId)) : null,
+    enabled: !!ruleId,
+  });
+
+  useEffect(() => {
+    if (existingRule) {
+      setForm({
+        pattern: existingRule.pattern || payee.toLowerCase(),
+        match_type: existingRule.match_type || "exact",
+        display_name: existingRule.display_name || "",
+        entity_type: existingRule.entity_type || "label",
+        entity_id: existingRule.entity_id || "",
+        entity_name: existingRule.entity_name || "",
+      });
+    }
+  }, [existingRule]);
+
+  useEffect(() => {
+    const h = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [onClose]);
+
+  const save = useMutation({
+    mutationFn: () => ruleId && existingRule
+      ? payeeRulesApi.update(ruleId, form)
+      : payeeRulesApi.create(form),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["zm-business"] });
+      qc.invalidateQueries({ queryKey: ["payee-rules"] });
+      onClose();
+    },
+  });
+
+  const del = useMutation({
+    mutationFn: () => payeeRulesApi.delete(ruleId!),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["zm-business"] });
+      qc.invalidateQueries({ queryKey: ["payee-rules"] });
+      onClose();
+    },
+  });
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%", boxSizing: "border-box", fontSize: 11,
+    border: "1px solid #EDEBE6", padding: "5px 8px",
+    outline: "none", fontFamily: "inherit", background: "#FAFAFA",
+  };
+  const selectStyle: React.CSSProperties = { ...inputStyle, cursor: "pointer" };
+
+  return (
+    <div ref={ref} style={{
+      position: "absolute", zIndex: 400, top: "calc(100% + 4px)", left: 0,
+      background: "#FFFFFF", border: "1px solid #EDEBE6",
+      boxShadow: "0 4px 20px rgba(0,0,0,0.12)", width: 280, padding: 14,
+    }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: "#1A1A1A" }}>
+          {ruleId && !editing ? "Правило сопоставления" : ruleId ? "Редактировать правило" : "Создать правило"}
+        </div>
+        <div style={{ display: "flex", gap: 4 }}>
+          {ruleId && !editing && (
+            <>
+              <button onClick={() => setEditing(true)} title="Редактировать"
+                style={{ background: "none", border: "none", cursor: "pointer", padding: 2, color: "#6B6355" }}>
+                <PencilSimple size={13} />
+              </button>
+              <button onClick={() => del.mutate()} title="Удалить"
+                style={{ background: "none", border: "none", cursor: "pointer", padding: 2, color: "#8B3A3A" }}>
+                <Trash size={13} />
+              </button>
+            </>
+          )}
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 2, color: "#A89070" }}>
+            <X size={13} />
+          </button>
+        </div>
+      </div>
+
+      {/* View mode */}
+      {ruleId && !editing && existingRule && (
+        <div style={{ fontSize: 11, color: "#1A1A1A" }}>
+          <div style={{ marginBottom: 5 }}>
+            <span style={{ color: "#A89070" }}>Паттерн: </span>
+            <code style={{ background: "#F2EFE9", padding: "1px 4px", fontSize: 10 }}>{existingRule.pattern}</code>
+            <span style={{ color: "#A89070", marginLeft: 6 }}>{MATCH_TYPE_LABELS[existingRule.match_type]}</span>
+          </div>
+          {existingRule.display_name && (
+            <div style={{ marginBottom: 4 }}><span style={{ color: "#A89070" }}>Метка: </span>{existingRule.display_name}</div>
+          )}
+          {existingRule.entity_type && (
+            <div><span style={{ color: "#A89070" }}>Тип: </span>{ENTITY_TYPE_LABELS[existingRule.entity_type] || existingRule.entity_type}
+              {existingRule.entity_name && <span> — {existingRule.entity_name}</span>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Edit/Create mode */}
+      {(!ruleId || editing) && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+          <div>
+            <div style={{ fontSize: 10, color: "#A89070", marginBottom: 2 }}>ПАТТЕРН</div>
+            <input value={form.pattern} onChange={e => setForm(f => ({ ...f, pattern: e.target.value }))}
+              style={inputStyle} />
+          </div>
+          <div>
+            <div style={{ fontSize: 10, color: "#A89070", marginBottom: 2 }}>ТИП СОВПАДЕНИЯ</div>
+            <select value={form.match_type} onChange={e => setForm(f => ({ ...f, match_type: e.target.value }))}
+              style={selectStyle}>
+              <option value="exact">Точное</option>
+              <option value="contains">Содержит</option>
+              <option value="prefix">С начала строки</option>
+            </select>
+          </div>
+          <div>
+            <div style={{ fontSize: 10, color: "#A89070", marginBottom: 2 }}>ОТОБРАЖАЕМОЕ ИМЯ</div>
+            <input value={form.display_name} onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))}
+              placeholder="Яндекс.Доставка" style={inputStyle} />
+          </div>
+          <div>
+            <div style={{ fontSize: 10, color: "#A89070", marginBottom: 2 }}>ПРИВЯЗАТЬ К</div>
+            <select value={form.entity_type} onChange={e => setForm(f => ({ ...f, entity_type: e.target.value }))}
+              style={selectStyle}>
+              <option value="label">Только метка</option>
+              <option value="contractor">Подрядчик</option>
+              <option value="customer">Клиент</option>
+              <option value="master">Мастер</option>
+              <option value="skip">Игнорировать</option>
+            </select>
+          </div>
+          {["contractor", "customer", "master"].includes(form.entity_type) && (
+            <div>
+              <div style={{ fontSize: 10, color: "#A89070", marginBottom: 2 }}>ИМЯ СУЩНОСТИ</div>
+              <input value={form.entity_name} onChange={e => setForm(f => ({ ...f, entity_name: e.target.value }))}
+                placeholder="Эдуард Пруняу" style={inputStyle} />
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
+            <button onClick={() => save.mutate()} disabled={save.isPending || !form.pattern}
+              style={{
+                flex: 1, background: "#1A1A1A", color: "#FFFFFF", border: "none",
+                padding: "6px 0", fontSize: 11, cursor: "pointer", fontFamily: "inherit",
+              }}>
+              {save.isPending ? "Сохраняем..." : "Сохранить"}
+            </button>
+            {editing && ruleId && (
+              <button onClick={() => setEditing(false)}
+                style={{ background: "none", border: "1px solid #EDEBE6", padding: "6px 10px", fontSize: 11, cursor: "pointer", fontFamily: "inherit", color: "#6B6355" }}>
+                Отмена
+              </button>
+            )}
+          </div>
+          {save.isError && (
+            <div style={{ fontSize: 10, color: "#8B3A3A" }}>Ошибка сохранения</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ZenMoneyPage() {
   const queryClient = useQueryClient();
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth);
@@ -206,6 +404,7 @@ export default function ZenMoneyPage() {
       queryClient.invalidateQueries({ queryKey: ["zm-business"] });
     },
   });
+  const [activePayeePopup, setActivePayeePopup] = useState<{ txId: string; payee: string; ruleId: number | null } | null>(null);
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState("");
   const [payeeFilter, setPayeeFilter] = useState("");
@@ -600,19 +799,35 @@ export default function ZenMoneyPage() {
                 <div style={{ paddingTop: 1 }}>
                   <BankBadge title={isExpense ? (tx.outcome_account || "") : (tx.income_account || "")} />
                 </div>
-                <div>
-                  <div style={{ fontSize: 12, color: "#1A1A1A" }}>
-                    {tx.payee || tx.comment || "—"}
+                <div style={{ position: "relative" }}>
+                  {/* Кликабельный payee */}
+                  <div
+                    onClick={() => {
+                      const payeeVal = (tx.payee || tx.comment || "").trim();
+                      if (!payeeVal) return;
+                      const isOpen = activePayeePopup?.txId === String(tx.id);
+                      setActivePayeePopup(isOpen ? null : { txId: String(tx.id), payee: payeeVal, ruleId: tx.rule_id ?? null });
+                    }}
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: 4,
+                      fontSize: 12, color: "#1A1A1A", cursor: "pointer",
+                    }}
+                    title="Создать/редактировать правило сопоставления"
+                  >
+                    <span>{tx.payee || tx.comment || "—"}</span>
+                    <Tag size={10} style={{ color: tx.rule_id ? "#E8592A" : "#C8C0B0", flexShrink: 0 }} />
                   </div>
                   {tx.payee && tx.comment && (
                     <div style={{ fontSize: 10, color: "#A89070" }}>{tx.comment}</div>
                   )}
                   {isBiz && (
-                    <div style={{ display: "flex", gap: 4, marginTop: 2 }}>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 2 }}>
                       {tx.matched_contractor && (
                         <span style={{
-                          fontSize: 9, background: "#FFF3EF", color: "#E8592A",
-                          padding: "1px 5px", border: "1px solid #F0D8D0",
+                          fontSize: 9, background: tx.matched_via === "rule" ? "#EFF5F1" : "#FFF3EF",
+                          color: tx.matched_via === "rule" ? "#4A7C59" : "#E8592A",
+                          padding: "1px 5px",
+                          border: `1px solid ${tx.matched_via === "rule" ? "#D0E0D4" : "#F0D8D0"}`,
                         }}>
                           {tx.matched_contractor}
                         </span>
@@ -626,6 +841,13 @@ export default function ZenMoneyPage() {
                         </span>
                       )}
                     </div>
+                  )}
+                  {activePayeePopup?.txId === String(tx.id) && (
+                    <PayeeRulePopup
+                      payee={activePayeePopup.payee}
+                      ruleId={activePayeePopup.ruleId}
+                      onClose={() => setActivePayeePopup(null)}
+                    />
                   )}
                 </div>
                 <div style={{ fontSize: 10, color: "#A89070", paddingTop: 1 }}>

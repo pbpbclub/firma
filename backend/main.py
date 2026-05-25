@@ -4,9 +4,9 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
 from auth import get_current_user, init_admin
-from db import ensure_customer_schema
+from db import ensure_customer_schema, ensure_payee_rules_schema
 from routers import orders, finance, catalog, taxes, users, estimates, funds
-from routers import customers, masters, zenmoney, admin
+from routers import customers, masters, zenmoney, admin, payee_rules
 
 app = FastAPI(title="Firma API", version="1.0")
 
@@ -32,6 +32,7 @@ app.include_router(funds.router, prefix="/api/funds", tags=["funds"], **protecte
 app.include_router(masters.router, prefix="/api/masters", tags=["masters"], **protected)
 app.include_router(zenmoney.router, prefix="/api/zenmoney", tags=["zenmoney"], **protected)
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"], **protected)
+app.include_router(payee_rules.router, prefix="/api/payee-rules", tags=["payee-rules"], **protected)
 
 @app.get("/api/health")
 def health():
@@ -46,3 +47,4 @@ if static_dir.exists():
 def startup():
     init_admin()
     ensure_customer_schema()
+    ensure_payee_rules_schema()

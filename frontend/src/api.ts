@@ -126,6 +126,28 @@ export const zenmoneyApi = {
   sync: () => api.post("/zenmoney/sync").then((r) => r.data),
 };
 
+export const payeeRulesApi = {
+  list: (params?: { entity_type?: string; entity_id?: string }) =>
+    api.get("/payee-rules", { params }).then((r) => r.data),
+  create: (data: {
+    pattern: string;
+    match_type: string;
+    display_name?: string;
+    entity_type?: string;
+    entity_id?: string;
+    entity_name?: string;
+  }) => api.post("/payee-rules", data).then((r) => r.data),
+  update: (id: number, data: Partial<{
+    pattern: string;
+    match_type: string;
+    display_name: string;
+    entity_type: string;
+    entity_id: string;
+    entity_name: string;
+  }>) => api.patch(`/payee-rules/${id}`, data).then((r) => r.data),
+  delete: (id: number) => api.delete(`/payee-rules/${id}`).then((r) => r.data),
+};
+
 export const adminApi = {
   system: () => api.get("/admin/system").then((r) => r.data),
   imports: () => api.get("/admin/imports").then((r) => r.data),

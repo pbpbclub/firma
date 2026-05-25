@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { UploadSimple, CheckCircle, WarningCircle, X, Plus, ArrowsClockwise } from "@phosphor-icons/react";
-import { adminApi, authApi, zenmoneyApi } from "../api";
+import { adminApi, authApi, zenmoneyApi, payeeRulesApi } from "../api";
 
 function fmt(n: number | null | undefined) {
   if (n == null) return "—";
@@ -499,6 +499,135 @@ function ImportsSection() {
   );
 }
 
+// ── Payee Rules ──────────────────────────────────────────────────────────────
+
+const MATCH_TYPE_LABELS_ADM: Record<string, string> = { exact: "точное", contains: "содержит", prefix: "с начала" };
+const ENTITY_TYPE_LABELS_ADM: Record<string, string> = {
+  contractor: "Подрядчик", customer: "Клиент", master: "Мастер", label: "Метка", skip: "Игнор",
+};
+
+function PayeeRulesSection() {
+  const qc = useQueryClient();
+  const [adding, setAdding] = useState(false);
+  const [editId, setEditId] = useState<number | null>(null);
+  const [form, setForm] = useState({ pattern: "", match_type: "exact", display_name: "", entity_type: "label", entity_id: "", entity_name: "" });
+
+  const { data: rules = [] } = useQuery({ queryKey: ["payee-rules"], queryFn: () => payeeRulesApi.list({}) });
+
+  const save = useMutation({
+    mutationFn: () => editId ? payeeRulesApi.update(editId, form) : payeeRulesApi.create(form),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["payee-rules"] }); qc.invalidateQueries({ queryKey: ["zm-business"] }); setAdding(false); setEditId(null); setForm({ pattern: "", match_type: "exact", display_name: "", entity_type: "label", entity_id: "", entity_name: "" }); },
+  });
+
+  const del = useMutation({
+    mutationFn: (id: number) => payeeRulesApi.delete(id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["payee-rules"] }); qc.invalidateQueries({ queryKey: ["zm-business"] }); },
+  });
+
+  const startEdit = (r: any) => {
+    setEditId(r.id);
+    setForm({ pattern: r.pattern, match_type: r.match_type, display_name: r.display_name || "", entity_type: r.entity_type || "label", entity_id: r.entity_id || "", entity_name: r.entity_name || "" });
+    setAdding(true);
+  };
+
+  const inputStyle: React.CSSProperties = { width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "6px 8px", fontSize: 12, outline: "none", fontFamily: "inherit" };
+
+  return (
+    <div style={{ marginBottom: 40 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+        <SectionLabel>ПРАВИЛА СОПОСТАВЛЕНИЯ ПЛАТЕЖЕЙ</SectionLabel>
+        <button onClick={() => { setEditId(null); setForm({ pattern: "", match_type: "exact", display_name: "", entity_type: "label", entity_id: "", entity_name: "" }); setAdding(v => !v); }}
+          style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 5, background: "none", border: "1px solid #EDEBE6", padding: "4px 10px", fontSize: 11, cursor: "pointer", color: "#6B6355", fontFamily: "inherit" }}>
+          <Plus size={11} /> Добавить
+        </button>
+      </div>
+
+      {adding && (
+        <div style={{ border: "1px solid #EDEBE6", padding: 16, marginBottom: 16, background: "#FAF8F5" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: 8, marginBottom: 8 }}>
+            <div>
+              <div style={{ fontSize: 10, color: "#A89070", marginBottom: 3 }}>ПАТТЕРН</div>
+              <input value={form.pattern} onChange={e => setForm(f => ({ ...f, pattern: e.target.value.toLowerCase() }))}
+                placeholder="yandex*доставка или имя плательщика" style={inputStyle} />
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: "#A89070", marginBottom: 3 }}>ТИП</div>
+              <select value={form.match_type} onChange={e => setForm(f => ({ ...f, match_type: e.target.value }))} style={{ ...inputStyle, cursor: "pointer" }}>
+                <option value="exact">Точное</option>
+                <option value="contains">Содержит</option>
+                <option value="prefix">С начала</option>
+              </select>
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 120px 1fr", gap: 8, marginBottom: 10 }}>
+            <div>
+              <div style={{ fontSize: 10, color: "#A89070", marginBottom: 3 }}>МЕТКА (DISPLAY NAME)</div>
+              <input value={form.display_name} onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))}
+                placeholder="Яндекс.Доставка" style={inputStyle} />
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: "#A89070", marginBottom: 3 }}>СУЩНОСТЬ</div>
+              <select value={form.entity_type} onChange={e => setForm(f => ({ ...f, entity_type: e.target.value }))} style={{ ...inputStyle, cursor: "pointer" }}>
+                <option value="label">Метка</option>
+                <option value="contractor">Подрядчик</option>
+                <option value="customer">Клиент</option>
+                <option value="master">Мастер</option>
+                <option value="skip">Игнорировать</option>
+              </select>
+            </div>
+            {["contractor", "customer", "master"].includes(form.entity_type) && (
+              <div>
+                <div style={{ fontSize: 10, color: "#A89070", marginBottom: 3 }}>ИМЯ СУЩНОСТИ</div>
+                <input value={form.entity_name} onChange={e => setForm(f => ({ ...f, entity_name: e.target.value }))}
+                  placeholder="Эдуард Пруняу" style={inputStyle} />
+              </div>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => save.mutate()} disabled={!form.pattern || save.isPending}
+              style={{ background: "#1A1A1A", color: "#FFF", border: "none", padding: "7px 20px", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+              {save.isPending ? "Сохраняем..." : editId ? "Обновить" : "Создать"}
+            </button>
+            <button onClick={() => { setAdding(false); setEditId(null); }}
+              style={{ background: "none", border: "1px solid #EDEBE6", padding: "7px 14px", fontSize: 12, cursor: "pointer", fontFamily: "inherit", color: "#6B6355" }}>
+              Отмена
+            </button>
+          </div>
+        </div>
+      )}
+
+      {(rules as any[]).length === 0 && !adding && (
+        <div style={{ color: "#A89070", fontSize: 13 }}>Правил пока нет</div>
+      )}
+
+      {(rules as any[]).length > 0 && (
+        <div style={{ border: "1px solid #EDEBE6" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 80px 120px 100px 60px", padding: "8px 12px", borderBottom: "1px solid #EDEBE6", background: "#FAF8F5" }}>
+            {["ПАТТЕРН", "ТИП", "МЕТКА", "СУЩНОСТЬ", ""].map((h, i) => (
+              <div key={i} style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.05em" }}>{h}</div>
+            ))}
+          </div>
+          {(rules as any[]).map((r: any) => (
+            <div key={r.id} style={{ display: "grid", gridTemplateColumns: "1fr 80px 120px 100px 60px", padding: "9px 12px", borderBottom: "1px solid #F2EFE9", alignItems: "center" }}>
+              <code style={{ fontSize: 11 }}>{r.pattern}</code>
+              <div style={{ fontSize: 11, color: "#6B6355" }}>{MATCH_TYPE_LABELS_ADM[r.match_type] || r.match_type}</div>
+              <div style={{ fontSize: 11, color: "#1A1A1A" }}>{r.display_name || "—"}</div>
+              <div style={{ fontSize: 11, color: "#6B6355" }}>
+                {ENTITY_TYPE_LABELS_ADM[r.entity_type] || r.entity_type || "—"}
+                {r.entity_name && <span style={{ color: "#A89070" }}> · {r.entity_name}</span>}
+              </div>
+              <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                <button onClick={() => startEdit(r)} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070", padding: 2 }} title="Редактировать">✎</button>
+                <button onClick={() => del.mutate(r.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2 }} title="Удалить">✕</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Change Password ──────────────────────────────────────────────────────────
 
 function PasswordSection() {
@@ -587,6 +716,7 @@ export default function Admin() {
       <UploadSection />
       <ImportsSection />
       <ZenMoneySyncSection />
+      <PayeeRulesSection />
       <SystemSection />
       <UsersSection />
       <PasswordSection />

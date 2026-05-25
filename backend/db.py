@@ -41,3 +41,24 @@ def ensure_customer_schema():
         conn.commit()
     finally:
         conn.close()
+
+
+def ensure_payee_rules_schema():
+    conn = get_production()
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS payee_rules (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                pattern     TEXT NOT NULL,
+                match_type  TEXT NOT NULL DEFAULT 'exact',
+                display_name TEXT,
+                entity_type TEXT,
+                entity_id   TEXT,
+                entity_name TEXT,
+                created_at  TEXT DEFAULT (datetime('now')),
+                updated_at  TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        conn.commit()
+    finally:
+        conn.close()

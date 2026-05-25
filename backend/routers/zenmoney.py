@@ -205,10 +205,71 @@ def _match_payee_zm(payee: str, contractors: list) -> str | None:
     return scores[0][1]
 
 
+def _load_payee_rules() -> list[dict]:
+    """Загрузить все правила сопоставления из production.db."""
+    try:
+        conn = get_production()
+        try:
+            rows = conn.execute("SELECT * FROM payee_rules").fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+    except Exception:
+        return []
+
+
+def _resolve_payee(payee: str, rules: list[dict], contractors: list[dict]) -> dict:
+    """
+    Разрешить payee: сначала по явным правилам, потом алгоритмически.
+    Возвращает dict с полями: display_name, matched_contractor, rule_id, matched_via.
+    """
+    if not payee:
+        return {"display_name": None, "matched_contractor": None, "rule_id": None, "matched_via": None}
+
+    pl = payee.lower()
+
+    # Слой 1: явные правила (exact → prefix → contains)
+    for mtype in ("exact", "prefix", "contains"):
+        for rule in rules:
+            if rule["match_type"] != mtype:
+                continue
+            pat = rule["pattern"]
+            if mtype == "exact" and pl == pat:
+                pass
+            elif mtype == "prefix" and pl.startswith(pat):
+                pass
+            elif mtype == "contains" and pat in pl:
+                pass
+            else:
+                continue
+            # Правило найдено
+            if rule["entity_type"] == "skip":
+                return {"display_name": None, "matched_contractor": None, "rule_id": rule["id"], "matched_via": "rule", "skip": True}
+            name = rule["display_name"] or rule["entity_name"] or payee
+            return {
+                "display_name": name,
+                "matched_contractor": name,
+                "rule_id": rule["id"],
+                "matched_via": "rule",
+                "entity_type": rule["entity_type"],
+                "entity_id": rule["entity_id"],
+                "entity_name": rule["entity_name"],
+            }
+
+    # Слой 2: алгоритм
+    algo = _match_payee_zm(payee, contractors)
+    if algo:
+        return {"display_name": algo, "matched_contractor": algo, "rule_id": None, "matched_via": "algorithm"}
+
+    return {"display_name": None, "matched_contractor": None, "rule_id": None, "matched_via": None}
+
+
 @router.get("/business")
 def get_business_transactions(months: int = Query(3, le=12)):
     """Транзакции с личных карт, связанные с бизнесом (подрядчики + ИП)."""
     SKIP = {"ооо", "ип", "ао", "нкп", "зао", "пао"}
+
+    rules = _load_payee_rules()
 
     contractors: list[dict] = []
 
@@ -254,14 +315,22 @@ def get_business_transactions(months: int = Query(3, le=12)):
             if d.get("income", 0) > 0 and d.get("outcome", 0) > 0:
                 continue  # skip transfers
             payee = (d.get("payee") or "").strip()
-            matched = _match_payee_zm(payee, contractors)
+            resolved = _resolve_payee(payee, rules, contractors)
+
+            if resolved.get("skip"):
+                continue
+
             is_biz_income = any(
                 kw in ((payee + " " + (d.get("comment") or "")).lower())
                 for kw in ["некрасов", "pbpb", "пбпб"]
             )
-            if matched or is_biz_income:
+            if resolved["matched_contractor"] or is_biz_income:
                 d["tags"] = json.loads(d.get("tags") or "[]")
-                d["matched_contractor"] = matched
+                d["matched_contractor"] = resolved["matched_contractor"]
+                d["matched_via"] = resolved["matched_via"]
+                d["rule_id"] = resolved["rule_id"]
+                d["entity_type"] = resolved.get("entity_type")
+                d["entity_id"] = resolved.get("entity_id")
                 d["is_business_income"] = is_biz_income
                 result.append(d)
 
