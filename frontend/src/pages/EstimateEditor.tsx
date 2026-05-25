@@ -377,7 +377,16 @@ export default function EstimateEditor() {
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [invoicing, setInvoicing] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  const [pendingSwitchId, setPendingSwitchId] = useState<string | null>(null);
   const blocker = useNavigationGuard(editMode);
+
+  const switchSet = (id: string) => {
+    if (editMode && id !== activeSetId) {
+      setPendingSwitchId(id);
+    } else {
+      setSelectedSetId(id);
+    }
+  };
 
   const { data: order } = useQuery({
     queryKey: ["order-detail-v2", orderId],
@@ -489,13 +498,13 @@ export default function EstimateEditor() {
         <span style={{ color: "#EDEBE6" }}>·</span>
         <span style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>{order?.title ?? orderId}</span>
 
-        {(sets as any[]).length > 1 && (
+        {activeSet && (
           <>
             <span style={{ color: "#EDEBE6" }}>·</span>
             {(sets as any[]).map((s: any, i: number) => (
               <button
                 key={s.id}
-                onClick={() => setSelectedSetId(s.id)}
+                onClick={() => switchSet(s.id)}
                 style={{
                   padding: "3px 8px", fontSize: 11, cursor: "pointer",
                   border: "1px solid",
@@ -505,6 +514,13 @@ export default function EstimateEditor() {
                 }}
               >Смета {i + 1}</button>
             ))}
+            <button
+              onClick={createSet}
+              title="Новая смета"
+              style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070", display: "flex", alignItems: "center", padding: "2px 4px", fontSize: 18, lineHeight: 1 }}
+              onMouseEnter={e => (e.currentTarget.style.color = "#E8592A")}
+              onMouseLeave={e => (e.currentTarget.style.color = "#A89070")}
+            >+</button>
           </>
         )}
 
@@ -813,6 +829,34 @@ export default function EstimateEditor() {
       )}
     </div>
     <NavigationGuardModal blocker={blocker} />
+
+    {/* Confirm switching estimate while in edit mode */}
+    {pendingSwitchId && (
+      <div style={{ position: "fixed", inset: 0, zIndex: 2000, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ background: "#FFF", width: 380, padding: "28px 32px", boxShadow: "0 8px 40px rgba(0,0,0,0.2)" }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "#1A1A1A", marginBottom: 8, letterSpacing: "-0.02em" }}>
+            Несохранённые изменения
+          </div>
+          <div style={{ fontSize: 13, color: "#6B6355", marginBottom: 24, lineHeight: 1.6 }}>
+            Если перейти на другую смету сейчас, все незаписанные изменения будут потеряны.
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button
+              onClick={() => { setSelectedSetId(pendingSwitchId); setEditMode(false); setPendingSwitchId(null); }}
+              style={{ flex: 1, background: "#1A1A1A", color: "#FFF", border: "none", padding: "9px 0", fontSize: 12, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
+            >
+              Перейти без сохранения
+            </button>
+            <button
+              onClick={() => setPendingSwitchId(null)}
+              style={{ flex: 1, background: "none", border: "1px solid #EDEBE6", padding: "9px 0", fontSize: 12, cursor: "pointer", fontFamily: "inherit", color: "#1A1A1A", fontWeight: 600 }}
+            >
+              Остаться
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     </>
   );
 }
