@@ -423,7 +423,6 @@ export default function EstimateEditor() {
   const totalBankAdd = isBank ? totalClient - totalSale : 0;
   const grandTotal   = isBank ? totalClient : totalSale;
   const taxes        = isBank ? Math.round(grandTotal * 0.06) : 0;
-  const fund         = isBank ? Math.round(totalBankAdd - taxes) : 0;
 
   const createSet = async () => {
     const s = await estimatesApi.createSet(orderId!);
@@ -829,7 +828,7 @@ export default function EstimateEditor() {
 
                 {/* К оплате (with bank surcharge) — only in bank mode */}
                 {isBank && (
-                  <div style={{ textAlign: "right" }}>
+                  <div style={{ textAlign: "right", position: "relative" }}>
                     {editMode ? (
                       <EditCell
                         value={clientPriceForItem(item)}
@@ -849,7 +848,7 @@ export default function EstimateEditor() {
                       <span style={{ fontWeight: 700, color: "#E8592A" }}>{fmt(clientPriceForItem(item))}</span>
                     )}
                     {editMode && (
-                      <div style={{ fontSize: 9, color: "#A89070", textAlign: "right", marginTop: 1 }}>
+                      <div style={{ position: "absolute", right: 0, bottom: -11, fontSize: 9, color: "#A89070", whiteSpace: "nowrap" }}>
                         {(item.bank_pct ?? bankPct).toFixed(1)}%
                       </div>
                     )}
@@ -919,11 +918,6 @@ export default function EstimateEditor() {
                 bankSale={`+${fmt(totalBankAdd)}`} bankSaleColor="#1A1A1A" hasBank />
               <FooterRow cols={colsMain} label="Налоги УСН 6%"
                 bankSale={`−${fmt(taxes)}`} bankSaleColor="#8B3A3A" hasBank />
-              {fund > 0 && (
-                <FooterRow cols={colsMain} label="Фонд бухгалтерии"
-                  bankSale={`+${fmt(fund)}`} bankSaleColor="#4A7C59" hasBank
-                  note="остаток надбавки безнала после налогов" />
-              )}
             </>}
 
             <div style={{
