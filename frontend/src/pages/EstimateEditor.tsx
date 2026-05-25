@@ -840,7 +840,7 @@ export default function EstimateEditor() {
                           const entered = parseFloat(v) || 0;
                           const salePrice = item.sale_price || 0;
                           const newBankPct = salePrice > 0
-                            ? Math.round((entered / salePrice - 1) * 10000) / 100
+                            ? (entered / salePrice - 1) * 100
                             : bankPct;
                           estimatesApi.updateItem(item.id, { bank_pct: newBankPct }).then(() => refetch());
                         }}
