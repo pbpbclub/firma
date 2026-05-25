@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Briefcase, MagnifyingGlass, Funnel, X, ArrowsClockwise, Tag, PencilSimple, Trash } from "@phosphor-icons/react";
-import { zenmoneyApi, payeeRulesApi } from "../api";
+import { zenmoneyApi, payeeRulesApi, mastersApi, customersApi } from "../api";
 
 function ColumnFilter({ options, value, onChange, maxHeight }: {
   options: string[];
@@ -205,6 +205,59 @@ const ENTITY_TYPE_LABELS: Record<string, string> = {
   skip: "Игнорировать",
 };
 
+function EntityPicker({ entityType, value, onChange }: {
+  entityType: string;
+  value: { id: string; name: string };
+  onChange: (id: string, name: string) => void;
+}) {
+  const [q, setQ] = useState("");
+  const { data: masters = [] } = useQuery({ queryKey: ["masters"], queryFn: mastersApi.list, enabled: entityType === "master" || entityType === "contractor" });
+  const { data: customers = [] } = useQuery({ queryKey: ["customers", ""], queryFn: () => customersApi.list(""), enabled: entityType === "customer" });
+
+  const items: { id: string; name: string }[] = entityType === "customer"
+    ? (customers as any[]).map((c: any) => ({ id: c.id, name: c.name }))
+    : (masters as any[]).map((m: any) => ({ id: m.id, name: m.name }));
+
+  const filtered = q ? items.filter(i => i.name.toLowerCase().includes(q.toLowerCase())) : items;
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%", boxSizing: "border-box", fontSize: 11,
+    border: "1px solid #EDEBE6", padding: "5px 8px", outline: "none", fontFamily: "inherit", background: "#FAFAFA",
+  };
+
+  return (
+    <div>
+      <div style={{ fontSize: 10, color: "#A89070", marginBottom: 2 }}>
+        {entityType === "customer" ? "КЛИЕНТ" : "МАСТЕР / ПОДРЯДЧИК"}
+      </div>
+      {value.name && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, padding: "4px 8px", background: "#FFF3EF", border: "1px solid #F0D8D0" }}>
+          <span style={{ fontSize: 11, flex: 1, color: "#1A1A1A" }}>{value.name}</span>
+          <button onClick={() => onChange("", "")} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: "#A89070" }}>
+            <X size={11} />
+          </button>
+        </div>
+      )}
+      <input value={q} onChange={e => setQ(e.target.value)} placeholder="Поиск..." style={inputStyle} />
+      {q && (
+        <div style={{ border: "1px solid #EDEBE6", borderTop: "none", maxHeight: 140, overflowY: "auto", background: "#FFF" }}>
+          {filtered.length === 0 && (
+            <div style={{ padding: "6px 8px", fontSize: 11, color: "#A89070" }}>Не найдено</div>
+          )}
+          {filtered.map(item => (
+            <div key={item.id} onClick={() => { onChange(item.id, item.name); setQ(""); }}
+              style={{ padding: "6px 8px", fontSize: 11, cursor: "pointer", borderBottom: "1px solid #F2EFE9" }}
+              onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")}
+              onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
+              {item.name}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PayeeRulePopup({ payee, ruleId, onClose }: {
   payee: string;
   ruleId: number | null;
@@ -359,11 +412,11 @@ function PayeeRulePopup({ payee, ruleId, onClose }: {
             </select>
           </div>
           {["contractor", "customer", "master"].includes(form.entity_type) && (
-            <div>
-              <div style={{ fontSize: 10, color: "#A89070", marginBottom: 2 }}>ИМЯ СУЩНОСТИ</div>
-              <input value={form.entity_name} onChange={e => setForm(f => ({ ...f, entity_name: e.target.value }))}
-                placeholder="Эдуард Пруняу" style={inputStyle} />
-            </div>
+            <EntityPicker
+              entityType={form.entity_type}
+              value={{ id: form.entity_id, name: form.entity_name }}
+              onChange={(id, name) => setForm(f => ({ ...f, entity_id: id, entity_name: name }))}
+            />
           )}
           <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
             <button onClick={() => save.mutate()} disabled={save.isPending || !form.pattern}

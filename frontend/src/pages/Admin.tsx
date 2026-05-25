@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { UploadSimple, CheckCircle, WarningCircle, X, Plus, ArrowsClockwise } from "@phosphor-icons/react";
-import { adminApi, authApi, zenmoneyApi, payeeRulesApi } from "../api";
+import { adminApi, authApi, zenmoneyApi, payeeRulesApi, mastersApi, customersApi } from "../api";
 
 function fmt(n: number | null | undefined) {
   if (n == null) return "—";
@@ -506,6 +506,55 @@ const ENTITY_TYPE_LABELS_ADM: Record<string, string> = {
   contractor: "Подрядчик", customer: "Клиент", master: "Мастер", label: "Метка", skip: "Игнор",
 };
 
+function EntityPickerAdmin({ entityType, value, onChange }: {
+  entityType: string;
+  value: { id: string; name: string };
+  onChange: (id: string, name: string) => void;
+}) {
+  const [q, setQ] = useState("");
+  const { data: masters = [] } = useQuery({ queryKey: ["masters"], queryFn: mastersApi.list, enabled: entityType === "master" || entityType === "contractor" });
+  const { data: customers = [] } = useQuery({ queryKey: ["customers", ""], queryFn: () => customersApi.list(""), enabled: entityType === "customer" });
+
+  const items: { id: string; name: string }[] = entityType === "customer"
+    ? (customers as any[]).map((c: any) => ({ id: c.id, name: c.name }))
+    : (masters as any[]).map((m: any) => ({ id: m.id, name: m.name }));
+
+  const filtered = q ? items.filter(i => i.name.toLowerCase().includes(q.toLowerCase())) : items;
+
+  const inputSt: React.CSSProperties = { width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "6px 8px", fontSize: 12, outline: "none", fontFamily: "inherit" };
+
+  return (
+    <div>
+      <div style={{ fontSize: 10, color: "#A89070", marginBottom: 3 }}>
+        {entityType === "customer" ? "КЛИЕНТ" : "МАСТЕР / ПОДРЯДЧИК"}
+      </div>
+      {value.name ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 8px", border: "1px solid #EDEBE6", marginBottom: 4, background: "#F9F6F2" }}>
+          <span style={{ flex: 1, fontSize: 12, color: "#1A1A1A" }}>{value.name}</span>
+          <button onClick={() => onChange("", "")} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070", padding: 0, fontSize: 14 }}>✕</button>
+        </div>
+      ) : (
+        <div style={{ position: "relative" }}>
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Начните вводить имя..." style={inputSt} />
+          {q && (
+            <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 100, border: "1px solid #EDEBE6", borderTop: "none", background: "#FFF", maxHeight: 160, overflowY: "auto", boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}>
+              {filtered.length === 0 && <div style={{ padding: "7px 10px", fontSize: 12, color: "#A89070" }}>Не найдено</div>}
+              {filtered.map(item => (
+                <div key={item.id} onClick={() => { onChange(item.id, item.name); setQ(""); }}
+                  style={{ padding: "7px 10px", fontSize: 12, cursor: "pointer", borderBottom: "1px solid #F2EFE9" }}
+                  onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")}
+                  onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
+                  {item.name}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PayeeRulesSection() {
   const qc = useQueryClient();
   const [adding, setAdding] = useState(false);
@@ -576,11 +625,11 @@ function PayeeRulesSection() {
               </select>
             </div>
             {["contractor", "customer", "master"].includes(form.entity_type) && (
-              <div>
-                <div style={{ fontSize: 10, color: "#A89070", marginBottom: 3 }}>ИМЯ СУЩНОСТИ</div>
-                <input value={form.entity_name} onChange={e => setForm(f => ({ ...f, entity_name: e.target.value }))}
-                  placeholder="Эдуард Пруняу" style={inputStyle} />
-              </div>
+              <EntityPickerAdmin
+                entityType={form.entity_type}
+                value={{ id: form.entity_id, name: form.entity_name }}
+                onChange={(id, name) => setForm(f => ({ ...f, entity_id: id, entity_name: name }))}
+              />
             )}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
