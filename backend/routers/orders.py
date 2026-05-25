@@ -225,6 +225,28 @@ def unarchive_order(order_id: str):
         conn.close()
 
 
+@router.delete("/{order_id}")
+def delete_order(order_id: str):
+    conn = get_production()
+    try:
+        r = conn.execute("SELECT id FROM orders WHERE id = ? OR number = ?", (order_id, order_id)).fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="Not found")
+        oid = r["id"]
+        # Удаляем связанные данные
+        conn.execute("DELETE FROM payments WHERE order_id = ?", (oid,))
+        conn.execute("DELETE FROM stages WHERE order_id = ?", (oid,))
+        conn.execute("DELETE FROM events WHERE order_id = ?", (oid,))
+        conn.execute("DELETE FROM estimate_items WHERE set_id IN (SELECT id FROM estimate_sets WHERE order_id = ?)", (oid,))
+        conn.execute("DELETE FROM estimate_lines WHERE item_id IN (SELECT ei.id FROM estimate_items ei JOIN estimate_sets es ON ei.set_id = es.id WHERE es.order_id = ?)", (oid,))
+        conn.execute("DELETE FROM estimate_sets WHERE order_id = ?", (oid,))
+        conn.execute("DELETE FROM orders WHERE id = ?", (oid,))
+        conn.commit()
+        return {"ok": True}
+    finally:
+        conn.close()
+
+
 @router.post("")
 async def create_order(body: dict = Body(...), user=Depends(get_current_user)):
     title = (body.get("title") or "").strip()

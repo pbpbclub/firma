@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect, useMemo } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { ordersApi, customersApi } from "../api";
-import { MagnifyingGlass, DotsThree, Plus, Files, CaretRight, Archive, ArrowCounterClockwise, CaretDown, Funnel, X } from "@phosphor-icons/react";
+import { MagnifyingGlass, DotsThree, Plus, Files, CaretRight, Archive, ArrowCounterClockwise, CaretDown, Funnel, X, Trash } from "@phosphor-icons/react";
 
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
   draft:         { label: "Черновик",       color: "#A89070" },
@@ -436,6 +436,19 @@ export default function OrdersV2() {
   const clearFilters = () => { setCustomerFilter(""); setTitleFilter(""); setAmountMin(""); setAmountMax(""); setPage(0); setSelectedIds(new Set()); };
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const bulkDelete = useMutation({
+    mutationFn: async (ids: string[]) => {
+      for (const id of ids) await ordersApi.delete(id);
+    },
+    onSuccess: () => {
+      setSelectedIds(new Set());
+      setConfirmDelete(false);
+      if (selected && selectedIds.has(selected.id)) setSelected(null);
+      qc.invalidateQueries({ queryKey: ["orders"] });
+    },
+  });
   const [amountMin, setAmountMin] = useState("");
   const [amountMax, setAmountMax] = useState("");
   const [showNewOrder, setShowNewOrder] = useState(false);
@@ -623,17 +636,60 @@ export default function OrdersV2() {
           const sum = filteredData.reduce((s: number, o: any) => s + (o.price_plan || 0), 0);
           const selSum = filteredData.filter((o: any) => selectedIds.has(o.id)).reduce((s: number, o: any) => s + (o.price_plan || 0), 0);
           return (
-            <div style={{ padding: "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
-              <div style={{ display: "flex", gap: 10, fontSize: 11, color: "#6B6355", alignItems: "center" }}>
-                {selectedIds.size > 0 && <span style={{ color: "#E8592A", fontWeight: 600 }}>Выбрано {selectedIds.size}</span>}
-                {selectedIds.size > 0 && selSum > 0 && <span>{fmt(selSum)}</span>}
-                {selectedIds.size === 0 && <span>{filteredData.length} заказов</span>}
-                {selectedIds.size === 0 && hasFilters && sum > 0 && <span>{fmt(sum)}</span>}
+            <>
+              <div style={{ padding: "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+                <div style={{ display: "flex", gap: 10, fontSize: 11, color: "#6B6355", alignItems: "center" }}>
+                  {selectedIds.size > 0 && <span style={{ color: "#E8592A", fontWeight: 600 }}>Выбрано {selectedIds.size}</span>}
+                  {selectedIds.size > 0 && selSum > 0 && <span>{fmt(selSum)}</span>}
+                  {selectedIds.size === 0 && <span>{filteredData.length} заказов</span>}
+                  {selectedIds.size === 0 && hasFilters && sum > 0 && <span>{fmt(sum)}</span>}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  {selectedIds.size > 0 && (
+                    <button
+                      onClick={() => setConfirmDelete(true)}
+                      style={{ fontSize: 10, color: "#8B3A3A", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 3, padding: 0 }}
+                    >
+                      <Trash size={10} /> Удалить
+                    </button>
+                  )}
+                  <button onClick={canClear ? clearFilters : undefined} style={{ fontSize: 10, color: canClear ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: canClear ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
+                    <X size={10} /> Сбросить
+                  </button>
+                </div>
               </div>
-              <button onClick={canClear ? clearFilters : undefined} style={{ fontSize: 10, color: canClear ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: canClear ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
-                <X size={10} /> Сбросить
-              </button>
-            </div>
+
+              {/* Confirm delete modal */}
+              {confirmDelete && (
+                <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}
+                  onClick={() => setConfirmDelete(false)}>
+                  <div style={{ background: "#FFF", padding: "28px 32px", width: 360, boxShadow: "0 8px 40px rgba(0,0,0,0.18)" }}
+                    onClick={e => e.stopPropagation()}>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: "#1A1A1A", marginBottom: 8, letterSpacing: "-0.02em" }}>
+                      Удалить {selectedIds.size} {selectedIds.size === 1 ? "заказ" : selectedIds.size < 5 ? "заказа" : "заказов"}?
+                    </div>
+                    <div style={{ fontSize: 12, color: "#6B6355", marginBottom: 24, lineHeight: 1.5 }}>
+                      Это действие необратимо. Все данные заказа, включая сметы и платежи, будут удалены навсегда.
+                    </div>
+                    <div style={{ display: "flex", gap: 10 }}>
+                      <button
+                        onClick={() => bulkDelete.mutate([...selectedIds])}
+                        disabled={bulkDelete.isPending}
+                        style={{ flex: 1, background: "#8B3A3A", color: "#FFF", border: "none", padding: "9px 0", fontSize: 12, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
+                      >
+                        {bulkDelete.isPending ? "Удаляем..." : "Удалить"}
+                      </button>
+                      <button
+                        onClick={() => setConfirmDelete(false)}
+                        style={{ flex: 1, background: "none", border: "1px solid #EDEBE6", padding: "9px 0", fontSize: 12, cursor: "pointer", fontFamily: "inherit", color: "#6B6355" }}
+                      >
+                        Отмена
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
           );
         })()}
 
