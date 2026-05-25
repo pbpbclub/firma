@@ -471,113 +471,125 @@ export default function EstimateEditor() {
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
 
       {/* ─ Header ─────────────────────────────────────────────────────────── */}
-      <div style={{ padding: "13px 28px", borderBottom: "1px solid #EDEBE6", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-        <button
-          onClick={() => navigate("/orders")}
-          style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070", display: "flex", alignItems: "center", gap: 4, fontSize: 12, padding: 0, flexShrink: 0 }}
-          onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
-          onMouseLeave={e => (e.currentTarget.style.color = "#A89070")}
-        >
-          <ArrowLeft size={13} /> Заказы
-        </button>
+      <div style={{ padding: "0 16px 0 28px", borderBottom: "1px solid #EDEBE6", display: "flex", alignItems: "center", gap: 8, flexShrink: 0, height: 46 }}>
 
-        {/* Add item via calculator — near back arrow */}
-        {activeSet && (
+        {/* Left fixed: back + add item + order title */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
           <button
-            onClick={addItemWithModal}
-            title="Добавить изделие (калькулятор)"
-            style={{
-              background: "none", border: "1px solid #EDEBE6", cursor: "pointer",
-              color: "#6B6355", display: "flex", alignItems: "center", gap: 4,
-              fontSize: 11, padding: "3px 8px", flexShrink: 0,
-            }}
-            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "#E8592A"; (e.currentTarget as HTMLElement).style.color = "#E8592A"; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "#EDEBE6"; (e.currentTarget as HTMLElement).style.color = "#6B6355"; }}
+            onClick={() => navigate("/orders")}
+            style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070", display: "flex", alignItems: "center", gap: 4, fontSize: 12, padding: 0 }}
+            onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
+            onMouseLeave={e => (e.currentTarget.style.color = "#A89070")}
           >
-            <Plus size={11} /> Изделие
+            <ArrowLeft size={13} /> Заказы
           </button>
-        )}
 
-        <span style={{ color: "#EDEBE6" }}>·</span>
-        <span style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>{order?.title ?? orderId}</span>
-
-        {activeSet && (
-          <>
-            <span style={{ color: "#EDEBE6" }}>·</span>
-            {(sets as any[]).map((s: any, i: number) => {
-              const isActive = activeSetId === s.id;
-              const label = s.title || `Смета ${i + 1}`;
-              return (
-                <div
-                  key={s.id}
-                  style={{
-                    display: "inline-flex", alignItems: "center",
-                    border: "1px solid",
-                    borderColor: isActive ? "#E8592A" : "#EDEBE6",
-                    background: isActive ? "#FFF3EF" : "transparent",
-                  }}
-                >
-                  {editingSetId === s.id ? (
-                    <input
-                      autoFocus
-                      value={editingSetName}
-                      onChange={e => setEditingSetName(e.target.value)}
-                      onBlur={async () => {
-                        const name = editingSetName.trim();
-                        await estimatesApi.updateSet(s.id, { title: name || null });
-                        refetch();
-                        setEditingSetId(null);
-                      }}
-                      onKeyDown={async e => {
-                        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                        if (e.key === "Escape") setEditingSetId(null);
-                      }}
-                      style={{
-                        border: "none", outline: "none", background: "transparent",
-                        fontSize: 11, color: "#E8592A", fontFamily: "inherit",
-                        padding: "3px 8px", width: Math.max(60, editingSetName.length * 7 + 20),
-                      }}
-                    />
-                  ) : (
-                    <>
-                      <button
-                        onClick={() => isActive
-                          ? (setEditingSetId(s.id), setEditingSetName(s.title || ""))
-                          : switchSet(s.id)
-                        }
-                        title={isActive ? "Нажмите для переименования" : undefined}
-                        style={{
-                          padding: editMode && isActive ? "3px 4px 3px 8px" : "3px 8px",
-                          fontSize: 11, cursor: "pointer",
-                          border: "none", background: "transparent",
-                          color: isActive ? "#E8592A" : "#A89070",
-                        }}
-                      >{label}</button>
-                      {editMode && isActive && (
-                        <button
-                          onClick={() => setConfirmDeleteSet(true)}
-                          title="Удалить смету"
-                          style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: "2px 6px 2px 0", display: "flex", alignItems: "center", fontSize: 14, lineHeight: 1 }}
-                          onMouseEnter={e => (e.currentTarget.style.color = "#8B3A3A")}
-                          onMouseLeave={e => (e.currentTarget.style.color = "#C8C0B0")}
-                        >×</button>
-                      )}
-                    </>
-                  )}
-                </div>
-              );
-            })}
+          {activeSet && (
             <button
-              onClick={createSet}
-              title="Новая смета"
-              style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070", display: "flex", alignItems: "center", padding: "2px 4px", fontSize: 18, lineHeight: 1 }}
-              onMouseEnter={e => (e.currentTarget.style.color = "#E8592A")}
-              onMouseLeave={e => (e.currentTarget.style.color = "#A89070")}
-            >+</button>
-          </>
+              onClick={addItemWithModal}
+              title="Добавить изделие (калькулятор)"
+              style={{
+                background: "none", border: "1px solid #EDEBE6", cursor: "pointer",
+                color: "#6B6355", display: "flex", alignItems: "center", gap: 4,
+                fontSize: 11, padding: "3px 8px",
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "#E8592A"; (e.currentTarget as HTMLElement).style.color = "#E8592A"; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "#EDEBE6"; (e.currentTarget as HTMLElement).style.color = "#6B6355"; }}
+            >
+              <Plus size={11} /> Изделие
+            </button>
+          )}
+
+          <span style={{ color: "#EDEBE6" }}>·</span>
+          <span style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A", whiteSpace: "nowrap" }}>{order?.title ?? orderId}</span>
+        </div>
+
+        {/* Middle scrollable: estimate tabs */}
+        {activeSet && (
+          <div style={{ flex: 1, minWidth: 0, overflow: "hidden", position: "relative" }}>
+            <div style={{
+              display: "flex", alignItems: "center", gap: 4,
+              overflowX: "auto", padding: "8px 4px",
+              scrollbarWidth: "none",
+            }}>
+              <span style={{ color: "#EDEBE6", flexShrink: 0 }}>·</span>
+              {(sets as any[]).map((s: any, i: number) => {
+                const isActive = activeSetId === s.id;
+                const label = s.title || `Смета ${i + 1}`;
+                return (
+                  <div
+                    key={s.id}
+                    style={{
+                      display: "inline-flex", alignItems: "center", flexShrink: 0,
+                      border: "1px solid",
+                      borderColor: isActive ? "#E8592A" : "#EDEBE6",
+                      background: isActive ? "#FFF3EF" : "transparent",
+                    }}
+                  >
+                    {editingSetId === s.id ? (
+                      <input
+                        autoFocus
+                        value={editingSetName}
+                        onChange={e => setEditingSetName(e.target.value)}
+                        onBlur={async () => {
+                          const name = editingSetName.trim();
+                          await estimatesApi.updateSet(s.id, { title: name || null });
+                          refetch();
+                          setEditingSetId(null);
+                        }}
+                        onKeyDown={async e => {
+                          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                          if (e.key === "Escape") setEditingSetId(null);
+                        }}
+                        style={{
+                          border: "none", outline: "none", background: "transparent",
+                          fontSize: 11, color: "#E8592A", fontFamily: "inherit",
+                          padding: "3px 8px", width: Math.max(60, editingSetName.length * 7 + 20),
+                        }}
+                      />
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => isActive
+                            ? (setEditingSetId(s.id), setEditingSetName(s.title || ""))
+                            : switchSet(s.id)
+                          }
+                          title={isActive ? "Нажмите для переименования" : undefined}
+                          style={{
+                            padding: editMode && isActive ? "3px 4px 3px 8px" : "3px 8px",
+                            fontSize: 11, cursor: "pointer",
+                            border: "none", background: "transparent",
+                            color: isActive ? "#E8592A" : "#A89070",
+                            whiteSpace: "nowrap",
+                          }}
+                        >{label}</button>
+                        {editMode && isActive && (
+                          <button
+                            onClick={() => setConfirmDeleteSet(true)}
+                            title="Удалить смету"
+                            style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: "2px 6px 2px 0", display: "flex", alignItems: "center", fontSize: 14, lineHeight: 1 }}
+                            onMouseEnter={e => (e.currentTarget.style.color = "#8B3A3A")}
+                            onMouseLeave={e => (e.currentTarget.style.color = "#C8C0B0")}
+                          >×</button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+              <button
+                onClick={createSet}
+                title="Новая смета"
+                style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070", display: "flex", alignItems: "center", padding: "2px 4px", fontSize: 18, lineHeight: 1, flexShrink: 0 }}
+                onMouseEnter={e => (e.currentTarget.style.color = "#E8592A")}
+                onMouseLeave={e => (e.currentTarget.style.color = "#A89070")}
+              >+</button>
+            </div>
+          </div>
         )}
 
-        <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+        {/* Right fixed: controls */}
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0, marginLeft: activeSet ? 0 : "auto" }}>
           {activeSet ? (
             <>
               <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
