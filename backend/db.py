@@ -10,6 +10,7 @@ ZENMONEY_DB = Path("/opt/fin-agent/data/zenmoney.db")
 def get_production():
     conn = sqlite3.connect(PRODUCTION_DB)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 
@@ -75,6 +76,40 @@ def ensure_estimate_items_schema():
         for col in ("brand", "catalog_item_id"):
             if col not in existing:
                 conn.execute(f"ALTER TABLE estimate_items ADD COLUMN {col} TEXT")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_catalog_material_fk():
+    conn = get_production()
+    try:
+        schema_row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE name='catalog_item_lines'"
+        ).fetchone()
+        if not schema_row:
+            return
+        if "REFERENCES materials" in (schema_row[0] or ""):
+            return
+        conn.executescript("""
+            PRAGMA foreign_keys=OFF;
+            CREATE TABLE catalog_item_lines_new (
+                id          TEXT PRIMARY KEY,
+                item_id     TEXT NOT NULL REFERENCES catalog_items(id) ON DELETE CASCADE,
+                type        TEXT NOT NULL,
+                title       TEXT NOT NULL,
+                qty         REAL DEFAULT 1,
+                unit        TEXT DEFAULT 'шт',
+                unit_price  REAL DEFAULT 0,
+                line_total  REAL DEFAULT 0,
+                material_id TEXT REFERENCES materials(id),
+                sort_order  INTEGER DEFAULT 0
+            );
+            INSERT INTO catalog_item_lines_new SELECT * FROM catalog_item_lines;
+            DROP TABLE catalog_item_lines;
+            ALTER TABLE catalog_item_lines_new RENAME TO catalog_item_lines;
+            PRAGMA foreign_keys=ON;
+        """)
         conn.commit()
     finally:
         conn.close()
