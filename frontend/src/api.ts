@@ -30,6 +30,7 @@ export const ordersApi = {
   unarchive: (id: string) => api.patch(`/orders/${id}/unarchive`).then((r) => r.data),
   create: (data: { title: string; customer_id?: number | null; deadline?: string | null; priority?: string; brand?: string | null }) =>
     api.post("/orders", data).then((r) => r.data),
+  update: (id: string, data: Record<string, any>) => api.patch(`/orders/${id}`, data).then((r) => r.data),
   updateBrand: (id: string, brand: string | null) => api.patch(`/orders/${id}/brand`, { brand }).then((r) => r.data),
   delete: (id: string) => api.delete(`/orders/${id}`).then((r) => r.data),
 };

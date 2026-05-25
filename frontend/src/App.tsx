@@ -11,6 +11,7 @@ import Catalog from "./pages/Catalog";
 import Customers from "./pages/Customers";
 import Taxes from "./pages/Taxes";
 import EstimateEditor from "./pages/EstimateEditor";
+import OrderDetail from "./pages/OrderDetail";
 import Funds from "./pages/Funds";
 import ZenMoney from "./pages/ZenMoney";
 import Admin from "./pages/Admin";
@@ -44,6 +45,7 @@ export default function App() {
                     <Route path="/customers/:id" element={<Customers />} />
                     <Route path="/catalog" element={<Catalog />} />
                     <Route path="/taxes" element={<Taxes />} />
+                    <Route path="/orders/:id" element={<OrderDetail />} />
                     <Route path="/orders/:orderId/estimate" element={<EstimateEditor />} />
                     <Route path="/funds" element={<Funds />} />
                     <Route path="/zenmoney" element={<ZenMoney />} />

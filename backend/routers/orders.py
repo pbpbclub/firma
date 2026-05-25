@@ -248,6 +248,42 @@ def update_brand(order_id: str, body: BrandUpdate):
         conn.close()
 
 
+@router.patch("/{order_id}")
+async def update_order(order_id: str, body: dict = Body(...)):
+    conn = get_production()
+    try:
+        r = conn.execute("SELECT id FROM orders WHERE id = ? OR number = ?", (order_id, order_id)).fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="Not found")
+
+        allowed = {"title", "priority", "deadline", "customer_id", "price_plan", "cost_plan", "brand", "status"}
+        fields, values = [], []
+        for key in allowed:
+            if key not in body:
+                continue
+            val = body[key]
+            if key == "priority" and val not in {"low", "normal", "high", "urgent"}:
+                raise HTTPException(status_code=400, detail=f"Invalid priority: {val}")
+            if key == "status" and val not in VALID_STATUSES:
+                raise HTTPException(status_code=400, detail=f"Invalid status: {val}")
+            if key == "brand" and val is not None and val not in VALID_BRANDS:
+                raise HTTPException(status_code=400, detail=f"Invalid brand: {val}")
+            if key == "title" and val is not None:
+                val = val.strip()
+            fields.append(f"{key} = ?")
+            values.append(val)
+
+        if fields:
+            fields.append("updated_at = datetime('now')")
+            values.append(r["id"])
+            conn.execute(f"UPDATE orders SET {', '.join(fields)} WHERE id = ?", values)
+            conn.commit()
+
+        return dict(conn.execute("SELECT * FROM orders WHERE id = ?", (r["id"],)).fetchone())
+    finally:
+        conn.close()
+
+
 @router.delete("/{order_id}")
 def delete_order(order_id: str):
     conn = get_production()

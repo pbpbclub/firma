@@ -1,182 +1,330 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ordersApi } from "../api";
-import { ArrowLeft, Phone } from "@phosphor-icons/react";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { ordersApi, customersApi, estimatesApi } from "../api";
+import { ArrowLeft, Plus, CaretRight } from "@phosphor-icons/react";
 
-const STATUS_COLORS: Record<string, string> = {
-  draft: "bg-gray-100 text-gray-600",
-  estimate: "bg-yellow-100 text-yellow-700",
-  project: "bg-blue-100 text-blue-700",
-  in_production: "bg-indigo-100 text-indigo-700",
-  completed: "bg-emerald-100 text-emerald-700",
-  cancelled: "bg-red-100 text-red-500",
-};
+const ALL_STATUSES = [
+  { value: "draft",         label: "Черновик",       color: "#A89070" },
+  { value: "estimate",      label: "Смета",          color: "#E8592A" },
+  { value: "project",       label: "Проект",         color: "#E8592A" },
+  { value: "in_production", label: "В производстве", color: "#1A1A1A" },
+  { value: "completed",     label: "Завершён",       color: "#4A7C59" },
+  { value: "cancelled",     label: "Отменён",        color: "#8B3A3A" },
+];
 
-function fmt(n: number) {
+const BRANDS = [
+  { value: "MeRA",    color: "#2E6DA4" },
+  { value: "pbpb",    color: "#7B4F9E" },
+  { value: "Транзит", color: "#3D8C6B" },
+];
+
+const ESTIMATE_STATUS: Record<string, string> = { approved: "Согласована", draft: "Черновик" };
+
+function fmt(n: number | null | undefined) {
+  if (!n) return "—";
   return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) + " ₽";
 }
 
 function fmtDate(s: string) {
   if (!s) return "—";
-  return new Date(s).toLocaleDateString("ru-RU");
+  return new Date(s).toLocaleDateString("ru-RU", { day: "numeric", month: "short", year: "numeric" });
+}
+
+interface FormState {
+  title: string;
+  status: string;
+  brand: string;
+  priority: string;
+  deadline: string;
+  customer_id: string;
+  price_plan: string;
+  cost_plan: string;
 }
 
 export default function OrderDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const qc = useQueryClient();
+  const [form, setForm] = useState<FormState | null>(null);
 
   const { data: order, isLoading } = useQuery({
-    queryKey: ["order", id],
+    queryKey: ["order-detail", id],
     queryFn: () => ordersApi.get(id!),
+    enabled: !!id,
   });
 
-  const { data: estimates } = useQuery({
-    queryKey: ["estimate", id],
+  const { data: customers = [] } = useQuery({
+    queryKey: ["customers", ""],
+    queryFn: () => customersApi.list(""),
+  });
+
+  const { data: estimates = [] } = useQuery({
+    queryKey: ["order-estimates", id],
     queryFn: () => ordersApi.estimate(id!),
+    enabled: !!id,
   });
 
-  if (isLoading) return <div className="p-6 text-gray-400">Загружаем...</div>;
-  if (!order || order.error) return <div className="p-6 text-gray-400">Заказ не найден</div>;
+  useEffect(() => {
+    if (order && !form) {
+      setForm({
+        title: order.title || "",
+        status: order.status || "draft",
+        brand: order.brand || "",
+        priority: order.priority || "normal",
+        deadline: order.deadline ? order.deadline.split("T")[0] : "",
+        customer_id: order.customer_id ? String(order.customer_id) : "",
+        price_plan: order.price_plan != null ? String(order.price_plan) : "",
+        cost_plan: order.cost_plan != null ? String(order.cost_plan) : "",
+      });
+    }
+  }, [order]);
 
-  const pct = order.price_plan > 0 ? (order.paid_total / order.price_plan) * 100 : 0;
+  const saveMutation = useMutation({
+    mutationFn: (data: Record<string, any>) => ordersApi.update(id!, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["order-detail", id] });
+      qc.invalidateQueries({ queryKey: ["orders-v2"] });
+    },
+  });
+
+  const addEstimateMutation = useMutation({
+    mutationFn: () => estimatesApi.createSet(id!),
+    onSuccess: (newSet: any) => {
+      navigate(`/orders/${id}/estimate?set=${newSet.id}`);
+    },
+  });
+
+  const handleSave = () => {
+    if (!form) return;
+    saveMutation.mutate({
+      title: form.title.trim() || undefined,
+      status: form.status,
+      brand: form.brand || null,
+      priority: form.priority,
+      deadline: form.deadline || null,
+      customer_id: form.customer_id ? parseInt(form.customer_id) : null,
+      price_plan: form.price_plan ? parseFloat(form.price_plan) : null,
+      cost_plan: form.cost_plan ? parseFloat(form.cost_plan) : null,
+    });
+  };
+
+  const field = (f: Partial<FormState>) => setForm(prev => prev ? { ...prev, ...f } : prev);
+
+  const statusColor = ALL_STATUSES.find(s => s.value === form?.status)?.color || "#1A1A1A";
+  const brandColor = BRANDS.find(b => b.value === form?.brand)?.color || "#A89070";
+  const paidTotal = order?.payments?.reduce((s: number, p: any) => s + p.amount, 0) ?? 0;
+
+  if (isLoading || !form) {
+    return <div style={{ padding: 40, color: "#A89070", fontSize: 13 }}>Загружаем...</div>;
+  }
 
   return (
-    <div className="p-6 max-w-5xl">
-      {/* Header */}
-      <button onClick={() => navigate(-1)} className="btn-ghost mb-4 -ml-2">
-        <ArrowLeft size={16} /> Назад
-      </button>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
 
-      <div className="flex items-start justify-between mb-6">
-        <div>
-          <div className="flex items-center gap-3 mb-1">
-            <h1 className="text-2xl font-bold text-gray-900">{order.title}</h1>
-            <span className={`badge ${STATUS_COLORS[order.status] || "bg-gray-100 text-gray-600"}`}>
-              {order.status_label}
-            </span>
-          </div>
+      {/* Top bar */}
+      <div style={{ padding: "16px 32px", borderBottom: "1px solid #EDEBE6", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <button
+            onClick={() => navigate("/orders")}
+            style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", color: "#A89070", fontSize: 12, padding: 0, fontFamily: "inherit" }}
+            onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
+            onMouseLeave={e => (e.currentTarget.style.color = "#A89070")}
+          >
+            <ArrowLeft size={13} /> Заказы
+          </button>
+          <div style={{ width: 1, height: 14, background: "#EDEBE6" }} />
+          <span style={{ fontSize: 11, color: "#A89070" }}>{order?.number}</span>
+        </div>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          {saveMutation.isError && <span style={{ fontSize: 11, color: "#8B3A3A" }}>Ошибка сохранения</span>}
+          {saveMutation.isSuccess && <span style={{ fontSize: 11, color: "#4A7C59" }}>Сохранено ✓</span>}
+          <button
+            onClick={handleSave}
+            disabled={saveMutation.isPending}
+            style={{ padding: "7px 22px", background: "#E8592A", color: "#fff", border: "none", fontSize: 12, fontWeight: 600, cursor: saveMutation.isPending ? "default" : "pointer", opacity: saveMutation.isPending ? 0.7 : 1, fontFamily: "inherit" }}
+          >
+            {saveMutation.isPending ? "Сохраняем..." : "Сохранить"}
+          </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-6">
-        {/* Finance card */}
-        <div className="card col-span-2">
-          <div className="text-sm font-semibold text-gray-700 mb-4">Финансы</div>
-          <div className="grid grid-cols-3 gap-4 mb-4">
+      {/* Scrollable body */}
+      <div style={{ flex: 1, overflow: "auto" }}>
+        <div style={{ maxWidth: 760, padding: "28px 32px 48px" }}>
+
+          {/* Editable title */}
+          <input
+            value={form.title}
+            onChange={e => field({ title: e.target.value })}
+            onKeyDown={e => e.key === "Enter" && handleSave()}
+            style={{ fontSize: 28, fontWeight: 700, letterSpacing: "-0.03em", color: "#1A1A1A", border: "none", borderBottom: "2px solid transparent", outline: "none", background: "transparent", width: "100%", padding: "0 0 4px", fontFamily: "inherit", marginBottom: 20, boxSizing: "border-box" }}
+            onFocus={e => (e.currentTarget.style.borderBottomColor = "#EDEBE6")}
+            onBlur={e => (e.currentTarget.style.borderBottomColor = "transparent")}
+          />
+
+          {/* Quick selectors */}
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 28, paddingBottom: 24, borderBottom: "1px solid #EDEBE6" }}>
             <div>
-              <div className="text-xs text-gray-400 mb-1">Стоимость заказа</div>
-              <div className="text-xl font-bold text-gray-900">{fmt(order.price_plan)}</div>
+              <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>СТАТУС</div>
+              <select
+                value={form.status}
+                onChange={e => field({ status: e.target.value })}
+                style={{ border: "1px solid #EDEBE6", padding: "6px 10px", fontSize: 12, fontWeight: 600, outline: "none", background: "#fff", color: statusColor, cursor: "pointer", fontFamily: "inherit" }}
+              >
+                {ALL_STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+              </select>
             </div>
             <div>
-              <div className="text-xs text-gray-400 mb-1">Оплачено</div>
-              <div className="text-xl font-bold text-emerald-600">{fmt(order.paid_total)}</div>
+              <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>БРЕНД</div>
+              <select
+                value={form.brand}
+                onChange={e => field({ brand: e.target.value })}
+                style={{ border: `1px solid ${form.brand ? brandColor : "#EDEBE6"}`, padding: "6px 10px", fontSize: 12, fontWeight: 600, outline: "none", background: "#fff", color: form.brand ? brandColor : "#A89070", cursor: "pointer", fontFamily: "inherit" }}
+              >
+                <option value="">— без бренда —</option>
+                {BRANDS.map(b => <option key={b.value} value={b.value}>{b.value}</option>)}
+              </select>
             </div>
             <div>
-              <div className="text-xs text-gray-400 mb-1">Долг</div>
-              <div className={`text-xl font-bold ${order.debt > 0 ? "text-orange-500" : "text-gray-400"}`}>
-                {order.debt > 0 ? fmt(order.debt) : "Оплачен"}
-              </div>
+              <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>ПРИОРИТЕТ</div>
+              <select
+                value={form.priority}
+                onChange={e => field({ priority: e.target.value })}
+                style={{ border: "1px solid #EDEBE6", padding: "6px 10px", fontSize: 12, outline: "none", background: "#fff", cursor: "pointer", fontFamily: "inherit" }}
+              >
+                <option value="low">Низкий</option>
+                <option value="normal">Обычный</option>
+                <option value="high">Высокий</option>
+                <option value="urgent">Срочный</option>
+              </select>
             </div>
           </div>
-          {/* Progress bar */}
-          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-emerald-500 rounded-full transition-all"
-              style={{ width: `${Math.min(100, pct)}%` }}
-            />
-          </div>
-          <div className="text-xs text-gray-400 mt-1">{Math.round(pct)}% оплачено</div>
-        </div>
 
-        {/* Client card */}
-        <div className="card">
-          <div className="text-sm font-semibold text-gray-700 mb-3">Клиент</div>
-          <div className="font-medium text-gray-900">{order.customer_name || "—"}</div>
-          {order.customer_phone && (
-            <div className="flex items-center gap-1.5 text-sm text-gray-500 mt-1">
-              <Phone size={13} />
-              {order.customer_phone}
+          {/* Fields grid */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px 28px", marginBottom: 32 }}>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>КЛИЕНТ</div>
+              <select
+                value={form.customer_id}
+                onChange={e => field({ customer_id: e.target.value })}
+                style={{ width: "100%", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none", background: "#fff", fontFamily: "inherit" }}
+              >
+                <option value="">— не выбран —</option>
+                {(customers as any[]).map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
             </div>
-          )}
-          {order.deadline && (
-            <div className="mt-3 text-xs text-gray-400">
-              Дедлайн: <span className="text-gray-700 font-medium">{fmtDate(order.deadline)}</span>
+            <div>
+              <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>СТОИМОСТЬ (план)</div>
+              <input
+                type="number"
+                value={form.price_plan}
+                onChange={e => field({ price_plan: e.target.value })}
+                placeholder="0"
+                style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none", fontFamily: "inherit" }}
+              />
             </div>
-          )}
-        </div>
-      </div>
-
-      {/* Payments */}
-      {order.payments?.length > 0 && (
-        <div className="card mb-4">
-          <div className="text-sm font-semibold text-gray-700 mb-3">Платежи</div>
-          <div className="space-y-2">
-            {order.payments.map((p: any) => (
-              <div key={p.id} className="flex items-center justify-between text-sm">
-                <div>
-                  <span className="font-medium text-emerald-600">{fmt(p.amount)}</span>
-                  <span className="text-gray-400 ml-2">{p.note || "оплата"}</span>
-                </div>
-                <div className="text-xs text-gray-400">{fmtDate(p.paid_at)}</div>
-              </div>
-            ))}
+            <div>
+              <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>СЕБЕСТОИМОСТЬ (план)</div>
+              <input
+                type="number"
+                value={form.cost_plan}
+                onChange={e => field({ cost_plan: e.target.value })}
+                placeholder="0"
+                style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none", fontFamily: "inherit" }}
+              />
+            </div>
+            <div>
+              <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>ДЕДЛАЙН</div>
+              <input
+                type="date"
+                value={form.deadline}
+                onChange={e => field({ deadline: e.target.value })}
+                style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none", fontFamily: "inherit" }}
+              />
+            </div>
           </div>
-        </div>
-      )}
 
-      {/* Estimates */}
-      {estimates && estimates.length > 0 && (
-        <div className="card mb-4">
-          <div className="text-sm font-semibold text-gray-700 mb-4">Смета</div>
-          {estimates.map((set: any) => (
-            <div key={set.id} className="mb-4">
-              <div className="text-xs text-gray-400 mb-2">
-                {set.title || ""}
-              </div>
-              {set.items?.map((item: any) => (
-                <div key={item.id} className="mb-3 pl-3 border-l-2 border-gray-100">
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="text-sm font-medium text-gray-800">{item.title}</div>
-                    <div className="text-sm font-bold text-gray-900">{fmt(item.sale_price)}</div>
+          {/* Estimates */}
+          <div style={{ paddingTop: 24, borderTop: "1px solid #EDEBE6", marginBottom: 32 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>СМЕТЫ</div>
+              <button
+                onClick={() => addEstimateMutation.mutate()}
+                disabled={addEstimateMutation.isPending}
+                style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 12px", border: "1px solid #EDEBE6", background: "none", fontSize: 11, cursor: "pointer", color: "#1A1A1A", fontFamily: "inherit" }}
+              >
+                <Plus size={11} /> Новая смета
+              </button>
+            </div>
+            {(estimates as any[]).length === 0 ? (
+              <div style={{ fontSize: 12, color: "#C8C0B0", padding: "8px 0" }}>Сметы не добавлены</div>
+            ) : (
+              (estimates as any[]).map((s: any, i: number) => (
+                <div
+                  key={s.id}
+                  onClick={() => navigate(`/orders/${id}/estimate?set=${s.id}`)}
+                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 10px", borderBottom: "1px solid #F2EFE9", cursor: "pointer" }}
+                  onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")}
+                  onMouseLeave={e => (e.currentTarget.style.background = "")}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>
+                      {s.name || `Смета ${i + 1}`}
+                    </span>
+                    <span style={{ fontSize: 10, color: s.status === "approved" ? "#4A7C59" : "#A89070", fontWeight: 500 }}>
+                      {ESTIMATE_STATUS[s.status] ?? s.status}
+                    </span>
                   </div>
-                  {item.lines?.map((line: any) => (
-                    <div key={line.id} className="flex items-center justify-between text-xs text-gray-500 py-0.5">
-                      <span>{line.title}</span>
-                      <span>
-                        {line.qty} {line.unit} × {fmt(line.unit_price)} = {fmt(line.line_total)}
-                      </span>
-                    </div>
-                  ))}
+                  <CaretRight size={13} style={{ color: "#C8C0B0" }} />
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Financial summary */}
+          <div style={{ paddingTop: 24, borderTop: "1px solid #EDEBE6", marginBottom: 32 }}>
+            <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 14 }}>ФИНАНСЫ</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px 24px" }}>
+              {[
+                { label: "Стоимость", value: fmt(order?.price_plan),  color: "#1A1A1A" },
+                { label: "Оплачено",  value: fmt(paidTotal),          color: "#4A7C59" },
+                { label: "Долг",      value: order?.debt > 0 ? fmt(order.debt) : "—", color: order?.debt > 0 ? "#E8592A" : "#C8C0B0" },
+                { label: "Маржа",     value: fmt(order?.margin),      color: "#1A1A1A" },
+              ].map(item => (
+                <div key={item.label}>
+                  <div style={{ fontSize: 9, color: "#A89070", marginBottom: 4 }}>{item.label}</div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: item.color }}>{item.value}</div>
                 </div>
               ))}
             </div>
-          ))}
-        </div>
-      )}
-
-      {/* Stages */}
-      {order.stages?.length > 0 && (
-        <div className="card">
-          <div className="text-sm font-semibold text-gray-700 mb-3">Этапы</div>
-          <div className="space-y-2">
-            {order.stages.map((s: any) => (
-              <div key={s.id} className="flex items-center gap-3 text-sm">
-                <div
-                  className={`w-2 h-2 rounded-full shrink-0 ${
-                    s.status === "completed"
-                      ? "bg-emerald-500"
-                      : s.status === "in_progress"
-                      ? "bg-brand-500"
-                      : "bg-gray-200"
-                  }`}
-                />
-                <span className="text-gray-700">{s.title}</span>
-                <span className="text-gray-400 text-xs ml-auto">{s.status}</span>
+            {order?.price_plan > 0 && (
+              <div style={{ marginTop: 14 }}>
+                <div style={{ height: 2, background: "#F2EFE9" }}>
+                  <div style={{ height: 2, background: "#E8592A", width: `${Math.min(100, (paidTotal / order.price_plan) * 100)}%` }} />
+                </div>
               </div>
-            ))}
+            )}
           </div>
+
+          {/* Payments */}
+          {order?.payments?.length > 0 && (
+            <div style={{ paddingTop: 24, borderTop: "1px solid #EDEBE6" }}>
+              <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 14 }}>ПЛАТЕЖИ</div>
+              {order.payments.map((p: any, i: number) => (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "10px 0", borderBottom: "1px solid #F2EFE9" }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A" }}>{fmt(p.amount)}</div>
+                    {p.note && <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>{p.note}</div>}
+                  </div>
+                  <div style={{ fontSize: 11, color: "#A89070" }}>{fmtDate(p.paid_at)}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
         </div>
-      )}
+      </div>
     </div>
   );
 }

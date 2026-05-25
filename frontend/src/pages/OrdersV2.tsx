@@ -1006,6 +1006,12 @@ export default function OrdersV2() {
                     Клиент
                   </button>
                 )}
+                <button
+                  onClick={() => navigate(`/orders/${selected.id}`)}
+                  style={{ padding: "5px 12px", border: "none", background: "#E8592A", color: "#FFFFFF", fontSize: 11, cursor: "pointer", fontWeight: 600 }}
+                >
+                  Редактировать →
+                </button>
                 <EstimatesDropdown orderId={selected.id} sets={detail?.estimate_sets ?? []} />
                 <button
                   onClick={handleArchive}
