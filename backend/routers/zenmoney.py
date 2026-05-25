@@ -130,23 +130,81 @@ def get_cashflow(months: int = Query(6, le=24)):
         conn.close()
 
 
+_OWNER_TOKENS = {"некрасов", "некрасова", "юрий"}
+_NAME_ALIASES: dict[str, list[str]] = {
+    "саша": ["александр"], "александр": ["саша"],
+    "миша": ["михаил"],    "михаил":    ["миша"],
+    "юра":  ["юрий"],      "юрий":      ["юра"],
+    "настя": ["анастасия"],"анастасия": ["настя"],
+    "серёжа": ["сергей"],  "сергей":    ["серёжа"],
+}
+_EXPLICIT_INITIALS: dict[tuple[str, str], str] = {
+    ("александр", "ш"): "Александр ЛДСП",
+    ("александр", "м"): "Александр Нержавейщик (Мельник)",
+    ("александр", "с"): "Самсонов Саша",
+}
+
+def _match_payee_zm(payee: str, contractors: list) -> str | None:
+    """Матчинг по целым словам (не подстрокам), с алиасами и явными инициалами."""
+    if not payee:
+        return None
+    pl = payee.lower()
+    words = set(re.findall(r"[а-яёa-z]{2,}", pl))
+    # пропустить транзакции владельца
+    if words & _OWNER_TOKENS:
+        return None
+    initials = re.findall(r"[а-яё](?=\.)", pl)
+    # явное разрешение однофамильцев
+    for (name_tok, init), cname in _EXPLICIT_INITIALS.items():
+        if name_tok in words and init in initials:
+            return cname
+    # расширить алиасами
+    expanded = set(words)
+    for w in words:
+        expanded.update(_NAME_ALIASES.get(w, []))
+    scores: list[tuple[int, str]] = []
+    for c in contractors:
+        score = 0
+        matched_inits: set[str] = set()
+        for tok in c["tokens"]:
+            variants = {tok} | set(_NAME_ALIASES.get(tok, []))
+            # полное совпадение слова (не подстрока)
+            if variants & expanded:
+                score += 2
+            else:
+                for init in initials:
+                    if tok.startswith(init) and init not in matched_inits:
+                        score += 1
+                        matched_inits.add(init)
+                        break
+        if score >= 2:
+            scores.append((score, c["name"]))
+    if not scores:
+        return None
+    scores.sort(key=lambda x: -x[0])
+    if len(scores) >= 2 and scores[0][0] == scores[1][0]:
+        return None
+    return scores[0][1]
+
+
 @router.get("/business")
 def get_business_transactions(months: int = Query(3, le=12)):
     """Транзакции с личных карт, связанные с бизнесом (подрядчики + ИП)."""
-    # Collect name tokens from creditors and contractors
-    known: dict[str, str] = {}
-    SKIP = {"ооо", "ип", "ао", "нкп", "фио", "зао", "пао"}
+    SKIP = {"ооо", "ип", "ао", "нкп", "зао", "пао"}
 
-    def _add_name(name: str):
-        for token in re.findall(r"[А-Яа-яЁё]{3,}", name):
-            if token.lower() not in SKIP:
-                known[token.lower()] = name
+    contractors: list[dict] = []
+
+    def _add(name: str):
+        toks = [t.lower() for t in re.findall(r"[А-Яа-яЁё]{3,}", name)
+                if t.lower() not in SKIP]
+        if toks:
+            contractors.append({"name": name, "tokens": toks})
 
     try:
         prod = get_production()
         try:
             for row in prod.execute("SELECT name FROM creditors").fetchall():
-                _add_name(row["name"])
+                _add(row["name"])
         finally:
             prod.close()
     except Exception:
@@ -155,8 +213,10 @@ def get_business_transactions(months: int = Query(3, le=12)):
     try:
         aconn = get_analytics()
         try:
-            for row in aconn.execute("SELECT name FROM contractors").fetchall():
-                _add_name(row["name"])
+            for row in aconn.execute(
+                "SELECT name FROM contractors WHERE status != 'blocked'"
+            ).fetchall():
+                _add(row["name"])
         finally:
             aconn.close()
     except Exception:
@@ -175,13 +235,12 @@ def get_business_transactions(months: int = Query(3, le=12)):
             d = dict(r)
             if d.get("income", 0) > 0 and d.get("outcome", 0) > 0:
                 continue  # skip transfers
-            search_text = ((d.get("payee") or "") + " " + (d.get("comment") or "")).lower()
-            matched = None
-            for token, name in known.items():
-                if token in search_text:
-                    matched = name
-                    break
-            is_biz_income = any(kw in search_text for kw in ["некрасов", "pbpb", "пбпб"])
+            payee = (d.get("payee") or "").strip()
+            matched = _match_payee_zm(payee, contractors)
+            is_biz_income = any(
+                kw in ((payee + " " + (d.get("comment") or "")).lower())
+                for kw in ["некрасов", "pbpb", "пбпб"]
+            )
             if matched or is_biz_income:
                 d["tags"] = json.loads(d.get("tags") or "[]")
                 d["matched_contractor"] = matched
