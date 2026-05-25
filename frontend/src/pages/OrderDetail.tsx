@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { ordersApi, customersApi, estimatesApi } from "../api";
-import { ArrowLeft, Plus, CaretRight } from "@phosphor-icons/react";
+import { ArrowLeft, Plus, CaretRight, Trash } from "@phosphor-icons/react";
 
 const ALL_STATUSES = [
   { value: "draft",         label: "Черновик",       color: "#A89070" },
@@ -47,6 +47,9 @@ export default function OrderDetail() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [form, setForm] = useState<FormState | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [newCustomerName, setNewCustomerName] = useState("");
+  const [creatingCustomer, setCreatingCustomer] = useState(false);
 
   const { data: order, isLoading } = useQuery({
     queryKey: ["order-detail", id],
@@ -88,6 +91,14 @@ export default function OrderDetail() {
     },
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: () => ordersApi.delete(id!),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["orders-v2"] });
+      navigate("/orders");
+    },
+  });
+
   const addEstimateMutation = useMutation({
     mutationFn: () => estimatesApi.createSet(id!),
     onSuccess: (newSet: any) => {
@@ -103,7 +114,7 @@ export default function OrderDetail() {
       brand: form.brand || null,
       priority: form.priority,
       deadline: form.deadline || null,
-      customer_id: form.customer_id ? parseInt(form.customer_id) : null,
+      customer_id: form.customer_id && form.customer_id !== "__new__" ? parseInt(form.customer_id) : null,
       price_plan: form.price_plan ? parseFloat(form.price_plan) : null,
       cost_plan: form.cost_plan ? parseFloat(form.cost_plan) : null,
     });
@@ -140,6 +151,15 @@ export default function OrderDetail() {
           {saveMutation.isError && <span style={{ fontSize: 11, color: "#8B3A3A" }}>Ошибка сохранения</span>}
           {saveMutation.isSuccess && <span style={{ fontSize: 11, color: "#4A7C59" }}>Сохранено ✓</span>}
           <button
+            onClick={() => setConfirmDelete(true)}
+            title="Удалить заказ"
+            style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, background: "#F2EFE9", border: "none", cursor: "pointer", color: "#8B3A3A" }}
+            onMouseEnter={e => { e.currentTarget.style.background = "#8B3A3A"; e.currentTarget.style.color = "#fff"; }}
+            onMouseLeave={e => { e.currentTarget.style.background = "#F2EFE9"; e.currentTarget.style.color = "#8B3A3A"; }}
+          >
+            <Trash size={14} />
+          </button>
+          <button
             onClick={handleSave}
             disabled={saveMutation.isPending}
             style={{ padding: "7px 22px", background: "#E8592A", color: "#fff", border: "none", fontSize: 12, fontWeight: 600, cursor: saveMutation.isPending ? "default" : "pointer", opacity: saveMutation.isPending ? 0.7 : 1, fontFamily: "inherit" }}
@@ -147,6 +167,40 @@ export default function OrderDetail() {
             {saveMutation.isPending ? "Сохраняем..." : "Сохранить"}
           </button>
         </div>
+
+        {/* Delete confirmation modal */}
+        {confirmDelete && (
+          <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}
+            onClick={() => setConfirmDelete(false)}>
+            <div style={{ background: "#FFF", padding: "28px 32px", width: 380, boxShadow: "0 8px 40px rgba(0,0,0,0.18)" }}
+              onClick={e => e.stopPropagation()}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#1A1A1A", marginBottom: 6, letterSpacing: "-0.02em" }}>
+                Удалить заказ?
+              </div>
+              <div style={{ fontSize: 13, color: "#6B6355", marginBottom: 4 }}>
+                {order?.title} · {order?.number}
+              </div>
+              <div style={{ fontSize: 12, color: "#A89070", marginBottom: 24, lineHeight: 1.6 }}>
+                Это действие необратимо. Все данные заказа, включая сметы и платежи, будут удалены навсегда.
+              </div>
+              <div style={{ display: "flex", gap: 10 }}>
+                <button
+                  onClick={() => deleteMutation.mutate()}
+                  disabled={deleteMutation.isPending}
+                  style={{ flex: 1, background: "#8B3A3A", color: "#FFF", border: "none", padding: "9px 0", fontSize: 12, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
+                >
+                  {deleteMutation.isPending ? "Удаляем..." : "Удалить"}
+                </button>
+                <button
+                  onClick={() => setConfirmDelete(false)}
+                  style={{ flex: 1, background: "none", border: "1px solid #EDEBE6", padding: "9px 0", fontSize: 12, cursor: "pointer", fontFamily: "inherit", color: "#6B6355" }}
+                >
+                  Отмена
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Scrollable body */}
@@ -206,13 +260,61 @@ export default function OrderDetail() {
             <div style={{ gridColumn: "1 / -1" }}>
               <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>КЛИЕНТ</div>
               <select
-                value={form.customer_id}
-                onChange={e => field({ customer_id: e.target.value })}
+                value={form.customer_id === "__new__" ? "__new__" : form.customer_id}
+                onChange={e => {
+                  if (e.target.value === "__new__") {
+                    field({ customer_id: "__new__" });
+                    setNewCustomerName("");
+                  } else {
+                    field({ customer_id: e.target.value });
+                    setNewCustomerName("");
+                  }
+                }}
                 style={{ width: "100%", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none", background: "#fff", fontFamily: "inherit" }}
               >
                 <option value="">— не выбран —</option>
                 {(customers as any[]).map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                <option value="__new__">+ Создать нового клиента</option>
               </select>
+              {form.customer_id === "__new__" && (
+                <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                  <input
+                    autoFocus
+                    placeholder="Имя клиента"
+                    value={newCustomerName}
+                    onChange={e => setNewCustomerName(e.target.value)}
+                    onKeyDown={async e => {
+                      if (e.key === "Escape") { field({ customer_id: "" }); setNewCustomerName(""); }
+                      if (e.key === "Enter" && newCustomerName.trim()) {
+                        setCreatingCustomer(true);
+                        try {
+                          const c = await customersApi.create({ name: newCustomerName.trim() });
+                          qc.invalidateQueries({ queryKey: ["customers"] });
+                          field({ customer_id: String(c.id) });
+                          setNewCustomerName("");
+                        } finally { setCreatingCustomer(false); }
+                      }
+                    }}
+                    style={{ flex: 1, border: "1px solid #E8592A", padding: "6px 10px", fontSize: 13, outline: "none", fontFamily: "inherit" }}
+                  />
+                  <button
+                    disabled={creatingCustomer || !newCustomerName.trim()}
+                    onClick={async () => {
+                      if (!newCustomerName.trim()) return;
+                      setCreatingCustomer(true);
+                      try {
+                        const c = await customersApi.create({ name: newCustomerName.trim() });
+                        qc.invalidateQueries({ queryKey: ["customers"] });
+                        field({ customer_id: String(c.id) });
+                        setNewCustomerName("");
+                      } finally { setCreatingCustomer(false); }
+                    }}
+                    style={{ padding: "6px 14px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600, opacity: creatingCustomer || !newCustomerName.trim() ? 0.5 : 1, fontFamily: "inherit" }}
+                  >
+                    {creatingCustomer ? "..." : "Создать"}
+                  </button>
+                </div>
+              )}
             </div>
             <div>
               <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>СТОИМОСТЬ (план)</div>
