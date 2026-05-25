@@ -306,19 +306,19 @@ function PayeeRulePopup({ payee, ruleId, onClose }: {
     mutationFn: () => ruleId && existingRule
       ? payeeRulesApi.update(ruleId, form)
       : payeeRulesApi.create(form),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["zm-business"] });
-      qc.invalidateQueries({ queryKey: ["payee-rules"] });
+    onSuccess: async () => {
       onClose();
+      await qc.invalidateQueries({ queryKey: ["zm-business"] });
+      await qc.invalidateQueries({ queryKey: ["payee-rules"] });
     },
   });
 
   const del = useMutation({
     mutationFn: () => payeeRulesApi.delete(ruleId!),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["zm-business"] });
-      qc.invalidateQueries({ queryKey: ["payee-rules"] });
+    onSuccess: async () => {
       onClose();
+      await qc.invalidateQueries({ queryKey: ["zm-business"] });
+      await qc.invalidateQueries({ queryKey: ["payee-rules"] });
     },
   });
 

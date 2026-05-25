@@ -42,6 +42,11 @@ def create_rule(body: dict = Body(...)):
     if match_type not in ("exact", "contains", "prefix"):
         raise HTTPException(status_code=400, detail="invalid match_type")
 
+    display_name = (body.get("display_name") or "").strip() or None
+    entity_type = body.get("entity_type") or None
+    entity_id = body.get("entity_id") or None
+    entity_name = (body.get("entity_name") or "").strip() or None
+
     conn = get_production()
     try:
         existing = conn.execute(
@@ -49,20 +54,20 @@ def create_rule(body: dict = Body(...)):
             (pattern.lower(), match_type),
         ).fetchone()
         if existing:
-            raise HTTPException(status_code=409, detail="rule already exists")
+            # Upsert: обновляем существующее правило вместо ошибки
+            conn.execute(
+                """UPDATE payee_rules SET display_name=?, entity_type=?, entity_id=?, entity_name=?,
+                   updated_at=datetime('now') WHERE id=?""",
+                (display_name, entity_type, entity_id, entity_name, existing["id"]),
+            )
+            conn.commit()
+            return dict(conn.execute("SELECT * FROM payee_rules WHERE id = ?", (existing["id"],)).fetchone())
 
         conn.execute(
             """INSERT INTO payee_rules
                (pattern, match_type, display_name, entity_type, entity_id, entity_name)
                VALUES (?, ?, ?, ?, ?, ?)""",
-            (
-                pattern.lower(),
-                match_type,
-                (body.get("display_name") or "").strip() or None,
-                body.get("entity_type") or None,
-                body.get("entity_id") or None,
-                (body.get("entity_name") or "").strip() or None,
-            ),
+            (pattern.lower(), match_type, display_name, entity_type, entity_id, entity_name),
         )
         conn.commit()
         rule_id = conn.execute("SELECT last_insert_rowid() as id").fetchone()["id"]
