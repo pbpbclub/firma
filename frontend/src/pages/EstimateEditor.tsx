@@ -340,18 +340,15 @@ function CatalogModal({ onClose, onSelect }: {
 
 // ── Footer row helper ────────────────────────────────────────────────────────
 
-function FooterRow({ cols, label, cost, sale, bankSale, delta, deltaColor, saleColor, bankSaleColor, note, hasBank }: {
+function FooterRow({ cols, label, cost, sale, delta, deltaColor, saleColor, note }: {
   cols: string;
   label: string;
   cost?: string;
   sale?: string;
-  bankSale?: string;
   delta?: string;
   deltaColor?: string;
   saleColor?: string;
-  bankSaleColor?: string;
   note?: string;
-  hasBank?: boolean;
 }) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: cols, padding: "7px 28px", gap: 12, alignItems: "center", borderBottom: "1px solid #F2EFE9" }}>
@@ -362,7 +359,6 @@ function FooterRow({ cols, label, cost, sale, bankSale, delta, deltaColor, saleC
       <div /><div />
       <div style={{ fontSize: 12, color: "#6B6355", textAlign: "right" }}>{cost ?? ""}</div>
       <div style={{ fontSize: 13, fontWeight: 500, color: saleColor ?? "#1A1A1A", textAlign: "right" }}>{sale ?? ""}</div>
-      {hasBank && <div style={{ fontSize: 13, fontWeight: 500, color: bankSaleColor ?? "#1A1A1A", textAlign: "right" }}>{bankSale ?? ""}</div>}
       <div style={{ fontSize: 12, fontWeight: 600, color: deltaColor ?? "#A89070", textAlign: "right" }}>{delta ?? ""}</div>
       <div />
     </div>
@@ -420,7 +416,6 @@ export default function EstimateEditor() {
   const clientPriceForItem = (it: any) =>
     isBank ? Math.round((it.sale_price || 0) * (1 + (it.bank_pct ?? bankPct) / 100)) : (it.sale_price || 0);
   const totalClient  = items.reduce((s: number, it: any) => s + clientPriceForItem(it), 0);
-  const totalBankAdd = isBank ? totalClient - totalSale : 0;
   const grandTotal   = isBank ? totalClient : totalSale;
   const taxes        = isBank ? Math.round(grandTotal * 0.06) : 0;
 
@@ -434,13 +429,6 @@ export default function EstimateEditor() {
     if (!activeSetId) return;
     await estimatesApi.updateSet(activeSetId, data);
     refetch();
-  };
-
-  const addItemWithModal = async () => {
-    if (!activeSetId) return;
-    const it = await estimatesApi.addItem(activeSetId, { title: "", markup: 2.0 });
-    await refetch();
-    setOpenItemId(it.id);
   };
 
   const addItemInline = async () => {
@@ -470,9 +458,7 @@ export default function EstimateEditor() {
     }
   };
 
-  const colsMain = isBank
-    ? "1fr 64px 80px 110px 110px 90px 90px 52px"
-    : "1fr 64px 80px 110px 110px 90px 52px";
+  const colsMain = "1fr 64px 80px 110px 110px 90px 52px";
 
   return (
     <>
@@ -491,22 +477,6 @@ export default function EstimateEditor() {
           >
             <ArrowLeft size={13} /> Заказы
           </button>
-
-          {activeSet && (
-            <button
-              onClick={addItemWithModal}
-              title="Добавить изделие (калькулятор)"
-              style={{
-                background: "none", border: "1px solid #EDEBE6", cursor: "pointer",
-                color: "#6B6355", display: "flex", alignItems: "center", gap: 4,
-                fontSize: 11, padding: "3px 8px",
-              }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "#E8592A"; (e.currentTarget as HTMLElement).style.color = "#E8592A"; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "#EDEBE6"; (e.currentTarget as HTMLElement).style.color = "#6B6355"; }}
-            >
-              <Plus size={11} /> Изделие
-            </button>
-          )}
 
           <span style={{ color: "#EDEBE6" }}>·</span>
           <span style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A", whiteSpace: "nowrap" }}>{order?.title ?? orderId}</span>
@@ -725,7 +695,7 @@ export default function EstimateEditor() {
 
           {/* ─ Column headers ─────────────────────────────────────────────── */}
           <div style={{ display: "grid", gridTemplateColumns: colsMain, padding: "7px 28px", gap: 12, borderBottom: "1px solid #EDEBE6", flexShrink: 0 }}>
-            {["Позиция", "Кол-во", "Наценка", "Себестоимость", "Клиенту", ...(isBank ? ["К оплате"] : []), "Δ Доход", ""].map((h, i) => (
+            {["Позиция", "Кол-во", "Наценка", "Себестоимость", isBank ? "К оплате" : "Клиенту", "Δ Доход", ""].map((h, i) => (
               <div key={i} style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em", textAlign: i >= 3 ? "right" : "left" }}>{h}</div>
             ))}
           </div>
@@ -806,56 +776,53 @@ export default function EstimateEditor() {
                   )}
                 </div>
 
-                {/* Sale price / Клиенту (base, pre-bank) */}
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#1A1A1A", textAlign: "right" }}>
-                  {editMode ? (
-                    <EditCell
-                      value={item.sale_price ?? 0}
-                      numeric
-                      display={fmt(item.sale_price)}
-                      style={{ fontWeight: 700, textAlign: "right" }}
-                      onSave={v => {
-                        const entered = parseFloat(v) || 0;
-                        const cost = item.cost_total || 0;
-                        const newMarkup = cost > 0 ? Math.round((entered / cost) * 1000) / 1000 : 1;
-                        estimatesApi.updateItem(item.id, { markup: newMarkup }).then(() => refetch());
-                      }}
-                    />
+                {/* Col 5: Клиенту (нал) / К оплате (безнал) */}
+                <div style={{ fontSize: 13, fontWeight: 700, textAlign: "right", position: "relative" }}>
+                  {isBank ? (
+                    <>
+                      {editMode ? (
+                        <EditCell
+                          value={clientPriceForItem(item)}
+                          numeric
+                          display={fmt(clientPriceForItem(item))}
+                          style={{ fontWeight: 700, textAlign: "right", color: "#E8592A" }}
+                          onSave={v => {
+                            const entered = parseFloat(v) || 0;
+                            const salePrice = item.sale_price || 0;
+                            const newBankPct = salePrice > 0 ? (entered / salePrice - 1) * 100 : bankPct;
+                            estimatesApi.updateItem(item.id, { bank_pct: newBankPct }).then(() => refetch());
+                          }}
+                        />
+                      ) : (
+                        <span style={{ color: "#E8592A" }}>{fmt(clientPriceForItem(item))}</span>
+                      )}
+                      {editMode && (
+                        <div style={{ position: "absolute", right: 0, bottom: -11, fontSize: 9, color: "#A89070", whiteSpace: "nowrap" }}>
+                          {(item.bank_pct ?? bankPct).toFixed(1)}%
+                        </div>
+                      )}
+                    </>
                   ) : (
-                    fmt(item.sale_price)
-                  )}
-                </div>
-
-                {/* К оплате (with bank surcharge) — only in bank mode */}
-                {isBank && (
-                  <div style={{ textAlign: "right", position: "relative" }}>
-                    {editMode ? (
+                    editMode ? (
                       <EditCell
-                        value={clientPriceForItem(item)}
+                        value={item.sale_price ?? 0}
                         numeric
-                        display={fmt(clientPriceForItem(item))}
-                        style={{ fontWeight: 700, textAlign: "right", color: "#E8592A" }}
+                        display={fmt(item.sale_price)}
+                        style={{ fontWeight: 700, textAlign: "right" }}
                         onSave={v => {
                           const entered = parseFloat(v) || 0;
-                          const salePrice = item.sale_price || 0;
-                          const newBankPct = salePrice > 0
-                            ? (entered / salePrice - 1) * 100
-                            : bankPct;
-                          estimatesApi.updateItem(item.id, { bank_pct: newBankPct }).then(() => refetch());
+                          const cost = item.cost_total || 0;
+                          const newMarkup = cost > 0 ? Math.round((entered / cost) * 1000) / 1000 : 1;
+                          estimatesApi.updateItem(item.id, { markup: newMarkup }).then(() => refetch());
                         }}
                       />
                     ) : (
-                      <span style={{ fontWeight: 700, color: "#E8592A" }}>{fmt(clientPriceForItem(item))}</span>
-                    )}
-                    {editMode && (
-                      <div style={{ position: "absolute", right: 0, bottom: -11, fontSize: 9, color: "#A89070", whiteSpace: "nowrap" }}>
-                        {(item.bank_pct ?? bankPct).toFixed(1)}%
-                      </div>
-                    )}
-                  </div>
-                )}
+                      fmt(item.sale_price)
+                    )
+                  )}
+                </div>
 
-                {/* Delta */}
+                {/* Col 6: Δ Доход */}
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#4A7C59", textAlign: "right" }}>
                   +{fmt((item.sale_price || 0) - (item.cost_total || 0))}
                 </div>
@@ -910,15 +877,12 @@ export default function EstimateEditor() {
           <div style={{ flexShrink: 0, borderTop: "1px solid #EDEBE6" }}>
 
             <FooterRow cols={colsMain} label="Итого себестоимость"
-              cost={fmt(totalCost)} sale={fmt(totalSale)} delta={`+${fmt(totalDelta)}`} deltaColor="#4A7C59"
-              hasBank={isBank} />
+              cost={fmt(totalCost)} sale={fmt(totalSale)} delta={`+${fmt(totalDelta)}`} deltaColor="#4A7C59" />
 
-            {isBank && <>
-              <FooterRow cols={colsMain} label="Надбавка безнал"
-                bankSale={`+${fmt(totalBankAdd)}`} bankSaleColor="#1A1A1A" hasBank />
+            {isBank && (
               <FooterRow cols={colsMain} label="Налоги УСН 6%"
-                bankSale={`−${fmt(taxes)}`} bankSaleColor="#8B3A3A" hasBank />
-            </>}
+                sale={`−${fmt(taxes)}`} saleColor="#8B3A3A" />
+            )}
 
             <div style={{
               display: "grid", gridTemplateColumns: colsMain,
@@ -927,16 +891,11 @@ export default function EstimateEditor() {
             }}>
               <div style={{ fontSize: 12, color: "#A89070", fontWeight: 500 }}>К оплате</div>
               <div /><div />
-              <div />
-              {isBank ? (
-                <>
-                  <div />
-                  <div style={{ fontSize: 15, fontWeight: 700, color: "#E8592A", textAlign: "right" }}>{fmt(grandTotal)}</div>
-                </>
-              ) : (
-                <div style={{ fontSize: 15, fontWeight: 700, color: "#E8592A", textAlign: "right" }}>{fmt(grandTotal)}</div>
-              )}
-              <div style={{ fontSize: 13, fontWeight: 600, color: "#4A7C59", textAlign: "right" }}>+{fmt(totalDelta)}</div>
+              <div style={{ fontSize: 12, color: "#6B6355", textAlign: "right" }}>{fmt(totalCost)}</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: isBank ? "#E8592A" : "#1A1A1A", textAlign: "right" }}>{fmt(grandTotal)}</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#4A7C59", textAlign: "right" }}>
+                {isBank ? `+${fmt(grandTotal - totalCost - taxes)}` : `+${fmt(totalDelta)}`}
+              </div>
               <div />
             </div>
           </div>
