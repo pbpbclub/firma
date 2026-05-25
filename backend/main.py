@@ -4,7 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
 from auth import get_current_user, init_admin
-from db import ensure_customer_schema, ensure_payee_rules_schema, ensure_orders_schema, ensure_catalog_schema, ensure_estimate_items_schema, ensure_catalog_material_fk
+from db import ensure_customer_schema, ensure_payee_rules_schema, ensure_orders_schema, ensure_catalog_schema, ensure_estimate_items_schema, ensure_catalog_material_fk, ensure_estimate_bank_pct_schema
 from routers import orders, finance, catalog, taxes, users, estimates, funds
 from routers import customers, masters, zenmoney, admin, payee_rules
 
@@ -52,3 +52,4 @@ def startup():
     ensure_catalog_schema()
     ensure_estimate_items_schema()
     ensure_catalog_material_fk()
+    ensure_estimate_bank_pct_schema()

@@ -67,6 +67,7 @@ class ItemCreate(BaseModel):
     category: Optional[str] = None
     markup: float = 2.0
     quantity: int = 1
+    bank_pct: Optional[float] = None
     sort_order: int = 0
 
 
@@ -78,6 +79,7 @@ class ItemUpdate(BaseModel):
     quantity: Optional[int] = None
     sort_order: Optional[int] = None
     cost_total: Optional[float] = None
+    bank_pct: Optional[float] = None
 
 
 class LineCreate(BaseModel):
@@ -139,6 +141,11 @@ def update_set(set_id: str, body: SetUpdate):
             f"UPDATE estimate_sets SET {set_clause} WHERE id = ?",
             list(fields.values()) + [set_id]
         )
+        if body.bank_pct is not None:
+            conn.execute(
+                "UPDATE estimate_items SET bank_pct = ? WHERE set_id = ?",
+                (body.bank_pct, set_id)
+            )
         conn.commit()
         return dict(conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (set_id,)).fetchone())
     finally:
@@ -170,13 +177,15 @@ def delete_set(set_id: str):
 def add_item(set_id: str, body: ItemCreate):
     conn = get_production()
     try:
-        if not conn.execute("SELECT id FROM estimate_sets WHERE id = ?", (set_id,)).fetchone():
+        set_row = conn.execute("SELECT id, bank_pct FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
+        if not set_row:
             raise HTTPException(status_code=404, detail="Set not found")
         item_id = str(uuid.uuid4())
+        bank_pct = body.bank_pct if body.bank_pct is not None else (set_row["bank_pct"] or 13)
         conn.execute(
-            """INSERT INTO estimate_items (id, set_id, title, category, markup, quantity, overhead_pct, tax_pct, cost_total, sale_price, sort_order, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, 0, ?, ?)""",
-            (item_id, set_id, body.title, body.category, body.markup, body.quantity, body.sort_order, _now())
+            """INSERT INTO estimate_items (id, set_id, title, category, markup, quantity, overhead_pct, tax_pct, cost_total, sale_price, bank_pct, sort_order, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, 0, ?, ?, ?)""",
+            (item_id, set_id, body.title, body.category, body.markup, body.quantity, bank_pct, body.sort_order, _now())
         )
         conn.commit()
         return dict(conn.execute("SELECT * FROM estimate_items WHERE id = ?", (item_id,)).fetchone())
@@ -360,10 +369,14 @@ def from_catalog(body: FromCatalog):
             "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM estimate_items WHERE set_id = ?",
             (body.set_id,)
         ).fetchone()[0]
+        set_bank_pct_row = conn.execute(
+            "SELECT bank_pct FROM estimate_sets WHERE id = ?", (body.set_id,)
+        ).fetchone()
+        set_bank_pct = (set_bank_pct_row["bank_pct"] if set_bank_pct_row else None) or 13
         conn.execute(
-            """INSERT INTO estimate_items (id, set_id, title, category, markup, overhead_pct, tax_pct, cost_total, sale_price, sort_order, created_at)
-               VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, ?, ?)""",
-            (item_id, body.set_id, cat["title"], cat["category"], round(markup, 4), sort_order, _now())
+            """INSERT INTO estimate_items (id, set_id, title, category, markup, overhead_pct, tax_pct, cost_total, sale_price, bank_pct, sort_order, created_at)
+               VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, ?, ?, ?)""",
+            (item_id, body.set_id, cat["title"], cat["category"], round(markup, 4), set_bank_pct, sort_order, _now())
         )
         for i, cl in enumerate(cat_lines):
             line_id = str(uuid.uuid4())

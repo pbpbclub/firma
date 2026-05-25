@@ -81,6 +81,17 @@ def ensure_estimate_items_schema():
         conn.close()
 
 
+def ensure_estimate_bank_pct_schema():
+    conn = get_production()
+    try:
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(estimate_items)").fetchall()}
+        if "bank_pct" not in existing:
+            conn.execute("ALTER TABLE estimate_items ADD COLUMN bank_pct REAL DEFAULT 13")
+            conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_catalog_material_fk():
     conn = get_production()
     try:

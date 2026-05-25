@@ -340,15 +340,18 @@ function CatalogModal({ onClose, onSelect }: {
 
 // ── Footer row helper ────────────────────────────────────────────────────────
 
-function FooterRow({ cols, label, cost, sale, delta, deltaColor, saleColor, note }: {
+function FooterRow({ cols, label, cost, sale, bankSale, delta, deltaColor, saleColor, bankSaleColor, note, hasBank }: {
   cols: string;
   label: string;
   cost?: string;
   sale?: string;
+  bankSale?: string;
   delta?: string;
   deltaColor?: string;
   saleColor?: string;
+  bankSaleColor?: string;
   note?: string;
+  hasBank?: boolean;
 }) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: cols, padding: "7px 28px", gap: 12, alignItems: "center", borderBottom: "1px solid #F2EFE9" }}>
@@ -359,6 +362,7 @@ function FooterRow({ cols, label, cost, sale, delta, deltaColor, saleColor, note
       <div /><div />
       <div style={{ fontSize: 12, color: "#6B6355", textAlign: "right" }}>{cost ?? ""}</div>
       <div style={{ fontSize: 13, fontWeight: 500, color: saleColor ?? "#1A1A1A", textAlign: "right" }}>{sale ?? ""}</div>
+      {hasBank && <div style={{ fontSize: 13, fontWeight: 500, color: bankSaleColor ?? "#1A1A1A", textAlign: "right" }}>{bankSale ?? ""}</div>}
       <div style={{ fontSize: 12, fontWeight: 600, color: deltaColor ?? "#A89070", textAlign: "right" }}>{delta ?? ""}</div>
       <div />
     </div>
@@ -413,10 +417,13 @@ export default function EstimateEditor() {
   const totalDelta = totalSale - totalCost;
   const bankPct    = activeSet?.bank_pct ?? 13;
   const isBank     = activeSet?.payment_type === "bank";
-  const bankAdd    = isBank ? Math.round(totalSale * bankPct / 100) : 0;
-  const grandTotal = totalSale + bankAdd;
-  const taxes      = isBank ? Math.round(grandTotal * 0.06) : 0;
-  const fund       = isBank ? Math.round(bankAdd - taxes) : 0;
+  const clientPriceForItem = (it: any) =>
+    isBank ? Math.round((it.sale_price || 0) * (1 + (it.bank_pct ?? bankPct) / 100)) : (it.sale_price || 0);
+  const totalClient  = items.reduce((s: number, it: any) => s + clientPriceForItem(it), 0);
+  const totalBankAdd = isBank ? totalClient - totalSale : 0;
+  const grandTotal   = isBank ? totalClient : totalSale;
+  const taxes        = isBank ? Math.round(grandTotal * 0.06) : 0;
+  const fund         = isBank ? Math.round(totalBankAdd - taxes) : 0;
 
   const createSet = async () => {
     const s = await estimatesApi.createSet(orderId!);
@@ -464,7 +471,9 @@ export default function EstimateEditor() {
     }
   };
 
-  const colsMain = "1fr 64px 80px 110px 110px 90px 52px";
+  const colsMain = isBank
+    ? "1fr 64px 80px 110px 110px 90px 90px 52px"
+    : "1fr 64px 80px 110px 110px 90px 52px";
 
   return (
     <>
@@ -610,7 +619,10 @@ export default function EstimateEditor() {
               </div>
 
               <div style={{ width: 100, display: "flex", alignItems: "center", gap: 4 }}>
-                {activeSet.payment_type === "bank" && (
+                {isBank && !editMode && (
+                  <span style={{ fontSize: 11, color: "#A89070" }}>Банк {bankPct}%</span>
+                )}
+                {isBank && editMode && (
                   <>
                     <span style={{ fontSize: 11, color: "#A89070" }}>Банк</span>
                     <input
@@ -714,7 +726,7 @@ export default function EstimateEditor() {
 
           {/* ─ Column headers ─────────────────────────────────────────────── */}
           <div style={{ display: "grid", gridTemplateColumns: colsMain, padding: "7px 28px", gap: 12, borderBottom: "1px solid #EDEBE6", flexShrink: 0 }}>
-            {["Позиция", "Кол-во", "Наценка", "Себестоимость", "Клиенту", "Δ Доход", ""].map((h, i) => (
+            {["Позиция", "Кол-во", "Наценка", "Себестоимость", "Клиенту", ...(isBank ? ["К оплате"] : []), "Δ Доход", ""].map((h, i) => (
               <div key={i} style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em", textAlign: i >= 3 ? "right" : "left" }}>{h}</div>
             ))}
           </div>
@@ -795,7 +807,7 @@ export default function EstimateEditor() {
                   )}
                 </div>
 
-                {/* Sale price / Клиенту */}
+                {/* Sale price / Клиенту (base, pre-bank) */}
                 <div style={{ fontSize: 13, fontWeight: 700, color: "#1A1A1A", textAlign: "right" }}>
                   {editMode ? (
                     <EditCell
@@ -814,6 +826,35 @@ export default function EstimateEditor() {
                     fmt(item.sale_price)
                   )}
                 </div>
+
+                {/* К оплате (with bank surcharge) — only in bank mode */}
+                {isBank && (
+                  <div style={{ textAlign: "right" }}>
+                    {editMode ? (
+                      <EditCell
+                        value={clientPriceForItem(item)}
+                        numeric
+                        display={fmt(clientPriceForItem(item))}
+                        style={{ fontWeight: 700, textAlign: "right", color: "#E8592A" }}
+                        onSave={v => {
+                          const entered = parseFloat(v) || 0;
+                          const salePrice = item.sale_price || 0;
+                          const newBankPct = salePrice > 0
+                            ? Math.round((entered / salePrice - 1) * 10000) / 100
+                            : bankPct;
+                          estimatesApi.updateItem(item.id, { bank_pct: newBankPct }).then(() => refetch());
+                        }}
+                      />
+                    ) : (
+                      <span style={{ fontWeight: 700, color: "#E8592A" }}>{fmt(clientPriceForItem(item))}</span>
+                    )}
+                    {editMode && (
+                      <div style={{ fontSize: 9, color: "#A89070", textAlign: "right", marginTop: 1 }}>
+                        {(item.bank_pct ?? bankPct).toFixed(1)}%
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Delta */}
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#4A7C59", textAlign: "right" }}>
@@ -870,16 +911,17 @@ export default function EstimateEditor() {
           <div style={{ flexShrink: 0, borderTop: "1px solid #EDEBE6" }}>
 
             <FooterRow cols={colsMain} label="Итого себестоимость"
-              cost={fmt(totalCost)} sale={fmt(totalSale)} delta={`+${fmt(totalDelta)}`} deltaColor="#4A7C59" />
+              cost={fmt(totalCost)} sale={fmt(totalSale)} delta={`+${fmt(totalDelta)}`} deltaColor="#4A7C59"
+              hasBank={isBank} />
 
             {isBank && <>
-              <FooterRow cols={colsMain} label={`Надбавка безнал ${bankPct}%`}
-                sale={`+${fmt(bankAdd)}`} saleColor="#1A1A1A" />
+              <FooterRow cols={colsMain} label="Надбавка безнал"
+                bankSale={`+${fmt(totalBankAdd)}`} bankSaleColor="#1A1A1A" hasBank />
               <FooterRow cols={colsMain} label="Налоги УСН 6%"
-                sale={`−${fmt(taxes)}`} saleColor="#8B3A3A" />
+                bankSale={`−${fmt(taxes)}`} bankSaleColor="#8B3A3A" hasBank />
               {fund > 0 && (
                 <FooterRow cols={colsMain} label="Фонд бухгалтерии"
-                  sale={`+${fmt(fund)}`} saleColor="#4A7C59"
+                  bankSale={`+${fmt(fund)}`} bankSaleColor="#4A7C59" hasBank
                   note="остаток надбавки безнала после налогов" />
               )}
             </>}
@@ -892,7 +934,14 @@ export default function EstimateEditor() {
               <div style={{ fontSize: 12, color: "#A89070", fontWeight: 500 }}>К оплате</div>
               <div /><div />
               <div />
-              <div style={{ fontSize: 15, fontWeight: 700, color: "#E8592A", textAlign: "right" }}>{fmt(grandTotal)}</div>
+              {isBank ? (
+                <>
+                  <div />
+                  <div style={{ fontSize: 15, fontWeight: 700, color: "#E8592A", textAlign: "right" }}>{fmt(grandTotal)}</div>
+                </>
+              ) : (
+                <div style={{ fontSize: 15, fontWeight: 700, color: "#E8592A", textAlign: "right" }}>{fmt(grandTotal)}</div>
+              )}
               <div style={{ fontSize: 13, fontWeight: 600, color: "#4A7C59", textAlign: "right" }}>+{fmt(totalDelta)}</div>
               <div />
             </div>
