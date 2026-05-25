@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
+import { useNavigationGuard, NavigationGuardModal } from "../components/NavigationGuard";
 import {
   MagnifyingGlass, DotsThree, Plus, CaretRight,
   PencilSimple, Check, X, FloppyDisk, Funnel, Trash, Tag,
@@ -334,6 +335,7 @@ const CUSTOMER_FIELDS: FieldDef[] = [
 function CustomerDetail({ customerId, onClose }: { customerId: string; onClose: () => void }) {
   const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
+  const blocker = useNavigationGuard(editing);
 
   const { data, isLoading } = useQuery({
     queryKey: ["customer", customerId],
@@ -484,6 +486,8 @@ function CustomerDetail({ customerId, onClose }: { customerId: string; onClose: 
 
         <PayeeRulesSection entityType="customer" entityId={customerId} />
       </div>
+
+      <NavigationGuardModal blocker={blocker} />
     </>
   );
 }
@@ -522,6 +526,7 @@ function MasterDetail({ masterId, onClose }: { masterId: string; onClose: () => 
   const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [editCreditor, setEditCreditor] = useState<any>(null);
+  const blocker = useNavigationGuard(editing || !!editCreditor);
 
   const { data, isLoading } = useQuery({
     queryKey: ["master", masterId],
@@ -745,6 +750,8 @@ function MasterDetail({ masterId, onClose }: { masterId: string; onClose: () => 
 
         <PayeeRulesSection entityType="master" entityId={masterId} />
       </div>
+
+      <NavigationGuardModal blocker={blocker} />
     </>
   );
 }

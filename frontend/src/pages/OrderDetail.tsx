@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { ordersApi, customersApi, estimatesApi } from "../api";
 import { ArrowLeft, Plus, CaretRight, Trash } from "@phosphor-icons/react";
+import { useNavigationGuard, NavigationGuardModal } from "../components/NavigationGuard";
 
 const ALL_STATUSES = [
   { value: "draft",         label: "Черновик",       color: "#A89070" },
@@ -47,7 +48,9 @@ export default function OrderDetail() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [form, setForm] = useState<FormState | null>(null);
+  const [isDirty, setIsDirty] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const blocker = useNavigationGuard(isDirty);
   const [newCustomerName, setNewCustomerName] = useState("");
   const [creatingCustomer, setCreatingCustomer] = useState(false);
 
@@ -86,6 +89,7 @@ export default function OrderDetail() {
   const saveMutation = useMutation({
     mutationFn: (data: Record<string, any>) => ordersApi.update(id!, data),
     onSuccess: () => {
+      setIsDirty(false);
       qc.invalidateQueries({ queryKey: ["order-detail", id] });
       qc.invalidateQueries({ queryKey: ["orders-v2"] });
     },
@@ -120,7 +124,7 @@ export default function OrderDetail() {
     });
   };
 
-  const field = (f: Partial<FormState>) => setForm(prev => prev ? { ...prev, ...f } : prev);
+  const field = (f: Partial<FormState>) => { setForm(prev => prev ? { ...prev, ...f } : prev); setIsDirty(true); };
 
   const statusColor = ALL_STATUSES.find(s => s.value === form?.status)?.color || "#1A1A1A";
   const brandColor = BRANDS.find(b => b.value === form?.brand)?.color || "#A89070";
@@ -131,6 +135,7 @@ export default function OrderDetail() {
   }
 
   return (
+    <>
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
 
       {/* Top bar */}
@@ -428,5 +433,8 @@ export default function OrderDetail() {
         </div>
       </div>
     </div>
+
+    <NavigationGuardModal blocker={blocker} />
+    </>
   );
 }
