@@ -380,6 +380,7 @@ export default function EstimateEditor() {
   const [pendingSwitchId, setPendingSwitchId] = useState<string | null>(null);
   const [editingSetId, setEditingSetId] = useState<string | null>(null);
   const [editingSetName, setEditingSetName] = useState("");
+  const [confirmDeleteSet, setConfirmDeleteSet] = useState(false);
   const blocker = useNavigationGuard(editMode);
 
   const switchSet = (id: string) => {
@@ -538,18 +539,30 @@ export default function EstimateEditor() {
                       }}
                     />
                   ) : (
-                    <button
-                      onClick={() => isActive
-                        ? (setEditingSetId(s.id), setEditingSetName(s.title || ""))
-                        : switchSet(s.id)
-                      }
-                      title={isActive ? "Нажмите для переименования" : undefined}
-                      style={{
-                        padding: "3px 8px", fontSize: 11, cursor: "pointer",
-                        border: "none", background: "transparent",
-                        color: isActive ? "#E8592A" : "#A89070",
-                      }}
-                    >{label}</button>
+                    <>
+                      <button
+                        onClick={() => isActive
+                          ? (setEditingSetId(s.id), setEditingSetName(s.title || ""))
+                          : switchSet(s.id)
+                        }
+                        title={isActive ? "Нажмите для переименования" : undefined}
+                        style={{
+                          padding: editMode && isActive ? "3px 4px 3px 8px" : "3px 8px",
+                          fontSize: 11, cursor: "pointer",
+                          border: "none", background: "transparent",
+                          color: isActive ? "#E8592A" : "#A89070",
+                        }}
+                      >{label}</button>
+                      {editMode && isActive && (
+                        <button
+                          onClick={() => setConfirmDeleteSet(true)}
+                          title="Удалить смету"
+                          style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: "2px 6px 2px 0", display: "flex", alignItems: "center", fontSize: 14, lineHeight: 1 }}
+                          onMouseEnter={e => (e.currentTarget.style.color = "#8B3A3A")}
+                          onMouseLeave={e => (e.currentTarget.style.color = "#C8C0B0")}
+                        >×</button>
+                      )}
+                    </>
                   )}
                 </div>
               );
@@ -869,6 +882,41 @@ export default function EstimateEditor() {
       )}
     </div>
     <NavigationGuardModal blocker={blocker} />
+
+    {/* Confirm delete estimate set */}
+    {confirmDeleteSet && (
+      <div style={{ position: "fixed", inset: 0, zIndex: 2000, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ background: "#FFF", width: 380, padding: "28px 32px", boxShadow: "0 8px 40px rgba(0,0,0,0.2)" }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "#1A1A1A", marginBottom: 8, letterSpacing: "-0.02em" }}>
+            Удалить смету?
+          </div>
+          <div style={{ fontSize: 13, color: "#6B6355", marginBottom: 24, lineHeight: 1.6 }}>
+            Смета «{activeSet?.title || `Смета ${(sets as any[]).findIndex((s: any) => s.id === activeSetId) + 1}`}» и все её позиции будут удалены без возможности восстановления.
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button
+              onClick={async () => {
+                const remaining = (sets as any[]).filter((s: any) => s.id !== activeSetId);
+                await estimatesApi.deleteSet(activeSetId!);
+                setConfirmDeleteSet(false);
+                setEditMode(false);
+                setSelectedSetId(remaining[0]?.id ?? null);
+                refetch();
+              }}
+              style={{ flex: 1, background: "#8B3A3A", color: "#FFF", border: "none", padding: "9px 0", fontSize: 12, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
+            >
+              Удалить
+            </button>
+            <button
+              onClick={() => setConfirmDeleteSet(false)}
+              style={{ flex: 1, background: "none", border: "1px solid #EDEBE6", padding: "9px 0", fontSize: 12, cursor: "pointer", fontFamily: "inherit", color: "#1A1A1A", fontWeight: 600 }}
+            >
+              Отмена
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
 
     {/* Confirm switching estimate while in edit mode */}
     {pendingSwitchId && (
