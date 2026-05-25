@@ -65,6 +65,7 @@ class ItemCreate(BaseModel):
 class ItemUpdate(BaseModel):
     title: Optional[str] = None
     category: Optional[str] = None
+    brand: Optional[str] = None
     markup: Optional[float] = None
     quantity: Optional[int] = None
     sort_order: Optional[int] = None
@@ -213,6 +214,50 @@ def delete_item(item_id: str):
         conn.execute("DELETE FROM estimate_items WHERE id = ?", (item_id,))
         conn.commit()
         return {"ok": True}
+    finally:
+        conn.close()
+
+
+@router.post("/items/{item_id}/to-catalog")
+def sync_item_to_catalog(item_id: str):
+    conn = get_production()
+    try:
+        item = conn.execute("SELECT * FROM estimate_items WHERE id = ?", (item_id,)).fetchone()
+        if not item:
+            raise HTTPException(status_code=404, detail="Not found")
+        item = dict(item)
+        now = _now()
+        catalog_id = item.get("catalog_item_id")
+
+        if catalog_id and conn.execute("SELECT id FROM catalog_items WHERE id = ?", (catalog_id,)).fetchone():
+            conn.execute(
+                "UPDATE catalog_items SET title=?, brand=?, cost_total=?, sale_price=?, updated_at=? WHERE id=?",
+                (item["title"] or "Без названия", item.get("brand"), item["cost_total"], item["sale_price"], now, catalog_id)
+            )
+            conn.execute("DELETE FROM catalog_item_lines WHERE item_id = ?", (catalog_id,))
+        else:
+            catalog_id = str(uuid.uuid4())
+            markup_pct = round((item.get("markup") or 2.0) * 100 - 100, 1)
+            conn.execute(
+                """INSERT INTO catalog_items (id, title, brand, category, markup_pct, cost_total, sale_price, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (catalog_id, item["title"] or "Без названия", item.get("brand"), item.get("category"),
+                 markup_pct, item["cost_total"], item["sale_price"], now, now)
+            )
+            conn.execute("UPDATE estimate_items SET catalog_item_id=? WHERE id=?", (catalog_id, item_id))
+
+        lines = conn.execute(
+            "SELECT * FROM estimate_lines WHERE item_id = ? ORDER BY sort_order", (item_id,)
+        ).fetchall()
+        for i, line in enumerate(lines):
+            conn.execute(
+                """INSERT INTO catalog_item_lines (id, item_id, type, title, qty, unit, unit_price, line_total, sort_order)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (str(uuid.uuid4()), catalog_id, line["type"], line["title"],
+                 line["qty"], line["unit"], line["unit_price"], line["line_total"], i)
+            )
+        conn.commit()
+        return {"catalog_item_id": catalog_id}
     finally:
         conn.close()
 

@@ -54,6 +54,32 @@ def ensure_orders_schema():
         conn.close()
 
 
+def ensure_catalog_schema():
+    conn = get_production()
+    try:
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(catalog_items)").fetchall()}
+        if existing and "brand" not in existing:
+            conn.execute("ALTER TABLE catalog_items ADD COLUMN brand TEXT")
+            conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_estimate_items_schema():
+    conn = get_production()
+    try:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        if "estimate_items" not in tables:
+            return
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(estimate_items)").fetchall()}
+        for col in ("brand", "catalog_item_id"):
+            if col not in existing:
+                conn.execute(f"ALTER TABLE estimate_items ADD COLUMN {col} TEXT")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_payee_rules_schema():
     conn = get_production()
     try:

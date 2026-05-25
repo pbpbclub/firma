@@ -81,6 +81,12 @@ function EditCell({
   );
 }
 
+const BRANDS = [
+  { value: "MeRA",    color: "#2E6DA4" },
+  { value: "pbpb",    color: "#7B4F9E" },
+  { value: "Транзит", color: "#3D8C6B" },
+];
+
 // ── Item detail modal ────────────────────────────────────────────────────────
 
 function ItemModal({ item, onClose, onRefetch }: {
@@ -90,6 +96,8 @@ function ItemModal({ item, onClose, onRefetch }: {
 }) {
   const lines: any[] = item.lines ?? [];
   const gridCols = "20px 1fr 52px 68px 88px 80px 24px";
+  const [syncing, setSyncing] = useState(false);
+  const [synced, setSynced] = useState(false);
 
   const save = (fn: () => Promise<any>) => fn().then(onRefetch);
 
@@ -98,6 +106,18 @@ function ItemModal({ item, onClose, onRefetch }: {
       estimatesApi.addLine(item.id, { type: "material", title: "", qty: 1, unit: "шт", unit_price: 0 }).then(onRefetch);
     }
   }, []);
+
+  const handleSyncToCatalog = async () => {
+    setSyncing(true);
+    try {
+      await estimatesApi.syncToCatalog(item.id);
+      await onRefetch();
+      setSynced(true);
+      setTimeout(() => setSynced(false), 2000);
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   return (
     <div
@@ -117,6 +137,21 @@ function ItemModal({ item, onClose, onRefetch }: {
               onSave={v => save(() => estimatesApi.updateItem(item.id, { title: v }))}
               style={{ fontSize: 15, fontWeight: 700 }}
             />
+          </div>
+          {/* Brand selector */}
+          <div style={{ display: "flex", gap: 4 }}>
+            {BRANDS.map(b => (
+              <button
+                key={b.value}
+                onClick={() => save(() => estimatesApi.updateItem(item.id, { brand: item.brand === b.value ? null : b.value }))}
+                style={{
+                  padding: "2px 8px", fontSize: 10, cursor: "pointer", fontWeight: 600,
+                  border: `1px solid ${item.brand === b.value ? b.color : "#EDEBE6"}`,
+                  background: item.brand === b.value ? b.color : "transparent",
+                  color: item.brand === b.value ? "#FFFFFF" : "#A89070",
+                }}
+              >{b.value}</button>
+            ))}
           </div>
           <button
             onClick={onClose}
@@ -157,7 +192,6 @@ function ItemModal({ item, onClose, onRefetch }: {
                 >
                   <Icon size={12} />
                 </button>
-
                 <div style={{ fontSize: 12, color: "#1A1A1A" }}>
                   <EditCell
                     value={line.title}
@@ -213,8 +247,24 @@ function ItemModal({ item, onClose, onRefetch }: {
           </button>
         </div>
 
-        {/* Modal footer: totals */}
-        <div style={{ padding: "12px 20px", borderTop: "1px solid #EDEBE6", background: "#FAF8F5", display: "flex", justifyContent: "flex-end" }}>
+        {/* Modal footer: totals + catalog save */}
+        <div style={{ padding: "12px 20px", borderTop: "1px solid #EDEBE6", background: "#FAF8F5", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <button
+            onClick={handleSyncToCatalog}
+            disabled={syncing}
+            style={{
+              fontSize: 11, fontWeight: 600, cursor: syncing ? "default" : "pointer",
+              border: `1px solid ${synced ? "#4A7C59" : "#EDEBE6"}`,
+              background: synced ? "#4A7C59" : "transparent",
+              color: synced ? "#FFFFFF" : syncing ? "#C8C0B0" : "#6B6355",
+              padding: "4px 10px", display: "flex", alignItems: "center", gap: 4,
+            }}
+            onMouseEnter={e => { if (!syncing && !synced) (e.currentTarget as HTMLElement).style.borderColor = "#1A1A1A"; }}
+            onMouseLeave={e => { if (!synced) (e.currentTarget as HTMLElement).style.borderColor = "#EDEBE6"; }}
+          >
+            <Package size={11} />
+            {synced ? "Сохранено ✓" : item.catalog_item_id ? "Обновить в каталоге" : "Сохранить в каталог"}
+          </button>
           <div style={{ textAlign: "right" }}>
             <div style={{ fontSize: 10, color: "#A89070", marginBottom: 2 }}>СЕБЕСТОИМОСТЬ</div>
             <div style={{ fontSize: 14, fontWeight: 600, color: "#6B6355" }}>{fmt(item.cost_total)}</div>
@@ -325,6 +375,7 @@ export default function EstimateEditor() {
   const [openItemId, setOpenItemId] = useState<string | null>(null);
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [invoicing, setInvoicing] = useState(false);
+  const [editMode, setEditMode] = useState(false);
 
   const { data: order } = useQuery({
     queryKey: ["order-detail-v2", orderId],
@@ -516,6 +567,24 @@ export default function EstimateEditor() {
                 <FileText size={12} />
                 {invoicing ? "..." : "Счёт"}
               </button>
+
+              <div style={{ width: 1, height: 18, background: "#EDEBE6" }} />
+
+              {editMode ? (
+                <button
+                  onClick={() => setEditMode(false)}
+                  style={{ padding: "4px 14px", fontSize: 11, fontWeight: 600, border: "none", background: "#4A7C59", color: "#FFFFFF", cursor: "pointer", whiteSpace: "nowrap" }}
+                >
+                  Сохранить
+                </button>
+              ) : (
+                <button
+                  onClick={() => setEditMode(true)}
+                  style={{ padding: "4px 14px", fontSize: 11, fontWeight: 600, border: "1px solid #1A1A1A", background: "transparent", color: "#1A1A1A", cursor: "pointer", whiteSpace: "nowrap" }}
+                >
+                  Редактировать
+                </button>
+              )}
             </>
           ) : (
             <button
@@ -626,7 +695,7 @@ export default function EstimateEditor() {
                   +{fmt((item.sale_price || 0) - (item.cost_total || 0))}
                 </div>
 
-                {/* Actions: open calculator + delete */}
+                {/* Actions: open calculator + (edit mode) delete */}
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 4 }}>
                   <button
                     onClick={e => { e.stopPropagation(); setOpenItemId(item.id); }}
@@ -637,20 +706,22 @@ export default function EstimateEditor() {
                   >
                     <Cube size={13} />
                   </button>
-                  <button
-                    onClick={e => { e.stopPropagation(); estimatesApi.deleteItem(item.id).then(() => refetch()); }}
-                    style={{ background: "none", border: "none", cursor: "pointer", color: "#D0C8C0", padding: 2, display: "flex" }}
-                    onMouseEnter={e => (e.currentTarget.style.color = "#8B3A3A")}
-                    onMouseLeave={e => (e.currentTarget.style.color = "#D0C8C0")}
-                  >
-                    <Trash size={13} />
-                  </button>
+                  {editMode && (
+                    <button
+                      onClick={e => { e.stopPropagation(); estimatesApi.deleteItem(item.id).then(() => refetch()); }}
+                      style={{ background: "none", border: "none", cursor: "pointer", color: "#D0C8C0", padding: 2, display: "flex" }}
+                      onMouseEnter={e => (e.currentTarget.style.color = "#8B3A3A")}
+                      onMouseLeave={e => (e.currentTarget.style.color = "#D0C8C0")}
+                    >
+                      <Trash size={13} />
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
 
-            {/* Add row — always visible */}
-            <div style={{ padding: "10px 28px", display: "flex", gap: 10 }}>
+            {/* Add row — visible in edit mode */}
+            {editMode && <div style={{ padding: "10px 28px", display: "flex", gap: 10 }}>
               <button
                 onClick={addItemInline}
                 style={{ background: "none", border: "1px solid #EDEBE6", cursor: "pointer", fontSize: 12, color: "#6B6355", padding: "6px 12px", display: "flex", alignItems: "center", gap: 5 }}
@@ -667,7 +738,7 @@ export default function EstimateEditor() {
               >
                 <Package size={11} /> Из каталога
               </button>
-            </div>
+            </div>}
           </div>
 
           {/* ─ Footer totals ──────────────────────────────────────────────── */}

@@ -50,6 +50,7 @@ class LineIn(BaseModel):
 class ItemIn(BaseModel):
     title: str
     category: Optional[str] = None
+    brand: Optional[str] = None
     markup_pct: float = 30
     notes: Optional[str] = None
     lines: List[LineIn] = []
@@ -143,9 +144,9 @@ def create_item(body: ItemIn):
         sale_price = cost_total * (1 + body.markup_pct / 100)
         now = datetime.utcnow().isoformat()
         conn.execute(
-            """INSERT INTO catalog_items (id, title, category, markup_pct, cost_total, sale_price, notes, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (item_id, body.title, body.category, body.markup_pct, cost_total, sale_price, body.notes, now, now)
+            """INSERT INTO catalog_items (id, title, category, brand, markup_pct, cost_total, sale_price, notes, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (item_id, body.title, body.category, body.brand, body.markup_pct, cost_total, sale_price, body.notes, now, now)
         )
         for i, line in enumerate(body.lines):
             conn.execute(
@@ -176,9 +177,9 @@ def update_item(item_id: str, body: ItemIn):
         sale_price = cost_total * (1 + body.markup_pct / 100)
         now = datetime.utcnow().isoformat()
         conn.execute(
-            """UPDATE catalog_items SET title=?, category=?, markup_pct=?, cost_total=?, sale_price=?, notes=?, updated_at=?
+            """UPDATE catalog_items SET title=?, category=?, brand=?, markup_pct=?, cost_total=?, sale_price=?, notes=?, updated_at=?
                WHERE id=?""",
-            (body.title, body.category, body.markup_pct, cost_total, sale_price, body.notes, now, item_id)
+            (body.title, body.category, body.brand, body.markup_pct, cost_total, sale_price, body.notes, now, item_id)
         )
         conn.execute("DELETE FROM catalog_item_lines WHERE item_id = ?", (item_id,))
         for i, line in enumerate(body.lines):

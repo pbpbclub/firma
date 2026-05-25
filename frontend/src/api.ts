@@ -107,6 +107,7 @@ export const estimatesApi = {
     api.post("/estimates/items/from-catalog", { set_id: setId, catalog_item_id: catalogItemId }).then(r => r.data),
   invoice:     (setId: string)              =>
     api.post(`/estimates/sets/${setId}/invoice`, {}, { responseType: "blob" }).then(r => r.data),
+  syncToCatalog: (itemId: string)           => api.post(`/estimates/items/${itemId}/to-catalog`).then(r => r.data),
 };
 
 export const mastersApi = {

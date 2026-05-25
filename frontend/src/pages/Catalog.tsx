@@ -134,6 +134,7 @@ interface CatalogItem {
   id: string;
   title: string;
   category: string | null;
+  brand: string | null;
   markup_pct: number;
   cost_total: number;
   sale_price: number;
@@ -738,7 +739,16 @@ export default function Catalog() {
               <div style={{ display: "flex", alignItems: "center" }}>
                 <Checkbox checked={selectedIds.has(item.id)} onChange={() => toggleSelect(item.id)} />
               </div>
-              <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>{item.title}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>{item.title}</span>
+                {item.brand && (
+                  <span style={{
+                    fontSize: 9, fontWeight: 700, padding: "1px 5px",
+                    color: item.brand === "MeRA" ? "#2E6DA4" : item.brand === "pbpb" ? "#7B4F9E" : "#3D8C6B",
+                    border: `1px solid ${item.brand === "MeRA" ? "#2E6DA4" : item.brand === "pbpb" ? "#7B4F9E" : "#3D8C6B"}`,
+                  }}>{item.brand}</span>
+                )}
+              </div>
               <div style={{ fontSize: 12, color: "#A89070" }}>{item.category || "—"}</div>
               <div style={{ fontSize: 12, color: "#6B6355" }}>{fmt(item.cost_total)}</div>
               <div style={{ fontSize: 13, fontWeight: 700, color: "#E8592A" }}>{fmt(item.sale_price)}</div>
