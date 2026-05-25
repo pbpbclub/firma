@@ -688,6 +688,30 @@ export default function EstimateEditor() {
         </div>
       ) : (
         <>
+          {/* ─ Metadata strip ─────────────────────────────────────────────── */}
+          {activeSet && (() => {
+            const fmtSetDate = (iso: string) => {
+              if (!iso) return "—";
+              const d = new Date(iso);
+              const now = new Date();
+              const isToday = d.toDateString() === now.toDateString();
+              const isThisYear = d.getFullYear() === now.getFullYear();
+              const time = d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+              const day = d.toLocaleDateString("ru-RU", { day: "numeric", month: "short", ...(!isThisYear ? { year: "numeric" } : {}) });
+              return isToday ? `сегодня в ${time}` : `${day} в ${time}`;
+            };
+            return (
+              <div style={{ padding: "4px 28px", display: "flex", gap: 16, flexShrink: 0, borderBottom: "1px solid #F2EFE9" }}>
+                <span style={{ fontSize: 10, color: "#C8C0B0" }}>
+                  Создана: <span style={{ color: "#A89070" }}>{fmtSetDate(activeSet.created_at)}</span>
+                </span>
+                <span style={{ fontSize: 10, color: "#C8C0B0" }}>
+                  Изменена: <span style={{ color: "#A89070" }}>{fmtSetDate(activeSet.updated_at)}</span>
+                </span>
+              </div>
+            );
+          })()}
+
           {/* ─ Column headers ─────────────────────────────────────────────── */}
           <div style={{ display: "grid", gridTemplateColumns: colsMain, padding: "7px 28px", gap: 12, borderBottom: "1px solid #EDEBE6", flexShrink: 0 }}>
             {["Позиция", "Кол-во", "Наценка", "Себестоимость", "Клиенту", "Δ Доход", ""].map((h, i) => (

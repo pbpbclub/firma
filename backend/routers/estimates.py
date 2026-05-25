@@ -36,6 +36,14 @@ def _now():
     return datetime.utcnow().isoformat()
 
 
+def _touch_set(conn, item_id: str):
+    conn.execute(
+        """UPDATE estimate_sets SET updated_at = datetime('now')
+           WHERE id = (SELECT set_id FROM estimate_items WHERE id = ?)""",
+        (item_id,)
+    )
+
+
 # ─── Models ─────────────────────────────────────────────────────────────────
 
 class SetCreate(BaseModel):
@@ -198,6 +206,7 @@ def update_item(item_id: str, body: ItemUpdate):
             conn.execute("UPDATE estimate_items SET sale_price = ? WHERE id = ?", (sale, item_id))
         elif "markup" in fields or "quantity" in fields:
             _recalc_item(conn, item_id)
+        _touch_set(conn, item_id)
         conn.commit()
         return dict(conn.execute("SELECT * FROM estimate_items WHERE id = ?", (item_id,)).fetchone())
     finally:
@@ -210,6 +219,7 @@ def delete_item(item_id: str):
     try:
         if not conn.execute("SELECT id FROM estimate_items WHERE id = ?", (item_id,)).fetchone():
             raise HTTPException(status_code=404, detail="Not found")
+        _touch_set(conn, item_id)
         conn.execute("DELETE FROM estimate_lines WHERE item_id = ?", (item_id,))
         conn.execute("DELETE FROM estimate_items WHERE id = ?", (item_id,))
         conn.commit()
@@ -278,6 +288,7 @@ def add_line(item_id: str, body: LineCreate):
             (line_id, item_id, body.type, body.title, body.qty, body.unit, body.unit_price, line_total, body.sort_order, _now())
         )
         _recalc_item(conn, item_id)
+        _touch_set(conn, item_id)
         conn.commit()
         return dict(conn.execute("SELECT * FROM estimate_lines WHERE id = ?", (line_id,)).fetchone())
     finally:
@@ -302,6 +313,7 @@ def update_line(line_id: str, body: LineUpdate):
             list(fields.values()) + [line_id]
         )
         _recalc_item(conn, row["item_id"])
+        _touch_set(conn, row["item_id"])
         conn.commit()
         return dict(conn.execute("SELECT * FROM estimate_lines WHERE id = ?", (line_id,)).fetchone())
     finally:
@@ -318,6 +330,7 @@ def delete_line(line_id: str):
         item_id = row["item_id"]
         conn.execute("DELETE FROM estimate_lines WHERE id = ?", (line_id,))
         _recalc_item(conn, item_id)
+        _touch_set(conn, item_id)
         conn.commit()
         return {"ok": True}
     finally:
