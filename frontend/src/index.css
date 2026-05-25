@@ -30,3 +30,8 @@
     @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
   }
 }
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

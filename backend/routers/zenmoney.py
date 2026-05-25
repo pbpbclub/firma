@@ -3,9 +3,27 @@ from typing import Optional
 from db import get_zenmoney, get_analytics, get_production
 import json
 import re
+import subprocess
 from datetime import datetime, timedelta
 
 router = APIRouter()
+
+
+@router.post("/sync")
+def sync_zenmoney():
+    """Принудительная синхронизация с ZenMoney API."""
+    try:
+        result = subprocess.run(
+            ["python3", "/opt/fin-agent/tools/zenmoney.py", "sync"],
+            capture_output=True, text=True, timeout=60
+        )
+        if result.returncode != 0:
+            return {"ok": False, "error": result.stderr.strip() or "sync failed"}
+        return {"ok": True, "output": result.stdout.strip()}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "timeout (60s)"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 @router.get("/accounts")

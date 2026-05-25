@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { UploadSimple, CheckCircle, WarningCircle, X, Plus } from "@phosphor-icons/react";
-import { adminApi, authApi } from "../api";
+import { UploadSimple, CheckCircle, WarningCircle, X, Plus, ArrowsClockwise } from "@phosphor-icons/react";
+import { adminApi, authApi, zenmoneyApi } from "../api";
 
 function fmt(n: number | null | undefined) {
   if (n == null) return "—";
@@ -177,7 +177,70 @@ function SystemSection() {
   );
 }
 
-// ── Users ────────────────────────────────────────────────────────────────────
+// ── ZenMoney Sync ─────────────────────────────────────────────────────────────
+
+function ZenMoneySyncSection() {
+  const qc = useQueryClient();
+  const sync = useMutation({
+    mutationFn: zenmoneyApi.sync,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["zm-accounts"] });
+      qc.invalidateQueries({ queryKey: ["zm-cashflow"] });
+      qc.invalidateQueries({ queryKey: ["zm-report"] });
+      qc.invalidateQueries({ queryKey: ["zm-transactions"] });
+      qc.invalidateQueries({ queryKey: ["zm-business"] });
+    },
+  });
+
+  return (
+    <div style={{ marginBottom: 40 }}>
+      <SectionLabel>ZENMONEY — ЛИЧНЫЕ ФИНАНСЫ</SectionLabel>
+      <div style={{ border: "1px solid #EDEBE6", padding: "16px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <div style={{ fontSize: 13, color: "#1A1A1A", marginBottom: 3 }}>Синхронизация с ZenMoney</div>
+            <div style={{ fontSize: 11, color: "#A89070" }}>
+              Автоматически раз в час. Кнопка — принудительно сейчас.
+            </div>
+            {sync.isError && (
+              <div style={{ fontSize: 11, color: "#8B3A3A", marginTop: 6 }}>
+                {(sync.error as any)?.message || "Ошибка синхронизации"}
+              </div>
+            )}
+            {sync.isSuccess && (sync.data as any)?.ok === false && (
+              <div style={{ fontSize: 11, color: "#8B3A3A", marginTop: 6 }}>
+                {(sync.data as any)?.error}
+              </div>
+            )}
+            {sync.isSuccess && (sync.data as any)?.ok === true && (
+              <div style={{ fontSize: 11, color: "#4A7C59", marginTop: 6 }}>Готово</div>
+            )}
+          </div>
+          <button
+            onClick={() => sync.mutate()}
+            disabled={sync.isPending}
+            style={{
+              display: "flex", alignItems: "center", gap: 6,
+              background: sync.isPending ? "#F2EFE9" : "#1A1A1A",
+              color: sync.isPending ? "#A89070" : "#FFFFFF",
+              border: "none", padding: "8px 16px",
+              cursor: sync.isPending ? "default" : "pointer",
+              fontSize: 12, fontFamily: "inherit",
+            }}
+          >
+            <ArrowsClockwise
+              size={13}
+              style={{ animation: sync.isPending ? "spin 1s linear infinite" : "none" }}
+            />
+            {sync.isPending ? "Синхронизация..." : "Синхронизировать"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Users ─────────────────────────────────────────────────────────────────────
 
 function UsersSection() {
   const qc = useQueryClient();
@@ -523,6 +586,7 @@ export default function Admin() {
 
       <UploadSection />
       <ImportsSection />
+      <ZenMoneySyncSection />
       <SystemSection />
       <UsersSection />
       <PasswordSection />

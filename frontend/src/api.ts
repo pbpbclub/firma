@@ -123,6 +123,7 @@ export const zenmoneyApi = {
     api.get("/zenmoney/cashflow", { params: months ? { months } : {} }).then((r) => r.data),
   business: (months?: number) =>
     api.get("/zenmoney/business", { params: months ? { months } : {} }).then((r) => r.data),
+  sync: () => api.post("/zenmoney/sync").then((r) => r.data),
 };
 
 export const adminApi = {

@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Briefcase, MagnifyingGlass, Funnel, X } from "@phosphor-icons/react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Briefcase, MagnifyingGlass, Funnel, X, ArrowsClockwise } from "@phosphor-icons/react";
 import { zenmoneyApi } from "../api";
 
 function ColumnFilter({ options, value, onChange, maxHeight }: {
@@ -192,8 +192,20 @@ function getCurrentMonth() {
 }
 
 export default function ZenMoneyPage() {
+  const queryClient = useQueryClient();
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth);
   const [showBusiness, setShowBusiness] = useState(false);
+
+  const syncMutation = useMutation({
+    mutationFn: zenmoneyApi.sync,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["zm-accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["zm-cashflow"] });
+      queryClient.invalidateQueries({ queryKey: ["zm-report"] });
+      queryClient.invalidateQueries({ queryKey: ["zm-transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["zm-business"] });
+    },
+  });
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState("");
   const [payeeFilter, setPayeeFilter] = useState("");
@@ -329,6 +341,25 @@ export default function ZenMoneyPage() {
               Личные финансы
             </div>
             <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+              {/* Sync button */}
+              <button
+                onClick={() => syncMutation.mutate()}
+                disabled={syncMutation.isPending}
+                title="Синхронизировать с ZenMoney"
+                style={{
+                  display: "flex", alignItems: "center", gap: 5,
+                  background: "none", border: "1px solid #EDEBE6",
+                  padding: "4px 10px", cursor: syncMutation.isPending ? "default" : "pointer",
+                  fontSize: 12, color: syncMutation.isError ? "#8B3A3A" : syncMutation.isSuccess ? "#4A7C59" : "#6B6355",
+                  opacity: syncMutation.isPending ? 0.6 : 1,
+                }}
+              >
+                <ArrowsClockwise
+                  size={13}
+                  style={{ animation: syncMutation.isPending ? "spin 1s linear infinite" : "none" }}
+                />
+                {syncMutation.isPending ? "Синхронизация..." : syncMutation.isError ? "Ошибка" : "Синхронизировать"}
+              </button>
               {/* Month picker */}
               {!showBusiness && (
                 <select
