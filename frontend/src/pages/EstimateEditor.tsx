@@ -633,61 +633,78 @@ export default function EstimateEditor() {
               >
                 {/* Title */}
                 <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }} onClick={e => e.stopPropagation()}>
-                  <EditCell
-                    value={item.title}
-                    placeholder="Без названия"
-                    onSave={v => estimatesApi.updateItem(item.id, { title: v }).then(() => refetch())}
-                  />
+                  {editMode ? (
+                    <EditCell
+                      value={item.title}
+                      placeholder="Без названия"
+                      onSave={v => estimatesApi.updateItem(item.id, { title: v }).then(() => refetch())}
+                    />
+                  ) : (
+                    item.title || <span style={{ color: "#C8C0B0" }}>Без названия</span>
+                  )}
                 </div>
 
                 {/* Qty */}
-                <div onClick={e => e.stopPropagation()} style={{ fontSize: 13, color: "#1A1A1A", fontWeight: 500 }}>
-                  <EditCell
-                    value={item.quantity ?? 1}
-                    numeric
-                    onSave={v => estimatesApi.updateItem(item.id, { quantity: parseInt(v) || 1 }).then(() => refetch())}
-                  />
+                <div style={{ fontSize: 13, color: "#1A1A1A", fontWeight: 500 }}>
+                  {editMode ? (
+                    <EditCell
+                      value={item.quantity ?? 1}
+                      numeric
+                      onSave={v => estimatesApi.updateItem(item.id, { quantity: parseInt(v) || 1 }).then(() => refetch())}
+                    />
+                  ) : (
+                    item.quantity ?? 1
+                  )}
                 </div>
 
                 {/* Markup */}
-                <div onClick={e => e.stopPropagation()} style={{ fontSize: 12, color: "#6B6355" }}>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
-                    ×<EditCell
-                      value={item.markup ?? 2}
-                      numeric
-                      onSave={v => estimatesApi.updateItem(item.id, { markup: parseFloat(v) || 1 }).then(() => refetch())}
-                    />
-                  </span>
+                <div style={{ fontSize: 12, color: "#6B6355" }}>
+                  {editMode ? (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+                      ×<EditCell
+                        value={item.markup ?? 2}
+                        numeric
+                        onSave={v => estimatesApi.updateItem(item.id, { markup: parseFloat(v) || 1 }).then(() => refetch())}
+                      />
+                    </span>
+                  ) : (
+                    `×${item.markup ?? 2}`
+                  )}
                 </div>
 
                 {/* Cost */}
-                <div onClick={e => e.stopPropagation()} style={{ fontSize: 13, color: "#6B6355", textAlign: "right" }}>
-                  <EditCell
-                    value={item.cost_total ?? 0}
-                    numeric
-                    display={fmt(item.cost_total)}
-                    style={{ textAlign: "right" }}
-                    onSave={v => {
-                      const cost = parseFloat(v) || 0;
-                      estimatesApi.updateItem(item.id, { cost_total: cost }).then(() => refetch());
-                    }}
-                  />
+                <div style={{ fontSize: 13, color: "#6B6355", textAlign: "right" }}>
+                  {editMode ? (
+                    <EditCell
+                      value={item.cost_total ?? 0}
+                      numeric
+                      display={fmt(item.cost_total)}
+                      style={{ textAlign: "right" }}
+                      onSave={v => estimatesApi.updateItem(item.id, { cost_total: parseFloat(v) || 0 }).then(() => refetch())}
+                    />
+                  ) : (
+                    fmt(item.cost_total)
+                  )}
                 </div>
 
                 {/* Sale price / Клиенту */}
-                <div onClick={e => e.stopPropagation()} style={{ fontSize: 13, fontWeight: 700, color: "#1A1A1A", textAlign: "right" }}>
-                  <EditCell
-                    value={item.sale_price ?? 0}
-                    numeric
-                    display={fmt(item.sale_price)}
-                    style={{ fontWeight: 700, textAlign: "right" }}
-                    onSave={v => {
-                      const entered = parseFloat(v) || 0;
-                      const cost = item.cost_total || 0;
-                      const newMarkup = cost > 0 ? Math.round((entered / cost) * 1000) / 1000 : 1;
-                      estimatesApi.updateItem(item.id, { markup: newMarkup }).then(() => refetch());
-                    }}
-                  />
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#1A1A1A", textAlign: "right" }}>
+                  {editMode ? (
+                    <EditCell
+                      value={item.sale_price ?? 0}
+                      numeric
+                      display={fmt(item.sale_price)}
+                      style={{ fontWeight: 700, textAlign: "right" }}
+                      onSave={v => {
+                        const entered = parseFloat(v) || 0;
+                        const cost = item.cost_total || 0;
+                        const newMarkup = cost > 0 ? Math.round((entered / cost) * 1000) / 1000 : 1;
+                        estimatesApi.updateItem(item.id, { markup: newMarkup }).then(() => refetch());
+                      }}
+                    />
+                  ) : (
+                    fmt(item.sale_price)
+                  )}
                 </div>
 
                 {/* Delta */}
