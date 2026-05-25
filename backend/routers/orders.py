@@ -106,7 +106,7 @@ def get_order(order_id: str):
         ).fetchall()
 
         estimate_sets = conn.execute(
-            "SELECT * FROM estimate_sets WHERE order_id = ? ORDER BY created_at DESC",
+            "SELECT * FROM estimate_sets WHERE order_id = ? ORDER BY created_at ASC",
             (oid,),
         ).fetchall()
 
@@ -150,7 +150,7 @@ def get_estimate(order_id: str):
             return {"error": "not found"}
 
         sets = conn.execute(
-            "SELECT * FROM estimate_sets WHERE order_id = ? ORDER BY created_at DESC",
+            "SELECT * FROM estimate_sets WHERE order_id = ? ORDER BY created_at ASC",
             (order["id"],),
         ).fetchall()
 
