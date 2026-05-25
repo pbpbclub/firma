@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ordersApi, estimatesApi, catalogApi } from "../api";
+import { useNavigationGuard, NavigationGuardModal } from "../components/NavigationGuard";
 import {
   ArrowLeft, Plus, Trash, Package, Wrench, Truck, Cube,
   X, FileText,
@@ -376,6 +377,7 @@ export default function EstimateEditor() {
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [invoicing, setInvoicing] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  const blocker = useNavigationGuard(editMode);
 
   const { data: order } = useQuery({
     queryKey: ["order-detail-v2", orderId],
@@ -453,6 +455,7 @@ export default function EstimateEditor() {
   const colsMain = "1fr 64px 80px 110px 110px 90px 52px";
 
   return (
+    <>
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
 
       {/* ─ Header ─────────────────────────────────────────────────────────── */}
@@ -809,5 +812,7 @@ export default function EstimateEditor() {
         />
       )}
     </div>
+    <NavigationGuardModal blocker={blocker} />
+    </>
   );
 }
