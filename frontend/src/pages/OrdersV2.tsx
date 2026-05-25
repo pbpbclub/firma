@@ -4,6 +4,13 @@ import { useNavigate } from "react-router-dom";
 import { ordersApi, customersApi } from "../api";
 import { MagnifyingGlass, DotsThree, Plus, Files, CaretRight, Archive, ArrowCounterClockwise, CaretDown, Funnel, X, Trash } from "@phosphor-icons/react";
 
+const BRANDS: { value: string; color: string }[] = [
+  { value: "Мира",    color: "#2E6DA4" },
+  { value: "PBPB",    color: "#7B4F9E" },
+  { value: "Транзит", color: "#3D8C6B" },
+];
+const BRAND_COLOR: Record<string, string> = Object.fromEntries(BRANDS.map(b => [b.value, b.color]));
+
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
   draft:         { label: "Черновик",       color: "#A89070" },
   estimate:      { label: "Смета",          color: "#E8592A" },
@@ -126,6 +133,79 @@ function StatusPicker({ orderId, current, onChange }: { orderId: string; current
               onMouseLeave={(e) => { if (s.value !== current) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
             >
               {s.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BrandPicker({ orderId, current, onChange }: { orderId: string; current: string | null; onChange: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const pick = async (value: string | null) => {
+    if (value === current) { setOpen(false); return; }
+    setSaving(true);
+    try {
+      await ordersApi.updateBrand(orderId, value);
+      onChange();
+    } finally {
+      setSaving(false);
+      setOpen(false);
+    }
+  };
+
+  const color = current ? (BRAND_COLOR[current] || "#A89070") : "#A89070";
+
+  return (
+    <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        disabled={saving}
+        style={{
+          display: "flex", alignItems: "center", gap: 5,
+          padding: "5px 10px", border: `1px solid ${current ? color : "#EDEBE6"}`, background: "none",
+          fontSize: 11, cursor: "pointer", color: current ? color : "#A89070", fontWeight: 600,
+        }}
+      >
+        {saving ? "..." : (current || "Бренд")}
+        <CaretDown size={10} style={{ color: "#A89070" }} />
+      </button>
+      {open && (
+        <div style={{
+          position: "absolute", top: "100%", left: 0, marginTop: 2,
+          background: "#fff", border: "1px solid #EDEBE6", zIndex: 100,
+          boxShadow: "0 4px 16px rgba(0,0,0,0.12)", minWidth: 140,
+        }}>
+          <div
+            onClick={() => pick(null)}
+            style={{ padding: "8px 14px", fontSize: 12, cursor: "pointer", color: !current ? "#1A1A1A" : "#A89070", fontWeight: !current ? 700 : 400, background: !current ? "#FAF8F5" : "transparent" }}
+            onMouseEnter={(e) => { if (current) (e.currentTarget as HTMLElement).style.background = "#FAF8F5"; }}
+            onMouseLeave={(e) => { if (current) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+          >
+            Без бренда
+          </div>
+          {BRANDS.map(b => (
+            <div
+              key={b.value}
+              onClick={() => pick(b.value)}
+              style={{ padding: "8px 14px", fontSize: 12, cursor: "pointer", color: b.value === current ? b.color : "#1A1A1A", fontWeight: b.value === current ? 700 : 400, background: b.value === current ? "#FAF8F5" : "transparent" }}
+              onMouseEnter={(e) => { if (b.value !== current) (e.currentTarget as HTMLElement).style.background = "#FAF8F5"; }}
+              onMouseLeave={(e) => { if (b.value !== current) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+            >
+              {b.value}
             </div>
           ))}
         </div>
@@ -298,6 +378,7 @@ function NewOrderModal({ onClose, onCreated }: {
   const [customerId, setCustomerId] = useState("");
   const [deadline, setDeadline] = useState("");
   const [priority, setPriority] = useState("normal");
+  const [brand, setBrand] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [newCustomerName, setNewCustomerName] = useState("");
@@ -317,6 +398,7 @@ function NewOrderModal({ onClose, onCreated }: {
         customer_id: customerId ? parseInt(customerId) : null,
         deadline: deadline || null,
         priority,
+        brand: brand || null,
       });
       qc.invalidateQueries({ queryKey: ["orders-v2"] });
       onCreated(order.id);
@@ -407,6 +489,26 @@ function NewOrderModal({ onClose, onCreated }: {
               </select>
             </div>
           </div>
+          <div>
+            <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 6 }}>БРЕНД</div>
+            <div style={{ display: "flex", gap: 6 }}>
+              {BRANDS.map(b => (
+                <button
+                  key={b.value}
+                  type="button"
+                  onClick={() => setBrand(brand === b.value ? "" : b.value)}
+                  style={{
+                    padding: "5px 14px", border: `1px solid ${brand === b.value ? b.color : "#EDEBE6"}`,
+                    background: brand === b.value ? b.color : "transparent",
+                    color: brand === b.value ? "#FFFFFF" : b.color,
+                    fontSize: 12, cursor: "pointer", fontWeight: 600,
+                  }}
+                >
+                  {b.value}
+                </button>
+              ))}
+            </div>
+          </div>
           {error && <div style={{ fontSize: 11, color: "#8B3A3A" }}>{error}</div>}
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "14px 24px", borderTop: "1px solid #EDEBE6" }}>
@@ -433,7 +535,8 @@ export default function OrdersV2() {
   const [archiving, setArchiving] = useState(false);
   const [customerFilter, setCustomerFilter] = useState("");
   const [titleFilter, setTitleFilter] = useState("");
-  const clearFilters = () => { setCustomerFilter(""); setTitleFilter(""); setAmountMin(""); setAmountMax(""); setPage(0); setSelectedIds(new Set()); };
+  const [brandFilter, setBrandFilter] = useState("");
+  const clearFilters = () => { setCustomerFilter(""); setTitleFilter(""); setAmountMin(""); setAmountMax(""); setBrandFilter(""); setPage(0); setSelectedIds(new Set()); };
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -496,10 +599,11 @@ export default function OrdersV2() {
     let r = allData;
     if (customerFilter) r = r.filter((o: any) => o.customer_name === customerFilter);
     if (titleFilter) r = r.filter((o: any) => o.title === titleFilter);
+    if (brandFilter) r = r.filter((o: any) => o.brand === brandFilter);
     if (amountMin) r = r.filter((o: any) => (o.price_plan || 0) >= parseFloat(amountMin));
     if (amountMax) r = r.filter((o: any) => (o.price_plan || 0) <= parseFloat(amountMax));
     return r;
-  }, [allData, customerFilter, titleFilter, amountMin, amountMax]);
+  }, [allData, customerFilter, titleFilter, brandFilter, amountMin, amountMax]);
   const totalCount = filteredData.length;
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
   const pageData = filteredData.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
@@ -629,9 +733,28 @@ export default function OrdersV2() {
           </div>
         </div>
 
+        {/* Brand filter chips */}
+        <div style={{ padding: "8px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", gap: 6, alignItems: "center" }}>
+          <span style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginRight: 4 }}>БРЕНД</span>
+          {BRANDS.map(b => (
+            <button
+              key={b.value}
+              onClick={() => { setBrandFilter(brandFilter === b.value ? "" : b.value); setPage(0); }}
+              style={{
+                padding: "3px 10px", border: `1px solid ${brandFilter === b.value ? b.color : "#EDEBE6"}`,
+                background: brandFilter === b.value ? b.color : "transparent",
+                color: brandFilter === b.value ? "#FFFFFF" : b.color,
+                fontSize: 11, cursor: "pointer", fontWeight: 600, transition: "all 0.1s",
+              }}
+            >
+              {b.value}
+            </button>
+          ))}
+        </div>
+
         {/* Filter / selection bar — always visible to prevent layout shift */}
         {(() => {
-          const hasFilters = !!(titleFilter || customerFilter || amountMin || amountMax);
+          const hasFilters = !!(titleFilter || customerFilter || brandFilter || amountMin || amountMax);
           const canClear = hasFilters || selectedIds.size > 0;
           const sum = filteredData.reduce((s: number, o: any) => s + (o.price_plan || 0), 0);
           const selSum = filteredData.filter((o: any) => selectedIds.has(o.id)).reduce((s: number, o: any) => s + (o.price_plan || 0), 0);
@@ -754,6 +877,11 @@ export default function OrdersV2() {
                   </div>
                   <div style={{ fontSize: 13, fontWeight: 500, color: isActive ? "#FFFFFF" : "#1A1A1A", lineHeight: 1.4 }}>
                     {o.title}
+                    {o.brand && (
+                      <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.05em", marginTop: 2, color: isActive ? "rgba(255,255,255,0.75)" : (BRAND_COLOR[o.brand] || "#A89070") }}>
+                        {o.brand}
+                      </div>
+                    )}
                   </div>
                   <div style={{
                     width: 28, height: 28,
@@ -847,6 +975,14 @@ export default function OrdersV2() {
                 <StatusPicker
                   orderId={selected.id}
                   current={detail?.status ?? selected.status}
+                  onChange={() => {
+                    qc.invalidateQueries({ queryKey: ["orders-v2"] });
+                    qc.invalidateQueries({ queryKey: ["order-detail-v2", selected.id] });
+                  }}
+                />
+                <BrandPicker
+                  orderId={selected.id}
+                  current={detail?.brand ?? selected.brand ?? null}
                   onChange={() => {
                     qc.invalidateQueries({ queryKey: ["orders-v2"] });
                     qc.invalidateQueries({ queryKey: ["order-detail-v2", selected.id] });

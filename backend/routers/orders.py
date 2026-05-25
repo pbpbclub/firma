@@ -37,7 +37,7 @@ def list_orders(
             SELECT
                 o.id, o.number, o.title, o.status, o.priority,
                 o.deadline, o.price_plan, o.cost_plan, o.created_at,
-                o.archived,
+                o.archived, o.brand,
                 c.id AS customer_id,
                 c.name AS customer_name,
                 c.full_name AS customer_full_name,
@@ -225,6 +225,29 @@ def unarchive_order(order_id: str):
         conn.close()
 
 
+VALID_BRANDS = {"Мира", "PBPB", "Транзит"}
+
+
+class BrandUpdate(BaseModel):
+    brand: Optional[str]
+
+
+@router.patch("/{order_id}/brand")
+def update_brand(order_id: str, body: BrandUpdate):
+    if body.brand is not None and body.brand not in VALID_BRANDS:
+        raise HTTPException(status_code=400, detail=f"Invalid brand: {body.brand}")
+    conn = get_production()
+    try:
+        r = conn.execute("SELECT id FROM orders WHERE id = ? OR number = ?", (order_id, order_id)).fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="Not found")
+        conn.execute("UPDATE orders SET brand = ?, updated_at = datetime('now') WHERE id = ?", (body.brand, r["id"]))
+        conn.commit()
+        return {"ok": True, "brand": body.brand}
+    finally:
+        conn.close()
+
+
 @router.delete("/{order_id}")
 def delete_order(order_id: str):
     conn = get_production()
@@ -263,8 +286,8 @@ async def create_order(body: dict = Body(...), user=Depends(get_current_user)):
 
         new_id = str(uuid4())
         conn.execute(
-            """INSERT INTO orders (id, number, title, status, priority, deadline, customer_id, created_at)
-               VALUES (?, ?, ?, 'draft', ?, ?, ?, datetime('now'))""",
+            """INSERT INTO orders (id, number, title, status, priority, deadline, customer_id, brand, created_at)
+               VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, datetime('now'))""",
             (
                 new_id,
                 number,
@@ -272,6 +295,7 @@ async def create_order(body: dict = Body(...), user=Depends(get_current_user)):
                 body.get("priority", "normal"),
                 body.get("deadline") or None,
                 body.get("customer_id") or None,
+                body.get("brand") or None,
             ),
         )
         conn.commit()

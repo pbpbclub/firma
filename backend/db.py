@@ -43,6 +43,17 @@ def ensure_customer_schema():
         conn.close()
 
 
+def ensure_orders_schema():
+    conn = get_production()
+    try:
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(orders)").fetchall()}
+        if "brand" not in existing:
+            conn.execute("ALTER TABLE orders ADD COLUMN brand TEXT")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_payee_rules_schema():
     conn = get_production()
     try:
