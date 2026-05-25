@@ -117,16 +117,6 @@ function ItemModal({ item, onClose, onRefetch }: {
               style={{ fontSize: 15, fontWeight: 700 }}
             />
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, color: "#A89070", fontSize: 12 }}>
-            <span>Наценка</span>
-            <span style={{ color: "#1A1A1A", fontWeight: 600 }}>×</span>
-            <EditCell
-              value={item.markup ?? 2}
-              numeric
-              onSave={v => save(() => estimatesApi.updateItem(item.id, { markup: parseFloat(v) || 1 }))}
-              style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A" }}
-            />
-          </div>
           <button
             onClick={onClose}
             style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070", display: "flex", padding: 4 }}
@@ -223,14 +213,10 @@ function ItemModal({ item, onClose, onRefetch }: {
         </div>
 
         {/* Modal footer: totals */}
-        <div style={{ padding: "12px 20px", borderTop: "1px solid #EDEBE6", background: "#FAF8F5", display: "flex", justifyContent: "flex-end", gap: 32 }}>
+        <div style={{ padding: "12px 20px", borderTop: "1px solid #EDEBE6", background: "#FAF8F5", display: "flex", justifyContent: "flex-end" }}>
           <div style={{ textAlign: "right" }}>
             <div style={{ fontSize: 10, color: "#A89070", marginBottom: 2 }}>СЕБЕСТОИМОСТЬ</div>
             <div style={{ fontSize: 14, fontWeight: 600, color: "#6B6355" }}>{fmt(item.cost_total)}</div>
-          </div>
-          <div style={{ textAlign: "right" }}>
-            <div style={{ fontSize: 10, color: "#A89070", marginBottom: 2 }}>КЛИЕНТУ</div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1A1A" }}>{fmt(item.sale_price)}</div>
           </div>
         </div>
       </div>
