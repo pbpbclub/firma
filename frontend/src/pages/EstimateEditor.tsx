@@ -338,6 +338,7 @@ export default function EstimateEditor() {
   const [openItemId, setOpenItemId] = useState<string | null>(null);
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [invoicing, setInvoicing] = useState(false);
+  const [editMode, setEditMode] = useState(false);
 
   const { data: order } = useQuery({
     queryKey: ["order-detail-v2", orderId],
@@ -406,7 +407,7 @@ export default function EstimateEditor() {
     }
   };
 
-  const colsMain = "1fr 64px 80px 110px 110px 90px 28px";
+  const colsMain = editMode ? "1fr 64px 80px 110px 110px 90px 28px" : "1fr 64px 80px 110px 110px 90px";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -509,6 +510,24 @@ export default function EstimateEditor() {
                 <FileText size={12} />
                 {invoicing ? "..." : "Счёт"}
               </button>
+
+              <div style={{ width: 1, height: 18, background: "#EDEBE6" }} />
+
+              {editMode ? (
+                <button
+                  onClick={() => setEditMode(false)}
+                  style={{ padding: "4px 14px", fontSize: 11, fontWeight: 600, border: "none", background: "#4A7C59", color: "#FFFFFF", cursor: "pointer", whiteSpace: "nowrap" }}
+                >
+                  Сохранить
+                </button>
+              ) : (
+                <button
+                  onClick={() => setEditMode(true)}
+                  style={{ padding: "4px 14px", fontSize: 11, fontWeight: 600, border: "1px solid #1A1A1A", background: "transparent", color: "#1A1A1A", cursor: "pointer", whiteSpace: "nowrap" }}
+                >
+                  Редактировать
+                </button>
+              )}
             </>
           ) : (
             <button
@@ -530,7 +549,7 @@ export default function EstimateEditor() {
         <>
           {/* ─ Column headers ─────────────────────────────────────────────── */}
           <div style={{ display: "grid", gridTemplateColumns: colsMain, padding: "7px 28px", gap: 12, borderBottom: "1px solid #EDEBE6", flexShrink: 0 }}>
-            {["Позиция", "Кол-во", "Наценка", "Себестоимость", "Клиенту", "Δ Доход", ""].map((h, i) => (
+            {["Позиция", "Кол-во", "Наценка", "Себестоимость", "Клиенту", "Δ Доход", ...(editMode ? [""] : [])].map((h, i) => (
               <div key={i} style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em", textAlign: i >= 3 ? "right" : "left" }}>{h}</div>
             ))}
           </div>
@@ -546,15 +565,15 @@ export default function EstimateEditor() {
             {items.map((item: any) => (
               <div
                 key={item.id}
-                onClick={() => setOpenItemId(item.id)}
+                onClick={editMode ? () => setOpenItemId(item.id) : undefined}
                 style={{
                   display: "grid", gridTemplateColumns: colsMain,
                   padding: "11px 28px", gap: 12,
                   borderBottom: "1px solid #F2EFE9",
-                  cursor: "pointer", alignItems: "center",
+                  cursor: editMode ? "pointer" : "default", alignItems: "center",
                   transition: "background 0.1s",
                 }}
-                onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")}
+                onMouseEnter={e => { if (editMode) e.currentTarget.style.background = "#FAF8F5"; }}
                 onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
               >
                 <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>
@@ -565,11 +584,15 @@ export default function EstimateEditor() {
                   onClick={e => e.stopPropagation()}
                   style={{ fontSize: 13, color: "#1A1A1A", fontWeight: 500 }}
                 >
-                  <EditCell
-                    value={item.quantity ?? 1}
-                    numeric
-                    onSave={v => estimatesApi.updateItem(item.id, { quantity: parseInt(v) || 1 }).then(() => refetch())}
-                  />
+                  {editMode ? (
+                    <EditCell
+                      value={item.quantity ?? 1}
+                      numeric
+                      onSave={v => estimatesApi.updateItem(item.id, { quantity: parseInt(v) || 1 }).then(() => refetch())}
+                    />
+                  ) : (
+                    <span>{item.quantity ?? 1}</span>
+                  )}
                 </div>
 
                 <div style={{ fontSize: 12, color: "#6B6355" }}>
@@ -588,38 +611,42 @@ export default function EstimateEditor() {
                   +{fmt((item.sale_price || 0) - (item.cost_total || 0))}
                 </div>
 
-                <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                  <button
-                    onClick={e => { e.stopPropagation(); estimatesApi.deleteItem(item.id).then(() => refetch()); }}
-                    style={{ background: "none", border: "none", cursor: "pointer", color: "#D0C8C0", padding: 2, display: "flex" }}
-                    onMouseEnter={e => (e.currentTarget.style.color = "#8B3A3A")}
-                    onMouseLeave={e => (e.currentTarget.style.color = "#D0C8C0")}
-                  >
-                    <Trash size={13} />
-                  </button>
-                </div>
+                {editMode && (
+                  <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                    <button
+                      onClick={e => { e.stopPropagation(); estimatesApi.deleteItem(item.id).then(() => refetch()); }}
+                      style={{ background: "none", border: "none", cursor: "pointer", color: "#D0C8C0", padding: 2, display: "flex" }}
+                      onMouseEnter={e => (e.currentTarget.style.color = "#8B3A3A")}
+                      onMouseLeave={e => (e.currentTarget.style.color = "#D0C8C0")}
+                    >
+                      <Trash size={13} />
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
 
-            {/* Add row */}
-            <div style={{ padding: "10px 28px", display: "flex", gap: 10 }}>
-              <button
-                onClick={addItem}
-                style={{ background: "none", border: "1px solid #EDEBE6", cursor: "pointer", fontSize: 12, color: "#6B6355", padding: "6px 12px", display: "flex", alignItems: "center", gap: 5 }}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "#1A1A1A"; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "#EDEBE6"; }}
-              >
-                <Plus size={11} /> Позиция
-              </button>
-              <button
-                onClick={() => setCatalogOpen(true)}
-                style={{ background: "none", border: "1px solid #EDEBE6", cursor: "pointer", fontSize: 12, color: "#6B6355", padding: "6px 12px", display: "flex", alignItems: "center", gap: 5 }}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "#1A1A1A"; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "#EDEBE6"; }}
-              >
-                <Package size={11} /> Из каталога
-              </button>
-            </div>
+            {/* Add row — edit mode only */}
+            {editMode && (
+              <div style={{ padding: "10px 28px", display: "flex", gap: 10 }}>
+                <button
+                  onClick={addItem}
+                  style={{ background: "none", border: "1px solid #EDEBE6", cursor: "pointer", fontSize: 12, color: "#6B6355", padding: "6px 12px", display: "flex", alignItems: "center", gap: 5 }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "#1A1A1A"; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "#EDEBE6"; }}
+                >
+                  <Plus size={11} /> Позиция
+                </button>
+                <button
+                  onClick={() => setCatalogOpen(true)}
+                  style={{ background: "none", border: "1px solid #EDEBE6", cursor: "pointer", fontSize: 12, color: "#6B6355", padding: "6px 12px", display: "flex", alignItems: "center", gap: 5 }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "#1A1A1A"; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "#EDEBE6"; }}
+                >
+                  <Package size={11} /> Из каталога
+                </button>
+              </div>
+            )}
           </div>
 
           {/* ─ Footer totals ──────────────────────────────────────────────── */}
