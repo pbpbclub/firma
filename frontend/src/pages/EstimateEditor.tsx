@@ -92,6 +92,12 @@ function ItemModal({ item, onClose, onRefetch }: {
 
   const save = (fn: () => Promise<any>) => fn().then(onRefetch);
 
+  useEffect(() => {
+    if (lines.length === 0) {
+      estimatesApi.addLine(item.id, { type: "material", title: "", qty: 1, unit: "шт", unit_price: 0 }).then(onRefetch);
+    }
+  }, []);
+
   return (
     <div
       style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200 }}
@@ -142,7 +148,7 @@ function ItemModal({ item, onClose, onRefetch }: {
         <div style={{ flex: 1, overflowY: "auto" }}>
           {lines.length === 0 && (
             <div style={{ padding: "28px 20px", textAlign: "center", color: "#C8C0B0", fontSize: 12 }}>
-              Нет строк — добавьте позицию
+              Загружаем...
             </div>
           )}
           {lines.map((line: any) => {
