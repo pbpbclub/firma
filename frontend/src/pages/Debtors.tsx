@@ -411,14 +411,94 @@ function DebtorsTab() {
           </div>
         </>
       )}
-      <ReceivablesSection />
     </>
   );
 }
 
-// ── Секция: выставленные счета (receivables из вики) ──────────────────────
+// ── Модал: добавить счёт в нераспределённые ───────────────────────────────
 
-function ReceivablesSection() {
+function AddReceivableModal({ onClose }: { onClose: () => void }) {
+  const qc = useQueryClient();
+  const [client, setClient] = useState("");
+  const [inn, setInn] = useState("");
+  const [invoiceNum, setInvoiceNum] = useState("");
+  const [invoiceDate, setInvoiceDate] = useState("");
+  const [amount, setAmount] = useState("");
+  const [note, setNote] = useState("");
+
+  const { mutate, isPending } = useMutation({
+    mutationFn: () => financeApi.createReceivable({
+      client: client.trim(),
+      inn: inn.trim() || undefined,
+      invoice_num: invoiceNum.trim() || undefined,
+      invoice_date: invoiceDate || undefined,
+      amount: parseFloat(amount) || 0,
+      note: note.trim() || undefined,
+    }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["receivables"] }); onClose(); },
+  });
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ background: "#fff", width: 440, padding: 28, boxShadow: "0 8px 40px rgba(0,0,0,0.18)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "#1A1A1A" }}>Новый счёт</div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070" }}><X size={18} /></button>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>КЛИЕНТ *</div>
+            <input value={client} onChange={e => setClient(e.target.value)}
+              style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none" }}
+              placeholder="ООО «Название»" />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>ИНН</div>
+              <input value={inn} onChange={e => setInn(e.target.value)}
+                style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none" }} />
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>СУММА, ₽ *</div>
+              <input type="number" value={amount} onChange={e => setAmount(e.target.value)}
+                style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none" }}
+                placeholder="0" />
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>№ СЧЁТА</div>
+              <input value={invoiceNum} onChange={e => setInvoiceNum(e.target.value)}
+                style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none" }} />
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>ДАТА СЧЁТА</div>
+              <input type="date" value={invoiceDate} onChange={e => setInvoiceDate(e.target.value)}
+                style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none" }} />
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>НАЗНАЧЕНИЕ</div>
+            <textarea value={note} onChange={e => setNote(e.target.value)} rows={2}
+              style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none", resize: "vertical", fontFamily: "inherit" }} />
+          </div>
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 20 }}>
+          <button onClick={onClose} style={{ padding: "7px 16px", border: "1px solid #EDEBE6", background: "none", fontSize: 12, cursor: "pointer", color: "#6B6355" }}>Отмена</button>
+          <button disabled={!client.trim() || !amount || isPending}
+            onClick={() => mutate()}
+            style={{ padding: "7px 16px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600, opacity: !client.trim() || !amount ? 0.4 : 1 }}>
+            Добавить
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Вкладка: нераспределённые счета (receivables из вики) ─────────────────
+
+function UnallocatedTab() {
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({ queryKey: ["receivables"], queryFn: financeApi.receivables });
   const [editId, setEditId] = useState<number | null>(null);
@@ -431,22 +511,22 @@ function ReceivablesSection() {
   });
 
   const items: any[] = data?.open_items || [];
-  if (isLoading) return null;
-  if (items.length === 0) return null;
+
+  if (isLoading) return <div style={{ padding: 48, textAlign: "center", color: "#A89070", fontSize: 13 }}>Загружаем...</div>;
+  if (items.length === 0) return <div style={{ padding: 48, textAlign: "center", color: "#A89070", fontSize: 13 }}>Нет нераспределённых счетов</div>;
 
   const recCols = "2fr 2fr 120px 120px 120px";
 
   return (
     <>
-      {/* Section divider */}
-      <div style={{ padding: "14px 28px 10px", borderTop: "2px solid #EDEBE6", marginTop: 4, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.06em" }}>ВЫСТАВЛЕННЫЕ СЧЕТА (ВИКИ)</div>
+      <div style={{ padding: "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ fontSize: 11, color: "#6B6355" }}>{items.length} счетов</div>
         <div style={{ fontSize: 12, fontWeight: 700, color: "#4A7C59" }}>{fmt(data?.total_debt ?? 0)}</div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: recCols, padding: "6px 28px 6px", borderBottom: "1px solid #EDEBE6" }}>
-        {["Клиент", "Назначение", "Счёт", "Оплачено", "Остаток"].map(h => (
-          <div key={h} style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>{h}</div>
+        {["КЛИЕНТ", "НАЗНАЧЕНИЕ", "СЧЁТ", "ОПЛАЧЕНО", "ОСТАТОК"].map(h => (
+          <div key={h} style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>{h}</div>
         ))}
       </div>
 
@@ -530,15 +610,6 @@ function CreditorsTab() {
       {addOpen && <AddCreditorModal onClose={() => setAddOpen(false)} />}
       {editItem && <PayCreditorModal item={editItem} onClose={() => setEditItem(null)} />}
 
-      <div style={{ padding: "12px 28px", borderBottom: "1px solid #EDEBE6", display: "flex", justifyContent: "flex-end" }}>
-        <button
-          onClick={() => setAddOpen(true)}
-          style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600 }}
-        >
-          <Plus size={13} weight="bold" /> Добавить
-        </button>
-      </div>
-
       {(() => {
         const hasFilters = !!contragentFilter;
         const canClear = hasFilters || selectedIds.size > 0;
@@ -569,14 +640,14 @@ function CreditorsTab() {
           />
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          <span style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>Контрагент</span>
+          <span style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>КОНТРАГЕНТ</span>
           <ColumnFilter options={uniqueContragents} value={contragentFilter} onChange={setContragentFilter} />
         </div>
-        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>За что</div>
-        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>Сумма долга</div>
-        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>Оплачено</div>
-        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>Остаток</div>
-        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>Срок</div>
+        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ЗА ЧТО</div>
+        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>СУММА ДОЛГА</div>
+        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ОПЛАЧЕНО</div>
+        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ОСТАТОК</div>
+        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>СРОК</div>
       </div>
 
       {filteredItems.length === 0 ? (
@@ -603,7 +674,12 @@ function CreditorsTab() {
               <div style={{ display: "flex", alignItems: "center" }}>
                 <Checkbox checked={selectedIds.has(rowId)} onChange={() => toggleSelect(rowId)} />
               </div>
-              <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>{c.name}</div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>{c.name}</div>
+                {c.estimate_item_title && (
+                  <div style={{ fontSize: 10, color: "#A89070", marginTop: 2 }}>← Смета: {c.estimate_item_title}</div>
+                )}
+              </div>
               <div style={{ fontSize: 12, color: "#6B6355", paddingRight: 16, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {c.description || "—"}
               </div>
@@ -638,13 +714,10 @@ function CreditorsTab() {
 
 // ── Главная страница ────────────────────────────────────────────────────────
 
-const TABS = [
-  { id: "debtors",   label: "Нам должны" },
-  { id: "creditors", label: "Мы должны" },
-];
-
 export default function Debtors() {
-  const [tab, setTab] = useState<"debtors" | "creditors">("debtors");
+  const [tab, setTab] = useState<"debtors" | "unallocated" | "creditors">("debtors");
+  const [addCreditorOpen, setAddCreditorOpen] = useState(false);
+  const [addReceivableOpen, setAddReceivableOpen] = useState(false);
 
   const { data: debtData } = useQuery({ queryKey: ["debtors"], queryFn: financeApi.debtors });
   const { data: credData } = useQuery({ queryKey: ["creditors"], queryFn: () => financeApi.creditors() });
@@ -652,6 +725,13 @@ export default function Debtors() {
 
   const receivable = (debtData?.total ?? 0) + (recData?.total_debt ?? 0);
   const payable    = credData?.total_debt ?? 0;
+  const openRecCount = recData?.open_items?.length ?? 0;
+
+  const TABS = [
+    { id: "debtors",     label: "Нам должны" },
+    { id: "unallocated", label: openRecCount > 0 ? `Нераспределённые (${openRecCount})` : "Нераспределённые" },
+    { id: "creditors",   label: "Мы должны" },
+  ];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -693,9 +773,31 @@ export default function Debtors() {
         </div>
       </div>
 
+      {/* Modals */}
+      {addCreditorOpen && <AddCreditorModal onClose={() => setAddCreditorOpen(false)} />}
+      {addReceivableOpen && <AddReceivableModal onClose={() => setAddReceivableOpen(false)} />}
+
+      {/* Toolbar — always rendered to prevent layout jump */}
+      <div style={{ padding: "12px 28px", borderBottom: "1px solid #EDEBE6", display: "flex", justifyContent: "flex-end", flexShrink: 0, minHeight: 46, boxSizing: "border-box" }}>
+        {tab === "creditors" && (
+          <button onClick={() => setAddCreditorOpen(true)}
+            style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
+            <Plus size={13} weight="bold" /> Добавить
+          </button>
+        )}
+        {tab === "unallocated" && (
+          <button onClick={() => setAddReceivableOpen(true)}
+            style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
+            <Plus size={13} weight="bold" /> Добавить
+          </button>
+        )}
+      </div>
+
       {/* Content */}
       <div style={{ flex: 1, overflowY: "auto" }}>
-        {tab === "debtors" ? <DebtorsTab /> : <CreditorsTab />}
+        {tab === "debtors" && <DebtorsTab />}
+        {tab === "unallocated" && <UnallocatedTab />}
+        {tab === "creditors" && <CreditorsTab />}
       </div>
     </div>
   );

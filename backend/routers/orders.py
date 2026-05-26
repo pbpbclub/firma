@@ -166,7 +166,20 @@ def get_estimate(order_id: str):
                     "SELECT * FROM estimate_lines WHERE item_id = ? ORDER BY sort_order",
                     (item["id"],),
                 ).fetchall()
-                items_data.append({**dict(item), "lines": [dict(l) for l in lines]})
+                actual_paid = conn.execute(
+                    "SELECT COALESCE(SUM(paid), 0) FROM creditors WHERE estimate_item_id = ?",
+                    (item["id"],),
+                ).fetchone()[0]
+                obligations_count = conn.execute(
+                    "SELECT COUNT(*) FROM creditors WHERE estimate_item_id = ?",
+                    (item["id"],),
+                ).fetchone()[0]
+                items_data.append({
+                    **dict(item),
+                    "lines": [dict(l) for l in lines],
+                    "actual_paid": round(actual_paid, 2),
+                    "obligations_count": obligations_count,
+                })
             result.append({**dict(s), "items": items_data})
 
         return result

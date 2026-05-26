@@ -126,6 +126,17 @@ def ensure_catalog_material_fk():
         conn.close()
 
 
+def ensure_creditor_estimate_item_schema():
+    conn = get_production()
+    try:
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(creditors)").fetchall()}
+        if "estimate_item_id" not in existing:
+            conn.execute("ALTER TABLE creditors ADD COLUMN estimate_item_id TEXT")
+            conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_payee_rules_schema():
     conn = get_production()
     try:

@@ -59,6 +59,8 @@ export const financeApi = {
   deleteCreditor: (id: string) =>
     api.delete(`/finance/creditors/${id}`).then((r) => r.data),
   receivables: () => api.get("/finance/receivables").then((r) => r.data),
+  createReceivable: (data: { client: string; inn?: string; invoice_num?: string; invoice_date?: string; amount: number; paid?: number; note?: string }) =>
+    api.post("/finance/receivables", data).then((r) => r.data),
   updateReceivable: (id: number, data: { paid?: number; note?: string }) =>
     api.patch(`/finance/receivables/${id}`, data).then((r) => r.data),
 };
@@ -108,6 +110,7 @@ export const estimatesApi = {
   invoice:     (setId: string)              =>
     api.post(`/estimates/sets/${setId}/invoice`, {}, { responseType: "blob" }).then(r => r.data),
   syncToCatalog: (itemId: string)           => api.post(`/estimates/items/${itemId}/to-catalog`).then(r => r.data),
+  createObligations: (setId: string)        => api.post(`/estimates/sets/${setId}/create-obligations`).then(r => r.data),
 };
 
 export const mastersApi = {

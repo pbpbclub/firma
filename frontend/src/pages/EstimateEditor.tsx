@@ -358,6 +358,7 @@ function FooterRow({ cols, label, cost, sale, delta, deltaColor, saleColor, note
       </div>
       <div /><div />
       <div style={{ fontSize: 12, color: "#6B6355", textAlign: "right" }}>{cost ?? ""}</div>
+      <div />
       <div style={{ fontSize: 13, fontWeight: 500, color: saleColor ?? "#1A1A1A", textAlign: "right" }}>{sale ?? ""}</div>
       <div style={{ fontSize: 12, fontWeight: 600, color: deltaColor ?? "#A89070", textAlign: "right" }}>{delta ?? ""}</div>
       <div />
@@ -376,6 +377,7 @@ export default function EstimateEditor() {
   const [openItemId, setOpenItemId] = useState<string | null>(null);
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [invoicing, setInvoicing] = useState(false);
+  const [obligating, setObligating] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [pendingSwitchId, setPendingSwitchId] = useState<string | null>(null);
   const [editingSetId, setEditingSetId] = useState<string | null>(null);
@@ -445,6 +447,19 @@ export default function EstimateEditor() {
     setOpenItemId(it.id);
   };
 
+  const hasObligations = items.some((it: any) => (it.obligations_count ?? 0) > 0);
+
+  const createObligations = async () => {
+    if (!activeSetId) return;
+    setObligating(true);
+    try {
+      await estimatesApi.createObligations(activeSetId);
+      refetch();
+    } finally {
+      setObligating(false);
+    }
+  };
+
   const generateInvoice = async () => {
     if (!activeSetId) return;
     setInvoicing(true);
@@ -458,7 +473,7 @@ export default function EstimateEditor() {
     }
   };
 
-  const colsMain = "1fr 64px 80px 110px 110px 90px 52px";
+  const colsMain = "1fr 64px 80px 110px 110px 110px 90px 52px";
 
   return (
     <>
@@ -617,6 +632,23 @@ export default function EstimateEditor() {
                 {activeSet.status === "approved" ? "Согласована ✓" : "Согласовать"}
               </button>
 
+              {activeSet.status === "approved" && (
+                <button
+                  onClick={hasObligations ? undefined : createObligations}
+                  disabled={obligating || hasObligations}
+                  style={{
+                    padding: "4px 10px", fontSize: 11, fontWeight: 600,
+                    border: `1px solid ${hasObligations ? "#4A7C59" : "#EDEBE6"}`,
+                    background: hasObligations ? "transparent" : "transparent",
+                    color: hasObligations ? "#4A7C59" : obligating ? "#C8C0B0" : "#6B6355",
+                    cursor: hasObligations || obligating ? "default" : "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {hasObligations ? "Обязательства ✓" : obligating ? "..." : "Создать обязательства"}
+                </button>
+              )}
+
               <button
                 onClick={generateInvoice}
                 disabled={invoicing}
@@ -695,7 +727,7 @@ export default function EstimateEditor() {
 
           {/* ─ Column headers ─────────────────────────────────────────────── */}
           <div style={{ display: "grid", gridTemplateColumns: colsMain, padding: "7px 28px", gap: 12, borderBottom: "1px solid #EDEBE6", flexShrink: 0 }}>
-            {["Позиция", "Кол-во", "Наценка", "Себестоимость", isBank ? "К оплате" : "Клиенту", "Δ Доход", ""].map((h, i) => (
+            {["Позиция", "Кол-во", "Наценка", "Себестоимость", "Факт", isBank ? "К оплате" : "Клиенту", "Δ Доход", ""].map((h, i) => (
               <div key={i} style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em", textAlign: i >= 3 ? "right" : "left" }}>{h}</div>
             ))}
           </div>
@@ -776,7 +808,25 @@ export default function EstimateEditor() {
                   )}
                 </div>
 
-                {/* Col 5: Клиенту (нал) / К оплате (безнал) */}
+                {/* Col 5: Факт */}
+                <div style={{ fontSize: 12, textAlign: "right" }}>
+                  {(item.actual_paid ?? 0) > 0 ? (
+                    <>
+                      <div style={{ color: (item.actual_paid ?? 0) > (item.cost_total || 0) ? "#8B3A3A" : "#4A7C59", fontWeight: 600 }}>
+                        {fmt(item.actual_paid)}
+                      </div>
+                      <div style={{ fontSize: 9, color: (item.actual_paid ?? 0) > (item.cost_total || 0) ? "#8B3A3A" : "#4A7C59", marginTop: 1 }}>
+                        {(item.actual_paid ?? 0) > (item.cost_total || 0) ? "+" : ""}{fmt((item.actual_paid ?? 0) - (item.cost_total || 0))}
+                      </div>
+                    </>
+                  ) : (item.obligations_count ?? 0) > 0 ? (
+                    <span style={{ color: "#C8C0B0", fontSize: 11 }}>0 ₽</span>
+                  ) : (
+                    <span style={{ color: "#C8C0B0" }}>—</span>
+                  )}
+                </div>
+
+                {/* Col 6: Клиенту (нал) / К оплате (безнал) */}
                 <div style={{ fontSize: 13, fontWeight: 700, textAlign: "right", position: "relative" }}>
                   {isBank ? (
                     <>
@@ -892,6 +942,7 @@ export default function EstimateEditor() {
               <div style={{ fontSize: 12, color: "#A89070", fontWeight: 500 }}>К оплате</div>
               <div /><div />
               <div style={{ fontSize: 12, color: "#6B6355", textAlign: "right" }}>{fmt(totalCost)}</div>
+              <div />
               <div style={{ fontSize: 15, fontWeight: 700, color: isBank ? "#E8592A" : "#1A1A1A", textAlign: "right" }}>{fmt(grandTotal)}</div>
               <div style={{ fontSize: 13, fontWeight: 600, color: "#4A7C59", textAlign: "right" }}>
                 {isBank ? `+${fmt(grandTotal - totalCost - taxes)}` : `+${fmt(totalDelta)}`}

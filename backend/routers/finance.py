@@ -250,6 +250,7 @@ class CreditorIn(BaseModel):
     description: Optional[str] = None
     order_id: Optional[str] = None
     due_date: Optional[str] = None
+    estimate_item_id: Optional[str] = None
 
 
 class CreditorPatch(BaseModel):
@@ -258,20 +259,26 @@ class CreditorPatch(BaseModel):
     description: Optional[str] = None
     status: Optional[str] = None
     due_date: Optional[str] = None
+    estimate_item_id: Optional[str] = None
 
 
 @router.get("/creditors")
 def get_creditors(status: Optional[str] = None):
     conn = get_production()
     try:
-        sql = "SELECT * FROM creditors WHERE 1=1"
+        sql = """
+            SELECT c.*, ei.title AS estimate_item_title
+            FROM creditors c
+            LEFT JOIN estimate_items ei ON ei.id = c.estimate_item_id
+            WHERE 1=1
+        """
         params = []
         if status:
-            sql += " AND status = ?"
+            sql += " AND c.status = ?"
             params.append(status)
         else:
-            sql += " AND status = 'open'"
-        sql += " ORDER BY created_at DESC"
+            sql += " AND c.status = 'open'"
+        sql += " ORDER BY c.created_at DESC"
         rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
         for r in rows:
             r["debt"] = round(r["total"] - r["paid"], 2)
@@ -293,13 +300,17 @@ def create_creditor(body: CreditorIn):
     try:
         cid = str(uuid.uuid4())
         conn.execute(
-            """INSERT INTO creditors (id, name, total, paid, description, order_id, due_date)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO creditors (id, name, total, paid, description, order_id, due_date, estimate_item_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (cid, body.name, body.total, body.paid,
-             body.description, body.order_id, body.due_date),
+             body.description, body.order_id, body.due_date, body.estimate_item_id),
         )
         conn.commit()
-        row = dict(conn.execute("SELECT * FROM creditors WHERE id = ?", (cid,)).fetchone())
+        row = dict(conn.execute(
+            """SELECT c.*, ei.title AS estimate_item_title
+               FROM creditors c LEFT JOIN estimate_items ei ON ei.id = c.estimate_item_id
+               WHERE c.id = ?""", (cid,)
+        ).fetchone())
         row["debt"] = round(row["total"] - row["paid"], 2)
         return row
     finally:
@@ -344,6 +355,16 @@ def delete_creditor(creditor_id: str):
 
 # ── Receivables (кто должен нам — из вики финагента) ─────────────────────────
 
+class ReceivableCreate(BaseModel):
+    client: str
+    inn: Optional[str] = None
+    invoice_num: Optional[str] = None
+    invoice_date: Optional[str] = None
+    amount: float
+    paid: float = 0
+    note: Optional[str] = None
+
+
 class ReceivablePatch(BaseModel):
     paid: Optional[float] = None
     note: Optional[str] = None
@@ -373,6 +394,27 @@ def get_receivables():
             conn.close()
     except Exception as e:
         return {"items": [], "open_items": [], "total_debt": 0, "total_amount": 0, "error": str(e)}
+
+
+@router.post("/receivables")
+def create_receivable(body: ReceivableCreate):
+    try:
+        conn = get_finance()
+        try:
+            cur = conn.execute(
+                """INSERT INTO receivables (client, inn, invoice_num, invoice_date, amount, paid, note, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+                (body.client, body.inn, body.invoice_num, body.invoice_date,
+                 body.amount, body.paid, body.note),
+            )
+            conn.commit()
+            row = dict(conn.execute("SELECT * FROM receivables WHERE id = ?", (cur.lastrowid,)).fetchone())
+            row["debt"] = round(row["amount"] - (row["paid"] or 0), 2)
+            return row
+        finally:
+            conn.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.patch("/receivables/{rec_id}")

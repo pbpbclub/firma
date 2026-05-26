@@ -399,6 +399,45 @@ def from_catalog(body: FromCatalog):
         conn.close()
 
 
+# ─── Create obligations from approved estimate ───────────────────────────────
+
+@router.post("/sets/{set_id}/create-obligations")
+def create_obligations(set_id: str):
+    conn = get_production()
+    try:
+        es = conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
+        if not es:
+            raise HTTPException(status_code=404, detail="Set not found")
+        if es["status"] != "approved":
+            raise HTTPException(status_code=400, detail="Set must be approved")
+        order_id = es["order_id"]
+        items = conn.execute(
+            "SELECT * FROM estimate_items WHERE set_id = ? ORDER BY sort_order",
+            (set_id,)
+        ).fetchall()
+        created = 0
+        skipped = 0
+        for item in items:
+            existing = conn.execute(
+                "SELECT id FROM creditors WHERE estimate_item_id = ?", (item["id"],)
+            ).fetchone()
+            if existing:
+                skipped += 1
+                continue
+            cid = str(uuid.uuid4())
+            conn.execute(
+                """INSERT INTO creditors (id, name, total, paid, description, order_id, estimate_item_id, status)
+                   VALUES (?, ?, ?, 0, ?, ?, ?, 'open')""",
+                (cid, item["title"] or "Без названия", item["cost_total"] or 0,
+                 f"Смета: {es['title'] or set_id}", order_id, item["id"]),
+            )
+            created += 1
+        conn.commit()
+        return {"created": created, "skipped": skipped}
+    finally:
+        conn.close()
+
+
 # ─── Invoice generation ──────────────────────────────────────────────────────
 
 @router.post("/sets/{set_id}/invoice")
