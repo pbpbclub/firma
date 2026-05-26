@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { financeApi } from "../api";
-import { MagnifyingGlass, Funnel, X } from "@phosphor-icons/react";
+import { MagnifyingGlass, Funnel, X, LinkSimple } from "@phosphor-icons/react";
 
 function ColumnFilter({ options, value, onChange, maxHeight }: {
   options: string[];
@@ -204,6 +204,110 @@ const FILTERS = [
   { v: "out", l: "Списания" },
 ];
 
+// ── Модал: привязать транзакцию к обязательству ───────────────────────────
+
+function LinkCreditorModal({ tx, creditorByFinTx, onClose }: {
+  tx: any;
+  creditorByFinTx: Map<string, any>;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const [search, setSearch] = useState("");
+  const { data: suggested = [], isFetching } = useQuery({
+    queryKey: ["suggest-creditors", tx.id],
+    queryFn: () => financeApi.suggestCreditors(tx.counterparty || tx.purpose || "", tx.amount || 0),
+  });
+
+  const link = useMutation({
+    mutationFn: ({ creditorId, txId }: { creditorId: string; txId: string | null }) =>
+      financeApi.updateCreditor(creditorId, { finance_tx_id: txId }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["creditors-all"] }); onClose(); },
+  });
+
+  const currentCreditor = creditorByFinTx.get(String(tx.id));
+
+  const items: any[] = suggested as any[];
+  const filtered = search
+    ? items.filter((c: any) => (c.name || "").toLowerCase().includes(search.toLowerCase()))
+    : items;
+
+  function fmtAmt(n: number) {
+    return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) + " ₽";
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ background: "#fff", width: 480, maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,0.18)" }}>
+
+        {/* Header */}
+        <div style={{ padding: "16px 20px 12px", borderBottom: "1px solid #EDEBE6", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1A1A" }}>
+              {tx.counterparty || tx.purpose || "—"}
+            </div>
+            <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>
+              {(tx.date || "").slice(0, 10)} · −{fmtAmt(tx.amount)}
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070" }}><X size={16} /></button>
+        </div>
+
+        {/* Already linked */}
+        {currentCreditor && (
+          <div style={{ padding: "8px 20px", background: "#F2FDF5", borderBottom: "1px solid #D0EDD8", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ fontSize: 11, color: "#4A7C59" }}>
+              <LinkSimple size={11} style={{ marginRight: 4 }} />
+              Привязано: <strong>{currentCreditor.name}</strong>
+            </div>
+            <button
+              onClick={() => link.mutate({ creditorId: currentCreditor.id, txId: null })}
+              style={{ fontSize: 11, color: "#8B3A3A", background: "none", border: "none", cursor: "pointer", padding: 0 }}
+            >Отвязать</button>
+          </div>
+        )}
+
+        {/* Search */}
+        <div style={{ padding: "8px 20px", borderBottom: "1px solid #F2EFE9" }}>
+          <input value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Поиск по обязательству..."
+            style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "5px 10px", fontSize: 12, outline: "none" }} />
+        </div>
+
+        {/* List */}
+        <div style={{ flex: 1, overflowY: "auto" }}>
+          {isFetching && <div style={{ padding: 32, textAlign: "center", color: "#A89070", fontSize: 12 }}>Загружаем...</div>}
+          {!isFetching && filtered.length === 0 && <div style={{ padding: 32, textAlign: "center", color: "#C8C0B0", fontSize: 12 }}>Обязательства не найдены</div>}
+          {!isFetching && filtered.map((c: any) => {
+            const isLinked = currentCreditor?.id === c.id;
+            return (
+              <div key={c.id}
+                onClick={() => link.mutate({ creditorId: c.id, txId: String(tx.id) })}
+                style={{
+                  display: "grid", gridTemplateColumns: "1fr 100px 80px",
+                  padding: "9px 20px", borderBottom: "1px solid #F2EFE9", cursor: "pointer",
+                  background: isLinked ? "#F2FDF5" : "transparent", alignItems: "center", gap: 10,
+                }}
+                onMouseEnter={e => { if (!isLinked) e.currentTarget.style.background = "#FAF8F5"; }}
+                onMouseLeave={e => { if (!isLinked) e.currentTarget.style.background = "transparent"; }}
+              >
+                <div>
+                  <div style={{ fontSize: 12, color: "#1A1A1A", fontWeight: 500 }}>{c.name}</div>
+                  {c.description && <div style={{ fontSize: 10, color: "#A89070", marginTop: 1 }}>{c.description}</div>}
+                </div>
+                <div style={{ fontSize: 11, color: "#8B3A3A", textAlign: "right" }}>долг {fmtAmt(c.debt)}</div>
+                <div style={{ fontSize: 11, color: "#A89070", textAlign: "right" }}>
+                  {fmtAmt(c.total)}
+                  {isLinked && <LinkSimple size={10} style={{ color: "#4A7C59", marginLeft: 4 }} />}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Finance() {
   const [direction, setDirection] = useState("");
   const [search, setSearch] = useState("");
@@ -216,7 +320,20 @@ export default function Finance() {
   const clearFilters = () => { setAccountFilter(""); setDateFrom(""); setDateTo(""); setDescFilter(""); setAmountMin(""); setAmountMax(""); setSelectedIds(new Set()); };
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const FIN_GRID = "28px 110px 1fr 120px 120px";
+  const [linkModal, setLinkModal] = useState<any>(null);
+  const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
+
+  const { data: allCreditors } = useQuery({
+    queryKey: ["creditors-all"],
+    queryFn: () => financeApi.creditors("all"),
+  });
+  const creditorByFinTx = useMemo(() => {
+    const m = new Map<string, any>();
+    for (const c of (allCreditors?.items ?? []) as any[]) {
+      if (c.finance_tx_id) m.set(String(c.finance_tx_id), c);
+    }
+    return m;
+  }, [allCreditors]);
 
   const { data: balance } = useQuery({ queryKey: ["balance"], queryFn: financeApi.balance });
   const { data: summary } = useQuery({ queryKey: ["dds-summary"], queryFn: financeApi.summary });
@@ -367,6 +484,7 @@ export default function Finance() {
             <span style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>СУММА</span>
             <AmountFilter min={amountMin} max={amountMax} onChange={(mn, mx) => { setAmountMin(mn); setAmountMax(mx); }} />
           </div>
+          <div />
         </div>
 
         {/* Rows */}
@@ -413,8 +531,31 @@ export default function Finance() {
                 <div style={{ fontSize: 13, fontWeight: 600, color: t.direction === "in" ? "#4A7C59" : "#8B3A3A" }}>
                   {t.direction === "in" ? "+" : "−"}{fmt(t.amount)}
                 </div>
+                <div style={{ display: "flex", justifyContent: "center" }}>
+                  {t.direction === "out" && t.source !== "fund" && (
+                    <button
+                      onClick={e => { e.stopPropagation(); setLinkModal(t); }}
+                      title="Привязать к обязательству"
+                      style={{
+                        background: "none", border: "none", cursor: "pointer", padding: 2, display: "flex",
+                        color: creditorByFinTx.has(String(t.id)) ? "#4A7C59" : "#C8C0B0",
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
+                      onMouseLeave={e => (e.currentTarget.style.color = creditorByFinTx.has(String(t.id)) ? "#4A7C59" : "#C8C0B0")}
+                    >
+                      <LinkSimple size={12} />
+                    </button>
+                  )}
+                </div>
               </div>
             ))
+          )}
+          {linkModal && (
+            <LinkCreditorModal
+              tx={linkModal}
+              creditorByFinTx={creditorByFinTx}
+              onClose={() => setLinkModal(null)}
+            />
           )}
         </div>
       </div>

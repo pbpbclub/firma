@@ -260,6 +260,8 @@ class CreditorPatch(BaseModel):
     status: Optional[str] = None
     due_date: Optional[str] = None
     estimate_item_id: Optional[str] = None
+    finance_tx_id: Optional[str] = None
+    zenmoney_tx_id: Optional[str] = None
 
 
 @router.get("/creditors")
@@ -273,7 +275,9 @@ def get_creditors(status: Optional[str] = None):
             WHERE 1=1
         """
         params = []
-        if status:
+        if status == "all":
+            pass  # no filter
+        elif status:
             sql += " AND c.status = ?"
             params.append(status)
         else:
@@ -349,6 +353,72 @@ def delete_creditor(creditor_id: str):
         conn.execute("DELETE FROM creditors WHERE id = ?", (creditor_id,))
         conn.commit()
         return {"ok": True}
+    finally:
+        conn.close()
+
+
+# ── Suggest helpers ──────────────────────────────────────────────────────────
+
+def _name_score(a: str, b: str) -> float:
+    if not a or not b:
+        return 0.0
+    a_words = set(a.lower().split())
+    b_words = set(b.lower().split())
+    union = a_words | b_words
+    if not union:
+        return 0.0
+    return len(a_words & b_words) / len(union)
+
+
+def _amount_score(a: float, b: float) -> float:
+    denom = max(a, b)
+    if denom == 0:
+        return 0.0
+    return max(0.0, 1.0 - abs(a - b) / denom)
+
+
+@router.get("/transactions/suggest")
+def suggest_transactions(name: str = "", amount: float = 0, limit: int = Query(10, le=50)):
+    """Suggest finance transactions for linking to a creditor."""
+    conn = get_finance()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM transactions WHERE direction = 'out' ORDER BY date DESC LIMIT 500"
+        ).fetchall()
+        scored = []
+        for r in rows:
+            tx = dict(r)
+            label = (tx.get("counterparty") or "") + " " + (tx.get("purpose") or "")
+            ns = _name_score(name, label)
+            as_ = _amount_score(amount, tx.get("amount") or 0)
+            score = 0.6 * ns + 0.4 * as_
+            tx["score"] = round(score, 3)
+            scored.append(tx)
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        return scored[:limit]
+    finally:
+        conn.close()
+
+
+@router.get("/creditors/suggest")
+def suggest_creditors(counterparty: str = "", amount: float = 0, limit: int = Query(10, le=50)):
+    """Suggest creditors for linking to a finance transaction."""
+    conn = get_production()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM creditors WHERE status = 'open' ORDER BY created_at DESC LIMIT 200"
+        ).fetchall()
+        scored = []
+        for r in rows:
+            c = dict(r)
+            ns = _name_score(counterparty, c.get("name") or "")
+            as_ = _amount_score(amount, c.get("total") or 0)
+            score = 0.6 * ns + 0.4 * as_
+            c["score"] = round(score, 3)
+            c["debt"] = round(c["total"] - c["paid"], 2)
+            scored.append(c)
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        return scored[:limit]
     finally:
         conn.close()
 

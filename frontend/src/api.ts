@@ -54,10 +54,14 @@ export const financeApi = {
     api.get("/finance/creditors", { params: status ? { status } : {} }).then((r) => r.data),
   createCreditor: (data: { name: string; total: number; paid?: number; description?: string; order_id?: string; due_date?: string }) =>
     api.post("/finance/creditors", data).then((r) => r.data),
-  updateCreditor: (id: string, data: { paid?: number; total?: number; description?: string; status?: string; due_date?: string }) =>
+  updateCreditor: (id: string, data: { paid?: number; total?: number; description?: string; status?: string; due_date?: string; finance_tx_id?: string | null; zenmoney_tx_id?: string | null }) =>
     api.patch(`/finance/creditors/${id}`, data).then((r) => r.data),
   deleteCreditor: (id: string) =>
     api.delete(`/finance/creditors/${id}`).then((r) => r.data),
+  suggestTx: (name: string, amount: number) =>
+    api.get("/finance/transactions/suggest", { params: { name, amount } }).then((r) => r.data),
+  suggestCreditors: (counterparty: string, amount: number) =>
+    api.get("/finance/creditors/suggest", { params: { counterparty, amount } }).then((r) => r.data),
   receivables: () => api.get("/finance/receivables").then((r) => r.data),
   createReceivable: (data: { client: string; inn?: string; invoice_num?: string; invoice_date?: string; amount: number; paid?: number; note?: string }) =>
     api.post("/finance/receivables", data).then((r) => r.data),
@@ -131,6 +135,8 @@ export const zenmoneyApi = {
   business: (months?: number) =>
     api.get("/zenmoney/business", { params: months ? { months } : {} }).then((r) => r.data),
   sync: () => api.post("/zenmoney/sync").then((r) => r.data),
+  suggest: (name: string, amount: number) =>
+    api.get("/zenmoney/suggest", { params: { name, amount } }).then((r) => r.data),
 };
 
 export const payeeRulesApi = {

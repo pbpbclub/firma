@@ -126,6 +126,18 @@ def ensure_catalog_material_fk():
         conn.close()
 
 
+def ensure_creditor_tx_link_schema():
+    conn = get_production()
+    try:
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(creditors)").fetchall()}
+        for col in ("finance_tx_id", "zenmoney_tx_id"):
+            if col not in existing:
+                conn.execute(f"ALTER TABLE creditors ADD COLUMN {col} TEXT")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_creditor_estimate_item_schema():
     conn = get_production()
     try:

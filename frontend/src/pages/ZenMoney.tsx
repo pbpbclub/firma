@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Briefcase, MagnifyingGlass, Funnel, X, ArrowsClockwise, Tag, PencilSimple, Trash } from "@phosphor-icons/react";
-import { zenmoneyApi, payeeRulesApi, mastersApi, customersApi } from "../api";
+import { Briefcase, MagnifyingGlass, Funnel, X, ArrowsClockwise, Tag, PencilSimple, Trash, LinkSimple } from "@phosphor-icons/react";
+import { zenmoneyApi, payeeRulesApi, mastersApi, customersApi, financeApi } from "../api";
 
 function ColumnFilter({ options, value, onChange, maxHeight }: {
   options: string[];
@@ -442,6 +442,86 @@ function PayeeRulePopup({ payee, ruleId, onClose }: {
   );
 }
 
+// ── Модал: привязать ZenMoney транзакцию к обязательству ─────────────────
+
+function LinkZenModal({ tx, creditorByZenTx, onClose }: {
+  tx: any;
+  creditorByZenTx: Map<string, any>;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const [search, setSearch] = useState("");
+  const { data: suggested = [], isFetching } = useQuery({
+    queryKey: ["suggest-creditors-zen", tx.id],
+    queryFn: () => financeApi.suggestCreditors(tx.payee || tx.comment || "", tx.outcome || 0),
+  });
+
+  const link = useMutation({
+    mutationFn: ({ creditorId, txId }: { creditorId: string; txId: string | null }) =>
+      financeApi.updateCreditor(creditorId, { zenmoney_tx_id: txId }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["creditors-all"] }); onClose(); },
+  });
+
+  const currentCreditor = creditorByZenTx.get(String(tx.id));
+  const items: any[] = suggested as any[];
+  const filtered = search
+    ? items.filter((c: any) => (c.name || "").toLowerCase().includes(search.toLowerCase()))
+    : items;
+
+  function fmtAmt(n: number) {
+    return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) + " ₽";
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ background: "#fff", width: 480, maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,0.18)" }}>
+        <div style={{ padding: "16px 20px 12px", borderBottom: "1px solid #EDEBE6", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1A1A" }}>{tx.payee || tx.comment || "—"}</div>
+            <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>{tx.date} · −{fmtAmt(tx.outcome)}</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070" }}><X size={16} /></button>
+        </div>
+        {currentCreditor && (
+          <div style={{ padding: "8px 20px", background: "#F2FDF5", borderBottom: "1px solid #D0EDD8", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ fontSize: 11, color: "#4A7C59" }}><LinkSimple size={11} style={{ marginRight: 4 }} />Привязано: <strong>{currentCreditor.name}</strong></div>
+            <button onClick={() => link.mutate({ creditorId: currentCreditor.id, txId: null })}
+              style={{ fontSize: 11, color: "#8B3A3A", background: "none", border: "none", cursor: "pointer", padding: 0 }}>Отвязать</button>
+          </div>
+        )}
+        <div style={{ padding: "8px 20px", borderBottom: "1px solid #F2EFE9" }}>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Поиск по обязательству..."
+            style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "5px 10px", fontSize: 12, outline: "none" }} />
+        </div>
+        <div style={{ flex: 1, overflowY: "auto" }}>
+          {isFetching && <div style={{ padding: 32, textAlign: "center", color: "#A89070", fontSize: 12 }}>Загружаем...</div>}
+          {!isFetching && filtered.length === 0 && <div style={{ padding: 32, textAlign: "center", color: "#C8C0B0", fontSize: 12 }}>Обязательства не найдены</div>}
+          {!isFetching && filtered.map((c: any) => {
+            const isLinked = currentCreditor?.id === c.id;
+            return (
+              <div key={c.id}
+                onClick={() => link.mutate({ creditorId: c.id, txId: String(tx.id) })}
+                style={{ display: "grid", gridTemplateColumns: "1fr 100px 80px", padding: "9px 20px", borderBottom: "1px solid #F2EFE9", cursor: "pointer", background: isLinked ? "#F2FDF5" : "transparent", alignItems: "center", gap: 10 }}
+                onMouseEnter={e => { if (!isLinked) e.currentTarget.style.background = "#FAF8F5"; }}
+                onMouseLeave={e => { if (!isLinked) e.currentTarget.style.background = "transparent"; }}
+              >
+                <div>
+                  <div style={{ fontSize: 12, color: "#1A1A1A", fontWeight: 500 }}>{c.name}</div>
+                  {c.description && <div style={{ fontSize: 10, color: "#A89070", marginTop: 1 }}>{c.description}</div>}
+                </div>
+                <div style={{ fontSize: 11, color: "#8B3A3A", textAlign: "right" }}>долг {fmtAmt(c.debt)}</div>
+                <div style={{ fontSize: 11, color: "#A89070", textAlign: "right" }}>
+                  {fmtAmt(c.total)}{isLinked && <LinkSimple size={10} style={{ color: "#4A7C59", marginLeft: 4 }} />}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ZenMoneyPage() {
   const queryClient = useQueryClient();
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth);
@@ -468,7 +548,20 @@ export default function ZenMoneyPage() {
   const clearFilters = () => { setBankFilter(""); setCatFilter(""); setPayeeFilter(""); setAmountFilter(""); setDateFrom(""); setDateTo(""); setSelectedIds(new Set()); };
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const ZM_GRID = "28px 80px 36px 1fr 110px 100px";
+  const [linkModal, setLinkModal] = useState<any>(null);
+  const ZM_GRID = "28px 80px 36px 1fr 110px 100px 28px";
+
+  const { data: allCreditors } = useQuery({
+    queryKey: ["creditors-all"],
+    queryFn: () => financeApi.creditors("all"),
+  });
+  const creditorByZenTx = useMemo(() => {
+    const m = new Map<string, any>();
+    for (const c of (allCreditors?.items ?? []) as any[]) {
+      if (c.zenmoney_tx_id) m.set(String(c.zenmoney_tx_id), c);
+    }
+    return m;
+  }, [allCreditors]);
 
   const AMOUNT_RANGES = [
     { label: "до 1 000 ₽",     test: (a: number) => a < 1000 },
@@ -817,6 +910,7 @@ export default function ZenMoneyPage() {
               <span style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>СУММА</span>
               <ColumnFilter options={AMOUNT_RANGES.map(r => r.label)} value={amountFilter} onChange={setAmountFilter} />
             </div>
+            <div />
           </div>
         </div>
 
@@ -912,9 +1006,32 @@ export default function ZenMoneyPage() {
                 }}>
                   {isIncome ? "+" : "−"}{fmt(amount)} ₽
                 </div>
+                <div style={{ display: "flex", justifyContent: "center", paddingTop: 1 }}>
+                  {isExpense && (
+                    <button
+                      onClick={e => { e.stopPropagation(); setLinkModal(tx); }}
+                      title="Привязать к обязательству"
+                      style={{
+                        background: "none", border: "none", cursor: "pointer", padding: 2, display: "flex",
+                        color: creditorByZenTx.has(String(tx.id)) ? "#4A7C59" : "#C8C0B0",
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
+                      onMouseLeave={e => (e.currentTarget.style.color = creditorByZenTx.has(String(tx.id)) ? "#4A7C59" : "#C8C0B0")}
+                    >
+                      <LinkSimple size={12} />
+                    </button>
+                  )}
+                </div>
               </div>
             );
           })}
+          {linkModal && (
+            <LinkZenModal
+              tx={linkModal}
+              creditorByZenTx={creditorByZenTx}
+              onClose={() => setLinkModal(null)}
+            />
+          )}
         </div>
       </div>
 

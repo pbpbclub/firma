@@ -337,3 +337,44 @@ def get_business_transactions(months: int = Query(3, le=12)):
         return result
     finally:
         conn.close()
+
+
+@router.get("/suggest")
+def suggest_for_creditor(name: str = "", amount: float = 0, limit: int = Query(10, le=50)):
+    """Suggest ZenMoney expense transactions for linking to a creditor."""
+    def _name_score(a: str, b: str) -> float:
+        if not a or not b:
+            return 0.0
+        a_words = set(a.lower().split())
+        b_words = set(b.lower().split())
+        union = a_words | b_words
+        return len(a_words & b_words) / len(union) if union else 0.0
+
+    def _amount_score(a: float, b: float) -> float:
+        denom = max(a, b)
+        return max(0.0, 1.0 - abs(a - b) / denom) if denom else 0.0
+
+    conn = get_zenmoney()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM zm_transactions WHERE deleted=0 AND outcome > 0 AND income = 0 ORDER BY date DESC LIMIT 500"
+        ).fetchall()
+        scored = []
+        for r in rows:
+            tx = dict(r)
+            label = (tx.get("payee") or "") + " " + (tx.get("comment") or "")
+            ns = _name_score(name, label)
+            as_ = _amount_score(amount, tx.get("outcome") or 0)
+            score = 0.6 * ns + 0.4 * as_
+            tx["score"] = round(score, 3)
+            tx["amount"] = tx.get("outcome") or 0
+            tx["direction"] = "out"
+            try:
+                tx["tags"] = json.loads(tx.get("tags") or "[]")
+            except Exception:
+                tx["tags"] = []
+            scored.append(tx)
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        return scored[:limit]
+    finally:
+        conn.close()
