@@ -355,6 +355,7 @@ function CustomerDetail({ customerId, onClose }: { customerId: string; onClose: 
     mutationFn: () => customersApi.delete(customerId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["customers"] });
+      setEditing(false);
       onClose();
     },
   });
@@ -546,6 +547,7 @@ function MasterDetail({ masterId, onClose }: { masterId: string; onClose: () => 
     mutationFn: () => mastersApi.delete(masterId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["masters"] });
+      setEditing(false);
       onClose();
     },
   });
