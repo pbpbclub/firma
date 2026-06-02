@@ -219,8 +219,11 @@ function LinkCreditorModal({ tx, creditorByFinTx, onClose }: {
   });
 
   const link = useMutation({
-    mutationFn: ({ creditorId, txId }: { creditorId: string; txId: string | null }) =>
-      financeApi.updateCreditor(creditorId, { finance_tx_id: txId }),
+    mutationFn: ({ creditorId, txId }: { creditorId: string; txId: string | null }) => {
+      const patch: any = { finance_tx_id: txId };
+      if (txId !== null) patch.paid = tx.amount;
+      return financeApi.updateCreditor(creditorId, patch);
+    },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["creditors-all"] }); onClose(); },
   });
 
@@ -528,8 +531,15 @@ export default function Finance() {
                       </span>
                   }
                 </div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: t.direction === "in" ? "#4A7C59" : "#8B3A3A" }}>
-                  {t.direction === "in" ? "+" : "−"}{fmt(t.amount)}
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: t.direction === "in" ? "#4A7C59" : "#8B3A3A" }}>
+                    {t.direction === "in" ? "+" : "−"}{fmt(t.amount)}
+                  </div>
+                  {creditorByFinTx.has(String(t.id)) && (
+                    <div style={{ fontSize: 10, color: "#4A7C59", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {creditorByFinTx.get(String(t.id))?.name}
+                    </div>
+                  )}
                 </div>
                 <div style={{ display: "flex", justifyContent: "center" }}>
                   {t.direction === "out" && t.source !== "fund" && (

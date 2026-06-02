@@ -273,6 +273,7 @@ function PayeeRulePopup({ payee, ruleId, onClose }: {
     entity_type: "label",
     entity_id: "",
     entity_name: "",
+    category: "",
   });
 
   const { data: existingRule } = useQuery({
@@ -290,6 +291,7 @@ function PayeeRulePopup({ payee, ruleId, onClose }: {
         entity_type: existingRule.entity_type || "label",
         entity_id: existingRule.entity_id || "",
         entity_name: existingRule.entity_name || "",
+        category: existingRule.category || "",
       });
     }
   }, [existingRule]);
@@ -308,6 +310,7 @@ function PayeeRulePopup({ payee, ruleId, onClose }: {
       : payeeRulesApi.create(form),
     onSuccess: async () => {
       onClose();
+      await qc.invalidateQueries({ queryKey: ["zm-transactions"] });
       await qc.invalidateQueries({ queryKey: ["zm-business"] });
       await qc.invalidateQueries({ queryKey: ["payee-rules"] });
     },
@@ -317,6 +320,7 @@ function PayeeRulePopup({ payee, ruleId, onClose }: {
     mutationFn: () => payeeRulesApi.delete(ruleId!),
     onSuccess: async () => {
       onClose();
+      await qc.invalidateQueries({ queryKey: ["zm-transactions"] });
       await qc.invalidateQueries({ queryKey: ["zm-business"] });
       await qc.invalidateQueries({ queryKey: ["payee-rules"] });
     },
@@ -370,6 +374,9 @@ function PayeeRulePopup({ payee, ruleId, onClose }: {
           {existingRule.display_name && (
             <div style={{ marginBottom: 4 }}><span style={{ color: "#A89070" }}>Метка: </span>{existingRule.display_name}</div>
           )}
+          {existingRule.category && (
+            <div style={{ marginBottom: 4 }}><span style={{ color: "#A89070" }}>Категория: </span>{existingRule.category}</div>
+          )}
           {existingRule.entity_type && (
             <div><span style={{ color: "#A89070" }}>Тип: </span>{ENTITY_TYPE_LABELS[existingRule.entity_type] || existingRule.entity_type}
               {existingRule.entity_name && <span> — {existingRule.entity_name}</span>}
@@ -399,6 +406,11 @@ function PayeeRulePopup({ payee, ruleId, onClose }: {
             <div style={{ fontSize: 10, color: "#A89070", marginBottom: 2 }}>ОТОБРАЖАЕМОЕ ИМЯ</div>
             <input value={form.display_name} onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))}
               placeholder="Яндекс.Доставка" style={inputStyle} />
+          </div>
+          <div>
+            <div style={{ fontSize: 10, color: "#A89070", marginBottom: 2 }}>КАТЕГОРИЯ</div>
+            <input value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
+              placeholder="Доставка, Еда..." style={inputStyle} />
           </div>
           <div>
             <div style={{ fontSize: 10, color: "#A89070", marginBottom: 2 }}>ПРИВЯЗАТЬ К</div>
@@ -457,8 +469,11 @@ function LinkZenModal({ tx, creditorByZenTx, onClose }: {
   });
 
   const link = useMutation({
-    mutationFn: ({ creditorId, txId }: { creditorId: string; txId: string | null }) =>
-      financeApi.updateCreditor(creditorId, { zenmoney_tx_id: txId }),
+    mutationFn: ({ creditorId, txId }: { creditorId: string; txId: string | null }) => {
+      const patch: any = { zenmoney_tx_id: txId };
+      if (txId !== null) patch.paid = tx.outcome;
+      return financeApi.updateCreditor(creditorId, patch);
+    },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["creditors-all"] }); onClose(); },
   });
 
@@ -618,7 +633,7 @@ export default function ZenMoneyPage() {
   const displayTx: any[] = showBusiness ? (businessTx as any[]) : transactions;
 
   const uniqueCats = useMemo(
-    () => [...new Set(displayTx.map((t: any) => t.tags?.[0]).filter(Boolean))].sort() as string[],
+    () => [...new Set(displayTx.map((t: any) => t.display_category || t.tags?.[0]).filter(Boolean))].sort() as string[],
     [displayTx]
   );
   const uniquePayees = useMemo(
@@ -639,7 +654,7 @@ export default function ZenMoneyPage() {
       const isExp = t.outcome > 0 && t.income === 0;
       return detectBank(isExp ? (t.outcome_account || "") : (t.income_account || "")).name === bankFilter;
     });
-    if (catFilter) result = result.filter((t: any) => t.tags?.[0] === catFilter);
+    if (catFilter) result = result.filter((t: any) => (t.display_category || t.tags?.[0]) === catFilter);
     if (payeeFilter) result = result.filter((t: any) => (t.payee || t.comment) === payeeFilter);
     if (amountFilter) {
       const range = AMOUNT_RANGES.find(r => r.label === amountFilter);
@@ -998,13 +1013,20 @@ export default function ZenMoneyPage() {
                   )}
                 </div>
                 <div style={{ fontSize: 10, color: "#A89070", paddingTop: 1 }}>
-                  {(tx.tags as string[])?.[0] || ""}
+                  {tx.display_category || (tx.tags as string[])?.[0] || ""}
                 </div>
-                <div style={{
-                  fontSize: 12, fontWeight: 500, paddingTop: 1,
-                  color: isIncome ? "#4A7C59" : "#1A1A1A",
-                }}>
-                  {isIncome ? "+" : "−"}{fmt(amount)} ₽
+                <div>
+                  <div style={{
+                    fontSize: 12, fontWeight: 500, paddingTop: 1,
+                    color: isIncome ? "#4A7C59" : "#1A1A1A",
+                  }}>
+                    {isIncome ? "+" : "−"}{fmt(amount)} ₽
+                  </div>
+                  {creditorByZenTx.has(String(tx.id)) && (
+                    <div style={{ fontSize: 10, color: "#4A7C59", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {creditorByZenTx.get(String(tx.id))?.name}
+                    </div>
+                  )}
                 </div>
                 <div style={{ display: "flex", justifyContent: "center", paddingTop: 1 }}>
                   {isExpense && (
