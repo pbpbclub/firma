@@ -211,6 +211,66 @@ def ensure_creditors_plan_schema():
         conn.close()
 
 
+_SEED_WORK_TYPES = [
+    "Сварка", "Гибка", "Трубогиб", "Лазерная резка",
+    "Порошковая покраска", "Покраска",
+    "Столярные работы", "ЛДСП / корпусная мебель", "Нержавейка",
+    "Монтаж", "Электрика", "Стекло / зеркала",
+    "Доставка", "Сборка металла",
+]
+
+
+def ensure_work_types_schema():
+    conn = get_production()
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS work_types (
+                id          TEXT PRIMARY KEY,
+                name        TEXT NOT NULL UNIQUE,
+                sort_order  INTEGER DEFAULT 0,
+                created_at  TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS master_work_types (
+                master_id     TEXT NOT NULL,
+                work_type_id  TEXT NOT NULL,
+                PRIMARY KEY (master_id, work_type_id)
+            )
+        """)
+        # estimate_lines.work_type_id
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(estimate_lines)").fetchall()}
+        if existing and "work_type_id" not in existing:
+            conn.execute("ALTER TABLE estimate_lines ADD COLUMN work_type_id TEXT")
+
+        # Seed work types if table is empty
+        import uuid as _uuid
+        count = conn.execute("SELECT COUNT(*) FROM work_types").fetchone()[0]
+        if count == 0:
+            for i, name in enumerate(_SEED_WORK_TYPES):
+                conn.execute(
+                    "INSERT OR IGNORE INTO work_types (id, name, sort_order) VALUES (?, ?, ?)",
+                    (str(_uuid.uuid4()), name, i)
+                )
+            conn.commit()
+            # Auto-link masters to work types by specialization keyword match
+            wt_rows = conn.execute("SELECT id, name FROM work_types").fetchall()
+            masters = conn.execute("SELECT id, specialization FROM masters WHERE specialization IS NOT NULL AND specialization != ''").fetchall()
+            for m in masters:
+                spec = (m["specialization"] or "").lower()
+                for wt in wt_rows:
+                    # match on first significant word of work type name
+                    key = wt["name"].split(" / ")[0].split()[0].lower()
+                    if key and key in spec:
+                        conn.execute(
+                            "INSERT OR IGNORE INTO master_work_types (master_id, work_type_id) VALUES (?, ?)",
+                            (m["id"], wt["id"])
+                        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_payee_rules_schema():
     conn = get_production()
     try:

@@ -89,8 +89,51 @@ def list_masters():
                 (m["name"],)
             ).fetchone()[0]
             m["debt"] = round(debt, 2)
+            try:
+                m["work_type_ids"] = [
+                    row["work_type_id"] for row in conn.execute(
+                        "SELECT work_type_id FROM master_work_types WHERE master_id = ?", (m["id"],)
+                    ).fetchall()
+                ]
+            except Exception:
+                m["work_type_ids"] = []
             result.append(m)
         return result
+    finally:
+        conn.close()
+
+
+class MasterCreate(BaseModel):
+    name: str
+    role: Optional[str] = "Мастер"
+    specialization: Optional[str] = None
+    work_type_id: Optional[str] = None
+
+
+@router.post("")
+def create_master(body: MasterCreate):
+    import uuid
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name required")
+    conn = get_production()
+    try:
+        existing = conn.execute("SELECT * FROM masters WHERE name = ? COLLATE NOCASE", (name,)).fetchone()
+        if existing:
+            mid = existing["id"]
+        else:
+            mid = str(uuid.uuid4())
+            conn.execute(
+                "INSERT INTO masters (id, name, role, specialization, status, created_at) VALUES (?, ?, ?, ?, 'active', datetime('now'))",
+                (mid, name, body.role, body.specialization)
+            )
+        if body.work_type_id:
+            conn.execute(
+                "INSERT OR IGNORE INTO master_work_types (master_id, work_type_id) VALUES (?, ?)",
+                (mid, body.work_type_id)
+            )
+        conn.commit()
+        return dict(conn.execute("SELECT * FROM masters WHERE id = ?", (mid,)).fetchone())
     finally:
         conn.close()
 

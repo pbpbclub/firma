@@ -125,6 +125,7 @@ class LineCreate(BaseModel):
     sort_order: int = 0
     master_id: Optional[str] = None
     contractor_name: Optional[str] = None
+    work_type_id: Optional[str] = None
 
 
 class LineUpdate(BaseModel):
@@ -136,6 +137,7 @@ class LineUpdate(BaseModel):
     sort_order: Optional[int] = None
     master_id: Optional[str] = None
     contractor_name: Optional[str] = None
+    work_type_id: Optional[str] = None
 
 
 class FromCatalog(BaseModel):
@@ -341,11 +343,17 @@ def add_line(item_id: str, body: LineCreate):
             raise HTTPException(status_code=404, detail="Item not found")
         line_id = str(uuid.uuid4())
         line_total = round(body.qty * body.unit_price, 2)
+        title = body.title
+        # If work_type chosen, sync title to its name
+        if body.work_type_id:
+            wt = conn.execute("SELECT name FROM work_types WHERE id = ?", (body.work_type_id,)).fetchone()
+            if wt:
+                title = wt["name"]
         conn.execute(
-            """INSERT INTO estimate_lines (id, item_id, type, title, qty, unit, unit_price, line_total, sort_order, master_id, contractor_name, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (line_id, item_id, body.type, body.title, body.qty, body.unit, body.unit_price, line_total,
-             body.sort_order, body.master_id, body.contractor_name, _now())
+            """INSERT INTO estimate_lines (id, item_id, type, title, qty, unit, unit_price, line_total, sort_order, master_id, contractor_name, work_type_id, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (line_id, item_id, body.type, title, body.qty, body.unit, body.unit_price, line_total,
+             body.sort_order, body.master_id, body.contractor_name, body.work_type_id, _now())
         )
         _recalc_item(conn, item_id)
         _touch_set(conn, item_id)
@@ -364,6 +372,11 @@ def update_line(line_id: str, body: LineUpdate):
         if not row:
             raise HTTPException(status_code=404, detail="Not found")
         fields = {k: v for k, v in body.model_dump().items() if v is not None}
+        # If work_type chosen, sync title to its name
+        if "work_type_id" in fields:
+            wt = conn.execute("SELECT name FROM work_types WHERE id = ?", (fields["work_type_id"],)).fetchone()
+            if wt:
+                fields["title"] = wt["name"]
         # recalc line_total
         qty = fields.get("qty", row["qty"])
         unit_price = fields.get("unit_price", row["unit_price"])
@@ -373,6 +386,13 @@ def update_line(line_id: str, body: LineUpdate):
             f"UPDATE estimate_lines SET {set_clause} WHERE id = ?",
             list(fields.values()) + [line_id]
         )
+        # Auto-link master ↔ work_type
+        final = conn.execute("SELECT master_id, work_type_id FROM estimate_lines WHERE id = ?", (line_id,)).fetchone()
+        if final["master_id"] and final["work_type_id"]:
+            conn.execute(
+                "INSERT OR IGNORE INTO master_work_types (master_id, work_type_id) VALUES (?, ?)",
+                (final["master_id"], final["work_type_id"])
+            )
         _recalc_item(conn, row["item_id"])
         _touch_set(conn, row["item_id"])
         _sync_order_if_approved(conn, row["item_id"])

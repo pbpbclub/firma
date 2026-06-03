@@ -132,8 +132,18 @@ export const estimatesApi = {
 export const mastersApi = {
   list: () => api.get("/masters").then((r) => r.data),
   get: (id: string) => api.get(`/masters/${id}`).then((r) => r.data),
+  create: (data: { name: string; role?: string; specialization?: string; work_type_id?: string }) =>
+    api.post("/masters", data).then((r) => r.data),
   update: (id: string, data: Record<string, any>) => api.patch(`/masters/${id}`, data).then((r) => r.data),
   delete: (id: string) => api.delete(`/masters/${id}`).then((r) => r.data),
+};
+
+export const workTypesApi = {
+  list: () => api.get("/work-types").then((r) => r.data),
+  create: (name: string) => api.post("/work-types", { name }).then((r) => r.data),
+  masters: (workTypeId: string) => api.get(`/work-types/${workTypeId}/masters`).then((r) => r.data),
+  linkMaster: (workTypeId: string, masterId: string) =>
+    api.post(`/work-types/${workTypeId}/masters/${masterId}`).then((r) => r.data),
 };
 
 export const zenmoneyApi = {

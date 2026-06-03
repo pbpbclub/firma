@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ordersApi, estimatesApi, catalogApi, mastersApi } from "../api";
+import { ordersApi, estimatesApi, catalogApi, mastersApi, workTypesApi } from "../api";
 import { useNavigationGuard, NavigationGuardModal } from "../components/NavigationGuard";
 import {
   ArrowLeft, Plus, Trash, Package, Wrench, Truck, Cube,
@@ -90,37 +90,97 @@ const BRANDS = [
 
 // ── Item detail modal ────────────────────────────────────────────────────────
 
-function ContractorInput({ line, masters, onSave }: {
+const selectStyle: React.CSSProperties = {
+  width: "100%", border: "none", borderBottom: "1px solid #EDEBE6",
+  outline: "none", fontSize: 11, color: "#1A1A1A", background: "transparent",
+  padding: "2px 0", boxSizing: "border-box", cursor: "pointer", appearance: "none",
+};
+
+// Work-type dropdown (for non-material lines)
+function WorkTypeSelect({ line, workTypes, onPick, onCreate }: {
+  line: any;
+  workTypes: any[];
+  onPick: (wt: any | null) => void;
+  onCreate: (name: string) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [val, setVal] = useState("");
+  if (adding) {
+    return (
+      <input
+        autoFocus value={val}
+        onChange={e => setVal(e.target.value)}
+        onBlur={() => { const t = val.trim(); if (t) onCreate(t); setAdding(false); setVal(""); }}
+        onKeyDown={e => { if (e.key === "Enter") { const t = val.trim(); if (t) onCreate(t); setAdding(false); setVal(""); } if (e.key === "Escape") { setAdding(false); setVal(""); } }}
+        placeholder="Новый вид работ"
+        style={{ ...selectStyle, borderBottom: "1px solid #E8592A", cursor: "text", fontSize: 12 }}
+      />
+    );
+  }
+  return (
+    <select
+      value={line.work_type_id || ""}
+      onChange={e => {
+        const v = e.target.value;
+        if (v === "__add__") { setAdding(true); return; }
+        onPick(workTypes.find((w: any) => w.id === v) || null);
+      }}
+      style={{ ...selectStyle, fontSize: 12, color: line.work_type_id ? "#1A1A1A" : "#C8C0B0" }}
+    >
+      <option value="">— работа —</option>
+      {workTypes.map((w: any) => <option key={w.id} value={w.id}>{w.name}</option>)}
+      <option value="__add__">+ Добавить вид работ…</option>
+    </select>
+  );
+}
+
+// Contractor dropdown — sectioned by work type, with add
+function ContractorSelect({ line, masters, onPickMaster, onCreateMaster }: {
   line: any;
   masters: any[];
-  onSave: (masterId: string | null, name: string) => void;
+  onPickMaster: (masterId: string) => void;
+  onCreateMaster: (name: string) => void;
 }) {
-  const [val, setVal] = useState(line.contractor_name || (masters.find((m: any) => m.id === line.master_id)?.name) || "");
-  const ref = useRef<HTMLInputElement>(null);
-  const listId = `masters-${line.id}`;
-  return (
-    <div style={{ position: "relative" }}>
+  const [adding, setAdding] = useState(false);
+  const [val, setVal] = useState("");
+  const wtId = line.work_type_id;
+  const linked = wtId ? masters.filter((m: any) => (m.work_type_ids || []).includes(wtId)) : [];
+  const linkedIds = new Set(linked.map((m: any) => m.id));
+  const others = masters.filter((m: any) => !linkedIds.has(m.id));
+
+  if (adding) {
+    return (
       <input
-        ref={ref}
-        list={listId}
-        value={val}
+        autoFocus value={val}
         onChange={e => setVal(e.target.value)}
-        onBlur={() => {
-          const trimmed = val.trim();
-          const match = masters.find((m: any) => m.name.toLowerCase() === trimmed.toLowerCase());
-          onSave(match?.id ?? null, trimmed);
-        }}
-        placeholder="Исполнитель"
-        style={{
-          width: "100%", border: "none", borderBottom: val ? "1px solid #E8592A" : "1px solid #EDEBE6",
-          outline: "none", fontSize: 10, color: val ? "#1A1A1A" : "#C8C0B0",
-          background: "transparent", padding: "1px 2px", boxSizing: "border-box",
-        }}
+        onBlur={() => { const t = val.trim(); if (t) onCreateMaster(t); setAdding(false); setVal(""); }}
+        onKeyDown={e => { if (e.key === "Enter") { const t = val.trim(); if (t) onCreateMaster(t); setAdding(false); setVal(""); } if (e.key === "Escape") { setAdding(false); setVal(""); } }}
+        placeholder="Новый исполнитель"
+        style={{ ...selectStyle, borderBottom: "1px solid #E8592A", cursor: "text", fontSize: 10 }}
       />
-      <datalist id={listId}>
-        {masters.map((m: any) => <option key={m.id} value={m.name} />)}
-      </datalist>
-    </div>
+    );
+  }
+  return (
+    <select
+      value={line.master_id || ""}
+      onChange={e => {
+        const v = e.target.value;
+        if (v === "__add__") { setAdding(true); return; }
+        if (v) onPickMaster(v);
+      }}
+      style={{ ...selectStyle, fontSize: 10, color: line.master_id ? "#1A1A1A" : "#C8C0B0" }}
+    >
+      <option value="">— исполнитель —</option>
+      {linked.length > 0 && (
+        <optgroup label="По этому виду работ">
+          {linked.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </optgroup>
+      )}
+      <optgroup label={linked.length > 0 ? "Все исполнители" : "Исполнители"}>
+        {others.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
+      </optgroup>
+      <option value="__add__">+ Добавить исполнителя…</option>
+    </select>
   );
 }
 
@@ -134,12 +194,38 @@ function ItemModal({ item, onClose, onRefetch }: {
   const [syncing, setSyncing] = useState(false);
   const [synced, setSynced] = useState(false);
   const [masters, setMasters] = useState<any[]>([]);
+  const [workTypes, setWorkTypes] = useState<any[]>([]);
+
+  const reloadMasters = () =>
+    mastersApi.list().then((data: any) => setMasters(Array.isArray(data) ? data : (data?.masters ?? [])));
 
   useEffect(() => {
-    mastersApi.list().then((data: any) => setMasters(Array.isArray(data) ? data : (data?.masters ?? [])));
+    reloadMasters();
+    workTypesApi.list().then((data: any) => setWorkTypes(Array.isArray(data) ? data : []));
   }, []);
 
   const save = (fn: () => Promise<any>) => fn().then(onRefetch);
+
+  // Create a new work type, then assign it to the line
+  const createWorkType = async (line: any, name: string) => {
+    const wt = await workTypesApi.create(name);
+    setWorkTypes(prev => prev.find((w: any) => w.id === wt.id) ? prev : [...prev, wt]);
+    await save(() => estimatesApi.updateLine(line.id, { work_type_id: wt.id }));
+  };
+
+  // Create a new master (linked to line's work type), then assign to the line
+  const createMaster = async (line: any, name: string) => {
+    const m = await mastersApi.create({ name, role: "Мастер", work_type_id: line.work_type_id || undefined });
+    await reloadMasters();
+    await save(() => estimatesApi.updateLine(line.id, { master_id: m.id, contractor_name: m.name }));
+  };
+
+  // Pick existing master for a line
+  const pickMaster = async (line: any, masterId: string) => {
+    const m = masters.find((x: any) => x.id === masterId);
+    await save(() => estimatesApi.updateLine(line.id, { master_id: masterId, contractor_name: m?.name || "" }));
+    reloadMasters(); // refresh in case backend auto-linked master↔work_type
+  };
 
   useEffect(() => {
     if (lines.length === 0) {
@@ -233,11 +319,20 @@ function ItemModal({ item, onClose, onRefetch }: {
                   <Icon size={12} />
                 </button>
                 <div style={{ fontSize: 12, color: "#1A1A1A" }}>
-                  <EditCell
-                    value={line.title}
-                    placeholder="Название"
-                    onSave={v => save(() => estimatesApi.updateLine(line.id, { title: v }))}
-                  />
+                  {line.type === "material" ? (
+                    <EditCell
+                      value={line.title}
+                      placeholder="Название"
+                      onSave={v => save(() => estimatesApi.updateLine(line.id, { title: v }))}
+                    />
+                  ) : (
+                    <WorkTypeSelect
+                      line={line}
+                      workTypes={workTypes}
+                      onPick={wt => save(() => estimatesApi.updateLine(line.id, { work_type_id: wt?.id }))}
+                      onCreate={name => createWorkType(line, name)}
+                    />
+                  )}
                 </div>
                 <div style={{ fontSize: 11, color: "#6B6355" }}>
                   <EditCell
@@ -262,10 +357,11 @@ function ItemModal({ item, onClose, onRefetch }: {
                 <div style={{ fontSize: 12, fontWeight: 600, color: "#1A1A1A" }}>
                   {fmt(line.line_total)}
                 </div>
-                <ContractorInput
+                <ContractorSelect
                   line={line}
                   masters={masters}
-                  onSave={(masterId, name) => save(() => estimatesApi.updateLine(line.id, { master_id: masterId, contractor_name: name }))}
+                  onPickMaster={mid => pickMaster(line, mid)}
+                  onCreateMaster={name => createMaster(line, name)}
                 />
                 <button
                   onClick={() => save(() => estimatesApi.deleteLine(line.id))}
