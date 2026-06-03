@@ -300,6 +300,7 @@ function CalculatorModal({
 
   const [title, setTitle] = useState(item?.title ?? "");
   const [category, setCategory] = useState(item?.category ?? "");
+  const [brand, setBrand] = useState<string | null>(item?.brand ?? null);
   const [markupPct, setMarkupPct] = useState(item?.markup_pct ?? 30);
   const [notes, setNotes] = useState(item?.notes ?? "");
   const [lines, setLines] = useState<Line[]>(() =>
@@ -328,6 +329,7 @@ function CalculatorModal({
     const payload = {
       title: title.trim(),
       category: category.trim() || null,
+      brand: brand || null,
       markup_pct: markupPct,
       notes: notes.trim() || null,
       lines: lines.map((l, i) => ({
@@ -414,26 +416,60 @@ function CalculatorModal({
         {/* Scrollable body */}
         <div style={{ overflowY: "auto", flex: 1, padding: "0 24px 24px" }}>
 
-          {/* Name + category */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 160px", gap: 10, marginTop: 20 }}>
-            <div>
-              <div style={{ ...sectionLabel, marginTop: 0, marginBottom: 4 }}>НАЗВАНИЕ</div>
-              <input
-                style={{ ...inputBase, width: "100%" }}
-                placeholder="Название изделия"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                autoFocus
-              />
-            </div>
+          {/* Name */}
+          <div style={{ marginTop: 20 }}>
+            <div style={{ ...sectionLabel, marginTop: 0, marginBottom: 4 }}>НАЗВАНИЕ</div>
+            <input
+              style={{ ...inputBase, width: "100%" }}
+              placeholder="Название изделия"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              autoFocus
+            />
+          </div>
+
+          {/* Category + Brand */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 200px", gap: 10, marginTop: 14 }}>
             <div>
               <div style={{ ...sectionLabel, marginTop: 0, marginBottom: 4 }}>КАТЕГОРИЯ</div>
-              <input
-                style={{ ...inputBase, width: "100%" }}
-                placeholder="Столы"
+              <select
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
-              />
+                style={{ ...inputBase, width: "100%", appearance: "none", cursor: "pointer" }}
+              >
+                <option value="">— не выбрана —</option>
+                {["Столы", "Уличная мебель", "Мягкая мебель", "Металлокаркасы", "Стулья", "Каркас дивана", "Кашпо", "Перегородки", "Полки", "Скамейки", "Доставка"].map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+                {category && !["Столы", "Уличная мебель", "Мягкая мебель", "Металлокаркасы", "Стулья", "Каркас дивана", "Кашпо", "Перегородки", "Полки", "Скамейки", "Доставка"].includes(category) && (
+                  <option value={category}>{category}</option>
+                )}
+              </select>
+            </div>
+            <div>
+              <div style={{ ...sectionLabel, marginTop: 0, marginBottom: 4 }}>БРЕНД</div>
+              <div style={{ display: "flex", gap: 6 }}>
+                {([null, "MeRA", "pbpb", "Транзит"] as (string | null)[]).map((b) => {
+                  const colors: Record<string, string> = { MeRA: "#2E6DA4", pbpb: "#7B4F9E", Транзит: "#3D8C6B" };
+                  const active = brand === b;
+                  const color = b ? colors[b] : "#A89070";
+                  return (
+                    <button
+                      key={String(b)}
+                      onClick={() => setBrand(b)}
+                      style={{
+                        background: active ? color : "transparent",
+                        border: `1px solid ${active ? color : "#EDEBE6"}`,
+                        color: active ? "#FFFFFF" : color,
+                        fontSize: 11, fontWeight: 600, padding: "4px 8px",
+                        cursor: "pointer", transition: "all 0.12s",
+                      }}
+                    >
+                      {b ?? "—"}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
