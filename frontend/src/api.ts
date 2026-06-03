@@ -60,12 +60,14 @@ export const financeApi = {
     api.delete(`/finance/creditors/${id}`).then((r) => r.data),
   suggestTx: (name: string, amount: number) =>
     api.get("/finance/transactions/suggest", { params: { name, amount } }).then((r) => r.data),
+  suggestInTx: (name: string, amount: number) =>
+    api.get("/finance/transactions/suggest", { params: { name, amount, direction: "in" } }).then((r) => r.data),
   suggestCreditors: (counterparty: string, amount: number) =>
     api.get("/finance/creditors/suggest", { params: { counterparty, amount } }).then((r) => r.data),
   receivables: () => api.get("/finance/receivables").then((r) => r.data),
   createReceivable: (data: { client: string; inn?: string; invoice_num?: string; invoice_date?: string; amount: number; paid?: number; note?: string }) =>
     api.post("/finance/receivables", data).then((r) => r.data),
-  updateReceivable: (id: number, data: { paid?: number; note?: string }) =>
+  updateReceivable: (id: number, data: { paid?: number; note?: string; finance_tx_id?: string | null }) =>
     api.patch(`/finance/receivables/${id}`, data).then((r) => r.data),
 };
 
@@ -85,6 +87,8 @@ export const catalogApi = {
     update: (id: string, data: any) => api.put(`/catalog/items/${id}`, data).then((r) => r.data),
     delete: (id: string)            => api.delete(`/catalog/items/${id}`).then((r) => r.data),
   },
+  deleteByTitles: (titles: string[]) =>
+    api.delete("/catalog/by-titles", { data: { titles } }).then((r) => r.data),
 };
 
 export const fundsApi = {
@@ -115,6 +119,7 @@ export const estimatesApi = {
     api.post(`/estimates/sets/${setId}/invoice`, {}, { responseType: "blob" }).then(r => r.data),
   syncToCatalog: (itemId: string)           => api.post(`/estimates/items/${itemId}/to-catalog`).then(r => r.data),
   createObligations: (setId: string)        => api.post(`/estimates/sets/${setId}/create-obligations`).then(r => r.data),
+  deleteObligations: (setId: string)        => api.delete(`/estimates/sets/${setId}/obligations`).then(r => r.data),
 };
 
 export const mastersApi = {
@@ -149,6 +154,7 @@ export const payeeRulesApi = {
     entity_type?: string;
     entity_id?: string;
     entity_name?: string;
+    category?: string;
   }) => api.post("/payee-rules", data).then((r) => r.data),
   update: (id: number, data: Partial<{
     pattern: string;
@@ -157,6 +163,7 @@ export const payeeRulesApi = {
     entity_type: string;
     entity_id: string;
     entity_name: string;
+    category: string;
   }>) => api.patch(`/payee-rules/${id}`, data).then((r) => r.data),
   delete: (id: number) => api.delete(`/payee-rules/${id}`).then((r) => r.data),
 };

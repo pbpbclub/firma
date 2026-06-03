@@ -213,3 +213,27 @@ def delete_item(item_id: str):
         return {"ok": True}
     finally:
         conn.close()
+
+
+class DeleteByTitlesBody(BaseModel):
+    titles: List[str]
+
+
+@router.delete("/by-titles")
+def delete_by_titles(body: DeleteByTitlesBody):
+    """Delete all estimate_items (and their lines) matching the given titles."""
+    conn = get_production()
+    try:
+        deleted = 0
+        for title in body.titles:
+            item_ids = [r["id"] for r in conn.execute(
+                "SELECT id FROM estimate_items WHERE title = ?", (title,)
+            ).fetchall()]
+            for iid in item_ids:
+                conn.execute("DELETE FROM estimate_lines WHERE item_id = ?", (iid,))
+            result = conn.execute("DELETE FROM estimate_items WHERE title = ?", (title,))
+            deleted += result.rowcount
+        conn.commit()
+        return {"deleted": deleted}
+    finally:
+        conn.close()

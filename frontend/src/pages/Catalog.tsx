@@ -646,6 +646,19 @@ export default function Catalog() {
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [confirmSmetsDelete, setConfirmSmetsDelete] = useState(false);
+  const [smetsDeleting, setSmetsDeleting] = useState(false);
+
+  const smetsDelete = async () => {
+    setSmetsDeleting(true);
+    try {
+      await catalogApi.deleteByTitles(Array.from(selectedIds));
+      qc.invalidateQueries({ queryKey: ["catalog"] });
+      setSelectedIds(new Set());
+    } finally {
+      setSmetsDeleting(false);
+    }
+  };
 
   const bulkDelete = async () => {
     setBulkDeleting(true);
@@ -888,9 +901,20 @@ export default function Catalog() {
                         {selectedIds.size > 0 && selSum > 0 && <span>{fmt(selSum)}</span>}
                         {selectedIds.size === 0 && <span>{filteredSmets.length} изделий</span>}
                       </div>
-                      <button onClick={canClear ? clearFilters : undefined} style={{ fontSize: 10, color: canClear ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: canClear ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
-                        <X size={10} /> Сбросить
-                      </button>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        {selectedIds.size > 0 && (
+                          <button
+                            onClick={() => setConfirmSmetsDelete(true)}
+                            disabled={smetsDeleting}
+                            style={{ fontSize: 10, color: "#8B3A3A", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 3, padding: 0 }}
+                          >
+                            <Trash size={10} /> Удалить ({selectedIds.size})
+                          </button>
+                        )}
+                        <button onClick={canClear ? clearFilters : undefined} style={{ fontSize: 10, color: canClear ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: canClear ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
+                          <X size={10} /> Сбросить
+                        </button>
+                      </div>
                     </div>
                   );
                 })()}
@@ -965,6 +989,13 @@ export default function Catalog() {
           message={`Удалить ${selectedIds.size} изделий${selectedIds.size === 1 ? "" : ""} из каталога? Это действие безвозвратно.`}
           onConfirm={() => { setConfirmBulkDelete(false); bulkDelete(); }}
           onCancel={() => setConfirmBulkDelete(false)}
+        />
+      )}
+      {confirmSmetsDelete && (
+        <ConfirmModal
+          message={`Удалить ${selectedIds.size} позиций из всех смет? Это изменит суммы смет и безвозвратно удалит эти позиции.`}
+          onConfirm={() => { setConfirmSmetsDelete(false); smetsDelete(); }}
+          onCancel={() => setConfirmSmetsDelete(false)}
         />
       )}
     </div>
