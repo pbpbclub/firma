@@ -134,6 +134,47 @@ function WorkTypeSelect({ line, workTypes, onPick, onCreate }: {
   );
 }
 
+const UNIT_OPTIONS = ["шт", "м.п.", "м²", "м³", "кг", "л", "компл.", "услуга", "ч"];
+
+// Unit dropdown — preset units + custom
+function UnitSelect({ line, onSave }: {
+  line: any;
+  onSave: (unit: string) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [val, setVal] = useState("");
+  const current = line.unit || "шт";
+  const isCustom = !UNIT_OPTIONS.includes(current);
+  if (adding) {
+    return (
+      <input
+        autoFocus value={val}
+        onChange={e => setVal(e.target.value)}
+        onBlur={() => { const t = val.trim(); if (t) onSave(t); setAdding(false); setVal(""); }}
+        onKeyDown={e => { if (e.key === "Enter") { const t = val.trim(); if (t) onSave(t); setAdding(false); setVal(""); } if (e.key === "Escape") { setAdding(false); setVal(""); } }}
+        placeholder="ед."
+        style={{ ...selectStyle, borderBottom: "1px solid #E8592A", cursor: "text" }}
+      />
+    );
+  }
+  return (
+    <select
+      value={isCustom ? "__custom__" : current}
+      onChange={e => {
+        const v = e.target.value;
+        if (v === "__add__") { setAdding(true); return; }
+        if (v === "__custom__") return;
+        onSave(v);
+      }}
+      style={{ ...selectStyle, color: "#6B6355" }}
+    >
+      {isCustom && <option value="__custom__">{current}</option>}
+      {UNIT_OPTIONS.map(u => <option key={u} value={u}>{u}</option>)}
+      <option value="__add__">+ своя…</option>
+    </select>
+  );
+}
+
 // Contractor dropdown — sectioned by work type, with add
 function ContractorSelect({ line, masters, onPickMaster, onCreateMaster }: {
   line: any;
@@ -335,8 +376,8 @@ function ItemModal({ item, onClose, onRefetch }: {
                   )}
                 </div>
                 <div style={{ fontSize: 11, color: "#6B6355" }}>
-                  <EditCell
-                    value={line.unit}
+                  <UnitSelect
+                    line={line}
                     onSave={v => save(() => estimatesApi.updateLine(line.id, { unit: v }))}
                   />
                 </div>
