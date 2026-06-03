@@ -182,7 +182,7 @@ def get_debtors():
             SELECT
                 o.id, o.number, o.title, o.status, o.deadline,
                 c.name AS customer_name,
-                o.price_plan,
+                o.price_plan, o.finance_tx_id,
                 COALESCE(SUM(p.amount), 0) AS paid_manual
             FROM orders o
             LEFT JOIN customers c ON c.id = o.customer_id
@@ -198,30 +198,31 @@ def get_debtors():
             """
         ).fetchall()
 
-        # Bank incoming payments linked to orders via order_ref
+        # Build Map: bank_tx_id → payment amount (from production.db payments)
+        bank_tx_map: dict = {}
         try:
-            bank_rows = fin.execute(
-                """
-                SELECT order_ref, SUM(amount) AS bank_paid
-                FROM transactions
-                WHERE direction = 'in'
-                  AND order_ref IS NOT NULL AND order_ref != ''
-                GROUP BY order_ref
-                """
-            ).fetchall()
-            bank_by_ref = {r["order_ref"]: r["bank_paid"] for r in bank_rows}
+            prod2 = get_production()
+            brows = prod2.execute("SELECT bank_tx_id, amount FROM payments WHERE bank_tx_id IS NOT NULL").fetchall()
+            for br in brows:
+                bank_tx_map[br["bank_tx_id"]] = bank_tx_map.get(br["bank_tx_id"], 0) + (br["amount"] or 0)
+            prod2.close()
         except Exception:
-            bank_by_ref = {}
+            pass
+
+        STATUS_LABELS = {
+            "draft": "Черновик", "estimate": "Смета", "project": "Проект",
+            "in_production": "В производстве", "completed": "Завершён", "cancelled": "Отменён",
+        }
 
         result = []
         for r in orders:
             row = dict(r)
-            bank_paid = bank_by_ref.get(row["id"], 0) + bank_by_ref.get(row["number"], 0)
-            paid_total = row["paid_manual"] + bank_paid
+            paid_total = row["paid_manual"]
             debt = round((row["price_plan"] or 0) - paid_total, 2)
             row["paid_total"] = round(paid_total, 2)
-            row["paid_bank"] = round(bank_paid, 2)
+            row["paid_bank"] = 0
             row["debt"] = debt
+            row["status_label"] = STATUS_LABELS.get(row["status"], row["status"])
             if debt > 0:
                 result.append(row)
 
@@ -378,12 +379,13 @@ def _amount_score(a: float, b: float) -> float:
 
 
 @router.get("/transactions/suggest")
-def suggest_transactions(name: str = "", amount: float = 0, limit: int = Query(10, le=50)):
-    """Suggest finance transactions for linking to a creditor."""
+def suggest_transactions(name: str = "", amount: float = 0, direction: str = "out", limit: int = Query(10, le=50)):
+    """Suggest finance transactions for linking."""
     conn = get_finance()
     try:
         rows = conn.execute(
-            "SELECT * FROM transactions WHERE direction = 'out' ORDER BY date DESC LIMIT 500"
+            "SELECT * FROM transactions WHERE direction = ? ORDER BY date DESC LIMIT 500",
+            (direction,),
         ).fetchall()
         scored = []
         for r in rows:
@@ -438,6 +440,7 @@ class ReceivableCreate(BaseModel):
 class ReceivablePatch(BaseModel):
     paid: Optional[float] = None
     note: Optional[str] = None
+    finance_tx_id: Optional[str] = None
 
 
 @router.get("/receivables")
@@ -500,6 +503,8 @@ def update_receivable(rec_id: int, body: ReceivablePatch):
                 fields.append("paid = ?"); params.append(body.paid)
             if body.note is not None:
                 fields.append("note = ?"); params.append(body.note)
+            if "finance_tx_id" in body.model_fields_set:
+                fields.append("finance_tx_id = ?"); params.append(body.finance_tx_id)
             if fields:
                 params.append(rec_id)
                 conn.execute(f"UPDATE receivables SET {', '.join(fields)} WHERE id = ?", params)

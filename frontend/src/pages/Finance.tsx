@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { financeApi } from "../api";
+import { financeApi, ordersApi } from "../api";
 import { MagnifyingGlass, Funnel, X, LinkSimple } from "@phosphor-icons/react";
 
 function ColumnFilter({ options, value, onChange, maxHeight }: {
@@ -311,6 +311,94 @@ function LinkCreditorModal({ tx, creditorByFinTx, onClose }: {
   );
 }
 
+// ── Модал: привязать входящую транзакцию к заказу ────────────────────────────
+
+function LinkOrderModal({ tx, paymentByFinTx, onClose }: {
+  tx: any;
+  paymentByFinTx: Map<string, any>;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const [search, setSearch] = useState("");
+  const { data: suggested = [], isFetching } = useQuery({
+    queryKey: ["suggest-orders", tx.id],
+    queryFn: () => ordersApi.suggest(tx.counterparty || tx.purpose || "", tx.amount || 0),
+  });
+
+  const link = useMutation({
+    mutationFn: async ({ orderId, txId }: { orderId: string | null; txId: string }) => {
+      if (orderId === null) {
+        const cur = paymentByFinTx.get(String(txId));
+        if (cur) await ordersApi.deletePayment(cur.order_id, cur.payment_id);
+      } else {
+        await ordersApi.addPayment(orderId, {
+          amount: tx.amount,
+          paid_at: (tx.date || "").slice(0, 10),
+          note: `ДДС: ${tx.counterparty || tx.purpose || ""}`.trim(),
+          bank_tx_id: String(txId),
+        });
+      }
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["payments-map"] }); onClose(); },
+  });
+
+  const currentPayment = paymentByFinTx.get(String(tx.id));
+
+  function fmtAmt(n: number) {
+    return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) + " ₽";
+  }
+
+  const items: any[] = suggested as any[];
+  const filtered = search
+    ? items.filter((o: any) => ((o.title || "") + " " + (o.customer_name || "")).toLowerCase().includes(search.toLowerCase()))
+    : items;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ background: "#fff", width: 480, maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,0.18)" }}>
+        <div style={{ padding: "16px 20px 12px", borderBottom: "1px solid #EDEBE6", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1A1A" }}>{tx.counterparty || tx.purpose || "—"}</div>
+            <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>{(tx.date || "").slice(0, 10)} · +{fmtAmt(tx.amount)}</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070" }}><X size={16} /></button>
+        </div>
+        {currentPayment && (
+          <div style={{ padding: "8px 20px", background: "#F2FDF5", borderBottom: "1px solid #D0EDD8", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ fontSize: 11, color: "#4A7C59" }}>
+              <LinkSimple size={11} style={{ marginRight: 4 }} />
+              Привязано: <strong>{currentPayment.order_title} ({currentPayment.order_number})</strong>
+            </div>
+            <button onClick={() => link.mutate({ orderId: null, txId: String(tx.id) })} style={{ fontSize: 11, color: "#8B3A3A", background: "none", border: "none", cursor: "pointer", padding: 0 }}>Отвязать</button>
+          </div>
+        )}
+        <div style={{ padding: "8px 20px", borderBottom: "1px solid #F2EFE9" }}>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Поиск по заказу или клиенту..."
+            style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "5px 10px", fontSize: 12, outline: "none" }} />
+        </div>
+        <div style={{ flex: 1, overflowY: "auto" }}>
+          {isFetching && <div style={{ padding: 32, textAlign: "center", color: "#A89070", fontSize: 12 }}>Загружаем...</div>}
+          {!isFetching && filtered.length === 0 && <div style={{ padding: 32, textAlign: "center", color: "#C8C0B0", fontSize: 12 }}>Заказы не найдены</div>}
+          {!isFetching && filtered.map((o: any) => (
+            <div key={o.id} onClick={() => link.mutate({ orderId: o.id, txId: String(tx.id) })}
+              style={{ display: "grid", gridTemplateColumns: "1fr 100px 80px", padding: "9px 20px", borderBottom: "1px solid #F2EFE9", cursor: "pointer", alignItems: "center", gap: 10 }}
+              onMouseEnter={e => { e.currentTarget.style.background = "#FAF8F5"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+            >
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 500, color: "#1A1A1A" }}>{o.title}</div>
+                {o.customer_name && <div style={{ fontSize: 10, color: "#A89070", marginTop: 1 }}>{o.customer_name}</div>}
+              </div>
+              <div style={{ fontSize: 11, color: "#E8592A", textAlign: "right" }}>{o.number}</div>
+              <div style={{ fontSize: 11, color: "#A89070", textAlign: "right" }}>{fmtAmt(o.price_plan || 0)}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Finance() {
   const [direction, setDirection] = useState("");
   const [search, setSearch] = useState("");
@@ -324,7 +412,8 @@ export default function Finance() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [linkModal, setLinkModal] = useState<any>(null);
-  const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
+  const [linkOrderModal, setLinkOrderModal] = useState<any>(null);
+  const FIN_GRID = "28px 110px 1fr 120px 120px 28px 28px";
 
   const { data: allCreditors } = useQuery({
     queryKey: ["creditors-all"],
@@ -337,6 +426,18 @@ export default function Finance() {
     }
     return m;
   }, [allCreditors]);
+
+  const { data: paymentsMapData = [] } = useQuery({
+    queryKey: ["payments-map"],
+    queryFn: ordersApi.paymentsMap,
+  });
+  const paymentByFinTx = useMemo(() => {
+    const m = new Map<string, any>();
+    for (const p of paymentsMapData as any[]) {
+      if (p.bank_tx_id) m.set(String(p.bank_tx_id), p);
+    }
+    return m;
+  }, [paymentsMapData]);
 
   const { data: balance } = useQuery({ queryKey: ["balance"], queryFn: financeApi.balance });
   const { data: summary } = useQuery({ queryKey: ["dds-summary"], queryFn: financeApi.summary });
@@ -487,7 +588,7 @@ export default function Finance() {
             <span style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>СУММА</span>
             <AmountFilter min={amountMin} max={amountMax} onChange={(mn, mx) => { setAmountMin(mn); setAmountMax(mx); }} />
           </div>
-          <div />
+          <div /><div />
         </div>
 
         {/* Rows */}
@@ -535,9 +636,14 @@ export default function Finance() {
                   <div style={{ fontSize: 13, fontWeight: 600, color: t.direction === "in" ? "#4A7C59" : "#8B3A3A" }}>
                     {t.direction === "in" ? "+" : "−"}{fmt(t.amount)}
                   </div>
-                  {creditorByFinTx.has(String(t.id)) && (
+                  {t.direction === "out" && creditorByFinTx.has(String(t.id)) && (
                     <div style={{ fontSize: 10, color: "#4A7C59", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {creditorByFinTx.get(String(t.id))?.name}
+                    </div>
+                  )}
+                  {t.direction === "in" && paymentByFinTx.has(String(t.id)) && (
+                    <div style={{ fontSize: 10, color: "#4A7C59", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {paymentByFinTx.get(String(t.id))?.number}
                     </div>
                   )}
                 </div>
@@ -557,6 +663,22 @@ export default function Finance() {
                     </button>
                   )}
                 </div>
+                <div style={{ display: "flex", justifyContent: "center" }}>
+                  {t.direction === "in" && t.source !== "fund" && (
+                    <button
+                      onClick={e => { e.stopPropagation(); setLinkOrderModal(t); }}
+                      title="Привязать к заказу"
+                      style={{
+                        background: "none", border: "none", cursor: "pointer", padding: 2, display: "flex",
+                        color: paymentByFinTx.has(String(t.id)) ? "#4A7C59" : "#C8C0B0",
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
+                      onMouseLeave={e => (e.currentTarget.style.color = paymentByFinTx.has(String(t.id)) ? "#4A7C59" : "#C8C0B0")}
+                    >
+                      <LinkSimple size={12} />
+                    </button>
+                  )}
+                </div>
               </div>
             ))
           )}
@@ -565,6 +687,13 @@ export default function Finance() {
               tx={linkModal}
               creditorByFinTx={creditorByFinTx}
               onClose={() => setLinkModal(null)}
+            />
+          )}
+          {linkOrderModal && (
+            <LinkOrderModal
+              tx={linkOrderModal}
+              paymentByFinTx={paymentByFinTx}
+              onClose={() => setLinkOrderModal(null)}
             />
           )}
         </div>

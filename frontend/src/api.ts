@@ -33,6 +33,13 @@ export const ordersApi = {
   update: (id: string, data: Record<string, any>) => api.patch(`/orders/${id}`, data).then((r) => r.data),
   updateBrand: (id: string, brand: string | null) => api.patch(`/orders/${id}/brand`, { brand }).then((r) => r.data),
   delete: (id: string) => api.delete(`/orders/${id}`).then((r) => r.data),
+  addPayment: (id: string, data: { amount: number; paid_at: string; note?: string; bank_tx_id?: string }) =>
+    api.post(`/orders/${id}/payments`, data).then((r) => r.data),
+  deletePayment: (orderId: string, paymentId: string) =>
+    api.delete(`/orders/${orderId}/payments/${paymentId}`).then((r) => r.data),
+  suggest: (counterparty: string, amount: number) =>
+    api.get("/orders/suggest", { params: { counterparty, amount } }).then((r) => r.data),
+  paymentsMap: () => api.get("/orders/payments-map").then((r) => r.data),
 };
 
 export const customersApi = {

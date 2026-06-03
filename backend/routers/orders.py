@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Query, HTTPException, Body, Depends
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from uuid import uuid4
 from db import get_production
 from auth import get_current_user
@@ -269,7 +269,7 @@ async def update_order(order_id: str, body: dict = Body(...)):
         if not r:
             raise HTTPException(status_code=404, detail="Not found")
 
-        allowed = {"title", "priority", "deadline", "customer_id", "price_plan", "cost_plan", "brand", "status"}
+        allowed = {"title", "priority", "deadline", "customer_id", "price_plan", "cost_plan", "brand", "status", "finance_tx_id"}
         fields, values = [], []
         for key in allowed:
             if key not in body:
@@ -350,5 +350,108 @@ async def create_order(body: dict = Body(...), user=Depends(get_current_user)):
         conn.commit()
         order = dict(conn.execute("SELECT * FROM orders WHERE id = ?", (new_id,)).fetchone())
         return order
+    finally:
+        conn.close()
+
+
+class PaymentCreate(BaseModel):
+    amount: float
+    paid_at: str
+    note: Optional[str] = None
+    bank_tx_id: Optional[str] = None
+
+
+@router.post("/{order_id}/payments")
+def add_payment(order_id: str, body: PaymentCreate):
+    conn = get_production()
+    try:
+        r = conn.execute("SELECT id FROM orders WHERE id = ? OR number = ?", (order_id, order_id)).fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="Not found")
+        pid = str(uuid4())
+        conn.execute(
+            """INSERT INTO payments (id, order_id, amount, paid_at, note, bank_tx_id, source, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, 'manual', datetime('now'))""",
+            (pid, r["id"], body.amount, body.paid_at, body.note, body.bank_tx_id)
+        )
+        conn.commit()
+        return dict(conn.execute("SELECT * FROM payments WHERE id = ?", (pid,)).fetchone())
+    finally:
+        conn.close()
+
+
+@router.delete("/{order_id}/payments/{payment_id}")
+def delete_payment(order_id: str, payment_id: str):
+    conn = get_production()
+    try:
+        r = conn.execute("SELECT id FROM payments WHERE id = ? AND order_id IN (SELECT id FROM orders WHERE id = ? OR number = ?)", (payment_id, order_id, order_id)).fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="Not found")
+        conn.execute("DELETE FROM payments WHERE id = ?", (payment_id,))
+        conn.commit()
+        return {"ok": True}
+    finally:
+        conn.close()
+
+
+def _name_score(a: str, b: str) -> float:
+    wa = set((a or "").lower().split())
+    wb = set((b or "").lower().split())
+    if not wa or not wb:
+        return 0.0
+    return len(wa & wb) / max(len(wa), len(wb))
+
+
+def _amount_score(a: float, b: float) -> float:
+    if not a and not b:
+        return 1.0
+    m = max(abs(a), abs(b))
+    if not m:
+        return 1.0
+    return max(0.0, 1.0 - abs(a - b) / m)
+
+
+@router.get("/suggest")
+def suggest_orders(counterparty: str = "", amount: float = 0, limit: int = Query(10, le=50)):
+    conn = get_production()
+    try:
+        rows = conn.execute(
+            """SELECT o.id, o.number, o.title, o.price_plan, o.status,
+                      c.name AS customer_name,
+                      COALESCE(SUM(p.amount), 0) AS paid_total
+               FROM orders o
+               LEFT JOIN customers c ON c.id = o.customer_id
+               LEFT JOIN payments p ON p.order_id = o.id
+               WHERE o.archived = 0
+               GROUP BY o.id
+               ORDER BY o.created_at DESC LIMIT 200"""
+        ).fetchall()
+        scored = []
+        for r in rows:
+            row = dict(r)
+            ns = _name_score(counterparty, (row.get("customer_name") or "") + " " + (row.get("title") or ""))
+            as_ = _amount_score(amount, row.get("price_plan") or 0)
+            row["score"] = round(0.6 * ns + 0.4 * as_, 3)
+            row["debt"] = round((row.get("price_plan") or 0) - (row.get("paid_total") or 0), 2)
+            scored.append(row)
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        return scored[:limit]
+    finally:
+        conn.close()
+
+
+@router.get("/payments-map")
+def payments_map():
+    """Returns a map of bank_tx_id → {payment, order} for Finance.tsx."""
+    conn = get_production()
+    try:
+        rows = conn.execute(
+            """SELECT p.id AS payment_id, p.amount, p.paid_at, p.bank_tx_id,
+                      o.id AS order_id, o.number, o.title
+               FROM payments p
+               JOIN orders o ON o.id = p.order_id
+               WHERE p.bank_tx_id IS NOT NULL"""
+        ).fetchall()
+        return [dict(r) for r in rows]
     finally:
         conn.close()
