@@ -79,6 +79,68 @@ def list_orders(
         conn.close()
 
 
+def _name_score(a: str, b: str) -> float:
+    wa = set((a or "").lower().split())
+    wb = set((b or "").lower().split())
+    if not wa or not wb:
+        return 0.0
+    return len(wa & wb) / max(len(wa), len(wb))
+
+
+def _amount_score(a: float, b: float) -> float:
+    if not a and not b:
+        return 1.0
+    m = max(abs(a), abs(b))
+    if not m:
+        return 1.0
+    return max(0.0, 1.0 - abs(a - b) / m)
+
+
+@router.get("/suggest")
+def suggest_orders(counterparty: str = "", amount: float = 0, limit: int = Query(10, le=50)):
+    conn = get_production()
+    try:
+        rows = conn.execute(
+            """SELECT o.id, o.number, o.title, o.price_plan, o.status,
+                      c.name AS customer_name,
+                      COALESCE(SUM(p.amount), 0) AS paid_total
+               FROM orders o
+               LEFT JOIN customers c ON c.id = o.customer_id
+               LEFT JOIN payments p ON p.order_id = o.id
+               WHERE o.archived = 0
+               GROUP BY o.id
+               ORDER BY o.created_at DESC LIMIT 200"""
+        ).fetchall()
+        scored = []
+        for r in rows:
+            row = dict(r)
+            ns = _name_score(counterparty, (row.get("customer_name") or "") + " " + (row.get("title") or ""))
+            as_ = _amount_score(amount, row.get("price_plan") or 0)
+            row["score"] = round(0.6 * ns + 0.4 * as_, 3)
+            row["debt"] = round((row.get("price_plan") or 0) - (row.get("paid_total") or 0), 2)
+            scored.append(row)
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        return scored[:limit]
+    finally:
+        conn.close()
+
+
+@router.get("/payments-map")
+def payments_map():
+    conn = get_production()
+    try:
+        rows = conn.execute(
+            """SELECT p.id AS payment_id, p.amount, p.paid_at, p.bank_tx_id,
+                      o.id AS order_id, o.number, o.title
+               FROM payments p
+               JOIN orders o ON o.id = p.order_id
+               WHERE p.bank_tx_id IS NOT NULL"""
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
 @router.get("/{order_id}")
 def get_order(order_id: str):
     conn = get_production()
@@ -390,68 +452,5 @@ def delete_payment(order_id: str, payment_id: str):
         conn.execute("DELETE FROM payments WHERE id = ?", (payment_id,))
         conn.commit()
         return {"ok": True}
-    finally:
-        conn.close()
-
-
-def _name_score(a: str, b: str) -> float:
-    wa = set((a or "").lower().split())
-    wb = set((b or "").lower().split())
-    if not wa or not wb:
-        return 0.0
-    return len(wa & wb) / max(len(wa), len(wb))
-
-
-def _amount_score(a: float, b: float) -> float:
-    if not a and not b:
-        return 1.0
-    m = max(abs(a), abs(b))
-    if not m:
-        return 1.0
-    return max(0.0, 1.0 - abs(a - b) / m)
-
-
-@router.get("/suggest")
-def suggest_orders(counterparty: str = "", amount: float = 0, limit: int = Query(10, le=50)):
-    conn = get_production()
-    try:
-        rows = conn.execute(
-            """SELECT o.id, o.number, o.title, o.price_plan, o.status,
-                      c.name AS customer_name,
-                      COALESCE(SUM(p.amount), 0) AS paid_total
-               FROM orders o
-               LEFT JOIN customers c ON c.id = o.customer_id
-               LEFT JOIN payments p ON p.order_id = o.id
-               WHERE o.archived = 0
-               GROUP BY o.id
-               ORDER BY o.created_at DESC LIMIT 200"""
-        ).fetchall()
-        scored = []
-        for r in rows:
-            row = dict(r)
-            ns = _name_score(counterparty, (row.get("customer_name") or "") + " " + (row.get("title") or ""))
-            as_ = _amount_score(amount, row.get("price_plan") or 0)
-            row["score"] = round(0.6 * ns + 0.4 * as_, 3)
-            row["debt"] = round((row.get("price_plan") or 0) - (row.get("paid_total") or 0), 2)
-            scored.append(row)
-        scored.sort(key=lambda x: x["score"], reverse=True)
-        return scored[:limit]
-    finally:
-        conn.close()
-
-
-@router.get("/payments-map")
-def payments_map():
-    """Returns a map of bank_tx_id → {payment, order} for Finance.tsx."""
-    conn = get_production()
-    try:
-        rows = conn.execute(
-            """SELECT p.id AS payment_id, p.amount, p.paid_at, p.bank_tx_id,
-                      o.id AS order_id, o.number, o.title
-               FROM payments p
-               JOIN orders o ON o.id = p.order_id
-               WHERE p.bank_tx_id IS NOT NULL"""
-        ).fetchall()
-        return [dict(r) for r in rows]
     finally:
         conn.close()
