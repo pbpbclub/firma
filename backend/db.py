@@ -149,6 +149,68 @@ def ensure_creditor_estimate_item_schema():
         conn.close()
 
 
+def ensure_payee_rules_category_schema():
+    conn = get_production()
+    try:
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(payee_rules)").fetchall()}
+        if "category" not in existing:
+            conn.execute("ALTER TABLE payee_rules ADD COLUMN category TEXT")
+            conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_order_tx_link_schema():
+    conn = get_production()
+    try:
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(orders)").fetchall()}
+        if "finance_tx_id" not in existing:
+            conn.execute("ALTER TABLE orders ADD COLUMN finance_tx_id TEXT")
+            conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_receivable_tx_link_schema():
+    conn = get_finance()
+    try:
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(receivables)").fetchall()}
+        if "finance_tx_id" not in existing:
+            conn.execute("ALTER TABLE receivables ADD COLUMN finance_tx_id TEXT")
+            conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_estimate_lines_contractor_schema():
+    conn = get_production()
+    try:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        if "estimate_lines" not in tables:
+            return
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(estimate_lines)").fetchall()}
+        for col in ("master_id TEXT", "contractor_name TEXT"):
+            name = col.split()[0]
+            if name not in existing:
+                conn.execute(f"ALTER TABLE estimate_lines ADD COLUMN {col}")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_creditors_plan_schema():
+    conn = get_production()
+    try:
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(creditors)").fetchall()}
+        for col in ("estimate_line_id TEXT", "amount_plan REAL"):
+            name = col.split()[0]
+            if name not in existing:
+                conn.execute(f"ALTER TABLE creditors ADD COLUMN {col}")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_payee_rules_schema():
     conn = get_production()
     try:

@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ordersApi, estimatesApi, catalogApi } from "../api";
+import { ordersApi, estimatesApi, catalogApi, mastersApi } from "../api";
 import { useNavigationGuard, NavigationGuardModal } from "../components/NavigationGuard";
 import {
   ArrowLeft, Plus, Trash, Package, Wrench, Truck, Cube,
@@ -90,15 +90,54 @@ const BRANDS = [
 
 // ── Item detail modal ────────────────────────────────────────────────────────
 
+function ContractorInput({ line, masters, onSave }: {
+  line: any;
+  masters: any[];
+  onSave: (masterId: string | null, name: string) => void;
+}) {
+  const [val, setVal] = useState(line.contractor_name || (masters.find((m: any) => m.id === line.master_id)?.name) || "");
+  const ref = useRef<HTMLInputElement>(null);
+  const listId = `masters-${line.id}`;
+  return (
+    <div style={{ position: "relative" }}>
+      <input
+        ref={ref}
+        list={listId}
+        value={val}
+        onChange={e => setVal(e.target.value)}
+        onBlur={() => {
+          const trimmed = val.trim();
+          const match = masters.find((m: any) => m.name.toLowerCase() === trimmed.toLowerCase());
+          onSave(match?.id ?? null, trimmed);
+        }}
+        placeholder="Исполнитель"
+        style={{
+          width: "100%", border: "none", borderBottom: val ? "1px solid #E8592A" : "1px solid #EDEBE6",
+          outline: "none", fontSize: 10, color: val ? "#1A1A1A" : "#C8C0B0",
+          background: "transparent", padding: "1px 2px", boxSizing: "border-box",
+        }}
+      />
+      <datalist id={listId}>
+        {masters.map((m: any) => <option key={m.id} value={m.name} />)}
+      </datalist>
+    </div>
+  );
+}
+
 function ItemModal({ item, onClose, onRefetch }: {
   item: any;
   onClose: () => void;
   onRefetch: () => void;
 }) {
   const lines: any[] = item.lines ?? [];
-  const gridCols = "20px 1fr 52px 68px 88px 80px 24px";
+  const gridCols = "20px 1fr 52px 68px 88px 80px 130px 24px";
   const [syncing, setSyncing] = useState(false);
   const [synced, setSynced] = useState(false);
+  const [masters, setMasters] = useState<any[]>([]);
+
+  useEffect(() => {
+    mastersApi.list().then((data: any) => setMasters(Array.isArray(data) ? data : (data?.masters ?? [])));
+  }, []);
 
   const save = (fn: () => Promise<any>) => fn().then(onRefetch);
 
@@ -166,7 +205,7 @@ function ItemModal({ item, onClose, onRefetch }: {
 
         {/* Lines header */}
         <div style={{ display: "grid", gridTemplateColumns: gridCols, padding: "7px 20px", gap: 8, borderBottom: "1px solid #EDEBE6" }}>
-          {["", "Наименование", "Ед.", "Кол-во", "Цена", "Итого", ""].map((h, i) => (
+          {["", "Наименование", "Ед.", "Кол-во", "Цена", "Итого", "Исполнитель", ""].map((h, i) => (
             <div key={i} style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>{h}</div>
           ))}
         </div>
@@ -223,6 +262,11 @@ function ItemModal({ item, onClose, onRefetch }: {
                 <div style={{ fontSize: 12, fontWeight: 600, color: "#1A1A1A" }}>
                   {fmt(line.line_total)}
                 </div>
+                <ContractorInput
+                  line={line}
+                  masters={masters}
+                  onSave={(masterId, name) => save(() => estimatesApi.updateLine(line.id, { master_id: masterId, contractor_name: name }))}
+                />
                 <button
                   onClick={() => save(() => estimatesApi.deleteLine(line.id))}
                   style={{ background: "none", border: "none", cursor: "pointer", color: "#D0C8C0", padding: 0, display: "flex" }}

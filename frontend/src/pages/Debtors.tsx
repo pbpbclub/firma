@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { financeApi, zenmoneyApi } from "../api";
+import { financeApi, zenmoneyApi, ordersApi } from "../api";
 import { useNavigate } from "react-router-dom";
 import { Bank, X, Check, Plus, Funnel, LinkSimple } from "@phosphor-icons/react";
 
@@ -82,6 +82,96 @@ function deadlineColor(deadline: string) {
   if (days < 0) return "#8B3A3A";
   if (days < 7) return "#E8592A";
   return "#6B6355";
+}
+
+// ── Модал: связать с входящей транзакцией ─────────────────────────────────
+
+function LinkInTxModal({ title, name, amount, linkedTxId, onLink, onClose }: {
+  title: string; name: string; amount: number; linkedTxId?: string | null;
+  onLink: (txId: string | null) => void; onClose: () => void;
+}) {
+  const [search, setSearch] = useState("");
+
+  const { data: txs = [], isFetching: loading } = useQuery({
+    queryKey: ["suggest-in-tx", name, amount],
+    queryFn: () => financeApi.suggestInTx(name, amount),
+  });
+
+  const filtered = search
+    ? (txs as any[]).filter((t: any) => {
+        const label = ((t.counterparty || "") + " " + (t.purpose || "")).toLowerCase();
+        return label.includes(search.toLowerCase());
+      })
+    : (txs as any[]);
+
+  function fmtAmt(n: number) {
+    return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) + " ₽";
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ background: "#fff", width: 520, maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,0.18)" }}>
+
+        <div style={{ padding: "16px 20px 12px", borderBottom: "1px solid #EDEBE6" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1A1A" }}>{title}</div>
+              <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>{name} · {fmtAmt(amount)}</div>
+            </div>
+            <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070" }}><X size={16} /></button>
+          </div>
+        </div>
+
+        {linkedTxId && (
+          <div style={{ padding: "8px 20px", background: "#F2FDF5", borderBottom: "1px solid #D0EDD8", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ fontSize: 11, color: "#4A7C59" }}>
+              <LinkSimple size={11} style={{ marginRight: 4 }} />
+              Привязана транзакция
+            </div>
+            <button onClick={() => onLink(null)}
+              style={{ fontSize: 11, color: "#8B3A3A", background: "none", border: "none", cursor: "pointer", padding: 0 }}>Отвязать</button>
+          </div>
+        )}
+
+        <div style={{ padding: "8px 20px", borderBottom: "1px solid #F2EFE9" }}>
+          <input value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Поиск по контрагенту..."
+            style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "5px 10px", fontSize: 12, outline: "none" }} />
+        </div>
+
+        <div style={{ flex: 1, overflowY: "auto" }}>
+          {loading && <div style={{ padding: 32, textAlign: "center", color: "#A89070", fontSize: 12 }}>Загружаем...</div>}
+          {!loading && filtered.length === 0 && <div style={{ padding: 32, textAlign: "center", color: "#C8C0B0", fontSize: 12 }}>Транзакции не найдены</div>}
+          {!loading && filtered.map((t: any) => {
+            const isLinked = String(t.id) === String(linkedTxId);
+            const label = t.counterparty || t.purpose || "—";
+            return (
+              <div key={t.id}
+                onClick={() => onLink(String(t.id))}
+                style={{
+                  display: "grid", gridTemplateColumns: "80px 1fr 100px",
+                  padding: "9px 20px", borderBottom: "1px solid #F2EFE9", cursor: "pointer",
+                  background: isLinked ? "#F2FDF5" : "transparent", alignItems: "center", gap: 10,
+                }}
+                onMouseEnter={e => { if (!isLinked) e.currentTarget.style.background = "#FAF8F5"; }}
+                onMouseLeave={e => { if (!isLinked) e.currentTarget.style.background = "transparent"; }}
+              >
+                <div style={{ fontSize: 11, color: "#A89070" }}>{(t.date || "").slice(0, 10)}</div>
+                <div style={{ fontSize: 12, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {label}
+                  {t.purpose && t.counterparty && <div style={{ fontSize: 10, color: "#A89070", marginTop: 1 }}>{t.purpose}</div>}
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#4A7C59", textAlign: "right" }}>
+                  +{fmtAmt(t.amount || 0)}
+                  {isLinked && <LinkSimple size={10} style={{ color: "#4A7C59", marginLeft: 4 }} />}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ── Модал: добавить обязательство ──────────────────────────────────────────
@@ -279,14 +369,16 @@ function PayCreditorModal({ item, onClose }: { item: any; onClose: () => void })
 
 // ── Вкладка: дебиторка ─────────────────────────────────────────────────────
 
-const debtorCols = "28px 2fr 1fr 130px 150px 130px 100px";
+const debtorCols = "28px 2fr 1fr 130px 150px 130px 100px 28px";
 
 function DebtorsTab() {
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const { data, isLoading } = useQuery({ queryKey: ["debtors"], queryFn: financeApi.debtors });
   const [statusFilter, setStatusFilter] = useState("");
   const [clientFilter, setClientFilter] = useState("");
   const [orderFilter, setOrderFilter] = useState("");
+  const [linkItem, setLinkItem] = useState<any>(null);
   const clearFilters = () => { setStatusFilter(""); setClientFilter(""); setOrderFilter(""); setSelectedIds(new Set()); };
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -307,10 +399,26 @@ function DebtorsTab() {
   const totalPlan = filtered.reduce((s: number, r: any) => s + (r.price_plan || 0), 0);
   const totalPaid = filtered.reduce((s: number, r: any) => s + (r.paid_total || 0), 0);
 
+  const linkOrder = useMutation({
+    mutationFn: ({ id, txId }: { id: string; txId: string | null }) =>
+      ordersApi.update(id, { finance_tx_id: txId }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["debtors"] }); setLinkItem(null); },
+  });
+
   if (isLoading) return <div style={{ padding: 48, textAlign: "center", color: "#A89070", fontSize: 13 }}>Загружаем...</div>;
 
   return (
     <>
+      {linkItem && (
+        <LinkInTxModal
+          title={linkItem.title}
+          name={linkItem.customer_name || linkItem.title}
+          amount={linkItem.debt}
+          linkedTxId={linkItem.finance_tx_id}
+          onLink={(txId) => linkOrder.mutate({ id: linkItem.id, txId })}
+          onClose={() => setLinkItem(null)}
+        />
+      )}
       {(() => {
         const hasFilters = !!(statusFilter || clientFilter || orderFilter);
         const canClear = hasFilters || selectedIds.size > 0;
@@ -354,6 +462,7 @@ function DebtorsTab() {
         <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ОПЛАЧЕНО</div>
         <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ОЖИДАЕМ</div>
         <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ДЕДЛАЙН</div>
+        <div />
       </div>
 
       {filtered.length === 0 ? (
@@ -392,6 +501,17 @@ function DebtorsTab() {
               </div>
               <div style={{ fontSize: 13, fontWeight: 700, color: "#E8592A" }}>{fmt(d.debt)}</div>
               <div style={{ fontSize: 12, color: deadlineColor(d.deadline) }}>{fmtDate(d.deadline)}</div>
+              <div style={{ display: "flex", justifyContent: "center" }}>
+                <button
+                  onClick={e => { e.stopPropagation(); setLinkItem(d); }}
+                  title="Связать с транзакцией"
+                  style={{ background: "none", border: "none", cursor: "pointer", padding: 2, display: "flex", color: d.finance_tx_id ? "#4A7C59" : "#C8C0B0" }}
+                  onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
+                  onMouseLeave={e => (e.currentTarget.style.color = d.finance_tx_id ? "#4A7C59" : "#C8C0B0")}
+                >
+                  <LinkSimple size={13} />
+                </button>
+              </div>
             </div>
             );
           })}
@@ -407,7 +527,7 @@ function DebtorsTab() {
             <div style={{ fontSize: 12, color: "#6B6355", fontWeight: 500 }}>{fmt(totalPlan)}</div>
             <div style={{ fontSize: 12, color: "#4A7C59", fontWeight: 500 }}>{fmt(totalPaid)}</div>
             <div style={{ fontSize: 13, fontWeight: 700, color: "#E8592A" }}>{fmt(total)}</div>
-            <div />
+            <div /><div />
           </div>
         </>
       )}
@@ -503,6 +623,7 @@ function UnallocatedTab() {
   const { data, isLoading } = useQuery({ queryKey: ["receivables"], queryFn: financeApi.receivables });
   const [editId, setEditId] = useState<number | null>(null);
   const [paidDraft, setPaidDraft] = useState("");
+  const [linkItem, setLinkItem] = useState<any>(null);
 
   const update = useMutation({
     mutationFn: ({ id, paid }: { id: number; paid: number }) =>
@@ -510,22 +631,38 @@ function UnallocatedTab() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["receivables"] }); setEditId(null); },
   });
 
+  const linkRec = useMutation({
+    mutationFn: ({ id, txId }: { id: number; txId: string | null }) =>
+      financeApi.updateReceivable(id, { finance_tx_id: txId }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["receivables"] }); setLinkItem(null); },
+  });
+
   const items: any[] = data?.open_items || [];
 
   if (isLoading) return <div style={{ padding: 48, textAlign: "center", color: "#A89070", fontSize: 13 }}>Загружаем...</div>;
   if (items.length === 0) return <div style={{ padding: 48, textAlign: "center", color: "#A89070", fontSize: 13 }}>Нет нераспределённых счетов</div>;
 
-  const recCols = "2fr 2fr 120px 120px 120px";
+  const recCols = "2fr 2fr 120px 120px 120px 28px";
 
   return (
     <>
+      {linkItem && (
+        <LinkInTxModal
+          title={linkItem.client}
+          name={linkItem.client}
+          amount={linkItem.debt}
+          linkedTxId={linkItem.finance_tx_id}
+          onLink={(txId) => linkRec.mutate({ id: linkItem.id, txId })}
+          onClose={() => setLinkItem(null)}
+        />
+      )}
       <div style={{ padding: "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ fontSize: 11, color: "#6B6355" }}>{items.length} счетов</div>
         <div style={{ fontSize: 12, fontWeight: 700, color: "#4A7C59" }}>{fmt(data?.total_debt ?? 0)}</div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: recCols, padding: "6px 28px 6px", borderBottom: "1px solid #EDEBE6" }}>
-        {["КЛИЕНТ", "НАЗНАЧЕНИЕ", "СЧЁТ", "ОПЛАЧЕНО", "ОСТАТОК"].map(h => (
+        {["КЛИЕНТ", "НАЗНАЧЕНИЕ", "СЧЁТ", "ОПЛАЧЕНО", "ОСТАТОК", ""].map(h => (
           <div key={h} style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>{h}</div>
         ))}
       </div>
@@ -555,6 +692,17 @@ function UnallocatedTab() {
             </div>
             <div style={{ fontSize: 13, color: "#4A7C59" }}>{r.paid > 0 ? fmt(r.paid) : "—"}</div>
             <div style={{ fontSize: 13, fontWeight: 700, color: "#4A7C59" }}>{fmt(r.debt)}</div>
+            <div style={{ display: "flex", justifyContent: "center" }}>
+              <button
+                onClick={e => { e.stopPropagation(); setLinkItem(r); }}
+                title="Связать с транзакцией"
+                style={{ background: "none", border: "none", cursor: "pointer", padding: 2, display: "flex", color: r.finance_tx_id ? "#4A7C59" : "#C8C0B0" }}
+                onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
+                onMouseLeave={e => (e.currentTarget.style.color = r.finance_tx_id ? "#4A7C59" : "#C8C0B0")}
+              >
+                <LinkSimple size={13} />
+              </button>
+            </div>
           </div>
 
           {editId === r.id && (
@@ -602,7 +750,7 @@ function LinkTxModal({ creditor, onClose }: { creditor: any; onClose: () => void
   });
 
   const link = useMutation({
-    mutationFn: (data: { finance_tx_id?: string | null; zenmoney_tx_id?: string | null }) =>
+    mutationFn: (data: { finance_tx_id?: string | null; zenmoney_tx_id?: string | null; paid?: number }) =>
       financeApi.updateCreditor(creditor.id, data),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["creditors"] }); onClose(); },
   });
@@ -657,7 +805,7 @@ function LinkTxModal({ creditor, onClose }: { creditor: any; onClose: () => void
               Привязана транзакция
             </div>
             <button
-              onClick={() => link.mutate(tab === "finance" ? { finance_tx_id: null } : { zenmoney_tx_id: null })}
+              onClick={() => link.mutate(tab === "finance" ? { finance_tx_id: null, paid: 0 } : { zenmoney_tx_id: null, paid: 0 })}
               style={{ fontSize: 11, color: "#8B3A3A", background: "none", border: "none", cursor: "pointer", padding: 0 }}
             >Отвязать</button>
           </div>
@@ -680,7 +828,7 @@ function LinkTxModal({ creditor, onClose }: { creditor: any; onClose: () => void
             const amt = t.amount ?? (t.outcome || 0);
             return (
               <div key={t.id}
-                onClick={() => link.mutate(tab === "finance" ? { finance_tx_id: String(t.id) } : { zenmoney_tx_id: String(t.id) })}
+                onClick={() => link.mutate(tab === "finance" ? { finance_tx_id: String(t.id), paid: amt } : { zenmoney_tx_id: String(t.id), paid: amt })}
                 style={{
                   display: "grid", gridTemplateColumns: "80px 1fr 100px",
                   padding: "9px 20px", borderBottom: "1px solid #F2EFE9", cursor: "pointer",
@@ -709,7 +857,7 @@ function LinkTxModal({ creditor, onClose }: { creditor: any; onClose: () => void
 
 // ── Вкладка: кредиторы ─────────────────────────────────────────────────────
 
-const creditorCols = "28px 2fr 2fr 130px 130px 130px 100px 28px";
+const creditorCols = "28px 1.8fr 1.6fr 110px 110px 110px 110px 90px 28px";
 
 function CreditorsTab() {
   const [addOpen, setAddOpen] = useState(false);
@@ -770,8 +918,9 @@ function CreditorsTab() {
           <ColumnFilter options={uniqueContragents} value={contragentFilter} onChange={setContragentFilter} />
         </div>
         <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ЗА ЧТО</div>
-        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>СУММА ДОЛГА</div>
+        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ПЛАН</div>
         <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ОПЛАЧЕНО</div>
+        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ОТКЛОНЕНИЕ</div>
         <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ОСТАТОК</div>
         <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>СРОК</div>
         <div />
@@ -810,8 +959,11 @@ function CreditorsTab() {
               <div style={{ fontSize: 12, color: "#6B6355", paddingRight: 16, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {c.description || "—"}
               </div>
-              <div style={{ fontSize: 13, color: "#1A1A1A" }}>{fmt(c.total)}</div>
+              <div style={{ fontSize: 13, color: "#6B6355" }}>{fmt(c.amount_plan ?? c.total)}</div>
               <div style={{ fontSize: 13, color: "#4A7C59" }}>{c.paid > 0 ? fmt(c.paid) : "—"}</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: c.variance == null ? "#C8C0B0" : c.variance > 0 ? "#8B3A3A" : c.variance < 0 ? "#4A7C59" : "#A89070" }}>
+                {c.variance == null ? "—" : c.variance === 0 ? "0 ₽" : `${c.variance > 0 ? "+" : "−"}${fmt(Math.abs(c.variance))}`}
+              </div>
               <div style={{ fontSize: 13, fontWeight: 700, color: c.debt > 0 ? "#8B3A3A" : "#4A7C59" }}>
                 {c.debt > 0 ? fmt(c.debt) : "Закрыт"}
               </div>
@@ -841,9 +993,9 @@ function CreditorsTab() {
           }}>
             <div />
             <div style={{ fontSize: 11, color: "#A89070" }}>{filteredItems.length} записей</div>
-            <div />
             <div style={{ fontSize: 12, color: "#6B6355", fontWeight: 500 }}>{fmt(totalOwed)}</div>
             <div style={{ fontSize: 12, color: "#4A7C59", fontWeight: 500 }}>{fmt(totalPaid)}</div>
+            <div />
             <div style={{ fontSize: 13, fontWeight: 700, color: "#8B3A3A" }}>{fmt(totalDebt)}</div>
             <div /><div />
           </div>

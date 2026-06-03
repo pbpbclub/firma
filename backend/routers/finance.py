@@ -287,6 +287,11 @@ def get_creditors(status: Optional[str] = None):
         rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
         for r in rows:
             r["debt"] = round(r["total"] - r["paid"], 2)
+            plan = r.get("amount_plan")
+            if plan is not None and r["paid"] > 0:
+                r["variance"] = round(r["paid"] - plan, 2)
+            else:
+                r["variance"] = None
         total_owed = sum(r["total"] for r in rows)
         total_paid = sum(r["paid"] for r in rows)
         return {
