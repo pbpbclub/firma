@@ -154,6 +154,28 @@ interface CatalogItemFull extends CatalogItem {
   }>;
 }
 
+function ConfirmModal({ message, onConfirm, onCancel }: {
+  message: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 1100, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ background: "#fff", padding: "28px 32px", maxWidth: 380, boxShadow: "0 8px 40px rgba(0,0,0,0.18)", display: "flex", flexDirection: "column", gap: 20 }}>
+        <div style={{ fontSize: 13, color: "#1A1A1A", lineHeight: 1.5 }}>{message}</div>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button onClick={onCancel} style={{ padding: "7px 16px", background: "#F2EFE9", border: "none", cursor: "pointer", fontSize: 12, color: "#6B6355" }}>
+            Отмена
+          </button>
+          <button onClick={onConfirm} style={{ padding: "7px 16px", background: "#8B3A3A", border: "none", cursor: "pointer", fontSize: 12, color: "#fff", fontWeight: 600 }}>
+            Удалить безвозвратно
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const TYPE_LABELS: Record<LineType, string> = {
   material: "Материал",
   labor: "Работа",
@@ -308,6 +330,7 @@ function CalculatorModal({
   );
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const costTotal = lines.reduce((s, l) => s + l.qty * l.unit_price, 0);
   const markupAmt = costTotal * markupPct / 100;
@@ -388,6 +411,7 @@ function CalculatorModal({
   };
 
   return (
+    <>
     <div
       style={{
         position: "fixed", inset: 0, zIndex: 1000,
@@ -557,7 +581,7 @@ function CalculatorModal({
         <div style={{ padding: "14px 24px", borderTop: "1px solid #EDEBE6", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
           {!isNew ? (
             <button
-              onClick={deleteItem}
+              onClick={() => setConfirmDelete(true)}
               disabled={deleting}
               style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#8B3A3A", display: "flex", alignItems: "center", gap: 5 }}
             >
@@ -586,6 +610,14 @@ function CalculatorModal({
         </div>
       </div>
     </div>
+    {confirmDelete && (
+      <ConfirmModal
+        message={`Удалить «${item?.title}» из каталога? Это действие безвозвратно.`}
+        onConfirm={() => { setConfirmDelete(false); deleteItem(); }}
+        onCancel={() => setConfirmDelete(false)}
+      />
+    )}
+    </>
   );
 }
 
@@ -598,6 +630,7 @@ const catalogCols = "28px 2fr 1fr 130px 130px";
 const fromSmetsCols = "28px 2fr 1fr 80px 140px 120px 120px";
 
 export default function Catalog() {
+  const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>("Каталог");
   const [search, setSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -610,6 +643,21 @@ export default function Catalog() {
   const [priceMax, setPriceMax] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
+  const bulkDelete = async () => {
+    setBulkDeleting(true);
+    try {
+      for (const id of Array.from(selectedIds)) {
+        await catalogApi.items.delete(id);
+      }
+      qc.invalidateQueries({ queryKey: ["catalog-items"] });
+      setSelectedIds(new Set());
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
 
   const { data: savedItems = [], isLoading: loadingSaved } = useQuery<CatalogItem[]>({
     queryKey: ["catalog-items"],
@@ -726,9 +774,20 @@ export default function Catalog() {
                         {selectedIds.size > 0 && selSum > 0 && <span>{fmt(selSum)}</span>}
                         {selectedIds.size === 0 && <span>{filteredItems.length} изделий</span>}
                       </div>
-                      <button onClick={canClear ? clearFilters : undefined} style={{ fontSize: 10, color: canClear ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: canClear ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
-                        <X size={10} /> Сбросить
-                      </button>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        {selectedIds.size > 0 && (
+                          <button
+                            onClick={() => setConfirmBulkDelete(true)}
+                            disabled={bulkDeleting}
+                            style={{ fontSize: 10, color: "#8B3A3A", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 3, padding: 0 }}
+                          >
+                            <Trash size={10} /> Удалить ({selectedIds.size})
+                          </button>
+                        )}
+                        <button onClick={canClear ? clearFilters : undefined} style={{ fontSize: 10, color: canClear ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: canClear ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
+                          <X size={10} /> Сбросить
+                        </button>
+                      </div>
                     </div>
                   );
                 })()}
@@ -892,6 +951,13 @@ export default function Catalog() {
           item={modalItem as CatalogItemFull | null}
           onClose={closeModal}
           onSaved={closeModal}
+        />
+      )}
+      {confirmBulkDelete && (
+        <ConfirmModal
+          message={`Удалить ${selectedIds.size} изделий${selectedIds.size === 1 ? "" : ""} из каталога? Это действие безвозвратно.`}
+          onConfirm={() => { setConfirmBulkDelete(false); bulkDelete(); }}
+          onCancel={() => setConfirmBulkDelete(false)}
         />
       )}
     </div>
