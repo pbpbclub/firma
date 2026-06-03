@@ -5,7 +5,7 @@ import { ordersApi, estimatesApi, catalogApi } from "../api";
 import { useNavigationGuard, NavigationGuardModal } from "../components/NavigationGuard";
 import {
   ArrowLeft, Plus, Trash, Package, Wrench, Truck, Cube,
-  X, FileText,
+  X, FileText, DotsSixVertical, PencilSimple, FloppyDisk, ListChecks, CheckCircle, Circle,
 } from "@phosphor-icons/react";
 
 const TYPE_ICONS: Record<string, any> = {
@@ -267,8 +267,10 @@ function ItemModal({ item, onClose, onRefetch }: {
             {synced ? "Сохранено ✓" : item.catalog_item_id ? "Обновить в каталоге" : "Сохранить в каталог"}
           </button>
           <div style={{ textAlign: "right" }}>
-            <div style={{ fontSize: 10, color: "#A89070", marginBottom: 2 }}>СЕБЕСТОИМОСТЬ</div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: "#6B6355" }}>{fmt(item.cost_total)}</div>
+            <div style={{ fontSize: 10, color: "#A89070", marginBottom: 2 }}>СЕБЕСТОИМОСТЬ 1 ШТ</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "#6B6355" }}>
+              {fmt(lines.reduce((s: number, l: any) => s + (l.line_total || 0), 0))}
+            </div>
           </div>
         </div>
       </div>
@@ -352,12 +354,15 @@ function FooterRow({ cols, label, cost, sale, delta, deltaColor, saleColor, note
 }) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: cols, padding: "7px 28px", gap: 12, alignItems: "center", borderBottom: "1px solid #F2EFE9" }}>
+      <div />
       <div>
         <div style={{ fontSize: 11, color: "#A89070" }}>{label}</div>
         {note && <div style={{ fontSize: 10, color: "#C8C0B0", marginTop: 1 }}>{note}</div>}
       </div>
       <div /><div />
+      <div />
       <div style={{ fontSize: 12, color: "#6B6355", textAlign: "right" }}>{cost ?? ""}</div>
+      <div />
       <div />
       <div style={{ fontSize: 13, fontWeight: 500, color: saleColor ?? "#1A1A1A", textAlign: "right" }}>{sale ?? ""}</div>
       <div style={{ fontSize: 12, fontWeight: 600, color: deltaColor ?? "#A89070", textAlign: "right" }}>{delta ?? ""}</div>
@@ -378,6 +383,7 @@ export default function EstimateEditor() {
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [invoicing, setInvoicing] = useState(false);
   const [obligating, setObligating] = useState(false);
+  const [confirmRevert, setConfirmRevert] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [pendingSwitchId, setPendingSwitchId] = useState<string | null>(null);
   const [editingSetId, setEditingSetId] = useState<string | null>(null);
@@ -410,9 +416,12 @@ export default function EstimateEditor() {
   const items: any[] = activeSet?.items ?? [];
   const openItem    = items.find((it: any) => it.id === openItemId) ?? null;
 
-  const totalCost  = items.reduce((s: number, it: any) => s + (it.cost_total || 0), 0);
-  const totalSale  = items.reduce((s: number, it: any) => s + (it.sale_price || 0), 0);
-  const totalDelta = totalSale - totalCost;
+  const totalCost   = items.reduce((s: number, it: any) => s + (it.cost_total || 0), 0);
+  const totalSale   = items.reduce((s: number, it: any) => s + (it.sale_price || 0), 0);
+  const totalDelta  = totalSale - totalCost;
+  const totalQty    = items.reduce((s: number, it: any) => s + (it.quantity || 1), 0);
+  const totalFact   = items.reduce((s: number, it: any) => s + (it.actual_paid || 0), 0);
+  const avgMarkup   = totalCost > 0 ? totalSale / totalCost : 0;
   const bankPct    = activeSet?.bank_pct ?? 13;
   const isBank     = activeSet?.payment_type === "bank";
   const clientPriceForItem = (it: any) =>
@@ -473,7 +482,10 @@ export default function EstimateEditor() {
     }
   };
 
-  const colsMain = "1fr 64px 80px 110px 110px 110px 90px 52px";
+  const colsMain = "20px 1fr 56px 70px 90px 100px 100px 90px 100px 80px 44px";
+
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
   return (
     <>
@@ -582,16 +594,18 @@ export default function EstimateEditor() {
         )}
 
         {/* Right fixed: controls */}
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0, marginLeft: activeSet ? 0 : "auto" }}>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0, marginLeft: activeSet ? 0 : "auto" }}>
           {activeSet ? (
             <>
+              {/* Нал/Безнал — только в режиме редактирования */}
               <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
                 {[{ v: "cash", l: "Нал" }, { v: "bank", l: "Безнал" }].map(pt => (
                   <button
                     key={pt.v}
-                    onClick={() => updateSet({ payment_type: pt.v })}
+                    onClick={() => editMode && updateSet({ payment_type: pt.v })}
                     style={{
-                      padding: "4px 10px", fontSize: 11, cursor: "pointer",
+                      padding: "4px 10px", fontSize: 11,
+                      cursor: editMode ? "pointer" : "default",
                       border: "1px solid",
                       borderColor: activeSet.payment_type === pt.v ? "#1A1A1A" : "#EDEBE6",
                       background: activeSet.payment_type === pt.v ? "#1A1A1A" : "transparent",
@@ -602,84 +616,95 @@ export default function EstimateEditor() {
                 ))}
               </div>
 
-              <div style={{ width: 100, display: "flex", alignItems: "center", gap: 4 }}>
-                {isBank && !editMode && (
-                  <span style={{ fontSize: 11, color: "#A89070" }}>Банк {bankPct}%</span>
-                )}
-                {isBank && editMode && (
-                  <>
-                    <span style={{ fontSize: 11, color: "#A89070" }}>Банк</span>
+              {/* Банк % */}
+              {isBank && (
+                <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                  <span style={{ fontSize: 11, color: "#A89070" }}>Банк</span>
+                  {editMode ? (
                     <input
                       key={activeSet.bank_pct}
                       defaultValue={activeSet.bank_pct ?? 13}
                       onBlur={e => updateSet({ bank_pct: parseFloat(e.target.value) || 13 })}
-                      style={{ width: 36, border: "1px solid #EDEBE6", background: "transparent", fontSize: 11, textAlign: "center", padding: "3px 4px", outline: "none" }}
+                      style={{ width: 30, border: "1px solid #EDEBE6", background: "transparent", fontSize: 11, textAlign: "center", padding: "3px 2px", outline: "none" }}
                     />
-                    <span style={{ fontSize: 11, color: "#A89070" }}>%</span>
-                  </>
-                )}
-              </div>
+                  ) : (
+                    <span style={{ fontSize: 11, color: "#A89070" }}>{bankPct}%</span>
+                  )}
+                </div>
+              )}
 
+              <div style={{ width: 1, height: 18, background: "#EDEBE6", margin: "0 2px" }} />
+
+              {/* Согласовать */}
               <button
                 onClick={() => updateSet({ status: activeSet.status === "approved" ? "draft" : "approved" })}
+                title={activeSet.status === "approved" ? "Снять согласование" : "Согласовать"}
                 style={{
-                  padding: "4px 12px", fontSize: 11, cursor: "pointer", fontWeight: 600,
-                  border: "none",
+                  width: 28, height: 28, padding: 0, border: "none", cursor: "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center",
                   background: activeSet.status === "approved" ? "#4A7C59" : "#E8592A",
                   color: "#FFFFFF",
                 }}
               >
-                {activeSet.status === "approved" ? "Согласована ✓" : "Согласовать"}
+                {activeSet.status === "approved" ? <CheckCircle size={16} weight="bold" /> : <Circle size={16} weight="bold" />}
               </button>
 
-              {activeSet.status === "approved" && (
-                <button
-                  onClick={hasObligations ? undefined : createObligations}
-                  disabled={obligating || hasObligations}
-                  style={{
-                    padding: "4px 10px", fontSize: 11, fontWeight: 600,
-                    border: `1px solid ${hasObligations ? "#4A7C59" : "#EDEBE6"}`,
-                    background: hasObligations ? "transparent" : "transparent",
-                    color: hasObligations ? "#4A7C59" : obligating ? "#C8C0B0" : "#6B6355",
-                    cursor: hasObligations || obligating ? "default" : "pointer",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {hasObligations ? "Обязательства ✓" : obligating ? "..." : "Создать обязательства"}
-                </button>
-              )}
+              {/* Обязательства */}
+              <button
+                onClick={activeSet.status !== "approved" ? undefined : hasObligations ? () => setConfirmRevert(true) : createObligations}
+                disabled={obligating || activeSet.status !== "approved"}
+                title={activeSet.status !== "approved" ? "Доступно после согласования" : hasObligations ? "Обязательства созданы (нажмите для отмены)" : "Создать обязательства"}
+                style={{
+                  width: 28, height: 28, padding: 0, cursor: activeSet.status !== "approved" || obligating ? "default" : "pointer",
+                  border: "1px solid",
+                  borderColor: hasObligations ? "#4A7C59" : "#EDEBE6",
+                  background: "transparent",
+                  color: hasObligations ? "#4A7C59" : activeSet.status !== "approved" ? "#D0C8C0" : "#6B6355",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}
+                onMouseEnter={e => { if (activeSet.status === "approved" && !obligating) (e.currentTarget as HTMLElement).style.borderColor = hasObligations ? "#4A7C59" : "#1A1A1A"; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = hasObligations ? "#4A7C59" : "#EDEBE6"; }}
+              >
+                <ListChecks size={16} weight={hasObligations ? "bold" : "regular"} />
+              </button>
 
+              {/* Счёт */}
               <button
                 onClick={generateInvoice}
                 disabled={invoicing}
+                title="Сгенерировать счёт"
                 style={{
-                  display: "flex", alignItems: "center", gap: 5,
-                  padding: "4px 10px", fontSize: 11, fontWeight: 600,
-                  border: "1px solid #EDEBE6", background: "none",
-                  color: invoicing ? "#C8C0B0" : "#1A1A1A",
-                  cursor: invoicing ? "default" : "pointer",
-                  whiteSpace: "nowrap",
+                  width: 28, height: 28, padding: 0, cursor: invoicing ? "default" : "pointer",
+                  border: "1px solid #EDEBE6", background: "transparent",
+                  color: invoicing ? "#C8C0B0" : "#6B6355",
+                  display: "flex", alignItems: "center", justifyContent: "center",
                 }}
+                onMouseEnter={e => { if (!invoicing) { (e.currentTarget as HTMLElement).style.borderColor = "#1A1A1A"; (e.currentTarget as HTMLElement).style.color = "#1A1A1A"; } }}
+                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "#EDEBE6"; (e.currentTarget as HTMLElement).style.color = invoicing ? "#C8C0B0" : "#6B6355"; }}
               >
-                <FileText size={12} />
-                {invoicing ? "..." : "Счёт"}
+                <FileText size={16} />
               </button>
 
-              <div style={{ width: 1, height: 18, background: "#EDEBE6" }} />
+              <div style={{ width: 1, height: 18, background: "#EDEBE6", margin: "0 2px" }} />
 
+              {/* Редактировать / Сохранить */}
               {editMode ? (
                 <button
                   onClick={() => setEditMode(false)}
-                  style={{ padding: "4px 14px", fontSize: 11, fontWeight: 600, border: "none", background: "#4A7C59", color: "#FFFFFF", cursor: "pointer", whiteSpace: "nowrap" }}
+                  title="Сохранить"
+                  style={{ width: 28, height: 28, padding: 0, border: "none", background: "#4A7C59", color: "#FFFFFF", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
                 >
-                  Сохранить
+                  <FloppyDisk size={16} />
                 </button>
               ) : (
                 <button
                   onClick={() => setEditMode(true)}
-                  style={{ padding: "4px 14px", fontSize: 11, fontWeight: 600, border: "1px solid #1A1A1A", background: "transparent", color: "#1A1A1A", cursor: "pointer", whiteSpace: "nowrap" }}
+                  title="Редактировать"
+                  style={{ width: 28, height: 28, padding: 0, border: "1px solid #EDEBE6", background: "transparent", color: "#6B6355", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = "#1A1A1A"; (e.currentTarget as HTMLElement).style.borderColor = "#1A1A1A"; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = "#6B6355"; (e.currentTarget as HTMLElement).style.borderColor = "#EDEBE6"; }}
                 >
-                  Редактировать
+                  <PencilSimple size={16} />
                 </button>
               )}
             </>
@@ -725,33 +750,64 @@ export default function EstimateEditor() {
             );
           })()}
 
+          {/* ─ Table: horizontally scrollable, vertically flex ───────────── */}
+          <div style={{ flex: 1, overflowX: "auto", display: "flex", flexDirection: "column", minHeight: 0 }}>
+          <div style={{ minWidth: 1020, display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+
           {/* ─ Column headers ─────────────────────────────────────────────── */}
           <div style={{ display: "grid", gridTemplateColumns: colsMain, padding: "7px 28px", gap: 12, borderBottom: "1px solid #EDEBE6", flexShrink: 0 }}>
-            {["Позиция", "Кол-во", "Наценка", "Себестоимость", "Факт", isBank ? "К оплате" : "Клиенту", "Δ Доход", ""].map((h, i) => (
-              <div key={i} style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em", textAlign: i >= 3 ? "right" : "left" }}>{h}</div>
+            {["", "Позиция", "Кол-во", "Наценка", "Себест./шт", "Себест.", "Факт", isBank ? "К опл./шт" : "Клиент./шт", isBank ? "К оплате" : "Клиенту", "Δ Доход", ""].map((h, i) => (
+              <div key={i} style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em", textAlign: i >= 4 ? "right" : "left" }}>{h}</div>
             ))}
           </div>
 
           {/* ─ Item rows ──────────────────────────────────────────────────── */}
-          <div style={{ flex: 1, overflowY: "auto" }}>
+          <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
             {items.length === 0 && (
               <div style={{ padding: "48px 28px", textAlign: "center", color: "#C8C0B0", fontSize: 13 }}>
                 Добавьте позиции в смету
               </div>
             )}
 
-            {items.map((item: any) => (
+            {items.map((item: any, idx: number) => (
               <div
                 key={item.id}
+                draggable={editMode}
+                onDragStart={() => { setDragIdx(idx); setDragOverIdx(idx); }}
+                onDragEnter={() => setDragOverIdx(idx)}
+                onDragOver={e => e.preventDefault()}
+                onDragEnd={() => {
+                  if (dragIdx !== null && dragOverIdx !== null && dragIdx !== dragOverIdx) {
+                    const reordered = [...items];
+                    const [moved] = reordered.splice(dragIdx, 1);
+                    reordered.splice(dragOverIdx, 0, moved);
+                    reordered.forEach((it, i) => {
+                      estimatesApi.updateItem(it.id, { sort_order: i });
+                    });
+                    setTimeout(() => refetch(), 300);
+                  }
+                  setDragIdx(null);
+                  setDragOverIdx(null);
+                }}
                 style={{
                   display: "grid", gridTemplateColumns: colsMain,
                   padding: "11px 28px", gap: 12,
                   borderBottom: "1px solid #F2EFE9",
                   alignItems: "center",
+                  opacity: dragIdx === idx && dragOverIdx !== idx ? 0.4 : 1,
+                  background: dragOverIdx === idx && dragIdx !== idx ? "#F5F2EC" : "transparent",
+                  cursor: editMode ? "grab" : "default",
                 }}
-                onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")}
-                onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                onMouseEnter={e => { if (dragIdx === null) e.currentTarget.style.background = "#FAF8F5"; }}
+                onMouseLeave={e => { if (dragIdx === null) e.currentTarget.style.background = "transparent"; }}
               >
+                {/* Row number / drag handle */}
+                <div style={{ fontSize: 10, color: "#C8C0B0", userSelect: "none", display: "flex", alignItems: "center" }}>
+                  {editMode
+                    ? <DotsSixVertical size={13} style={{ color: "#C8C0B0", cursor: "grab" }} />
+                    : <span>{idx + 1}</span>}
+                </div>
+
                 {/* Title */}
                 <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }} onClick={e => e.stopPropagation()}>
                   {editMode ? (
@@ -793,7 +849,18 @@ export default function EstimateEditor() {
                   )}
                 </div>
 
-                {/* Cost */}
+                {/* Себест./шт */}
+                {(() => {
+                  const qty = item.quantity || 1;
+                  const costUnit = qty > 1 ? Math.round((item.cost_total || 0) / qty) : null;
+                  return (
+                    <div style={{ fontSize: 11, color: "#A89070", textAlign: "right" }}>
+                      {costUnit !== null ? fmt(costUnit) : <span style={{ color: "#EDEBE6" }}>—</span>}
+                    </div>
+                  );
+                })()}
+
+                {/* Себест. итого */}
                 <div style={{ fontSize: 13, color: "#6B6355", textAlign: "right" }}>
                   {editMode ? (
                     <EditCell
@@ -808,7 +875,7 @@ export default function EstimateEditor() {
                   )}
                 </div>
 
-                {/* Col 5: Факт */}
+                {/* Факт */}
                 <div style={{ fontSize: 12, textAlign: "right" }}>
                   {(item.actual_paid ?? 0) > 0 ? (
                     <>
@@ -826,7 +893,18 @@ export default function EstimateEditor() {
                   )}
                 </div>
 
-                {/* Col 6: Клиенту (нал) / К оплате (безнал) */}
+                {/* К опл./шт */}
+                {(() => {
+                  const qty = item.quantity || 1;
+                  const priceUnit = qty > 1 ? Math.round(clientPriceForItem(item) / qty) : null;
+                  return (
+                    <div style={{ fontSize: 11, color: isBank ? "#E8592A" : "#A89070", textAlign: "right", opacity: 0.7 }}>
+                      {priceUnit !== null ? fmt(priceUnit) : <span style={{ color: "#EDEBE6" }}>—</span>}
+                    </div>
+                  );
+                })()}
+
+                {/* К оплате итого */}
                 <div style={{ fontSize: 13, fontWeight: 700, textAlign: "right", position: "relative" }}>
                   {isBank ? (
                     <>
@@ -874,7 +952,7 @@ export default function EstimateEditor() {
 
                 {/* Col 6: Δ Доход */}
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#4A7C59", textAlign: "right" }}>
-                  +{fmt((item.sale_price || 0) - (item.cost_total || 0))}
+                  {(() => { const d = clientPriceForItem(item) - (item.cost_total || 0); return (d >= 0 ? "+" : "") + fmt(d); })()}
                 </div>
 
                 {/* Actions: open calculator + (edit mode) delete */}
@@ -926,8 +1004,22 @@ export default function EstimateEditor() {
           {/* ─ Footer totals ──────────────────────────────────────────────── */}
           <div style={{ flexShrink: 0, borderTop: "1px solid #EDEBE6" }}>
 
-            <FooterRow cols={colsMain} label="Итого себестоимость"
-              cost={fmt(totalCost)} sale={fmt(totalSale)} delta={`+${fmt(totalDelta)}`} deltaColor="#4A7C59" />
+            {/* Итого — все колонки */}
+            <div style={{ display: "grid", gridTemplateColumns: colsMain, padding: "7px 28px", gap: 12, alignItems: "center", borderBottom: "1px solid #F2EFE9" }}>
+              <div />
+              <div style={{ fontSize: 11, color: "#A89070" }}>Итого</div>
+              <div style={{ fontSize: 12, color: "#6B6355" }}>{totalQty}</div>
+              <div style={{ fontSize: 12, color: "#6B6355" }}>×{avgMarkup.toFixed(2)}</div>
+              <div style={{ fontSize: 11, color: "#A89070", textAlign: "right" }}>{totalQty > 1 ? fmt(Math.round(totalCost / totalQty)) : "—"}</div>
+              <div style={{ fontSize: 12, color: "#6B6355", textAlign: "right" }}>{fmt(totalCost)}</div>
+              <div style={{ fontSize: 12, color: totalFact > totalCost ? "#8B3A3A" : totalFact > 0 ? "#4A7C59" : "#C8C0B0", textAlign: "right" }}>
+                {totalFact > 0 ? fmt(totalFact) : <span style={{ fontSize: 11 }}>0 ₽</span>}
+              </div>
+              <div style={{ fontSize: 11, color: isBank ? "#E8592A" : "#A89070", textAlign: "right", opacity: 0.7 }}>{totalQty > 1 ? fmt(Math.round((isBank ? totalClient : totalSale) / totalQty)) : "—"}</div>
+              <div style={{ fontSize: 13, fontWeight: 500, textAlign: "right" }}>{fmt(isBank ? totalClient : totalSale)}</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: "#4A7C59", textAlign: "right" }}>+{fmt(isBank ? totalClient - totalCost : totalDelta)}</div>
+              <div />
+            </div>
 
             {isBank && (
               <FooterRow cols={colsMain} label="Налоги УСН 6%"
@@ -939,9 +1031,12 @@ export default function EstimateEditor() {
               padding: "10px 28px", gap: 12, alignItems: "center",
               background: "#FAF8F5", borderTop: "1px solid #EDEBE6",
             }}>
+              <div />
               <div style={{ fontSize: 12, color: "#A89070", fontWeight: 500 }}>К оплате</div>
               <div /><div />
+              <div />
               <div style={{ fontSize: 12, color: "#6B6355", textAlign: "right" }}>{fmt(totalCost)}</div>
+              <div />
               <div />
               <div style={{ fontSize: 15, fontWeight: 700, color: isBank ? "#E8592A" : "#1A1A1A", textAlign: "right" }}>{fmt(grandTotal)}</div>
               <div style={{ fontSize: 13, fontWeight: 600, color: "#4A7C59", textAlign: "right" }}>
@@ -950,6 +1045,8 @@ export default function EstimateEditor() {
               <div />
             </div>
           </div>
+          </div>{/* end minWidth wrapper */}
+          </div>{/* end overflowX:auto wrapper */}
         </>
       )}
 
@@ -998,6 +1095,38 @@ export default function EstimateEditor() {
             </button>
             <button
               onClick={() => setConfirmDeleteSet(false)}
+              style={{ flex: 1, background: "none", border: "1px solid #EDEBE6", padding: "9px 0", fontSize: 12, cursor: "pointer", fontFamily: "inherit", color: "#1A1A1A", fontWeight: 600 }}
+            >
+              Отмена
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* Confirm revert obligations */}
+    {confirmRevert && (
+      <div style={{ position: "fixed", inset: 0, zIndex: 2000, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ background: "#FFF", width: 380, padding: "28px 32px", boxShadow: "0 8px 40px rgba(0,0,0,0.2)" }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "#1A1A1A", marginBottom: 8, letterSpacing: "-0.02em" }}>
+            Вернуть обязательства?
+          </div>
+          <div style={{ fontSize: 13, color: "#6B6355", marginBottom: 24, lineHeight: 1.6 }}>
+            Все обязательства, созданные по этой смете, будут удалены. Если по ним уже зафиксированы оплаты — они тоже пропадут.
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button
+              onClick={async () => {
+                setConfirmRevert(false);
+                await estimatesApi.deleteObligations(activeSetId!);
+                refetch();
+              }}
+              style={{ flex: 1, background: "#8B3A3A", color: "#FFF", border: "none", padding: "9px 0", fontSize: 12, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
+            >
+              Удалить обязательства
+            </button>
+            <button
+              onClick={() => setConfirmRevert(false)}
               style={{ flex: 1, background: "none", border: "1px solid #EDEBE6", padding: "9px 0", fontSize: 12, cursor: "pointer", fontFamily: "inherit", color: "#1A1A1A", fontWeight: 600 }}
             >
               Отмена

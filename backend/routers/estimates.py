@@ -11,24 +11,22 @@ router = APIRouter()
 # ─── helpers ────────────────────────────────────────────────────────────────
 
 def _recalc_item(conn, item_id: str):
+    """Recalculate cost_total from lines. Does NOT touch sale_price."""
     line_cost = conn.execute(
         "SELECT COALESCE(SUM(line_total), 0) FROM estimate_lines WHERE item_id = ?",
         (item_id,)
     ).fetchone()[0]
     row = conn.execute(
-        "SELECT markup, quantity, cost_total FROM estimate_items WHERE id = ?", (item_id,)
+        "SELECT quantity, cost_total FROM estimate_items WHERE id = ?", (item_id,)
     ).fetchone()
-    markup = row["markup"] or 1.0
     quantity = row["quantity"] or 1
-    # Only use line-calculated cost if lines actually exist
     if line_cost > 0:
         cost_total = round(line_cost * quantity, 2)
     else:
         cost_total = row["cost_total"] or 0
-    sale = round(cost_total * markup, 2)
     conn.execute(
-        "UPDATE estimate_items SET cost_total = ?, sale_price = ? WHERE id = ?",
-        (cost_total, sale, item_id)
+        "UPDATE estimate_items SET cost_total = ? WHERE id = ?",
+        (cost_total, item_id)
     )
 
 
@@ -42,6 +40,42 @@ def _touch_set(conn, item_id: str):
            WHERE id = (SELECT set_id FROM estimate_items WHERE id = ?)""",
         (item_id,)
     )
+
+
+def _sync_order_from_set(conn, set_id: str):
+    """Recalculate order price_plan/cost_plan from all items in this set."""
+    es = conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
+    if not es:
+        return
+    items = conn.execute(
+        "SELECT cost_total, sale_price, bank_pct FROM estimate_items WHERE set_id = ?",
+        (set_id,)
+    ).fetchall()
+    total_cost = sum((it["cost_total"] or 0) for it in items)
+    set_bank_pct = es["bank_pct"] or 13
+    if es["payment_type"] == "bank":
+        total_price = sum(
+            round((it["sale_price"] or 0) * (1 + (it["bank_pct"] or set_bank_pct) / 100))
+            for it in items
+        )
+    else:
+        total_price = sum((it["sale_price"] or 0) for it in items)
+    conn.execute(
+        "UPDATE orders SET price_plan = ?, cost_plan = ?, updated_at = datetime('now') WHERE id = ?",
+        (total_price, total_cost, es["order_id"])
+    )
+
+
+def _sync_order_if_approved(conn, item_id: str):
+    """Sync parent order totals if the item's set is approved."""
+    row = conn.execute(
+        """SELECT es.id, es.status FROM estimate_sets es
+           JOIN estimate_items ei ON ei.set_id = es.id
+           WHERE ei.id = ?""",
+        (item_id,)
+    ).fetchone()
+    if row and row["status"] == "approved":
+        _sync_order_from_set(conn, row["id"])
 
 
 # ─── Models ─────────────────────────────────────────────────────────────────
@@ -147,6 +181,10 @@ def update_set(set_id: str, body: SetUpdate):
                 (body.bank_pct, set_id)
             )
         conn.commit()
+        updated = conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
+        if updated["status"] == "approved":
+            _sync_order_from_set(conn, set_id)
+            conn.commit()
         return dict(conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (set_id,)).fetchone())
     finally:
         conn.close()
@@ -188,6 +226,10 @@ def add_item(set_id: str, body: ItemCreate):
             (item_id, set_id, body.title, body.category, body.markup, body.quantity, bank_pct, body.sort_order, _now())
         )
         conn.commit()
+        set_status = conn.execute("SELECT status FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
+        if set_status and set_status["status"] == "approved":
+            _sync_order_from_set(conn, set_id)
+            conn.commit()
         return dict(conn.execute("SELECT * FROM estimate_items WHERE id = ?", (item_id,)).fetchone())
     finally:
         conn.close()
@@ -207,15 +249,10 @@ def update_item(item_id: str, body: ItemUpdate):
                 f"UPDATE estimate_items SET {set_clause} WHERE id = ?",
                 list(fields.values()) + [item_id]
             )
-        if "cost_total" in fields:
-            # Direct cost — recompute sale_price from new cost × markup
-            cur = conn.execute("SELECT markup FROM estimate_items WHERE id = ?", (item_id,)).fetchone()
-            markup = cur["markup"] or 1.0
-            sale = round(fields["cost_total"] * markup, 2)
-            conn.execute("UPDATE estimate_items SET sale_price = ? WHERE id = ?", (sale, item_id))
-        elif "markup" in fields or "quantity" in fields:
+        if "quantity" in fields:
             _recalc_item(conn, item_id)
         _touch_set(conn, item_id)
+        _sync_order_if_approved(conn, item_id)
         conn.commit()
         return dict(conn.execute("SELECT * FROM estimate_items WHERE id = ?", (item_id,)).fetchone())
     finally:
@@ -226,12 +263,21 @@ def update_item(item_id: str, body: ItemUpdate):
 def delete_item(item_id: str):
     conn = get_production()
     try:
-        if not conn.execute("SELECT id FROM estimate_items WHERE id = ?", (item_id,)).fetchone():
+        item_row = conn.execute(
+            "SELECT set_id FROM estimate_items WHERE id = ?", (item_id,)
+        ).fetchone()
+        if not item_row:
             raise HTTPException(status_code=404, detail="Not found")
+        set_id = item_row["set_id"]
         _touch_set(conn, item_id)
         conn.execute("DELETE FROM estimate_lines WHERE item_id = ?", (item_id,))
         conn.execute("DELETE FROM estimate_items WHERE id = ?", (item_id,))
         conn.commit()
+        # Sync after deletion so totals exclude the removed item
+        set_row = conn.execute("SELECT status FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
+        if set_row and set_row["status"] == "approved":
+            _sync_order_from_set(conn, set_id)
+            conn.commit()
         return {"ok": True}
     finally:
         conn.close()
@@ -298,6 +344,7 @@ def add_line(item_id: str, body: LineCreate):
         )
         _recalc_item(conn, item_id)
         _touch_set(conn, item_id)
+        _sync_order_if_approved(conn, item_id)
         conn.commit()
         return dict(conn.execute("SELECT * FROM estimate_lines WHERE id = ?", (line_id,)).fetchone())
     finally:
@@ -323,6 +370,7 @@ def update_line(line_id: str, body: LineUpdate):
         )
         _recalc_item(conn, row["item_id"])
         _touch_set(conn, row["item_id"])
+        _sync_order_if_approved(conn, row["item_id"])
         conn.commit()
         return dict(conn.execute("SELECT * FROM estimate_lines WHERE id = ?", (line_id,)).fetchone())
     finally:
@@ -340,6 +388,7 @@ def delete_line(line_id: str):
         conn.execute("DELETE FROM estimate_lines WHERE id = ?", (line_id,))
         _recalc_item(conn, item_id)
         _touch_set(conn, item_id)
+        _sync_order_if_approved(conn, item_id)
         conn.commit()
         return {"ok": True}
     finally:
@@ -387,6 +436,12 @@ def from_catalog(body: FromCatalog):
                 (line_id, item_id, cl["type"], cl["title"], cl["qty"], cl["unit"], cl["unit_price"], line_total, i, _now())
             )
         _recalc_item(conn, item_id)
+        # New item from catalog: set initial sale_price = cost × markup
+        fresh = conn.execute("SELECT cost_total, markup FROM estimate_items WHERE id = ?", (item_id,)).fetchone()
+        conn.execute(
+            "UPDATE estimate_items SET sale_price = ? WHERE id = ?",
+            (round((fresh["cost_total"] or 0) * (fresh["markup"] or 1.0), 2), item_id)
+        )
         conn.commit()
 
         item = dict(conn.execute("SELECT * FROM estimate_items WHERE id = ?", (item_id,)).fetchone())
@@ -438,6 +493,25 @@ def create_obligations(set_id: str):
         conn.close()
 
 
+@router.delete("/sets/{set_id}/obligations")
+def delete_obligations(set_id: str):
+    conn = get_production()
+    try:
+        item_ids = [r["id"] for r in conn.execute(
+            "SELECT id FROM estimate_items WHERE set_id = ?", (set_id,)
+        ).fetchall()]
+        if not item_ids:
+            return {"deleted": 0}
+        placeholders = ",".join("?" * len(item_ids))
+        result = conn.execute(
+            f"DELETE FROM creditors WHERE estimate_item_id IN ({placeholders})", item_ids
+        )
+        conn.commit()
+        return {"deleted": result.rowcount}
+    finally:
+        conn.close()
+
+
 # ─── Invoice generation ──────────────────────────────────────────────────────
 
 @router.post("/sets/{set_id}/invoice")
@@ -456,7 +530,7 @@ def generate_invoice(set_id: str):
 
     try:
         result = subprocess.run(
-            ["python3", "/opt/fin-agent/tools/invoice.py", "order", order_number],
+            ["python3", "/opt/firma/backend/invoice.py", "order", order_number, "--set-id", set_id],
             capture_output=True, text=True, timeout=30
         )
         if result.returncode != 0:
