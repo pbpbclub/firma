@@ -626,7 +626,7 @@ function CalculatorModal({
 const tabs = ["Каталог", "Из смет"] as const;
 type Tab = typeof tabs[number];
 
-const catalogCols = "28px 2fr 1fr 130px 130px";
+const catalogCols = "28px 2fr 90px 1fr 130px 130px";
 const fromSmetsCols = "28px 2fr 1fr 80px 140px 120px 120px";
 
 export default function Catalog() {
@@ -638,7 +638,8 @@ export default function Catalog() {
   const [modalOpen, setModalOpen] = useState(false);
   const [catFilter, setCatFilter] = useState("");
   const [nameFilter, setNameFilter] = useState("");
-  const clearFilters = () => { setCatFilter(""); setNameFilter(""); setPriceMin(""); setPriceMax(""); setSelectedIds(new Set()); };
+  const [brandFilter, setBrandFilter] = useState("");
+  const clearFilters = () => { setCatFilter(""); setNameFilter(""); setBrandFilter(""); setPriceMin(""); setPriceMax(""); setSelectedIds(new Set()); };
   const [priceMin, setPriceMin] = useState("");
   const [priceMax, setPriceMax] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -754,9 +755,11 @@ export default function Catalog() {
           {(() => {
             const uniqueCats = [...new Set(savedItems.map(i => i.category).filter(Boolean))].sort() as string[];
             const uniqueNames = [...new Set(savedItems.map(i => i.title).filter(Boolean))].sort() as string[];
+            const uniqueBrands = [...new Set(savedItems.map(i => i.brand).filter(Boolean))].sort() as string[];
             const filteredItems = savedItems.filter(i => {
               if (catFilter && i.category !== catFilter) return false;
               if (nameFilter && i.title !== nameFilter) return false;
+              if (brandFilter && i.brand !== brandFilter) return false;
               if (priceMin && (i.sale_price || 0) < parseFloat(priceMin)) return false;
               if (priceMax && (i.sale_price || 0) > parseFloat(priceMax)) return false;
               return true;
@@ -764,7 +767,7 @@ export default function Catalog() {
             return (
               <>
                 {(() => {
-                  const hasFilters = !!(catFilter || nameFilter || priceMin || priceMax);
+                  const hasFilters = !!(catFilter || nameFilter || brandFilter || priceMin || priceMax);
                   const canClear = hasFilters || selectedIds.size > 0;
                   const selSum = filteredItems.filter(i => selectedIds.has(i.id)).reduce((s, i) => s + (i.sale_price || 0), 0);
                   return (
@@ -808,6 +811,10 @@ export default function Catalog() {
                     <ColumnFilter options={uniqueNames} value={nameFilter} onChange={setNameFilter} />
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <span style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>БРЕНД</span>
+                    <ColumnFilter options={uniqueBrands} value={brandFilter} onChange={setBrandFilter} />
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                     <span style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>КАТЕГОРИЯ</span>
                     <ColumnFilter options={uniqueCats} value={catFilter} onChange={setCatFilter} />
                   </div>
@@ -834,15 +841,15 @@ export default function Catalog() {
               <div style={{ display: "flex", alignItems: "center" }}>
                 <Checkbox checked={selectedIds.has(item.id)} onChange={() => toggleSelect(item.id)} />
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>{item.title}</span>
-                {item.brand && (
+              <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.title}</div>
+              <div>
+                {item.brand ? (
                   <span style={{
-                    fontSize: 9, fontWeight: 700, padding: "1px 5px",
+                    fontSize: 10, fontWeight: 700, padding: "2px 6px",
                     color: item.brand === "MeRA" ? "#2E6DA4" : item.brand === "pbpb" ? "#7B4F9E" : "#3D8C6B",
                     border: `1px solid ${item.brand === "MeRA" ? "#2E6DA4" : item.brand === "pbpb" ? "#7B4F9E" : "#3D8C6B"}`,
                   }}>{item.brand}</span>
-                )}
+                ) : <span style={{ fontSize: 11, color: "#C8C0B0" }}>—</span>}
               </div>
               <div style={{ fontSize: 12, color: "#A89070" }}>{item.category || "—"}</div>
               <div style={{ fontSize: 12, color: "#6B6355" }}>{fmt(item.cost_total)}</div>
