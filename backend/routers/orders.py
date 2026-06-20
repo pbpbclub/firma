@@ -28,6 +28,7 @@ PRIORITY_LABELS = {
 def list_orders(
     status: Optional[str] = None,
     search: Optional[str] = None,
+    brand: Optional[str] = None,
     archived: bool = False,
     limit: int = Query(50, le=200),
 ):
@@ -56,6 +57,9 @@ def list_orders(
         if status:
             sql += " AND o.status = ?"
             params.append(status)
+        if brand:
+            sql += " AND o.brand = ?"
+            params.append(brand)
         if search:
             sql += " AND (o.title LIKE ? OR o.number LIKE ? OR c.name LIKE ?)"
             params += [f"%{search}%"] * 3

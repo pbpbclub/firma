@@ -354,7 +354,12 @@ def ensure_business_units_schema():
         if conn.execute("SELECT COUNT(*) FROM business_units").fetchone()[0] == 0:
             ip_id = str(_uuid.uuid4())
             fl_id = str(_uuid.uuid4())
-            conn.execute("INSERT INTO business_units (id, name, kind, sort_order) VALUES (?, 'ИП Некрасов', 'ИП', 0)", (ip_id,))
+            conn.execute(
+                """INSERT INTO business_units (id, name, kind, full_name, inn, notes, sort_order)
+                   VALUES (?, 'ИП Некрасов', 'ИП', 'ИП НЕКРАСОВ ЮРИЙ ВЛАДИМИРОВИЧ', '366409706709',
+                           'ОГРНИП 320366800068510 · 394018, Воронеж, ул. Пушкинская, 18-37 · +7 920 405-14-88', 0)""",
+                (ip_id,)
+            )
             conn.execute("INSERT INTO business_units (id, name, kind, sort_order) VALUES (?, 'Физлицо Некрасов', 'Физлицо', 1)", (fl_id,))
             seed_accounts = [
                 (ip_id, "Т-Банк р/с", "40802810400004306154", "tbank", "bank", 0),
@@ -366,6 +371,13 @@ def ensure_business_units_schema():
                     "INSERT INTO accounts (id, business_unit_id, name, number, bank, source, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (str(_uuid.uuid4()), bu, name, number, bank, source, so)
                 )
+        # Idempotent: fill ИП Некрасов requisites if missing (existing installs)
+        conn.execute(
+            """UPDATE business_units
+               SET full_name='ИП НЕКРАСОВ ЮРИЙ ВЛАДИМИРОВИЧ', inn='366409706709',
+                   notes='ОГРНИП 320366800068510 · 394018, Воронеж, ул. Пушкинская, 18-37 · +7 920 405-14-88'
+               WHERE name='ИП Некрасов' AND (inn IS NULL OR inn='')"""
+        )
         conn.commit()
     finally:
         conn.close()

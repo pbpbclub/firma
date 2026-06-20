@@ -1,6 +1,7 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { brandsApi, financeApi, businessUnitsApi } from "../api";
+import { brandsApi, financeApi, businessUnitsApi, ordersApi } from "../api";
 import { X, Plus, Trash } from "@phosphor-icons/react";
 
 function fmt(n: number) {
@@ -27,9 +28,6 @@ const RAL_PALETTE = [
 
 const FIELDS: { key: string; label: string; type?: string }[] = [
   { key: "name", label: "Название" },
-  { key: "full_name", label: "Юр. лицо / полное название" },
-  { key: "inn", label: "ИНН" },
-  { key: "account", label: "Расчётный счёт" },
   { key: "description", label: "Описание", type: "textarea" },
   { key: "positioning", label: "Позиционирование", type: "textarea" },
   { key: "notes", label: "Заметки", type: "textarea" },
@@ -37,7 +35,13 @@ const FIELDS: { key: string; label: string; type?: string }[] = [
 
 function BrandModal({ brand, onClose }: { brand: any; onClose: () => void }) {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const isNew = !brand?.id;
+  const { data: brandOrders = [] } = useQuery({
+    queryKey: ["orders", "brand", brand?.name],
+    queryFn: () => ordersApi.list({ brand: brand.name }),
+    enabled: !isNew && !!brand?.name,
+  });
   const [form, setForm] = useState<Record<string, string>>(() => {
     const f: Record<string, string> = { color: brand?.color ?? "" };
     for (const fl of FIELDS) f[fl.key] = brand?.[fl.key] ?? "";
@@ -121,6 +125,29 @@ function BrandModal({ brand, onClose }: { brand: any; onClose: () => void }) {
               })}
             </div>
           </div>
+          {/* Заказы бренда */}
+          {!isNew && (
+            <div>
+              <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 6 }}>ЗАКАЗЫ</div>
+              {(brandOrders as any[]).length === 0 ? (
+                <div style={{ fontSize: 12, color: "#C8C0B0" }}>Заказов нет</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", border: "1px solid #F2EFE9" }}>
+                  {(brandOrders as any[]).map((o: any) => (
+                    <div key={o.id}
+                      onClick={() => { onClose(); navigate(`/orders/${o.id}/estimate`); }}
+                      style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderBottom: "1px solid #F2EFE9", cursor: "pointer" }}
+                      onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")}
+                      onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
+                      <span style={{ fontSize: 10, color: "#A89070", minWidth: 56 }}>{o.number}</span>
+                      <span style={{ flex: 1, fontSize: 12, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.title}</span>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: "#1A1A1A" }}>{fmt(o.price_plan || 0)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 24px", borderTop: "1px solid #EDEBE6" }}>
           {!isNew ? (
