@@ -55,8 +55,13 @@ def list_orders(
         """
         params: list = [1 if archived else 0]
         if status:
-            sql += " AND o.status = ?"
-            params.append(status)
+            statuses = [s.strip() for s in status.split(",") if s.strip()]
+            if len(statuses) == 1:
+                sql += " AND o.status = ?"
+                params.append(statuses[0])
+            elif statuses:
+                sql += f" AND o.status IN ({','.join('?' * len(statuses))})"
+                params += statuses
         if brand:
             sql += " AND o.brand = ?"
             params.append(brand)

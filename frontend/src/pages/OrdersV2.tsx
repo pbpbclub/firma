@@ -21,9 +21,8 @@ const STATUS_MAP: Record<string, { label: string; color: string }> = {
 };
 
 const STATUSES = [
-  { value: "", label: "Все" },
-  { value: "estimate", label: "Смета" },
   { value: "in_production", label: "В работе" },
+  { value: "draft,estimate", label: "Смета" },
   { value: "completed", label: "Завершён" },
 ];
 
@@ -600,7 +599,7 @@ function NewOrderModal({ onClose, onCreated }: {
 export default function OrdersV2() {
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState("in_production");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<any>(null);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -634,7 +633,7 @@ export default function OrdersV2() {
     queryKey: ["orders-v2", status, search, archiveMode],
     queryFn: () => {
       const params: Record<string, string | boolean> = {};
-      if (status) params.status = status;
+      if (status && !archiveMode) params.status = status;
       if (search) params.search = search;
       if (archiveMode) params.archived = true;
       return ordersApi.list(params);
