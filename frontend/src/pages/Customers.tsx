@@ -1,12 +1,13 @@
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { useNavigationGuard, NavigationGuardModal } from "../components/NavigationGuard";
 import {
   MagnifyingGlass, DotsThree, Plus, CaretRight,
-  PencilSimple, Check, X, FloppyDisk, Funnel, Trash, Tag,
+  PencilSimple, Check, X, FloppyDisk, Trash, Tag,
 } from "@phosphor-icons/react";
 import { customersApi, mastersApi, financeApi, payeeRulesApi } from "../api";
+import { ColumnFilter } from "../components/TableFilters";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -30,49 +31,6 @@ function fmtDate(s: string) {
 }
 
 const PAGE_SIZE = 15;
-
-function ColumnFilter({ options, value, onChange }: {
-  options: string[]; value: string; onChange: (v: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [q, setQ] = useState("");
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const h = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [open]);
-  useEffect(() => { if (!open) setQ(""); }, [open]);
-  const filtered = q ? options.filter(o => o.toLowerCase().includes(q.toLowerCase())) : options;
-  return (
-    <div ref={ref} style={{ position: "relative", display: "inline-flex" }}>
-      <button onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
-        style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", display: "flex", alignItems: "center", color: value ? "#E8592A" : "#C8C0B0" }}>
-        <Funnel size={11} weight={value ? "fill" : "regular"} />
-      </button>
-      {open && (
-        <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 200, background: "#FFFFFF", border: "1px solid #EDEBE6", boxShadow: "0 4px 16px rgba(0,0,0,0.10)", minWidth: 180 }}>
-          <div style={{ padding: "5px 8px", borderBottom: "1px solid #F2EFE9" }}>
-            <input autoFocus value={q} onChange={e => setQ(e.target.value)} onClick={e => e.stopPropagation()}
-              placeholder="Поиск..." style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 12, outline: "none", fontFamily: "inherit" }} />
-          </div>
-          <div style={{ maxHeight: 220, overflowY: "auto" }}>
-            <div onClick={() => { onChange(""); setOpen(false); }} style={{ padding: "8px 12px", fontSize: 12, cursor: "pointer", color: !value ? "#E8592A" : "#1A1A1A", fontWeight: !value ? 600 : 400, borderBottom: "1px solid #F2EFE9" }}
-              onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>Все</div>
-            {filtered.map(opt => (
-              <div key={opt} onClick={() => { onChange(opt); setOpen(false); }} style={{ padding: "8px 12px", fontSize: 12, cursor: "pointer", color: value === opt ? "#E8592A" : "#1A1A1A", fontWeight: value === opt ? 600 : 400 }}
-                onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>{opt}</div>
-            ))}
-            {filtered.length === 0 && <div style={{ padding: "8px 12px", fontSize: 12, color: "#C8C0B0" }}>Не найдено</div>}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 const STATUS_COLORS: Record<string, string> = {
   favorite: "#E8592A", stable: "#4A7C59", available: "#A89070", risk: "#8B3A3A",
@@ -895,12 +853,7 @@ export default function Customers() {
           <div />
           {!rightOpen ? (
             <>
-              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                <span style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>
-                  {tab === "clients" ? "КЛИЕНТ" : "ИСПОЛНИТЕЛЬ"}
-                </span>
-                <ColumnFilter options={uniqueNames} value={nameFilter} onChange={(v) => { setNameFilter(v); setPage(0); }} />
-              </div>
+              <div><ColumnFilter label={tab === "clients" ? "КЛИЕНТ" : "ИСПОЛНИТЕЛЬ"} options={uniqueNames} value={nameFilter} onChange={(v) => { setNameFilter(v); setPage(0); }} /></div>
               <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>ТЕЛЕФОН</div>
               <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>
                 {tab === "clients" ? "ИНН" : "РОЛЬ / ДОЛГ"}

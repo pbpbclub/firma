@@ -2,7 +2,8 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { ordersApi, customersApi, brandsApi } from "../api";
-import { MagnifyingGlass, DotsThree, Plus, Files, CaretRight, Archive, ArrowCounterClockwise, CaretDown, Funnel, X, Trash, PencilSimple, UserCircle } from "@phosphor-icons/react";
+import { MagnifyingGlass, DotsThree, Plus, Files, CaretRight, Archive, ArrowCounterClockwise, CaretDown, X, Trash, PencilSimple, UserCircle } from "@phosphor-icons/react";
+import { ColumnFilter, AmountFilter } from "../components/TableFilters";
 
 const BRANDS: { value: string; color: string }[] = [
   { value: "MeRA",    color: "#2E6DA4" },
@@ -207,94 +208,6 @@ function BrandPicker({ orderId, current, onChange }: { orderId: string; current:
               {b.value}
             </div>
           ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ColumnFilter({ options, value, onChange, maxHeight }: {
-  options: string[];
-  value: string;
-  onChange: (v: string) => void;
-  maxHeight?: number;
-}) {
-  const [open, setOpen] = useState(false);
-  const [q, setQ] = useState("");
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const h = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [open]);
-  useEffect(() => { if (!open) setQ(""); }, [open]);
-  const filtered = q ? options.filter(o => o.toLowerCase().includes(q.toLowerCase())) : options;
-  return (
-    <div ref={ref} style={{ position: "relative", display: "inline-flex" }}>
-      <button onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
-        style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", display: "flex", alignItems: "center", color: value ? "#E8592A" : "#C8C0B0" }}>
-        <Funnel size={11} weight={value ? "fill" : "regular"} />
-      </button>
-      {open && (
-        <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 200, background: "#FFFFFF", border: "1px solid #EDEBE6", boxShadow: "0 4px 16px rgba(0,0,0,0.10)", minWidth: 180 }}>
-          <div style={{ padding: "5px 8px", borderBottom: "1px solid #F2EFE9" }}>
-            <input autoFocus value={q} onChange={e => setQ(e.target.value)} onClick={e => e.stopPropagation()}
-              placeholder="Поиск..." style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 12, outline: "none", fontFamily: "inherit" }} />
-          </div>
-          <div style={{ maxHeight: maxHeight ?? 200, overflowY: "auto" }}>
-            <div onClick={() => { onChange(""); setOpen(false); }} style={{ padding: "8px 12px", fontSize: 12, cursor: "pointer", color: !value ? "#E8592A" : "#1A1A1A", fontWeight: !value ? 600 : 400, borderBottom: "1px solid #F2EFE9" }}
-              onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>Все</div>
-            {filtered.map(opt => (
-              <div key={opt} onClick={() => { onChange(opt); setOpen(false); }} style={{ padding: "8px 12px", fontSize: 12, cursor: "pointer", color: value === opt ? "#E8592A" : "#1A1A1A", fontWeight: value === opt ? 600 : 400 }}
-                onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>{opt}</div>
-            ))}
-            {filtered.length === 0 && <div style={{ padding: "8px 12px", fontSize: 12, color: "#C8C0B0" }}>Не найдено</div>}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function AmountFilter({ min, max, onChange }: {
-  min: string; max: string;
-  onChange: (min: string, max: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const h = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [open]);
-  const active = !!min || !!max;
-  return (
-    <div ref={ref} style={{ position: "relative", display: "inline-flex" }}>
-      <button onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
-        style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", display: "flex", alignItems: "center", color: active ? "#E8592A" : "#C8C0B0" }}>
-        <Funnel size={11} weight={active ? "fill" : "regular"} />
-      </button>
-      {open && (
-        <div style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 200, background: "#FFFFFF", border: "1px solid #EDEBE6", boxShadow: "0 4px 16px rgba(0,0,0,0.10)", padding: "10px 12px", minWidth: 210 }}>
-          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <input type="number" placeholder="От" value={min} onChange={e => onChange(e.target.value, max)} autoFocus
-              style={{ width: 84, border: "1px solid #EDEBE6", padding: "5px 8px", fontSize: 12, outline: "none" }} />
-            <span style={{ fontSize: 12, color: "#A89070" }}>—</span>
-            <input type="number" placeholder="До" value={max} onChange={e => onChange(min, e.target.value)}
-              style={{ width: 84, border: "1px solid #EDEBE6", padding: "5px 8px", fontSize: 12, outline: "none" }} />
-          </div>
-          {active && (
-            <button onClick={() => { onChange("", ""); setOpen(false); }}
-              style={{ marginTop: 8, width: "100%", padding: "5px", border: "none", background: "#FAF8F5", fontSize: 11, color: "#A89070", cursor: "pointer" }}>
-              Сбросить
-            </button>
-          )}
         </div>
       )}
     </div>
@@ -882,19 +795,10 @@ export default function OrdersV2() {
               }}
             />
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <span style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>НАЗВАНИЕ</span>
-            <ColumnFilter options={uniqueTitles} value={titleFilter} onChange={(v) => { setTitleFilter(v); setPage(0); }} />
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <span style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>КЛИЕНТ</span>
-            <ColumnFilter options={uniqueCustomers} value={customerFilter} onChange={(v) => { setCustomerFilter(v); setPage(0); }} />
-          </div>
+          <div><ColumnFilter label="НАЗВАНИЕ" options={uniqueTitles} value={titleFilter} onChange={(v) => { setTitleFilter(v); setPage(0); }} /></div>
+          <div><ColumnFilter label="КЛИЕНТ" options={uniqueCustomers} value={customerFilter} onChange={(v) => { setCustomerFilter(v); setPage(0); }} /></div>
           <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>СТАТУС</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <span style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>СУММА</span>
-            <AmountFilter min={amountMin} max={amountMax} onChange={(mn, mx) => { setAmountMin(mn); setAmountMax(mx); setPage(0); }} />
-          </div>
+          <div><AmountFilter label="СУММА" min={amountMin} max={amountMax} onChange={(mn, mx) => { setAmountMin(mn); setAmountMax(mx); setPage(0); }} /></div>
           {!selected && <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>К ПОЛУЧЕНИЮ</div>}
           <div />
         </div>

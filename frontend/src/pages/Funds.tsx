@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fundsApi } from "../api";
 import { Plus, Minus, Trash, X } from "@phosphor-icons/react";
+import { ColumnFilter } from "../components/TableFilters";
 
 const PRESET_COLORS = [
   "#E8592A", "#4A7C59", "#1A1A1A", "#A89070",
@@ -84,12 +85,15 @@ function FundDetailModal({ fund, onClose, onRefresh }: {
 }) {
   const qc = useQueryClient();
   const [txModal, setTxModal] = useState<"deposit" | "withdraw" | null>(null);
+  const [noteFilter, setNoteFilter] = useState("");
 
   const { data: txs = [], refetch } = useQuery({
     queryKey: ["fund-txs-modal", fund.id],
     queryFn: () => fundsApi.transactions(fund.id),
   });
-  const txList = txs as any[];
+  const allTx = txs as any[];
+  const noteOptions = [...new Set(allTx.map((t: any) => t.note).filter(Boolean))].sort() as string[];
+  const txList = noteFilter ? allTx.filter((t: any) => t.note === noteFilter) : allTx;
 
   const deleteTx = async (txId: string) => {
     await fundsApi.deleteTx(txId);
@@ -145,9 +149,10 @@ function FundDetailModal({ fund, onClose, onRefresh }: {
 
           {/* Заголовок таблицы */}
           <div style={{ display: "grid", gridTemplateColumns: "110px 1fr 120px 28px", padding: "7px 24px", borderBottom: "1px solid #EDEBE6" }}>
-            {["Дата", "Комментарий", "Сумма", ""].map((h, i) => (
-              <div key={i} style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>{h}</div>
-            ))}
+            <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>Дата</div>
+            <div><ColumnFilter label="Комментарий" options={noteOptions} value={noteFilter} onChange={setNoteFilter} /></div>
+            <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>Сумма</div>
+            <div />
           </div>
 
           {/* История */}

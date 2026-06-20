@@ -1,53 +1,8 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { catalogApi } from "../api";
-import { MagnifyingGlass, Plus, X, Trash, Funnel } from "@phosphor-icons/react";
-
-function ColumnFilter({ options, value, onChange, maxHeight }: {
-  options: string[];
-  value: string;
-  onChange: (v: string) => void;
-  maxHeight?: number;
-}) {
-  const [open, setOpen] = useState(false);
-  const [q, setQ] = useState("");
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const h = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [open]);
-  useEffect(() => { if (!open) setQ(""); }, [open]);
-  const filtered = q ? options.filter(o => o.toLowerCase().includes(q.toLowerCase())) : options;
-  return (
-    <div ref={ref} style={{ position: "relative", display: "inline-flex" }}>
-      <button onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
-        style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", display: "flex", alignItems: "center", color: value ? "#E8592A" : "#C8C0B0" }}>
-        <Funnel size={11} weight={value ? "fill" : "regular"} />
-      </button>
-      {open && (
-        <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 200, background: "#FFFFFF", border: "1px solid #EDEBE6", boxShadow: "0 4px 16px rgba(0,0,0,0.10)", minWidth: 180 }}>
-          <div style={{ padding: "5px 8px", borderBottom: "1px solid #F2EFE9" }}>
-            <input autoFocus value={q} onChange={e => setQ(e.target.value)} onClick={e => e.stopPropagation()}
-              placeholder="Поиск..." style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 12, outline: "none", fontFamily: "inherit" }} />
-          </div>
-          <div style={{ maxHeight: maxHeight ?? 200, overflowY: "auto" }}>
-            <div onClick={() => { onChange(""); setOpen(false); }} style={{ padding: "8px 12px", fontSize: 12, cursor: "pointer", color: !value ? "#E8592A" : "#1A1A1A", fontWeight: !value ? 600 : 400, borderBottom: "1px solid #F2EFE9" }}
-              onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>Все</div>
-            {filtered.map(opt => (
-              <div key={opt} onClick={() => { onChange(opt); setOpen(false); }} style={{ padding: "8px 12px", fontSize: 12, cursor: "pointer", color: value === opt ? "#E8592A" : "#1A1A1A", fontWeight: value === opt ? 600 : 400 }}
-                onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>{opt}</div>
-            ))}
-            {filtered.length === 0 && <div style={{ padding: "8px 12px", fontSize: 12, color: "#C8C0B0" }}>Не найдено</div>}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+import { MagnifyingGlass, Plus, X, Trash } from "@phosphor-icons/react";
+import { ColumnFilter, AmountFilter } from "../components/TableFilters";
 
 function Checkbox({ checked, indeterminate = false, onChange }: {
   checked: boolean; indeterminate?: boolean; onChange: () => void;
@@ -61,48 +16,6 @@ function Checkbox({ checked, indeterminate = false, onChange }: {
     }}>
       {checked && <svg width="8" height="6" viewBox="0 0 8 6" fill="none"><path d="M1 3L3 5.5L7 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
       {!checked && indeterminate && <div style={{ width: 8, height: 1.5, background: "#E8592A" }} />}
-    </div>
-  );
-}
-
-function AmountFilter({ min, max, onChange }: {
-  min: string; max: string;
-  onChange: (min: string, max: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const h = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [open]);
-  const active = !!min || !!max;
-  return (
-    <div ref={ref} style={{ position: "relative", display: "inline-flex" }}>
-      <button onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
-        style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", display: "flex", alignItems: "center", color: active ? "#E8592A" : "#C8C0B0" }}>
-        <Funnel size={11} weight={active ? "fill" : "regular"} />
-      </button>
-      {open && (
-        <div style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 200, background: "#FFFFFF", border: "1px solid #EDEBE6", boxShadow: "0 4px 16px rgba(0,0,0,0.10)", padding: "10px 12px", minWidth: 210 }}>
-          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <input type="number" placeholder="От" value={min} onChange={e => onChange(e.target.value, max)} autoFocus
-              style={{ width: 84, border: "1px solid #EDEBE6", padding: "5px 8px", fontSize: 12, outline: "none" }} />
-            <span style={{ fontSize: 12, color: "#A89070" }}>—</span>
-            <input type="number" placeholder="До" value={max} onChange={e => onChange(min, e.target.value)}
-              style={{ width: 84, border: "1px solid #EDEBE6", padding: "5px 8px", fontSize: 12, outline: "none" }} />
-          </div>
-          {active && (
-            <button onClick={() => { onChange("", ""); setOpen(false); }}
-              style={{ marginTop: 8, width: "100%", padding: "5px", border: "none", background: "#FAF8F5", fontSize: 11, color: "#A89070", cursor: "pointer" }}>
-              Сбросить
-            </button>
-          )}
-        </div>
-      )}
     </div>
   );
 }
@@ -819,23 +732,11 @@ export default function Catalog() {
                       }}
                     />
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                    <span style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ИЗДЕЛИЕ</span>
-                    <ColumnFilter options={uniqueNames} value={nameFilter} onChange={setNameFilter} />
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                    <span style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>БРЕНД</span>
-                    <ColumnFilter options={uniqueBrands} value={brandFilter} onChange={setBrandFilter} />
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                    <span style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>КАТЕГОРИЯ</span>
-                    <ColumnFilter options={uniqueCats} value={catFilter} onChange={setCatFilter} />
-                  </div>
+                  <div><ColumnFilter label="ИЗДЕЛИЕ" options={uniqueNames} value={nameFilter} onChange={setNameFilter} /></div>
+                  <div><ColumnFilter label="БРЕНД" options={uniqueBrands} value={brandFilter} onChange={setBrandFilter} /></div>
+                  <div><ColumnFilter label="КАТЕГОРИЯ" options={uniqueCats} value={catFilter} onChange={setCatFilter} /></div>
                   <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>СЕБЕСТОИМОСТЬ</div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                    <span style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ПРОДАЖНАЯ ЦЕНА</span>
-                    <AmountFilter min={priceMin} max={priceMax} onChange={(mn, mx) => { setPriceMin(mn); setPriceMax(mx); }} />
-                  </div>
+                  <div><AmountFilter label="ПРОДАЖНАЯ ЦЕНА" min={priceMin} max={priceMax} onChange={(mn, mx) => { setPriceMin(mn); setPriceMax(mx); }} /></div>
                 </div>
                 {loadingSaved ? (
                   <div style={{ padding: 48, textAlign: "center", color: "#A89070", fontSize: 13 }}>Загружаем...</div>
@@ -929,19 +830,10 @@ export default function Catalog() {
                 }}
               />
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <span style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ИЗДЕЛИЕ</span>
-              <ColumnFilter options={smetsUniqueNames} value={nameFilter} onChange={setNameFilter} />
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <span style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>КАТЕГОРИЯ</span>
-              <ColumnFilter options={smetsUniqueCats} value={catFilter} onChange={setCatFilter} />
-            </div>
+            <div><ColumnFilter label="ИЗДЕЛИЕ" options={smetsUniqueNames} value={nameFilter} onChange={setNameFilter} /></div>
+            <div><ColumnFilter label="КАТЕГОРИЯ" options={smetsUniqueCats} value={catFilter} onChange={setCatFilter} /></div>
             <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ЗАКАЗОВ</div>
-            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <span style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ЦЕНА (СР.)</span>
-              <AmountFilter min={priceMin} max={priceMax} onChange={(mn, mx) => { setPriceMin(mn); setPriceMax(mx); }} />
-            </div>
+            <div><AmountFilter label="ЦЕНА (СР.)" min={priceMin} max={priceMax} onChange={(mn, mx) => { setPriceMin(mn); setPriceMax(mx); }} /></div>
             <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>МИН.</div>
             <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>МАКС.</div>
           </div>

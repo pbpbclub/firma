@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { brandsApi, financeApi, businessUnitsApi, ordersApi } from "../api";
 import { X, Plus, Trash } from "@phosphor-icons/react";
+import { ColumnFilter } from "../components/TableFilters";
 
 function fmt(n: number) {
   return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n || 0) + " ₽";
@@ -344,6 +345,16 @@ export default function Brands() {
   const th: React.CSSProperties = { fontSize: 11, color: "#A89070", letterSpacing: "0.04em" };
   const rowStyle: React.CSSProperties = { padding: "13px 28px", borderBottom: "1px solid #F2EFE9", alignItems: "center", cursor: "pointer", transition: "background 0.1s" };
 
+  const [unitNameFilter, setUnitNameFilter] = useState("");
+  const [unitKindFilter, setUnitKindFilter] = useState("");
+  const [brandNameFilter, setBrandNameFilter] = useState("");
+  const unitNames = [...new Set((units as any[]).map((u: any) => u.name).filter(Boolean))].sort() as string[];
+  const unitKinds = [...new Set((units as any[]).map((u: any) => u.kind).filter(Boolean))].sort() as string[];
+  const brandNames = [...new Set((brands as any[]).map((b: any) => b.name).filter(Boolean))].sort() as string[];
+  const filteredUnits = (units as any[]).filter((u: any) =>
+    (!unitNameFilter || u.name === unitNameFilter) && (!unitKindFilter || u.kind === unitKindFilter));
+  const filteredBrands = (brands as any[]).filter((b: any) => !brandNameFilter || b.name === brandNameFilter);
+
   return (
     <div style={{ padding: "24px 0 40px", display: "flex", flexDirection: "column", height: "100%", boxSizing: "border-box", overflowY: "auto" }}>
       <div style={{ padding: "0 28px", marginBottom: 22 }}>
@@ -360,10 +371,12 @@ export default function Brands() {
         </button>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: buCols, padding: "8px 28px", borderBottom: "1px solid #EDEBE6", borderTop: "1px solid #EDEBE6" }}>
-        <div style={th}>НАЗВАНИЕ</div><div style={th}>ТИП</div><div style={th}>ИНН</div><div style={th}>СЧЕТА</div>
+        <div><ColumnFilter label="НАЗВАНИЕ" options={unitNames} value={unitNameFilter} onChange={setUnitNameFilter} /></div>
+        <div><ColumnFilter label="ТИП" options={unitKinds} value={unitKindFilter} onChange={setUnitKindFilter} /></div>
+        <div style={th}>ИНН</div><div style={th}>СЧЕТА</div>
         <div style={{ ...th, textAlign: "right" }}>БАЛАНС</div>
       </div>
-      {(units as any[]).map((u: any) => (
+      {filteredUnits.map((u: any) => (
         <div key={u.id} onClick={() => setEditUnit(u)} style={{ display: "grid", gridTemplateColumns: buCols, ...rowStyle }}
           onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")}
           onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
@@ -388,10 +401,11 @@ export default function Brands() {
         </button>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: brandCols, padding: "8px 28px", borderBottom: "1px solid #EDEBE6", borderTop: "1px solid #EDEBE6" }}>
-        <div style={th}>НАЗВАНИЕ</div><div style={th}>ОПИСАНИЕ</div>
+        <div><ColumnFilter label="НАЗВАНИЕ" options={brandNames} value={brandNameFilter} onChange={setBrandNameFilter} /></div>
+        <div style={th}>ОПИСАНИЕ</div>
         <div style={{ ...th, textAlign: "right" }}>ДОХОД</div><div style={{ ...th, textAlign: "right" }}>ПРИБЫЛЬ</div>
       </div>
-      {(brands as any[]).map((b: any) => {
+      {filteredBrands.map((b: any) => {
         const fin = finOf(b.name);
         return (
           <div key={b.id} onClick={() => setEdit(b)} style={{ display: "grid", gridTemplateColumns: brandCols, ...rowStyle }}
