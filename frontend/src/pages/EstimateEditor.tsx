@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ordersApi, estimatesApi, catalogApi, mastersApi, workTypesApi } from "../api";
@@ -586,11 +586,30 @@ export default function EstimateEditor() {
     enabled: !!orderId,
   });
 
-  const { data: sets = [], refetch } = useQuery({
+  const { data: sets = [], refetch, isLoading: setsLoading } = useQuery({
     queryKey: ["estimate", orderId],
     queryFn: () => ordersApi.estimate(orderId!),
     enabled: !!orderId,
   });
+
+  // After creating a new order (?new=1): jump straight into a fresh estimate
+  const autoNewRef = useRef(false);
+  useEffect(() => {
+    if (searchParams.get("new") !== "1" || setsLoading || autoNewRef.current) return;
+    autoNewRef.current = true;
+    (async () => {
+      if ((sets as any[]).length === 0) {
+        const s = await estimatesApi.createSet(orderId!);
+        setSelectedSetId(s.id);
+        setEditMode(true);
+        refetch();
+      } else {
+        setSelectedSetId((sets as any[])[0].id);
+        setEditMode(true);
+      }
+      navigate(`/orders/${orderId}/estimate`, { replace: true });
+    })();
+  }, [sets, setsLoading]);
 
   const activeSetId = selectedSetId ?? ((sets as any[])[0]?.id ?? null);
   const activeSet   = (sets as any[]).find((s: any) => s.id === activeSetId) ?? null;
@@ -614,6 +633,7 @@ export default function EstimateEditor() {
   const createSet = async () => {
     const s = await estimatesApi.createSet(orderId!);
     setSelectedSetId(s.id);
+    setEditMode(true);
     refetch();
   };
 

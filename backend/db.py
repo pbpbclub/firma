@@ -36,7 +36,7 @@ def ensure_customer_schema():
     conn = get_production()
     try:
         existing = {r[1] for r in conn.execute("PRAGMA table_info(customers)").fetchall()}
-        for column in ("wiki_ref", "finagent_ref", "source", "status"):
+        for column in ("wiki_ref", "finagent_ref", "source", "status", "telegram", "instagram", "whatsapp"):
             if column not in existing:
                 conn.execute(f"ALTER TABLE customers ADD COLUMN {column} TEXT")
         conn.commit()

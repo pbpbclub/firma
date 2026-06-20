@@ -31,8 +31,11 @@ class CustomerCreateRequest(BaseModel):
     full_name: Optional[str] = None
     inn: Optional[str] = None
     phone: Optional[str] = None
-    email: Optional[EmailStr] = None
+    email: Optional[str] = None
     contact: Optional[str] = None
+    telegram: Optional[str] = None
+    instagram: Optional[str] = None
+    whatsapp: Optional[str] = None
     notes: Optional[str] = None
     wiki_ref: Optional[str] = None
     finagent_ref: Optional[str] = None
@@ -45,8 +48,11 @@ class CustomerUpdateRequest(BaseModel):
     full_name: Optional[str] = None
     inn: Optional[str] = None
     phone: Optional[str] = None
-    email: Optional[EmailStr] = None
+    email: Optional[str] = None
     contact: Optional[str] = None
+    telegram: Optional[str] = None
+    instagram: Optional[str] = None
+    whatsapp: Optional[str] = None
     notes: Optional[str] = None
     wiki_ref: Optional[str] = None
     finagent_ref: Optional[str] = None
@@ -176,20 +182,13 @@ def create_customer(payload: CustomerCreateRequest):
     conn = get_production()
     try:
         customer_id = str(uuid4())
+        data = {k: v for k, v in payload.model_dump().items() if v is not None}
+        data["id"] = customer_id
+        cols = ", ".join(data.keys())
+        placeholders = ", ".join("?" * len(data))
         conn.execute(
-            "INSERT INTO customers (id, name, full_name, inn, phone, email, contact, notes, wiki_ref, finagent_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                customer_id,
-                payload.name,
-                payload.full_name,
-                payload.inn,
-                payload.phone,
-                payload.email,
-                payload.contact,
-                payload.notes,
-                payload.wiki_ref,
-                payload.finagent_ref,
-            ),
+            f"INSERT INTO customers ({cols}) VALUES ({placeholders})",
+            tuple(data.values()),
         )
         conn.commit()
         return {"id": customer_id}

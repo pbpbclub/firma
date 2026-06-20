@@ -387,7 +387,8 @@ function NewOrderModal({ onClose, onCreated }: {
   const [lookingUp, setLookingUp] = useState(false);
   const [lookupMsg, setLookupMsg] = useState("");
   const [newCustomer, setNewCustomer] = useState<Record<string, string>>({
-    name: "", inn: "", full_name: "", phone: "", email: "", contact: "", source: "", notes: "",
+    name: "", inn: "", full_name: "", phone: "", email: "", contact: "",
+    telegram: "", instagram: "", whatsapp: "", source: "", notes: "",
   });
 
   const { data: customers = [] } = useQuery({
@@ -511,9 +512,12 @@ function NewOrderModal({ onClose, onCreated }: {
                 {[
                   { k: "name", l: "НАЗВАНИЕ *", ph: "ООО «...» или ФИО" },
                   { k: "full_name", l: "ПОЛНОЕ ИМЯ", ph: "" },
-                  { k: "phone", l: "ТЕЛЕФОН", ph: "+7..." },
-                  { k: "email", l: "EMAIL", ph: "" },
                   { k: "contact", l: "КОНТАКТНОЕ ЛИЦО", ph: "" },
+                  { k: "phone", l: "ТЕЛЕФОН", ph: "+7..." },
+                  { k: "telegram", l: "TELEGRAM", ph: "@username" },
+                  { k: "instagram", l: "INSTAGRAM", ph: "@username" },
+                  { k: "whatsapp", l: "WHATSAPP", ph: "+7..." },
+                  { k: "email", l: "EMAIL", ph: "" },
                 ].map(f => (
                   <div key={f.k}>
                     <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>{f.l}</div>
@@ -1222,7 +1226,7 @@ export default function OrdersV2() {
       {showNewOrder && (
         <NewOrderModal
           onClose={() => setShowNewOrder(false)}
-          onCreated={(id) => { setShowNewOrder(false); navigate(`/orders/${id}/estimate`); }}
+          onCreated={(id) => { setShowNewOrder(false); navigate(`/orders/${id}/estimate?new=1`); }}
         />
       )}
     </div>
