@@ -3,8 +3,28 @@ from pydantic import BaseModel, EmailStr
 from typing import Optional
 from uuid import uuid4
 from db import get_production, get_finance
+import os
+import httpx
 
 router = APIRouter()
+
+_FIN_AGENT_ENV = "/opt/fin-agent/.env"
+
+
+def _dadata_token() -> str:
+    """DADATA_TOKEN from process env or fin-agent .env."""
+    token = os.getenv("DADATA_TOKEN", "")
+    if token:
+        return token
+    try:
+        with open(_FIN_AGENT_ENV) as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("DADATA_TOKEN") and "=" in line:
+                    return line.partition("=")[2].strip().strip('"').strip("'")
+    except Exception:
+        pass
+    return ""
 
 class CustomerCreateRequest(BaseModel):
     name: str
@@ -52,6 +72,43 @@ def list_customers(
         return [dict(r) for r in rows]
     finally:
         conn.close()
+
+
+@router.get("/lookup-inn")
+def lookup_inn(inn: str):
+    token = _dadata_token()
+    if not token:
+        raise HTTPException(status_code=503, detail="DADATA_TOKEN not configured")
+    inn = (inn or "").strip()
+    if not inn:
+        raise HTTPException(status_code=400, detail="inn required")
+    try:
+        r = httpx.post(
+            "https://suggestions.dadata.ru/suggestions/api/4_1/rs/findById/party",
+            json={"query": inn},
+            headers={"Authorization": f"Token {token}", "Accept": "application/json"},
+            timeout=10,
+        )
+        r.raise_for_status()
+        suggestions = r.json().get("suggestions", [])
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"DaData error: {e}")
+    if not suggestions:
+        return {"found": False}
+    d = suggestions[0]
+    data = d.get("data", {}) or {}
+    name_obj = data.get("name") or {}
+    mgmt = data.get("management") or {}
+    addr = (data.get("address") or {}).get("value")
+    return {
+        "found": True,
+        "name": d.get("value"),
+        "full_name": name_obj.get("full_with_opf"),
+        "inn": data.get("inn"),
+        "kpp": data.get("kpp"),
+        "contact": mgmt.get("name"),
+        "notes": addr,
+    }
 
 
 @router.get("/{customer_id}")

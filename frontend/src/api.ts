@@ -28,7 +28,7 @@ export const ordersApi = {
   updateStatus: (id: string, status: string) => api.patch(`/orders/${id}/status`, { status }).then((r) => r.data),
   archive: (id: string) => api.patch(`/orders/${id}/archive`).then((r) => r.data),
   unarchive: (id: string) => api.patch(`/orders/${id}/unarchive`).then((r) => r.data),
-  create: (data: { title: string; customer_id?: number | null; deadline?: string | null; priority?: string; brand?: string | null }) =>
+  create: (data: { title: string; customer_id?: string | null; deadline?: string | null; priority?: string; brand?: string | null }) =>
     api.post("/orders", data).then((r) => r.data),
   update: (id: string, data: Record<string, any>) => api.patch(`/orders/${id}`, data).then((r) => r.data),
   updateBrand: (id: string, brand: string | null) => api.patch(`/orders/${id}/brand`, { brand }).then((r) => r.data),
@@ -49,6 +49,7 @@ export const customersApi = {
   create: (data: Record<string, any>) => api.post("/customers", data).then((r) => r.data),
   update: (id: string, data: Record<string, any>) => api.put(`/customers/${id}`, data).then((r) => r.data),
   delete: (id: string) => api.delete(`/customers/${id}`).then((r) => r.data),
+  lookupInn: (inn: string) => api.get("/customers/lookup-inn", { params: { inn } }).then((r) => r.data),
 };
 
 export const financeApi = {

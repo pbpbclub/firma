@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { ordersApi, customersApi } from "../api";
-import { MagnifyingGlass, DotsThree, Plus, Files, CaretRight, Archive, ArrowCounterClockwise, CaretDown, Funnel, X, Trash } from "@phosphor-icons/react";
+import { MagnifyingGlass, DotsThree, Plus, Files, CaretRight, Archive, ArrowCounterClockwise, CaretDown, Funnel, X, Trash, PencilSimple, UserCircle } from "@phosphor-icons/react";
 
 const BRANDS: { value: string; color: string }[] = [
   { value: "MeRA",    color: "#2E6DA4" },
@@ -369,9 +369,11 @@ function EstimatesDropdown({ orderId, sets }: { orderId: string; sets: any[] }) 
   );
 }
 
+const CUSTOMER_SOURCES = ["Сарафан", "Инстаграм", "Авито", "Сайт", "ВКонтакте", "Выставка", "Прочее"];
+
 function NewOrderModal({ onClose, onCreated }: {
   onClose: () => void;
-  onCreated: (orderId: number) => void;
+  onCreated: (orderId: string) => void;
 }) {
   const qc = useQueryClient();
   const [title, setTitle] = useState("");
@@ -381,13 +383,62 @@ function NewOrderModal({ onClose, onCreated }: {
   const [brand, setBrand] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [newCustomerName, setNewCustomerName] = useState("");
   const [creatingCustomer, setCreatingCustomer] = useState(false);
+  const [lookingUp, setLookingUp] = useState(false);
+  const [lookupMsg, setLookupMsg] = useState("");
+  const [newCustomer, setNewCustomer] = useState<Record<string, string>>({
+    name: "", inn: "", full_name: "", phone: "", email: "", contact: "", source: "", notes: "",
+  });
 
   const { data: customers = [] } = useQuery({
     queryKey: ["customers", ""],
     queryFn: () => customersApi.list(""),
   });
+
+  const setNC = (k: string, v: string) => setNewCustomer(prev => ({ ...prev, [k]: v }));
+
+  async function handleInnLookup() {
+    const inn = newCustomer.inn.trim();
+    if (!inn) return;
+    setLookingUp(true);
+    setLookupMsg("");
+    try {
+      const res = await customersApi.lookupInn(inn);
+      if (res.found) {
+        setNewCustomer(prev => ({
+          ...prev,
+          name: res.name || prev.name,
+          full_name: res.full_name || prev.full_name,
+          inn: res.inn || prev.inn,
+          contact: res.contact || prev.contact,
+          notes: res.notes || prev.notes,
+        }));
+        setLookupMsg("Найдено ✓");
+      } else {
+        setLookupMsg("Не найдено");
+      }
+    } catch {
+      setLookupMsg("Ошибка поиска");
+    } finally {
+      setLookingUp(false);
+    }
+  }
+
+  async function handleCreateCustomer() {
+    if (!newCustomer.name.trim()) { setLookupMsg("Введите название"); return; }
+    setCreatingCustomer(true);
+    try {
+      const payload: Record<string, any> = {};
+      for (const [k, v] of Object.entries(newCustomer)) {
+        if (v && v.trim()) payload[k] = v.trim();
+      }
+      const c = await customersApi.create(payload);
+      qc.invalidateQueries({ queryKey: ["customers"] });
+      setCustomerId(String(c.id));
+    } finally {
+      setCreatingCustomer(false);
+    }
+  }
 
   async function handleSubmit() {
     if (!title.trim()) { setError("Введите название заказа"); return; }
@@ -395,7 +446,7 @@ function NewOrderModal({ onClose, onCreated }: {
     try {
       const order = await ordersApi.create({
         title: title.trim(),
-        customer_id: customerId ? parseInt(customerId) : null,
+        customer_id: customerId && customerId !== "__new__" ? customerId : null,
         deadline: deadline || null,
         priority,
         brand: brand || null,
@@ -426,7 +477,7 @@ function NewOrderModal({ onClose, onCreated }: {
             <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>КЛИЕНТ</div>
             <select value={customerId} onChange={e => {
               setCustomerId(e.target.value);
-              if (e.target.value !== "__new__") setNewCustomerName("");
+              if (e.target.value !== "__new__") setLookupMsg("");
             }}
               style={{ width: "100%", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none", background: "#fff", color: customerId && customerId !== "__new__" ? "#1A1A1A" : "#A89070" }}>
               <option value="">— не выбран —</option>
@@ -434,41 +485,67 @@ function NewOrderModal({ onClose, onCreated }: {
               <option value="__new__">+ добавить нового</option>
             </select>
             {customerId === "__new__" && (
-              <div style={{ marginTop: 6, display: "flex", gap: 6 }}>
-                <input
-                  autoFocus
-                  placeholder="Имя клиента"
-                  value={newCustomerName}
-                  onChange={e => setNewCustomerName(e.target.value)}
-                  onKeyDown={async e => {
-                    if (e.key === "Escape") { setCustomerId(""); setNewCustomerName(""); }
-                    if (e.key === "Enter" && newCustomerName.trim()) {
-                      setCreatingCustomer(true);
-                      try {
-                        const c = await customersApi.create({ name: newCustomerName.trim() });
-                        qc.invalidateQueries({ queryKey: ["customers"] });
-                        setCustomerId(String(c.id));
-                        setNewCustomerName("");
-                      } finally { setCreatingCustomer(false); }
-                    }
-                  }}
-                  style={{ flex: 1, border: "1px solid #E8592A", padding: "6px 10px", fontSize: 13, outline: "none" }}
-                />
-                <button
-                  disabled={creatingCustomer || !newCustomerName.trim()}
-                  onClick={async () => {
-                    if (!newCustomerName.trim()) return;
-                    setCreatingCustomer(true);
-                    try {
-                      const c = await customersApi.create({ name: newCustomerName.trim() });
-                      qc.invalidateQueries({ queryKey: ["customers"] });
-                      setCustomerId(String(c.id));
-                      setNewCustomerName("");
-                    } finally { setCreatingCustomer(false); }
-                  }}
-                  style={{ padding: "6px 12px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600, opacity: creatingCustomer || !newCustomerName.trim() ? 0.5 : 1 }}>
-                  {creatingCustomer ? "..." : "Создать"}
-                </button>
+              <div style={{ marginTop: 8, border: "1px solid #EDEBE6", padding: 12, display: "flex", flexDirection: "column", gap: 8, background: "#FAF8F5" }}>
+                {/* ИНН + поиск */}
+                <div>
+                  <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>ИНН</div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <input
+                      autoFocus
+                      placeholder="ИНН — найдём реквизиты"
+                      value={newCustomer.inn}
+                      onChange={e => setNC("inn", e.target.value)}
+                      onKeyDown={e => { if (e.key === "Enter") handleInnLookup(); }}
+                      style={{ flex: 1, border: "1px solid #EDEBE6", padding: "6px 10px", fontSize: 13, outline: "none", boxSizing: "border-box" }}
+                    />
+                    <button
+                      disabled={lookingUp || !newCustomer.inn.trim()}
+                      onClick={handleInnLookup}
+                      style={{ padding: "6px 12px", border: "1px solid #1A1A1A", background: "#1A1A1A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600, opacity: lookingUp || !newCustomer.inn.trim() ? 0.5 : 1, whiteSpace: "nowrap" }}>
+                      {lookingUp ? "..." : "Найти"}
+                    </button>
+                  </div>
+                  {lookupMsg && <div style={{ fontSize: 10, color: lookupMsg.includes("✓") ? "#4A7C59" : "#8B3A3A", marginTop: 3 }}>{lookupMsg}</div>}
+                </div>
+                {/* Поля карточки */}
+                {[
+                  { k: "name", l: "НАЗВАНИЕ *", ph: "ООО «...» или ФИО" },
+                  { k: "full_name", l: "ПОЛНОЕ ИМЯ", ph: "" },
+                  { k: "phone", l: "ТЕЛЕФОН", ph: "+7..." },
+                  { k: "email", l: "EMAIL", ph: "" },
+                  { k: "contact", l: "КОНТАКТНОЕ ЛИЦО", ph: "" },
+                ].map(f => (
+                  <div key={f.k}>
+                    <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>{f.l}</div>
+                    <input
+                      placeholder={f.ph}
+                      value={newCustomer[f.k]}
+                      onChange={e => setNC(f.k, e.target.value)}
+                      style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "6px 10px", fontSize: 13, outline: "none" }}
+                    />
+                  </div>
+                ))}
+                <div>
+                  <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>ИСТОЧНИК</div>
+                  <select value={newCustomer.source} onChange={e => setNC("source", e.target.value)}
+                    style={{ width: "100%", border: "1px solid #EDEBE6", padding: "6px 10px", fontSize: 13, outline: "none", background: "#fff", color: newCustomer.source ? "#1A1A1A" : "#A89070" }}>
+                    <option value="">— не выбран —</option>
+                    {CUSTOMER_SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                  <button
+                    onClick={() => { setCustomerId(""); }}
+                    style={{ padding: "6px 12px", border: "1px solid #EDEBE6", background: "#fff", color: "#6B6355", fontSize: 12, cursor: "pointer" }}>
+                    Отмена
+                  </button>
+                  <button
+                    disabled={creatingCustomer || !newCustomer.name.trim()}
+                    onClick={handleCreateCustomer}
+                    style={{ flex: 1, padding: "6px 12px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600, opacity: creatingCustomer || !newCustomer.name.trim() ? 0.5 : 1 }}>
+                    {creatingCustomer ? "Создаём..." : "Создать клиента"}
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -549,7 +626,7 @@ export default function OrdersV2() {
       setSelectedIds(new Set());
       setConfirmDelete(false);
       if (selected && selectedIds.has(selected.id)) setSelected(null);
-      qc.invalidateQueries({ queryKey: ["orders"] });
+      qc.invalidateQueries({ queryKey: ["orders-v2"] });
     },
   });
   const [amountMin, setAmountMin] = useState("");
@@ -979,7 +1056,7 @@ export default function OrdersV2() {
                 {selected.title}
               </div>
               <div style={{ fontSize: 11, color: "#A89070", marginTop: 8 }}>
-                {[selected.number ? `№ ${selected.number}` : "", selected.customer_name].filter(Boolean).join(" · ")}
+                {selected.customer_name || ""}
               </div>
               <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap", alignItems: "center" }}>
                 <StatusPicker
@@ -998,35 +1075,42 @@ export default function OrdersV2() {
                     qc.invalidateQueries({ queryKey: ["order-detail-v2", selected.id] });
                   }}
                 />
-                {selected.customer_id && (
-                  <button
-                    onClick={() => navigate(`/customers/${selected.customer_id}`)}
-                    style={{ padding: "5px 10px", border: "1px solid #EDEBE6", background: "transparent", color: "#1A1A1A", fontSize: 11, cursor: "pointer" }}
-                  >
-                    Клиент
-                  </button>
-                )}
+                <EstimatesDropdown orderId={selected.id} sets={detail?.estimate_sets ?? []} />
                 <button
                   onClick={() => navigate(`/orders/${selected.id}`)}
-                  style={{ padding: "5px 12px", border: "none", background: "#E8592A", color: "#FFFFFF", fontSize: 11, cursor: "pointer", fontWeight: 600 }}
+                  title="Редактировать"
+                  style={{ width: 28, height: 28, padding: 0, border: "none", background: "#E8592A", color: "#FFFFFF", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
                 >
-                  Редактировать →
+                  <PencilSimple size={15} />
                 </button>
-                <EstimatesDropdown orderId={selected.id} sets={detail?.estimate_sets ?? []} />
                 <button
                   onClick={handleArchive}
                   disabled={archiving}
+                  title={archiveMode ? "Восстановить из архива" : "В архив"}
                   style={{
-                    padding: "5px 10px", border: "1px solid #EDEBE6", background: "transparent",
-                    color: archiveMode ? "#4A7C59" : "#A89070", fontSize: 11, cursor: "pointer",
-                    display: "flex", alignItems: "center", gap: 5,
+                    width: 28, height: 28, padding: 0, border: "1px solid #EDEBE6", background: "transparent",
+                    color: archiveMode ? "#4A7C59" : "#A89070", cursor: "pointer",
+                    display: "flex", alignItems: "center", justifyContent: "center",
                   }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "#1A1A1A"; (e.currentTarget as HTMLElement).style.color = "#1A1A1A"; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "#EDEBE6"; (e.currentTarget as HTMLElement).style.color = archiveMode ? "#4A7C59" : "#A89070"; }}
                 >
-                  {archiveMode
-                    ? <><ArrowCounterClockwise size={11} /> Восстановить</>
-                    : <><Archive size={11} /> В архив</>
-                  }
+                  {archiveMode ? <ArrowCounterClockwise size={15} /> : <Archive size={15} />}
                 </button>
+                {selected.customer_id && (
+                  <button
+                    onClick={() => navigate(`/customers/${selected.customer_id}`)}
+                    title="Перейти к клиенту"
+                    style={{
+                      width: 28, height: 28, padding: 0, border: "1px solid #EDEBE6", background: "transparent",
+                      color: "#A89070", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                    }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "#1A1A1A"; (e.currentTarget as HTMLElement).style.color = "#1A1A1A"; }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "#EDEBE6"; (e.currentTarget as HTMLElement).style.color = "#A89070"; }}
+                  >
+                    <UserCircle size={15} />
+                  </button>
+                )}
               </div>
             </div>
             <button
@@ -1046,12 +1130,18 @@ export default function OrdersV2() {
             <div style={{ marginBottom: 24 }}>
               <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 16, textTransform: "uppercase" }}>Финансы</div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "16px 32px" }}>
-                {[
-                  { label: "Стоимость", value: fmt(selected.price_plan), color: "#1A1A1A" },
-                  { label: "Оплачено",  value: fmt(paidTotal),           color: "#4A7C59" },
-                  { label: "Долг",      value: selected.debt > 0 ? fmt(selected.debt) : "Оплачено", color: selected.debt > 0 ? "#E8592A" : "#4A7C59" },
-                  { label: "Маржа",     value: fmt(selected.margin),     color: "#1A1A1A" },
-                ].map((item) => (
+                {(() => {
+                  const ebitda = selected.margin || 0;
+                  const taxes = Math.round((selected.price_plan || 0) * 0.06);
+                  const netMargin = ebitda - taxes;
+                  return [
+                    { label: "Стоимость", value: fmt(selected.price_plan), color: "#1A1A1A" },
+                    { label: "Оплачено",  value: fmt(paidTotal),           color: "#4A7C59" },
+                    { label: "Долг",      value: selected.debt > 0 ? fmt(selected.debt) : "Оплачено", color: selected.debt > 0 ? "#E8592A" : "#4A7C59" },
+                    { label: "EBITDA",    value: fmt(ebitda),              color: "#1A1A1A" },
+                    { label: "Маржа",     value: fmt(netMargin),           color: netMargin > 0 ? "#4A7C59" : "#8B3A3A" },
+                  ];
+                })().map((item) => (
                   <div key={item.label}>
                     <div style={{ fontSize: 10, color: "#A89070", marginBottom: 4 }}>{item.label}</div>
                     <div style={{ fontSize: 15, fontWeight: 700, color: item.color }}>{item.value}</div>
