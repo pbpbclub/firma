@@ -15,6 +15,7 @@ import OrderDetail from "./pages/OrderDetail";
 import Funds from "./pages/Funds";
 import ZenMoney from "./pages/ZenMoney";
 import Admin from "./pages/Admin";
+import Brands from "./pages/Brands";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 60_000, retry: 1 } },
@@ -41,6 +42,7 @@ const router = createBrowserRouter([
       { path: "/catalog", element: <Catalog /> },
       { path: "/taxes", element: <Taxes /> },
       { path: "/funds", element: <Funds /> },
+      { path: "/brands", element: <Brands /> },
       { path: "/zenmoney", element: <ZenMoney /> },
       { path: "/admin", element: <Admin /> },
     ],

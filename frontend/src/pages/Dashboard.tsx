@@ -47,6 +47,7 @@ export default function Dashboard() {
     queryKey: ["orders-active"],
     queryFn: () => ordersApi.list({ status: "in_production" }),
   });
+  const byBrand = useQuery({ queryKey: ["finance-by-brand"], queryFn: financeApi.byBrand });
 
   const balanceTotal = balance.data?.total ?? 0;
   const taxToPay = taxes.data?.tax_to_pay ?? 0;
@@ -115,6 +116,37 @@ export default function Dashboard() {
           ))}
         </div>
       </div>
+
+      {/* По брендам */}
+      {(() => {
+        const rows = ((byBrand.data ?? []) as any[]).filter(b => b.income || b.expense || b.price_plan);
+        if (rows.length === 0) return null;
+        return (
+          <div style={{ ...section, display: "flex", gap: 48, alignItems: "flex-start" }}>
+            <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em", width: 80, paddingTop: 2 }}>ПО БРЕНДАМ</div>
+            <div style={{ display: "flex", gap: 36, flex: 1, flexWrap: "wrap" }}>
+              {rows.map((b: any) => (
+                <div key={b.brand} style={{ minWidth: 150 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: b.color || "#A89070" }} />
+                    <span style={{ fontSize: 12, fontWeight: 600, color: "#1A1A1A" }}>{b.brand}</span>
+                  </div>
+                  <div style={{ display: "flex", gap: 16 }}>
+                    <div>
+                      <div style={{ fontSize: 9, color: "#A89070" }}>ДОХОД</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "#4A7C59" }}>{fmt(b.income)}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 9, color: "#A89070" }}>ПРИБЫЛЬ</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: b.profit >= 0 ? "#1A1A1A" : "#8B3A3A" }}>{fmt(b.profit)}</div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Circular indicators */}
       <div style={{ ...section, display: "flex", gap: 48, alignItems: "center" }}>

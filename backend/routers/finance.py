@@ -171,6 +171,70 @@ def get_summary():
         conn.close()
 
 
+@router.get("/by-brand")
+def finance_by_brand():
+    """Доход/расход/прибыль по брендам (через заказы)."""
+    conn = get_production()
+    try:
+        NO_BRAND = "Без бренда"
+        agg: dict = {}
+
+        def slot(brand):
+            b = brand or NO_BRAND
+            if b not in agg:
+                agg[b] = {"brand": b, "income": 0.0, "expense": 0.0,
+                          "price_plan": 0.0, "cost_plan": 0.0, "orders_count": 0}
+            return agg[b]
+
+        # порядок/цвета брендов
+        brand_meta = {}
+        try:
+            for r in conn.execute("SELECT name, color FROM brands ORDER BY sort_order, name").fetchall():
+                brand_meta[r["name"]] = r["color"]
+                slot(r["name"])  # показывать даже бренды без движений
+        except Exception:
+            pass
+
+        # доход: платежи → заказ → бренд
+        for r in conn.execute(
+            """SELECT o.brand AS brand, COALESCE(SUM(p.amount),0) AS s
+               FROM payments p JOIN orders o ON o.id = p.order_id
+               GROUP BY o.brand""").fetchall():
+            slot(r["brand"])["income"] += r["s"] or 0
+
+        # расход: обязательства → заказ → бренд
+        for r in conn.execute(
+            """SELECT o.brand AS brand, COALESCE(SUM(c.paid),0) AS s
+               FROM creditors c JOIN orders o ON o.id = c.order_id
+               GROUP BY o.brand""").fetchall():
+            slot(r["brand"])["expense"] += r["s"] or 0
+
+        # план по заказам
+        for r in conn.execute(
+            """SELECT brand, COALESCE(SUM(price_plan),0) AS pp, COALESCE(SUM(cost_plan),0) AS cp,
+                      COUNT(*) AS cnt
+               FROM orders WHERE archived = 0 GROUP BY brand""").fetchall():
+            s = slot(r["brand"])
+            s["price_plan"] += r["pp"] or 0
+            s["cost_plan"] += r["cp"] or 0
+            s["orders_count"] += r["cnt"] or 0
+
+        result = []
+        for b, v in agg.items():
+            v["profit"] = round(v["income"] - v["expense"], 2)
+            v["income"] = round(v["income"], 2)
+            v["expense"] = round(v["expense"], 2)
+            v["price_plan"] = round(v["price_plan"], 2)
+            v["cost_plan"] = round(v["cost_plan"], 2)
+            v["color"] = brand_meta.get(b)
+            result.append(v)
+        # бренды с движением/планом вперёд, «Без бренда» в конец
+        result.sort(key=lambda x: (x["brand"] == NO_BRAND, -(x["income"] + x["price_plan"])))
+        return result
+    finally:
+        conn.close()
+
+
 @router.get("/debtors")
 def get_debtors():
     prod = get_production()

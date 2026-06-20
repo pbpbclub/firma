@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { ordersApi, customersApi } from "../api";
+import { ordersApi, customersApi, brandsApi } from "../api";
 import { MagnifyingGlass, DotsThree, Plus, Files, CaretRight, Archive, ArrowCounterClockwise, CaretDown, Funnel, X, Trash, PencilSimple, UserCircle } from "@phosphor-icons/react";
 
 const BRANDS: { value: string; color: string }[] = [
@@ -396,6 +396,11 @@ function NewOrderModal({ onClose, onCreated }: {
     queryFn: () => customersApi.list(""),
   });
 
+  const { data: brandsList = [] } = useQuery({
+    queryKey: ["brands"],
+    queryFn: brandsApi.list,
+  });
+
   const setNC = (k: string, v: string) => setNewCustomer(prev => ({ ...prev, [k]: v }));
 
   async function handleInnLookup() {
@@ -571,24 +576,12 @@ function NewOrderModal({ onClose, onCreated }: {
             </div>
           </div>
           <div>
-            <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 6 }}>БРЕНД</div>
-            <div style={{ display: "flex", gap: 6 }}>
-              {BRANDS.map(b => (
-                <button
-                  key={b.value}
-                  type="button"
-                  onClick={() => setBrand(brand === b.value ? "" : b.value)}
-                  style={{
-                    padding: "5px 14px", border: `1px solid ${brand === b.value ? b.color : "#EDEBE6"}`,
-                    background: brand === b.value ? b.color : "transparent",
-                    color: brand === b.value ? "#FFFFFF" : b.color,
-                    fontSize: 12, cursor: "pointer", fontWeight: 600,
-                  }}
-                >
-                  {b.value}
-                </button>
-              ))}
-            </div>
+            <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>БРЕНД</div>
+            <select value={brand} onChange={e => setBrand(e.target.value)}
+              style={{ width: "100%", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none", background: "#fff", color: brand ? "#1A1A1A" : "#A89070" }}>
+              <option value="">— не выбран —</option>
+              {(brandsList as any[]).map((b: any) => <option key={b.id} value={b.name}>{b.name}</option>)}
+            </select>
           </div>
           {error && <div style={{ fontSize: 11, color: "#8B3A3A" }}>{error}</div>}
         </div>

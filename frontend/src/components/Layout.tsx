@@ -6,12 +6,13 @@ import {
   TrendUp,
   Package,
   Calculator,
-  Users,
+  CurrencyDollar,
   User,
   SignOut,
   List,
   Vault,
   HandCoins,
+  Buildings,
 } from "@phosphor-icons/react";
 import { getUser, logout } from "../auth";
 
@@ -19,12 +20,13 @@ const nav = [
   { to: "/", icon: SquaresFour, label: "Главная" },
   { to: "/orders", icon: FileText, label: "Заказы" },
   { to: "/finance", icon: TrendUp, label: "ДДС" },
-  { to: "/debtors", icon: Users, label: "Обязательства" },
+  { to: "/zenmoney", icon: HandCoins, label: "Личные" },
+  { to: "/debtors", icon: CurrencyDollar, label: "Обязательства" },
   { to: "/customers", icon: User, label: "Клиенты" },
+  { to: "/brands", icon: Buildings, label: "Бренды" },
   { to: "/catalog", icon: Package, label: "Каталог" },
   { to: "/taxes", icon: Calculator, label: "Налоги" },
   { to: "/funds", icon: Vault, label: "Фонды" },
-  { to: "/zenmoney", icon: HandCoins, label: "Личные" },
 ];
 
 export default function Layout({ children }: { children: React.ReactNode }) {
@@ -86,7 +88,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </button>
 
           {/* Nav */}
-          <nav style={{ flex: 1, paddingTop: 8, paddingBottom: 8 }}>
+          <nav style={{ flex: 1, paddingTop: 8, paddingBottom: 8, overflowY: "auto", scrollbarWidth: "none" }}>
             {nav.map(({ to, icon: Icon, label }) => (
               <NavLink
                 key={to}

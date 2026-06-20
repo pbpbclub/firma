@@ -271,6 +271,57 @@ def ensure_work_types_schema():
         conn.close()
 
 
+_SEED_BRANDS = [
+    {
+        "name": "MeRA", "color": "#2E6DA4", "sort_order": 0,
+        "description": "Производственный бренд: металлокаркасная мебель и изделия на заказ. B2B — рестораны, кафе, дизайнеры, корпоративные клиенты.",
+        "positioning": "Производство под ключ: сварка, гибка, порошковая покраска, нержавейка. Работа по чертежам и сметам.",
+    },
+    {
+        "name": "pbpb", "color": "#7B4F9E", "sort_order": 1,
+        "description": "PBPB Mebel Club — дизайнерский / ритейл-бренд авторской мебели. Продвижение через Instagram и сайт pbpb.club.",
+        "positioning": "Готовые дизайнерские изделия и коллекции, прямые продажи частным клиентам, сильный визуальный бренд.",
+    },
+    {
+        "name": "Транзит", "color": "#3D8C6B", "sort_order": 2,
+        "description": "Транзитные / посреднические заказы: перепродажа, логистика, агентские сделки.",
+        "positioning": "Сделки, проходящие через ИП как посредника без собственного производства.",
+    },
+]
+
+
+def ensure_brands_schema():
+    import uuid as _uuid
+    conn = get_production()
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS brands (
+                id          TEXT PRIMARY KEY,
+                name        TEXT UNIQUE NOT NULL,
+                color       TEXT,
+                full_name   TEXT,
+                inn         TEXT,
+                account     TEXT,
+                description TEXT,
+                positioning TEXT,
+                notes       TEXT,
+                sort_order  INTEGER DEFAULT 0,
+                created_at  TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        count = conn.execute("SELECT COUNT(*) FROM brands").fetchone()[0]
+        if count == 0:
+            for b in _SEED_BRANDS:
+                conn.execute(
+                    """INSERT OR IGNORE INTO brands (id, name, color, description, positioning, sort_order)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (str(_uuid.uuid4()), b["name"], b["color"], b["description"], b["positioning"], b["sort_order"])
+                )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_payee_rules_schema():
     conn = get_production()
     try:

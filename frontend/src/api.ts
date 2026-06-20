@@ -52,8 +52,16 @@ export const customersApi = {
   lookupInn: (inn: string) => api.get("/customers/lookup-inn", { params: { inn } }).then((r) => r.data),
 };
 
+export const brandsApi = {
+  list: () => api.get("/brands").then((r) => r.data),
+  create: (data: Record<string, any>) => api.post("/brands", data).then((r) => r.data),
+  update: (id: string, data: Record<string, any>) => api.patch(`/brands/${id}`, data).then((r) => r.data),
+  delete: (id: string) => api.delete(`/brands/${id}`).then((r) => r.data),
+};
+
 export const financeApi = {
   balance: () => api.get("/finance/balance").then((r) => r.data),
+  byBrand: () => api.get("/finance/by-brand").then((r) => r.data),
   transactions: (params?: Record<string, string>) =>
     api.get("/finance/transactions", { params }).then((r) => r.data),
   summary: () => api.get("/finance/summary").then((r) => r.data),

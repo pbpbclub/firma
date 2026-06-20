@@ -300,7 +300,11 @@ def unarchive_order(order_id: str):
         conn.close()
 
 
-VALID_BRANDS = {"MeRA", "pbpb", "Транзит"}
+def _valid_brands(conn) -> set:
+    try:
+        return {r["name"] for r in conn.execute("SELECT name FROM brands").fetchall()}
+    except Exception:
+        return {"MeRA", "pbpb", "Транзит"}
 
 
 class BrandUpdate(BaseModel):
@@ -309,7 +313,12 @@ class BrandUpdate(BaseModel):
 
 @router.patch("/{order_id}/brand")
 def update_brand(order_id: str, body: BrandUpdate):
-    if body.brand is not None and body.brand not in VALID_BRANDS:
+    conn0 = get_production()
+    try:
+        valid = _valid_brands(conn0)
+    finally:
+        conn0.close()
+    if body.brand is not None and body.brand not in valid:
         raise HTTPException(status_code=400, detail=f"Invalid brand: {body.brand}")
     conn = get_production()
     try:
@@ -341,7 +350,7 @@ async def update_order(order_id: str, body: dict = Body(...)):
                 raise HTTPException(status_code=400, detail=f"Invalid priority: {val}")
             if key == "status" and val not in VALID_STATUSES:
                 raise HTTPException(status_code=400, detail=f"Invalid status: {val}")
-            if key == "brand" and val is not None and val not in VALID_BRANDS:
+            if key == "brand" and val is not None and val not in _valid_brands(conn):
                 raise HTTPException(status_code=400, detail=f"Invalid brand: {val}")
             if key == "title" and val is not None:
                 val = val.strip()
