@@ -59,6 +59,16 @@ export const brandsApi = {
   delete: (id: string) => api.delete(`/brands/${id}`).then((r) => r.data),
 };
 
+export const businessUnitsApi = {
+  list: () => api.get("/business-units").then((r) => r.data),
+  create: (data: Record<string, any>) => api.post("/business-units", data).then((r) => r.data),
+  update: (id: string, data: Record<string, any>) => api.patch(`/business-units/${id}`, data).then((r) => r.data),
+  delete: (id: string) => api.delete(`/business-units/${id}`).then((r) => r.data),
+  addAccount: (data: Record<string, any>) => api.post("/business-units/accounts", data).then((r) => r.data),
+  updateAccount: (id: string, data: Record<string, any>) => api.patch(`/business-units/accounts/${id}`, data).then((r) => r.data),
+  deleteAccount: (id: string) => api.delete(`/business-units/accounts/${id}`).then((r) => r.data),
+};
+
 export const financeApi = {
   balance: () => api.get("/finance/balance").then((r) => r.data),
   byBrand: () => api.get("/finance/by-brand").then((r) => r.data),

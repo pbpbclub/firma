@@ -322,6 +322,55 @@ def ensure_brands_schema():
         conn.close()
 
 
+def ensure_business_units_schema():
+    import uuid as _uuid
+    conn = get_production()
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS business_units (
+                id          TEXT PRIMARY KEY,
+                name        TEXT UNIQUE NOT NULL,
+                kind        TEXT,
+                inn         TEXT,
+                full_name   TEXT,
+                notes       TEXT,
+                sort_order  INTEGER DEFAULT 0,
+                created_at  TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS accounts (
+                id               TEXT PRIMARY KEY,
+                business_unit_id TEXT,
+                name             TEXT,
+                number           TEXT,
+                bank             TEXT,
+                source           TEXT DEFAULT 'manual',
+                manual_balance   REAL,
+                sort_order       INTEGER DEFAULT 0,
+                created_at       TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        if conn.execute("SELECT COUNT(*) FROM business_units").fetchone()[0] == 0:
+            ip_id = str(_uuid.uuid4())
+            fl_id = str(_uuid.uuid4())
+            conn.execute("INSERT INTO business_units (id, name, kind, sort_order) VALUES (?, 'ИП Некрасов', 'ИП', 0)", (ip_id,))
+            conn.execute("INSERT INTO business_units (id, name, kind, sort_order) VALUES (?, 'Физлицо Некрасов', 'Физлицо', 1)", (fl_id,))
+            seed_accounts = [
+                (ip_id, "Т-Банк р/с", "40802810400004306154", "tbank", "bank", 0),
+                (ip_id, "Сбербанк р/с", "40802810113000047460", "sber", "bank", 1),
+                (fl_id, "Личные карты", None, None, "zenmoney", 0),
+            ]
+            for bu, name, number, bank, source, so in seed_accounts:
+                conn.execute(
+                    "INSERT INTO accounts (id, business_unit_id, name, number, bank, source, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (str(_uuid.uuid4()), bu, name, number, bank, source, so)
+                )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_payee_rules_schema():
     conn = get_production()
     try:
