@@ -806,35 +806,6 @@ export default function OrdersV2() {
           </div>
         </div>
 
-        {/* Brand filter chips */}
-        <div style={{ padding: "8px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", gap: 6, alignItems: "center" }}>
-          <button
-            onClick={() => { setBrandFilter(""); setPage(0); }}
-            style={{
-              padding: "3px 10px", border: `1px solid ${!brandFilter ? "#1A1A1A" : "#EDEBE6"}`,
-              background: !brandFilter ? "#1A1A1A" : "transparent",
-              color: !brandFilter ? "#FFFFFF" : "#A89070",
-              fontSize: 11, cursor: "pointer", fontWeight: 600, transition: "all 0.1s",
-            }}
-          >
-            Все
-          </button>
-          {BRANDS.map(b => (
-            <button
-              key={b.value}
-              onClick={() => { setBrandFilter(brandFilter === b.value ? "" : b.value); setPage(0); }}
-              style={{
-                padding: "3px 10px", border: `1px solid ${brandFilter === b.value ? b.color : "#EDEBE6"}`,
-                background: brandFilter === b.value ? b.color : "transparent",
-                color: brandFilter === b.value ? "#FFFFFF" : b.color,
-                fontSize: 11, cursor: "pointer", fontWeight: 600, transition: "all 0.1s",
-              }}
-            >
-              {b.value}
-            </button>
-          ))}
-        </div>
-
         {/* Filter / selection bar — always visible to prevent layout shift */}
         {(() => {
           const hasFilters = !!(titleFilter || customerFilter || brandFilter || amountMin || amountMax);
