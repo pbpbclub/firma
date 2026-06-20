@@ -7,9 +7,26 @@ function fmt(n: number) {
   return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n || 0) + " ₽";
 }
 
+const RAL_PALETTE = [
+  { name: "vinyl",        ral: "RAL 9005", hex: "#0A0A0A" },
+  { name: "cocoa",        ral: "RAL 8025", hex: "#755C48" },
+  { name: "glaze",        ral: "RAL 4009", hex: "#A18594" },
+  { name: "sky",          ral: "RAL 5024", hex: "#5B9BD5" },
+  { name: "concrete",     ral: "RAL 7004", hex: "#9EA0A1" },
+  { name: "wine",         ral: "RAL 3011", hex: "#781F19" },
+  { name: "aperol",       ral: "RAL 2004", hex: "#E75B12" },
+  { name: "powder",       ral: "RAL 1015", hex: "#E6D2B5" },
+  { name: "cotton candy", ral: "RAL 3015", hex: "#E8A0B5" },
+  { name: "matcha",       ral: "RAL 6011", hex: "#6C7C59" },
+  { name: "lagoon",       ral: "RAL 5005", hex: "#1E4B8C" },
+  { name: "porcelain",    ral: "RAL 9003", hex: "#F4F4F4" },
+  { name: "mint",         ral: "RAL 6019", hex: "#BDECB6" },
+  { name: "limoncello",   ral: "RAL 1018", hex: "#F8F32B" },
+  { name: "salmon",       ral: "RAL 3022", hex: "#D56D56" },
+];
+
 const FIELDS: { key: string; label: string; type?: string }[] = [
   { key: "name", label: "Название" },
-  { key: "color", label: "Цвет (hex)" },
   { key: "full_name", label: "Юр. лицо / полное название" },
   { key: "inn", label: "ИНН" },
   { key: "account", label: "Расчётный счёт" },
@@ -22,7 +39,7 @@ function BrandModal({ brand, onClose }: { brand: any; onClose: () => void }) {
   const qc = useQueryClient();
   const isNew = !brand?.id;
   const [form, setForm] = useState<Record<string, string>>(() => {
-    const f: Record<string, string> = {};
+    const f: Record<string, string> = { color: brand?.color ?? "" };
     for (const fl of FIELDS) f[fl.key] = brand?.[fl.key] ?? "";
     return f;
   });
@@ -75,14 +92,35 @@ function BrandModal({ brand, onClose }: { brand: any; onClose: () => void }) {
                 <textarea value={form[f.key]} onChange={e => set(f.key, e.target.value)} rows={2}
                   style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }} />
               ) : (
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <input value={form[f.key]} onChange={e => set(f.key, e.target.value)} style={inputStyle}
-                    autoFocus={f.key === "name" && isNew} />
-                  {f.key === "color" && form.color && <div style={{ width: 24, height: 24, flexShrink: 0, background: form.color, border: "1px solid #EDEBE6" }} />}
-                </div>
+                <input value={form[f.key]} onChange={e => set(f.key, e.target.value)} style={inputStyle}
+                  autoFocus={f.key === "name" && isNew} />
               )}
             </div>
           ))}
+          {/* Цвет — палитра RAL pbpb */}
+          <div>
+            <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 6 }}>ЦВЕТ</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {RAL_PALETTE.map(c => {
+                const selected = (form.color || "").toLowerCase() === c.hex.toLowerCase();
+                return (
+                  <button
+                    key={c.hex}
+                    type="button"
+                    title={`${c.name} · ${c.ral}`}
+                    onClick={() => set("color", c.hex)}
+                    style={{
+                      width: 28, height: 28, background: c.hex, cursor: "pointer",
+                      border: c.hex.toLowerCase() === "#f4f4f4" ? "1px solid #EDEBE6" : "none",
+                      outline: selected ? "2px solid #1A1A1A" : "none",
+                      outlineOffset: 2,
+                      padding: 0,
+                    }}
+                  />
+                );
+              })}
+            </div>
+          </div>
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 24px", borderTop: "1px solid #EDEBE6" }}>
           {!isNew ? (
