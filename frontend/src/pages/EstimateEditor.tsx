@@ -1072,12 +1072,11 @@ export default function EstimateEditor() {
                   )}
                 </div>
 
-                {/* Себест./шт — редактируемо только у позиций без строк */}
+                {/* Себест./шт — редактируемо у всех позиций (итог пересчитывается) */}
                 {(() => {
                   const qty = item.quantity || 1;
                   const costUnit = Math.round((item.cost_total || 0) / qty);
-                  const hasLines = (item.lines?.length ?? 0) > 0;
-                  if (editMode && !hasLines) {
+                  if (editMode) {
                     return (
                       <div style={{ fontSize: 11, color: "#6B6355", textAlign: "right" }}>
                         <EditCell
