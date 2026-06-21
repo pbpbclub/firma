@@ -79,8 +79,8 @@ export default function Taxes() {
           <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em", width: 80, paddingTop: 2 }}>ПОРОГ 300К</div>
           <div style={{ flex: 1, maxWidth: 480 }}>
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#1A1A1A", marginBottom: 8 }}>
-              <span style={{ fontWeight: 600 }}>{fmt(data.income_year)}</span>
-              <span style={{ color: "#A89070" }}>300 000 ₽</span>
+              <span style={{ fontWeight: 600, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(data.income_year)}</span>
+              <span style={{ color: "#A89070", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>300 000 ₽</span>
             </div>
             <div style={{ height: 2, background: "#EDEBE6" }}>
               <div style={{

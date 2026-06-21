@@ -151,7 +151,7 @@ export default function OrderDetail() {
             <ArrowLeft size={13} /> Заказы
           </button>
           <div style={{ width: 1, height: 14, background: "#EDEBE6" }} />
-          <span style={{ fontSize: 11, color: "#A89070" }}>{order?.number}</span>
+          <span style={{ fontSize: 11, color: "#A89070", fontFamily: MONO }}>{order?.number}</span>
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           {saveMutation.isError && <span style={{ fontSize: 11, color: "#8B3A3A" }}>Ошибка сохранения</span>}
@@ -439,10 +439,10 @@ export default function OrderDetail() {
               {order.payments.map((p: any, i: number) => (
                 <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "10px 0", borderBottom: "1px solid #F2EFE9" }}>
                   <div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A" }}>{fmt(p.amount)}</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(p.amount)}</div>
                     {p.note && <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>{p.note}</div>}
                   </div>
-                  <div style={{ fontSize: 11, color: "#A89070" }}>{fmtDate(p.paid_at)}</div>
+                  <div style={{ fontSize: 11, color: "#A89070", fontFamily: MONO }}>{fmtDate(p.paid_at)}</div>
                 </div>
               ))}
             </div>

@@ -383,10 +383,10 @@ export default function Brands() {
           onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
           <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A" }}>{u.name}</div>
           <div style={{ fontSize: 12, color: "#6B6355" }}>{u.kind || "—"}</div>
-          <div style={{ fontSize: 12, color: "#A89070" }}>{u.inn || "—"}</div>
+          <div style={{ fontSize: 12, color: "#A89070", fontFamily: MONO }}>{u.inn || "—"}</div>
           <div style={{ fontSize: 11, color: "#6B6355" }}>
             {(u.accounts || []).length === 0 ? "—" : (u.accounts || []).map((a: any) => (
-              <span key={a.id} style={{ display: "inline-block", marginRight: 10 }}>{a.name} <span style={{ color: "#A89070" }}>{fmt(a.balance || 0)}</span></span>
+              <span key={a.id} style={{ display: "inline-block", marginRight: 10 }}>{a.name} <span style={{ color: "#A89070", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(a.balance || 0)}</span></span>
             ))}
           </div>
           <div style={{ fontSize: 14, fontWeight: 700, color: u.balance_total >= 0 ? "#1A1A1A" : "#8B3A3A", textAlign: "right", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(u.balance_total || 0)}</div>
@@ -414,7 +414,7 @@ export default function Brands() {
             onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ width: 10, height: 10, borderRadius: "50%", background: b.color || "#A89070", flexShrink: 0 }} />
-              <span style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A" }}>{b.name}</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A", fontFamily: MONO }}>{b.name}</span>
             </div>
             <div style={{ fontSize: 12, color: "#6B6355", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingRight: 16 }}>{b.description || "—"}</div>
             <div style={{ fontSize: 13, fontWeight: 600, color: "#4A7C59", textAlign: "right", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fin ? fmt(fin.income) : "—"}</div>

@@ -328,10 +328,10 @@ function CustomerDetail({ customerId, onClose }: { customerId: string; onClose: 
   const summary = data?.transaction_summary;
   const totalDebt = (data?.orders ?? []).reduce((s: number, o: any) => s + Math.max(0, o.debt ?? 0), 0);
 
-  const Row = ({ label, value }: { label: string; value?: string | null }) => (
+  const Row = ({ label, value, mono }: { label: string; value?: string | null; mono?: boolean }) => (
     <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #F2EFE9" }}>
       <div style={{ fontSize: 11, color: "#A89070" }}>{label}</div>
-      <div style={{ fontSize: 12, fontWeight: 500, color: value ? "#1A1A1A" : "#C8C0B0", textAlign: "right", maxWidth: 240, wordBreak: "break-word" }}>{value || "—"}</div>
+      <div style={{ fontSize: 12, fontWeight: 500, color: value ? "#1A1A1A" : "#C8C0B0", textAlign: "right", maxWidth: 240, wordBreak: "break-word", fontFamily: mono && value ? MONO : undefined, fontVariantNumeric: mono ? "tabular-nums" : undefined }}>{value || "—"}</div>
     </div>
   );
 
@@ -400,8 +400,8 @@ function CustomerDetail({ customerId, onClose }: { customerId: string; onClose: 
 
         {/* Contacts */}
         <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10 }}>КОНТАКТЫ</div>
-        <Row label="ИНН"              value={customer.inn} />
-        <Row label="Телефон"          value={customer.phone} />
+        <Row label="ИНН"              value={customer.inn} mono />
+        <Row label="Телефон"          value={customer.phone} mono />
         <Row label="Email"            value={customer.email} />
         <Row label="Контактное лицо"  value={customer.contact} />
 
@@ -439,8 +439,8 @@ function CustomerDetail({ customerId, onClose }: { customerId: string; onClose: 
                   <div style={{ fontSize: 10, color: "#A89070" }}>{ORDER_STATUS_LABELS[o.status] || o.status}</div>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#6B6355" }}>
-                  <span>{fmt(o.price_plan)}</span>
-                  <span style={{ color: o.debt > 0 ? "#E8592A" : "#4A7C59" }}>{o.debt > 0 ? `долг ${fmt(o.debt)}` : "оплачен"}</span>
+                  <span style={{ fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(o.price_plan)}</span>
+                  <span style={{ color: o.debt > 0 ? "#E8592A" : "#4A7C59", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{o.debt > 0 ? `долг ${fmt(o.debt)}` : "оплачен"}</span>
                 </div>
               </div>
             ))}
@@ -550,10 +550,10 @@ function MasterDetail({ masterId, onClose }: { masterId: string; onClose: () => 
     status:         master.status,
   };
 
-  const Row = ({ label, value }: { label: string; value?: string | null }) => (
+  const Row = ({ label, value, mono }: { label: string; value?: string | null; mono?: boolean }) => (
     <div style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid #F2EFE9" }}>
       <div style={{ fontSize: 11, color: "#A89070" }}>{label}</div>
-      <div style={{ fontSize: 12, fontWeight: 500, color: value ? "#1A1A1A" : "#C8C0B0", textAlign: "right", maxWidth: 240 }}>{value || "—"}</div>
+      <div style={{ fontSize: 12, fontWeight: 500, color: value ? "#1A1A1A" : "#C8C0B0", textAlign: "right", maxWidth: 240, fontFamily: mono && value ? MONO : undefined, fontVariantNumeric: mono ? "tabular-nums" : undefined }}>{value || "—"}</div>
     </div>
   );
 
@@ -582,7 +582,7 @@ function MasterDetail({ masterId, onClose }: { masterId: string; onClose: () => 
           </div>
           <div style={{ fontSize: 12, color: "#A89070" }}>{master.role}{master.specialization ? ` · ${master.specialization}` : ""}</div>
           {totalDebt > 0 && (
-            <div style={{ marginTop: 6, fontSize: 13, fontWeight: 700, color: "#8B3A3A" }}>Долг: {fmt(totalDebt)}</div>
+            <div style={{ marginTop: 6, fontSize: 13, fontWeight: 700, color: "#8B3A3A" }}>Долг: <span style={{ fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(totalDebt)}</span></div>
           )}
         </div>
         <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
@@ -607,7 +607,7 @@ function MasterDetail({ masterId, onClose }: { masterId: string; onClose: () => 
 
         {/* Contacts */}
         <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10 }}>КОНТАКТЫ</div>
-        <Row label="Телефон"  value={master.phone} />
+        <Row label="Телефон"  value={master.phone} mono />
         <Row label="Telegram" value={master.telegram} />
         <Row label="Email"    value={master.email} />
 
@@ -616,7 +616,7 @@ function MasterDetail({ masterId, onClose }: { masterId: string; onClose: () => 
           <>
             <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10, marginTop: 18 }}>ОПЛАТА</div>
             {wiki.pay_label && <Row label="Схема" value={wiki.pay_label} />}
-            {wiki.prepay_pct > 0 && <Row label="Предоплата" value={`${wiki.prepay_pct}%`} />}
+            {wiki.prepay_pct > 0 && <Row label="Предоплата" value={`${wiki.prepay_pct}%`} mono />}
           </>
         )}
 
@@ -661,7 +661,7 @@ function MasterDetail({ masterId, onClose }: { masterId: string; onClose: () => 
               >
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <div style={{ fontSize: 11, color: "#6B6355", flex: 1, paddingRight: 8 }}>{c.description || "—"}</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: c.status === "open" ? "#8B3A3A" : "#A89070", flexShrink: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: c.status === "open" ? "#8B3A3A" : "#A89070", flexShrink: 0, fontFamily: c.status === "open" ? MONO : undefined, fontVariantNumeric: "tabular-nums" }}>
                     {c.status === "open" ? fmt(c.debt) : <span style={{ fontSize: 10 }}>Закрыт</span>}
                   </div>
                 </div>
@@ -899,16 +899,16 @@ export default function Customers() {
 
                 {!rightOpen && (
                   <>
-                    <div style={{ fontSize: 11, color: isActive ? "rgba(255,255,255,0.7)" : "#6B6355" }}>
+                    <div style={{ fontSize: 11, color: isActive ? "rgba(255,255,255,0.7)" : "#6B6355", fontFamily: MONO }}>
                       {item.phone || "—"}
                     </div>
-                    <div style={{ fontSize: 11, color: isActive ? "rgba(255,255,255,0.7)" : "#6B6355" }}>
+                    <div style={{ fontSize: 11, color: isActive ? "rgba(255,255,255,0.7)" : "#6B6355", fontFamily: tab === "clients" ? MONO : undefined }}>
                       {tab === "clients"
                         ? (item.inn || "—")
                         : <span>
                             {item.role || "—"}
                             {item.debt > 0 && !isActive && (
-                              <span style={{ marginLeft: 8, fontWeight: 700, color: "#8B3A3A" }}>{fmt(item.debt)}</span>
+                              <span style={{ marginLeft: 8, fontWeight: 700, color: "#8B3A3A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(item.debt)}</span>
                             )}
                           </span>
                       }
