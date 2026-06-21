@@ -4,6 +4,7 @@ import { financeApi, zenmoneyApi, ordersApi } from "../api";
 import { useNavigate } from "react-router-dom";
 import { Bank, X, Check, Plus, LinkSimple } from "@phosphor-icons/react";
 import { ColumnFilter } from "../components/TableFilters";
+import { Modal } from "../components/ui/Modal";
 
 function Checkbox({ checked, indeterminate = false, onChange }: {
   checked: boolean; indeterminate?: boolean; onChange: () => void;
@@ -64,17 +65,10 @@ function LinkInTxModal({ title, name, amount, linkedTxId, onLink, onClose }: {
   }
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ background: "#fff", width: 520, maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,0.18)" }}>
-
-        <div style={{ padding: "16px 20px 12px", borderBottom: "1px solid #EDEBE6" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1A1A" }}>{title}</div>
-              <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>{name} · {fmtAmt(amount)}</div>
-            </div>
-            <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070" }}><X size={16} /></button>
-          </div>
+    <Modal size="md" eyebrow="ПРИВЯЗАТЬ ПОСТУПЛЕНИЕ" onClose={onClose}>
+        <div style={{ padding: "14px 20px 12px", borderBottom: "1px solid #F2EFE9" }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1A1A" }}>{title}</div>
+          <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>{name} · {fmtAmt(amount)}</div>
         </div>
 
         {linkedTxId && (
@@ -124,8 +118,7 @@ function LinkInTxModal({ title, name, amount, linkedTxId, onLink, onClose }: {
             );
           })}
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -722,17 +715,12 @@ function LinkTxModal({ creditor, onClose }: { creditor: any; onClose: () => void
   }
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ background: "#fff", width: 520, maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,0.18)" }}>
-
+    <Modal size="md" eyebrow="ПРИВЯЗАТЬ ТРАНЗАКЦИЮ" onClose={onClose}>
         {/* Header */}
-        <div style={{ padding: "16px 20px 12px", borderBottom: "1px solid #EDEBE6" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1A1A" }}>{creditor.name}</div>
-              <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>{fmtAmt(creditor.total)} · долг {fmtAmt(creditor.debt)}</div>
-            </div>
-            <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070" }}><X size={16} /></button>
+        <div style={{ padding: "14px 20px 12px", borderBottom: "1px solid #F2EFE9" }}>
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1A1A" }}>{creditor.name}</div>
+            <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>{fmtAmt(creditor.total)} · долг {fmtAmt(creditor.debt)}</div>
           </div>
           {/* Source tabs */}
           <div style={{ display: "flex", gap: 0 }}>
@@ -801,8 +789,7 @@ function LinkTxModal({ creditor, onClose }: { creditor: any; onClose: () => void
             );
           })}
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 

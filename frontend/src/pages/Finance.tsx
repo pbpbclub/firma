@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { financeApi, ordersApi } from "../api";
 import { MagnifyingGlass, X, LinkSimple } from "@phosphor-icons/react";
 import { ColumnFilter, AmountFilter, PeriodFilter } from "../components/TableFilters";
+import { Modal } from "../components/ui/Modal";
 
 function Checkbox({ checked, indeterminate = false, onChange }: {
   checked: boolean; indeterminate?: boolean; onChange: () => void;
@@ -85,20 +86,16 @@ function LinkCreditorModal({ tx, creditorByFinTx, onClose }: {
   }
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ background: "#fff", width: 480, maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,0.18)" }}>
+    <Modal size="md" eyebrow="ПРИВЯЗАТЬ К ОБЯЗАТЕЛЬСТВУ" onClose={onClose}>
 
-        {/* Header */}
-        <div style={{ padding: "16px 20px 12px", borderBottom: "1px solid #EDEBE6", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1A1A" }}>
-              {tx.counterparty || tx.purpose || "—"}
-            </div>
-            <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>
-              {(tx.date || "").slice(0, 10)} · −{fmtAmt(tx.amount)}
-            </div>
+        {/* Транзакция */}
+        <div style={{ padding: "14px 20px 12px", borderBottom: "1px solid #F2EFE9" }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1A1A" }}>
+            {tx.counterparty || tx.purpose || "—"}
           </div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070" }}><X size={16} /></button>
+          <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>
+            {(tx.date || "").slice(0, 10)} · −{fmtAmt(tx.amount)}
+          </div>
         </div>
 
         {/* Already linked */}
@@ -152,8 +149,7 @@ function LinkCreditorModal({ tx, creditorByFinTx, onClose }: {
             );
           })}
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -200,14 +196,10 @@ function LinkOrderModal({ tx, paymentByFinTx, onClose }: {
     : items;
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ background: "#fff", width: 480, maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,0.18)" }}>
-        <div style={{ padding: "16px 20px 12px", borderBottom: "1px solid #EDEBE6", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1A1A" }}>{tx.counterparty || tx.purpose || "—"}</div>
-            <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>{(tx.date || "").slice(0, 10)} · +{fmtAmt(tx.amount)}</div>
-          </div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070" }}><X size={16} /></button>
+    <Modal size="md" eyebrow="ПРИВЯЗАТЬ К ЗАКАЗУ" onClose={onClose}>
+        <div style={{ padding: "14px 20px 12px", borderBottom: "1px solid #F2EFE9" }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1A1A" }}>{tx.counterparty || tx.purpose || "—"}</div>
+          <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>{(tx.date || "").slice(0, 10)} · +{fmtAmt(tx.amount)}</div>
         </div>
         {currentPayment && (
           <div style={{ padding: "8px 20px", background: "#F2FDF5", borderBottom: "1px solid #D0EDD8", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -240,8 +232,7 @@ function LinkOrderModal({ tx, paymentByFinTx, onClose }: {
             </div>
           ))}
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 

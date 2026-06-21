@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Briefcase, MagnifyingGlass, X, ArrowsClockwise, Tag, PencilSimple, Trash, LinkSimple } from "@phosphor-icons/react";
 import { zenmoneyApi, payeeRulesApi, mastersApi, customersApi, financeApi } from "../api";
 import { ColumnFilter, PeriodFilter } from "../components/TableFilters";
+import { Modal } from "../components/ui/Modal";
 
 const fmt = (n: number) =>
   new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(Math.abs(n));
@@ -375,14 +376,10 @@ function LinkZenModal({ tx, creditorByZenTx, onClose }: {
   }
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ background: "#fff", width: 480, maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,0.18)" }}>
-        <div style={{ padding: "16px 20px 12px", borderBottom: "1px solid #EDEBE6", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1A1A" }}>{tx.payee || tx.comment || "—"}</div>
-            <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>{tx.date} · −{fmtAmt(tx.outcome)}</div>
-          </div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070" }}><X size={16} /></button>
+    <Modal size="md" eyebrow="ПРИВЯЗАТЬ К ОБЯЗАТЕЛЬСТВУ" onClose={onClose}>
+        <div style={{ padding: "14px 20px 12px", borderBottom: "1px solid #F2EFE9" }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1A1A" }}>{tx.payee || tx.comment || "—"}</div>
+          <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>{tx.date} · −{fmtAmt(tx.outcome)}</div>
         </div>
         {currentCreditor && (
           <div style={{ padding: "8px 20px", background: "#F2FDF5", borderBottom: "1px solid #D0EDD8", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -419,8 +416,7 @@ function LinkZenModal({ tx, creditorByZenTx, onClose }: {
             );
           })}
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
