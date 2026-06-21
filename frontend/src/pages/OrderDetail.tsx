@@ -367,15 +367,28 @@ export default function OrderDetail() {
             {(estimates as any[]).length === 0 ? (
               <div style={{ fontSize: 12, color: "#C8C0B0", padding: "8px 0" }}>Сметы не добавлены</div>
             ) : (
-              (estimates as any[]).map((s: any, i: number) => (
+              (estimates as any[]).map((s: any, i: number) => {
+                const items = s.items ?? [];
+                const isBank = s.payment_type === "bank";
+                const bpct = s.bank_pct ?? 13;
+                const cost = items.reduce((a: number, it: any) => a + (it.cost_total || 0), 0);
+                const sale = items.reduce((a: number, it: any) => a + (isBank ? Math.round((it.sale_price || 0) * (1 + (it.bank_pct ?? bpct) / 100)) : (it.sale_price || 0)), 0);
+                const delta = sale - cost;
+                const metric = (label: string, value: string, color: string) => (
+                  <div style={{ textAlign: "right", minWidth: 76 }}>
+                    <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.04em" }}>{label}</div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color }}>{value}</div>
+                  </div>
+                );
+                return (
                 <div
                   key={s.id}
                   onClick={() => navigate(`/orders/${id}/estimate?set=${s.id}`)}
-                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 10px", borderBottom: "1px solid #F2EFE9", cursor: "pointer" }}
+                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, padding: "12px 10px", borderBottom: "1px solid #F2EFE9", cursor: "pointer" }}
                   onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")}
                   onMouseLeave={e => (e.currentTarget.style.background = "")}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0 }}>
                     <span style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>
                       {s.name || `Смета ${i + 1}`}
                     </span>
@@ -383,9 +396,13 @@ export default function OrderDetail() {
                       {ESTIMATE_STATUS[s.status] ?? s.status}
                     </span>
                   </div>
-                  <CaretRight size={13} style={{ color: "#C8C0B0" }} />
+                  {metric("СЕБЕСТ.", fmt(cost), "#6B6355")}
+                  {metric("ПРОДАЖА", fmt(sale), "#1A1A1A")}
+                  {metric("Δ", delta === 0 ? "—" : (delta > 0 ? "+" : "") + fmt(delta), delta >= 0 ? "#4A7C59" : "#8B3A3A")}
+                  <CaretRight size={13} style={{ color: "#C8C0B0", flexShrink: 0 }} />
                 </div>
-              ))
+                );
+              })
             )}
           </div>
 
