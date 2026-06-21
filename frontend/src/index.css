@@ -2,10 +2,39 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Самохостинг JetBrains Mono (без внешнего CDN). */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal; font-weight: 400; font-display: swap;
+  src: url('/fonts/jetbrains-mono-400.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal; font-weight: 500; font-display: swap;
+  src: url('/fonts/jetbrains-mono-500.ttf') format('truetype');
+}
+
+/* «JBMNum» — та же гарнитура, но ограничена unicode-range только цифрами,
+   разделителями, валютой и №/#/%. Ставится первой в глобальном стеке, поэтому
+   ВСЕ числа во всём приложении рендерятся моноширинно автоматически, а буквы
+   (кириллица/латиница) падают в system-ui. */
+@font-face {
+  font-family: 'JBMNum';
+  font-style: normal; font-weight: 400; font-display: swap;
+  src: url('/fonts/jetbrains-mono-400.ttf') format('truetype');
+  unicode-range: U+0030-0039, U+0025, U+0023, U+0024, U+002B, U+002C, U+002D, U+002E, U+002F, U+003A, U+20BD, U+2116, U+2212, U+00A0, U+202F, U+2009;
+}
+@font-face {
+  font-family: 'JBMNum';
+  font-style: normal; font-weight: 500; font-display: swap;
+  src: url('/fonts/jetbrains-mono-500.ttf') format('truetype');
+  unicode-range: U+0030-0039, U+0025, U+0023, U+0024, U+002B, U+002C, U+002D, U+002E, U+002F, U+003A, U+20BD, U+2116, U+2212, U+00A0, U+202F, U+2009;
+}
+
 @layer base {
   body {
     @apply bg-gray-50 text-gray-900 antialiased;
-    font-family: system-ui, -apple-system, sans-serif;
+    font-family: 'JBMNum', system-ui, -apple-system, sans-serif;
     margin: 0;
   }
   #root {
