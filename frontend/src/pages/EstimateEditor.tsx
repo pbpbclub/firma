@@ -305,7 +305,7 @@ function FooterRow({ cols, label, cost, sale, delta, deltaColor, saleColor, note
   note?: string;
 }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: cols, padding: "7px 28px", gap: 12, alignItems: "center", borderBottom: "1px solid #F2EFE9" }}>
+    <div style={{ display: "grid", gridTemplateColumns: cols, padding: "7px 28px", gap: 12, alignItems: "center", borderBottom: "1px solid #F2EFE9", fontVariantNumeric: "tabular-nums" }}>
       <div />
       <div>
         <div style={{ fontSize: 11, color: "#A89070" }}>{label}</div>
@@ -774,6 +774,7 @@ export default function EstimateEditor() {
                   padding: "11px 28px", gap: 12,
                   borderBottom: "1px solid #F2EFE9",
                   alignItems: "center",
+                  fontVariantNumeric: "tabular-nums",
                   opacity: dragIdx === idx && dragOverIdx !== idx ? 0.4 : 1,
                   background: dragOverIdx === idx && dragIdx !== idx ? "#F5F2EC" : "transparent",
                   cursor: editMode ? "grab" : "default",
@@ -993,7 +994,7 @@ export default function EstimateEditor() {
           <div style={{ flexShrink: 0, borderTop: "1px solid #EDEBE6" }}>
 
             {/* Итого — все колонки */}
-            <div style={{ display: "grid", gridTemplateColumns: colsMain, padding: "7px 28px", gap: 12, alignItems: "center", borderBottom: "1px solid #F2EFE9" }}>
+            <div style={{ display: "grid", gridTemplateColumns: colsMain, padding: "7px 28px", gap: 12, alignItems: "center", borderBottom: "1px solid #F2EFE9", fontVariantNumeric: "tabular-nums" }}>
               <div />
               <div style={{ fontSize: 11, color: "#A89070" }}>Итого</div>
               <div style={{ fontSize: 12, color: "#6B6355" }}>{totalQty}</div>
