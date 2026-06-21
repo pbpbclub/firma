@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { MONO } from "../components/ui/Num";
 import { taxApi } from "../api";
 import { WarningCircle, CheckCircle } from "@phosphor-icons/react";
 
@@ -65,7 +66,7 @@ export default function Taxes() {
         ].map((item, i) => (
           <div key={item.label} style={{ padding: "20px 24px", borderRight: i < 3 ? "1px solid #EDEBE6" : "none" }}>
             <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 8 }}>{item.label}</div>
-            <div style={{ fontSize: 19, fontWeight: 700, color: item.color ?? "#1A1A1A" }}>{item.value}</div>
+            <div style={{ fontSize: 19, fontWeight: 700, color: item.color ?? "#1A1A1A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{item.value}</div>
             <div style={{ fontSize: 11, color: "#A89070", marginTop: 6 }}>{item.sub}</div>
             <ThinBar pct={item.pct} color={item.color ?? "#E8592A"} />
           </div>

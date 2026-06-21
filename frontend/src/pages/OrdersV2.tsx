@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { MONO } from "../components/ui/Num";
 import { useNavigate } from "react-router-dom";
 import { ordersApi, customersApi, brandsApi } from "../api";
 import { MagnifyingGlass, DotsThree, Plus, Files, CaretRight, Archive, ArrowCounterClockwise, CaretDown, X, Trash, PencilSimple, UserCircle } from "@phosphor-icons/react";
@@ -836,7 +837,7 @@ export default function OrdersV2() {
                   <div style={{ fontSize: 13, fontWeight: 500, color: isActive ? "#FFFFFF" : "#1A1A1A", lineHeight: 1.4 }}>
                     {o.title}
                     {o.brand && (
-                      <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.05em", marginTop: 2, color: isActive ? "rgba(255,255,255,0.75)" : (BRAND_COLOR[o.brand] || "#A89070") }}>
+                      <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.05em", marginTop: 2, color: isActive ? "rgba(255,255,255,0.75)" : (BRAND_COLOR[o.brand] || "#A89070"), fontFamily: MONO }}>
                         {o.brand}
                       </div>
                     )}
@@ -856,11 +857,11 @@ export default function OrdersV2() {
                   <div style={{ fontSize: 11, color: isActive ? "#FFFFFF" : st.color, fontWeight: 500, lineHeight: 1.4 }}>
                     {st.label}
                   </div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: isActive ? "#FFFFFF" : "#1A1A1A", lineHeight: 1.4 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: isActive ? "#FFFFFF" : "#1A1A1A", lineHeight: 1.4, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
                     {fmt(o.price_plan)}
                   </div>
                   {!selected && (
-                    <div style={{ fontSize: 13, fontWeight: 600, color: isActive ? "#FFFFFF" : (o.debt > 0 ? "#E8592A" : "#C8C0B0"), lineHeight: 1.4 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: isActive ? "#FFFFFF" : (o.debt > 0 ? "#E8592A" : "#C8C0B0"), lineHeight: 1.4, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
                       {o.debt > 0 ? fmt(o.debt) : "—"}
                     </div>
                   )}

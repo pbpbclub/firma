@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { MONO } from "../components/ui/Num";
 import { fundsApi } from "../api";
 import { Plus, Minus, Trash, X } from "@phosphor-icons/react";
 import { ColumnFilter } from "../components/TableFilters";
@@ -122,7 +123,7 @@ function FundDetailModal({ fund, onClose, onRefresh }: {
             </div>
             <div style={{ textAlign: "right", marginRight: 16 }}>
               <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.05em", marginBottom: 2 }}>БАЛАНС</div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: fund.balance > 0 ? "#1A1A1A" : "#C8C0B0" }}>{fmt(fund.balance)}</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: fund.balance > 0 ? "#1A1A1A" : "#C8C0B0", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(fund.balance)}</div>
             </div>
             <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070", display: "flex" }}><X size={16} /></button>
           </div>
@@ -168,7 +169,7 @@ function FundDetailModal({ fund, onClose, onRefresh }: {
                 >
                   <div style={{ fontSize: 12, color: "#A89070" }}>{fmtDate(tx.date)}</div>
                   <div style={{ fontSize: 13, color: "#1A1A1A" }}>{tx.note || <span style={{ color: "#C8C0B0" }}>—</span>}</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: tx.direction === "in" ? "#4A7C59" : "#8B3A3A" }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: tx.direction === "in" ? "#4A7C59" : "#8B3A3A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
                     {tx.direction === "in" ? "+" : "−"}{fmt(tx.amount)}
                   </div>
                   <button onClick={() => deleteTx(tx.id)}
@@ -286,7 +287,7 @@ export default function Funds() {
         <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
           <div style={{ textAlign: "right" }}>
             <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 2 }}>ВСЕГО В ФОНДАХ</div>
-            <div style={{ fontSize: 20, fontWeight: 700, color: "#1A1A1A" }}>{fmt(totalBalance)}</div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: "#1A1A1A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(totalBalance)}</div>
           </div>
           <button
             onClick={() => setCreateOpen(true)}
@@ -328,7 +329,7 @@ export default function Funds() {
                   </span>
                 </button>
 
-                <div style={{ fontSize: 22, fontWeight: 700, color: f.balance > 0 ? "#1A1A1A" : "#C8C0B0", letterSpacing: "-0.02em", marginBottom: 12 }}>
+                <div style={{ fontSize: 22, fontWeight: 700, color: f.balance > 0 ? "#1A1A1A" : "#C8C0B0", letterSpacing: "-0.02em", marginBottom: 12, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
                   {fmt(f.balance)}
                 </div>
 

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { MONO } from "../components/ui/Num";
 import { useNavigate, useParams } from "react-router-dom";
 import { useNavigationGuard, NavigationGuardModal } from "../components/NavigationGuard";
 import {
@@ -391,7 +392,7 @@ function CustomerDetail({ customerId, onClose }: { customerId: string; onClose: 
             ].map(s => (
               <div key={s.l} style={{ background: "#FAF8F5", padding: "9px 11px" }}>
                 <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 3 }}>{s.l.toUpperCase()}</div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: s.c }}>{s.v}</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: s.c, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{s.v}</div>
               </div>
             ))}
           </div>

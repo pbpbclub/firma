@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { MONO } from "../components/ui/Num";
 import { ordersApi, customersApi, estimatesApi } from "../api";
 import { ArrowLeft, Plus, CaretRight, Trash } from "@phosphor-icons/react";
 import { useNavigationGuard, NavigationGuardModal } from "../components/NavigationGuard";
@@ -377,7 +378,7 @@ export default function OrderDetail() {
                 const metric = (label: string, value: string, color: string) => (
                   <div style={{ textAlign: "right", minWidth: 76 }}>
                     <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.04em" }}>{label}</div>
-                    <div style={{ fontSize: 12, fontWeight: 600, color }}>{value}</div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{value}</div>
                   </div>
                 );
                 return (
@@ -418,7 +419,7 @@ export default function OrderDetail() {
               ].map(item => (
                 <div key={item.label}>
                   <div style={{ fontSize: 9, color: "#A89070", marginBottom: 4 }}>{item.label}</div>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: item.color }}>{item.value}</div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: item.color, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{item.value}</div>
                 </div>
               ))}
             </div>

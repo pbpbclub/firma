@@ -6,6 +6,7 @@ import { ColumnFilter, AmountFilter } from "../components/TableFilters";
 import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { CalcHeader, CalcSection, CalcRow, CalcFooter } from "../components/ui/Calc";
 import { BrandSelect } from "../components/ui/Selects";
+import { MONO } from "../components/ui/Num";
 
 function Checkbox({ checked, indeterminate = false, onChange }: {
   checked: boolean; indeterminate?: boolean; onChange: () => void;
@@ -444,15 +445,15 @@ export default function Catalog() {
               <div>
                 {item.brand ? (
                   <span style={{
-                    fontSize: 10, fontWeight: 700, padding: "2px 6px",
+                    fontSize: 10, fontWeight: 700, padding: "2px 6px", fontFamily: MONO,
                     color: item.brand === "MeRA" ? "#2E6DA4" : item.brand === "pbpb" ? "#7B4F9E" : "#3D8C6B",
                     border: `1px solid ${item.brand === "MeRA" ? "#2E6DA4" : item.brand === "pbpb" ? "#7B4F9E" : "#3D8C6B"}`,
                   }}>{item.brand}</span>
                 ) : <span style={{ fontSize: 11, color: "#C8C0B0" }}>—</span>}
               </div>
               <div style={{ fontSize: 12, color: "#A89070" }}>{item.category || "—"}</div>
-              <div style={{ fontSize: 12, color: "#6B6355" }}>{fmt(item.cost_total)}</div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#E8592A" }}>{fmt(item.sale_price)}</div>
+              <div style={{ fontSize: 12, color: "#6B6355", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(item.cost_total)}</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#E8592A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(item.sale_price)}</div>
             </div>
           ))}
               </>
@@ -541,9 +542,9 @@ export default function Catalog() {
               <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>{item.title}</div>
               <div style={{ fontSize: 12, color: "#A89070" }}>{item.category || "—"}</div>
               <div style={{ fontSize: 12, color: "#6B6355" }}>{item.times_ordered}</div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#1A1A1A" }}>{fmt(item.avg_price)}</div>
-              <div style={{ fontSize: 12, color: "#A89070" }}>{fmt(item.min_price)}</div>
-              <div style={{ fontSize: 12, color: "#A89070" }}>{fmt(item.max_price)}</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#1A1A1A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(item.avg_price)}</div>
+              <div style={{ fontSize: 12, color: "#A89070", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(item.min_price)}</div>
+              <div style={{ fontSize: 12, color: "#A89070", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(item.max_price)}</div>
             </div>
             );
           })}

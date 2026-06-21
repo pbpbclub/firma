@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { financeApi, taxApi, ordersApi } from "../api";
+import { MONO } from "../components/ui/Num";
 
 function fmt(n: number) {
   if (!n && n !== 0) return "—";
@@ -23,7 +24,7 @@ function CircleProgress({ pct, size = 64 }: { pct: number; size?: number }) {
         transform={`rotate(-90 ${cx} ${cx})`}
         style={{ transition: "stroke-dashoffset 0.5s ease" }}
       />
-      <text x={cx} y={cx + 4} textAnchor="middle" fontSize={11} fontWeight={700} fill="#1A1A1A">
+      <text x={cx} y={cx + 4} textAnchor="middle" fontSize={11} fontWeight={700} fill="#1A1A1A" fontFamily={MONO}>
         {Math.round(pct)}%
       </text>
     </svg>
@@ -88,7 +89,7 @@ export default function Dashboard() {
             borderRight: i < 3 ? "1px solid #EDEBE6" : "none",
           }}>
             <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10 }}>{item.label}</div>
-            <div style={{ fontSize: 20, fontWeight: 700, color: item.color, marginBottom: 14 }}>{item.value}</div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: item.color, marginBottom: 14, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{item.value}</div>
             <ThinBar pct={item.pct} color={item.color} />
           </div>
         ))}
@@ -110,7 +111,7 @@ export default function Dashboard() {
           ].map((item) => (
             <div key={item.label} style={{ flex: 1 }}>
               <div style={{ fontSize: 11, color: "#A89070", marginBottom: 6 }}>{item.label}</div>
-              <div style={{ fontSize: 17, fontWeight: 700, color: item.color, marginBottom: 10 }}>{item.value}</div>
+              <div style={{ fontSize: 17, fontWeight: 700, color: item.color, marginBottom: 10, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{item.value}</div>
               <ThinBar pct={item.pct} color={item.color} />
             </div>
           ))}
@@ -134,11 +135,11 @@ export default function Dashboard() {
                   <div style={{ display: "flex", gap: 16 }}>
                     <div>
                       <div style={{ fontSize: 9, color: "#A89070" }}>ДОХОД</div>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: "#4A7C59" }}>{fmt(b.income)}</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "#4A7C59", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(b.income)}</div>
                     </div>
                     <div>
                       <div style={{ fontSize: 9, color: "#A89070" }}>ПРИБЫЛЬ</div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: b.profit >= 0 ? "#1A1A1A" : "#8B3A3A" }}>{fmt(b.profit)}</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: b.profit >= 0 ? "#1A1A1A" : "#8B3A3A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(b.profit)}</div>
                     </div>
                   </div>
                 </div>
@@ -183,7 +184,7 @@ export default function Dashboard() {
                 <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>{d.title}</div>
               </div>
               <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#E8592A" }}>{fmt(d.debt)}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#E8592A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(d.debt)}</div>
                 {d.deadline && (
                   <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>
                     до {new Date(d.deadline).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}
@@ -213,11 +214,11 @@ export default function Dashboard() {
                     <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>{o.title}</div>
                     <div style={{ fontSize: 11, color: "#A89070" }}>{o.customer_name || "—"}</div>
                   </div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A" }}>{fmt(plan)}</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(plan)}</div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <div style={{ flex: 1 }}><ThinBar pct={p} /></div>
-                  <div style={{ fontSize: 10, color: "#A89070", minWidth: 28, textAlign: "right" }}>{Math.round(p)}%</div>
+                  <div style={{ fontSize: 10, color: "#A89070", minWidth: 28, textAlign: "right", fontFamily: MONO }}>{Math.round(p)}%</div>
                 </div>
               </div>
             );

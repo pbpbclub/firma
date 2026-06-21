@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { MONO } from "../components/ui/Num";
 import { brandsApi, financeApi, businessUnitsApi, ordersApi } from "../api";
 import { X, Plus, Trash } from "@phosphor-icons/react";
 import { ColumnFilter } from "../components/TableFilters";
@@ -142,7 +143,7 @@ function BrandModal({ brand, onClose }: { brand: any; onClose: () => void }) {
                       onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
                       <span style={{ fontSize: 10, color: "#A89070", minWidth: 56 }}>{o.number}</span>
                       <span style={{ flex: 1, fontSize: 12, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.title}</span>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: "#1A1A1A" }}>{fmt(o.price_plan || 0)}</span>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: "#1A1A1A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(o.price_plan || 0)}</span>
                     </div>
                   ))}
                 </div>
@@ -261,7 +262,7 @@ function BusinessUnitModal({ unit, onClose }: { unit: any; onClose: () => void }
                         {ACCOUNT_SOURCES.find(s => s.v === a.source)?.l || a.source}{a.number ? ` · ${a.number}` : ""}
                       </div>
                     </div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A" }}>{fmt(a.balance || 0)}</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(a.balance || 0)}</div>
                     <button onClick={async () => { await businessUnitsApi.deleteAccount(a.id); refresh(); onClose(); }}
                       style={{ background: "none", border: "none", cursor: "pointer", color: "#D0C8C0", padding: 0, display: "flex" }}
                       onMouseEnter={e => (e.currentTarget.style.color = "#8B3A3A")}
@@ -388,7 +389,7 @@ export default function Brands() {
               <span key={a.id} style={{ display: "inline-block", marginRight: 10 }}>{a.name} <span style={{ color: "#A89070" }}>{fmt(a.balance || 0)}</span></span>
             ))}
           </div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: u.balance_total >= 0 ? "#1A1A1A" : "#8B3A3A", textAlign: "right" }}>{fmt(u.balance_total || 0)}</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: u.balance_total >= 0 ? "#1A1A1A" : "#8B3A3A", textAlign: "right", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(u.balance_total || 0)}</div>
         </div>
       ))}
 
@@ -416,8 +417,8 @@ export default function Brands() {
               <span style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A" }}>{b.name}</span>
             </div>
             <div style={{ fontSize: 12, color: "#6B6355", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingRight: 16 }}>{b.description || "—"}</div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: "#4A7C59", textAlign: "right" }}>{fin ? fmt(fin.income) : "—"}</div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: fin && fin.profit < 0 ? "#8B3A3A" : "#1A1A1A", textAlign: "right" }}>{fin ? fmt(fin.profit) : "—"}</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#4A7C59", textAlign: "right", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fin ? fmt(fin.income) : "—"}</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: fin && fin.profit < 0 ? "#8B3A3A" : "#1A1A1A", textAlign: "right", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fin ? fmt(fin.profit) : "—"}</div>
           </div>
         );
       })}
