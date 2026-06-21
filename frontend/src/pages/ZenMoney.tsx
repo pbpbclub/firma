@@ -4,6 +4,7 @@ import { Briefcase, MagnifyingGlass, X, ArrowsClockwise, Tag, PencilSimple, Tras
 import { zenmoneyApi, payeeRulesApi, mastersApi, customersApi, financeApi } from "../api";
 import { ColumnFilter, PeriodFilter } from "../components/TableFilters";
 import { Modal } from "../components/ui/Modal";
+import { MONO } from "../components/ui/Num";
 
 const fmt = (n: number) =>
   new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(Math.abs(n));
@@ -690,20 +691,20 @@ export default function ZenMoneyPage() {
             }}>
               <div>
                 <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>РАСХОДЫ</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: "#8B3A3A" }}>
+                <div style={{ fontSize: 18, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: "tabular-nums", color: "#8B3A3A" }}>
                   {fmt(report.expenses)} ₽
                 </div>
               </div>
               <div>
                 <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>ДОХОДЫ</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: "#4A7C59" }}>
+                <div style={{ fontSize: 18, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: "tabular-nums", color: "#4A7C59" }}>
                   {fmt(report.incomes)} ₽
                 </div>
               </div>
               <div>
                 <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>БАЛАНС</div>
                 <div style={{
-                  fontSize: 18, fontWeight: 700,
+                  fontSize: 18, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: "tabular-nums",
                   color: report.incomes - report.expenses >= 0 ? "#4A7C59" : "#8B3A3A",
                 }}>
                   {report.incomes - report.expenses >= 0 ? "+" : "−"}
@@ -712,7 +713,7 @@ export default function ZenMoneyPage() {
               </div>
               <div style={{ marginLeft: "auto", alignSelf: "center" }}>
                 <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>ОПЕРАЦИЙ</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: "#1A1A1A" }}>{displayTx.length}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: "tabular-nums", color: "#1A1A1A" }}>{displayTx.length}</div>
               </div>
             </div>
           )}
@@ -725,15 +726,15 @@ export default function ZenMoneyPage() {
             }}>
               <div>
                 <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>ПОТРАЧЕНО НА БИЗНЕС</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: "#8B3A3A" }}>{fmt(bizExpense)} ₽</div>
+                <div style={{ fontSize: 18, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: "tabular-nums", color: "#8B3A3A" }}>{fmt(bizExpense)} ₽</div>
               </div>
               <div>
                 <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>ПОЛУЧЕНО ОТ ИП</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: "#4A7C59" }}>{fmt(bizIncome)} ₽</div>
+                <div style={{ fontSize: 18, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: "tabular-nums", color: "#4A7C59" }}>{fmt(bizIncome)} ₽</div>
               </div>
               <div>
                 <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>ОПЕРАЦИЙ</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: "#1A1A1A" }}>{displayTx.length}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: "tabular-nums", color: "#1A1A1A" }}>{displayTx.length}</div>
               </div>
               <div style={{ marginLeft: "auto", alignSelf: "center", fontSize: 11, color: "#A89070" }}>
                 за последние 3 месяца
@@ -828,7 +829,7 @@ export default function ZenMoneyPage() {
                 <div style={{ paddingTop: 2 }}>
                   <Checkbox checked={selectedIds.has(String(tx.id))} onChange={() => toggleSelect(String(tx.id))} />
                 </div>
-                <div style={{ fontSize: 11, color: "#6B6355", paddingTop: 1 }}>{tx.date?.slice(5)}</div>
+                <div style={{ fontSize: 11, color: "#6B6355", paddingTop: 1, fontFamily: MONO }}>{tx.date?.slice(5)}</div>
                 <div style={{ paddingTop: 1 }}>
                   <BankBadge title={isExpense ? (tx.outcome_account || "") : (tx.income_account || "")} />
                 </div>
@@ -890,6 +891,7 @@ export default function ZenMoneyPage() {
                   <div style={{
                     fontSize: 12, fontWeight: 500, paddingTop: 1,
                     color: isIncome ? "#4A7C59" : "#1A1A1A",
+                    fontFamily: MONO, fontVariantNumeric: "tabular-nums",
                   }}>
                     {isIncome ? "+" : "−"}{fmt(amount)} ₽
                   </div>
@@ -945,6 +947,7 @@ export default function ZenMoneyPage() {
           <div style={{
             fontSize: 28, fontWeight: 700, letterSpacing: "-0.03em",
             color: totalBalance >= 0 ? "#1A1A1A" : "#8B3A3A",
+            fontFamily: MONO, fontVariantNumeric: "tabular-nums",
           }}>
             {totalBalance < 0 ? "−" : ""}{fmt(totalBalance)} ₽
           </div>
@@ -969,6 +972,7 @@ export default function ZenMoneyPage() {
                   <div style={{
                     fontSize: 13, fontWeight: 600,
                     color: acc.balance >= 0 ? "#1A1A1A" : "#8B3A3A",
+                    fontFamily: MONO, fontVariantNumeric: "tabular-nums",
                   }}>
                     {acc.balance < 0 ? "−" : ""}{fmt(acc.balance)} ₽
                   </div>
@@ -1035,7 +1039,7 @@ export default function ZenMoneyPage() {
                   <div key={i} style={{ padding: "6px 0", borderBottom: "1px solid #F2EFE9" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
                       <div style={{ fontSize: 11, color: "#1A1A1A" }}>{cat.category}</div>
-                      <div style={{ fontSize: 11, color: "#8B3A3A", fontWeight: 500 }}>
+                      <div style={{ fontSize: 11, color: "#8B3A3A", fontWeight: 500, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
                         {fmt(cat.total)} ₽
                       </div>
                     </div>

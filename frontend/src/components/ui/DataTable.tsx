@@ -1,3 +1,5 @@
+import { MONO } from "./Num";
+
 // Таблица-список (используется в P1: Orders/Finance/ZenMoney/Debtors).
 // Без карточек-обёрток, прямо на белой поверхности. Hover #FAF8F5, выбран #FFF8F5,
 // делитель #F2EFE9. Числа — вправо, tabular-nums. Фильтр-заголовок передаётся
@@ -72,7 +74,7 @@ export function DataTable<T>({
                 </div>
               )}
               {columns.map(c => (
-                <div key={c.key} style={{ textAlign: c.align ?? "left", fontVariantNumeric: c.align === "right" ? "tabular-nums" : undefined, minWidth: 0 }}>
+                <div key={c.key} style={{ textAlign: c.align ?? "left", fontFamily: c.align === "right" ? MONO : undefined, fontVariantNumeric: c.align === "right" ? "tabular-nums" : undefined, minWidth: 0 }}>
                   {c.render(row)}
                 </div>
               ))}

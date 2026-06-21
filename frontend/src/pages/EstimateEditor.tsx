@@ -7,6 +7,9 @@ import { Modal } from "../components/ui/Modal";
 import { CalcHeader, CalcSection, CalcRow, CalcFooter } from "../components/ui/Calc";
 import { BrandSelect, EditableText } from "../components/ui/Selects";
 import { markupToPct, pctToMarkup } from "../components/ui/priceMath";
+import { MONO } from "../components/ui/Num";
+
+const SANS = "system-ui, -apple-system, sans-serif";
 import {
   ArrowLeft, Plus, Trash, Package, Cube,
   X, FileText, DotsSixVertical, PencilSimple, FloppyDisk, ListChecks, CheckCircle, Circle,
@@ -305,9 +308,9 @@ function FooterRow({ cols, label, cost, sale, delta, deltaColor, saleColor, note
   note?: string;
 }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: cols, padding: "7px 28px", gap: 12, alignItems: "center", borderBottom: "1px solid #F2EFE9", fontVariantNumeric: "tabular-nums" }}>
+    <div style={{ display: "grid", gridTemplateColumns: cols, padding: "7px 28px", gap: 12, alignItems: "center", borderBottom: "1px solid #F2EFE9", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
       <div />
-      <div>
+      <div style={{ fontFamily: SANS }}>
         <div style={{ fontSize: 11, color: "#A89070" }}>{label}</div>
         {note && <div style={{ fontSize: 10, color: "#C8C0B0", marginTop: 1 }}>{note}</div>}
       </div>
@@ -774,7 +777,7 @@ export default function EstimateEditor() {
                   padding: "11px 28px", gap: 12,
                   borderBottom: "1px solid #F2EFE9",
                   alignItems: "center",
-                  fontVariantNumeric: "tabular-nums",
+                  fontFamily: MONO, fontVariantNumeric: "tabular-nums",
                   opacity: dragIdx === idx && dragOverIdx !== idx ? 0.4 : 1,
                   background: dragOverIdx === idx && dragIdx !== idx ? "#F5F2EC" : "transparent",
                   cursor: editMode ? "grab" : "default",
@@ -790,7 +793,7 @@ export default function EstimateEditor() {
                 </div>
 
                 {/* Title */}
-                <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }} onClick={e => e.stopPropagation()}>
+                <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A", fontFamily: SANS }} onClick={e => e.stopPropagation()}>
                   {editMode ? (
                     <EditCell
                       value={item.title}
@@ -994,9 +997,9 @@ export default function EstimateEditor() {
           <div style={{ flexShrink: 0, borderTop: "1px solid #EDEBE6" }}>
 
             {/* Итого — все колонки */}
-            <div style={{ display: "grid", gridTemplateColumns: colsMain, padding: "7px 28px", gap: 12, alignItems: "center", borderBottom: "1px solid #F2EFE9", fontVariantNumeric: "tabular-nums" }}>
+            <div style={{ display: "grid", gridTemplateColumns: colsMain, padding: "7px 28px", gap: 12, alignItems: "center", borderBottom: "1px solid #F2EFE9", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
               <div />
-              <div style={{ fontSize: 11, color: "#A89070" }}>Итого</div>
+              <div style={{ fontSize: 11, color: "#A89070", fontFamily: SANS }}>Итого</div>
               <div style={{ fontSize: 12, color: "#6B6355" }}>{totalQty}</div>
               <div style={{ fontSize: 12, color: "#6B6355" }}>{(() => { const p = markupToPct(avgMarkup); return `${p >= 0 ? "+" : ""}${p}%`; })()}</div>
               <div style={{ fontSize: 11, color: "#A89070", textAlign: "right" }}>{totalQty > 1 ? fmt(Math.round(totalCost / totalQty)) : "—"}</div>

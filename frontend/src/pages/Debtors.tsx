@@ -5,6 +5,9 @@ import { useNavigate } from "react-router-dom";
 import { Bank, X, Check, Plus, LinkSimple } from "@phosphor-icons/react";
 import { ColumnFilter } from "../components/TableFilters";
 import { Modal } from "../components/ui/Modal";
+import { MONO } from "../components/ui/Num";
+
+const SANS = "system-ui, -apple-system, sans-serif";
 
 function Checkbox({ checked, indeterminate = false, onChange }: {
   checked: boolean; indeterminate?: boolean; onChange: () => void;
@@ -425,6 +428,7 @@ function DebtorsTab() {
                 display: "grid", gridTemplateColumns: debtorCols,
                 padding: "13px 28px", borderBottom: "1px solid #F2EFE9",
                 cursor: "pointer", alignItems: "center", transition: "background 0.1s",
+                fontFamily: MONO, fontVariantNumeric: "tabular-nums",
                 background: selectedIds.has(rowId) ? "#FFF8F5" : "transparent",
               }}
               onMouseEnter={(e) => { if (!selectedIds.has(rowId)) e.currentTarget.style.background = "#FAF8F5"; }}
@@ -433,11 +437,11 @@ function DebtorsTab() {
               <div style={{ display: "flex", alignItems: "center" }}>
                 <Checkbox checked={selectedIds.has(rowId)} onChange={() => toggleSelect(rowId)} />
               </div>
-              <div>
+              <div style={{ fontFamily: SANS }}>
                 <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>{d.customer_name || "—"}</div>
                 <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>{d.title}</div>
               </div>
-              <div style={{ fontSize: 12, color: "#6B6355" }}>{d.status_label || d.status}</div>
+              <div style={{ fontSize: 12, color: "#6B6355", fontFamily: SANS }}>{d.status_label || d.status}</div>
               <div style={{ fontSize: 13, color: "#1A1A1A" }}>{fmt(d.price_plan)}</div>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <span style={{ fontSize: 13, color: "#4A7C59" }}>{fmt(d.paid_total)}</span>
@@ -464,9 +468,10 @@ function DebtorsTab() {
             display: "grid", gridTemplateColumns: debtorCols,
             padding: "10px 28px", borderTop: "1px solid #EDEBE6",
             alignItems: "center", background: "#FAF8F5",
+            fontFamily: MONO, fontVariantNumeric: "tabular-nums",
           }}>
             <div />
-            <div style={{ fontSize: 11, color: "#A89070" }}>{filtered.length} заказов</div>
+            <div style={{ fontSize: 11, color: "#A89070", fontFamily: SANS }}>{filtered.length} заказов</div>
             <div />
             <div style={{ fontSize: 12, color: "#6B6355", fontWeight: 500 }}>{fmt(totalPlan)}</div>
             <div style={{ fontSize: 12, color: "#4A7C59", fontWeight: 500 }}>{fmt(totalPaid)}</div>
@@ -602,7 +607,7 @@ function UnallocatedTab() {
       )}
       <div style={{ padding: "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ fontSize: 11, color: "#6B6355" }}>{items.length} счетов</div>
-        <div style={{ fontSize: 12, fontWeight: 700, color: "#4A7C59" }}>{fmt(data?.total_debt ?? 0)}</div>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#4A7C59", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(data?.total_debt ?? 0)}</div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: recCols, padding: "6px 28px 6px", borderBottom: "1px solid #EDEBE6" }}>
@@ -619,15 +624,16 @@ function UnallocatedTab() {
               display: "grid", gridTemplateColumns: recCols,
               padding: "11px 28px", borderBottom: "1px solid #F2EFE9",
               cursor: "pointer", alignItems: "center", transition: "background 0.1s",
+              fontFamily: MONO, fontVariantNumeric: "tabular-nums",
             }}
             onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")}
             onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
           >
-            <div>
+            <div style={{ fontFamily: SANS }}>
               <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>{r.client}</div>
               {r.inn && <div style={{ fontSize: 10, color: "#A89070", marginTop: 1 }}>ИНН {r.inn}</div>}
             </div>
-            <div style={{ fontSize: 11, color: "#6B6355", paddingRight: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            <div style={{ fontSize: 11, color: "#6B6355", paddingRight: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: SANS }}>
               {r.note || "—"}
             </div>
             <div style={{ fontSize: 11, color: "#A89070" }}>
@@ -877,6 +883,7 @@ function CreditorsTab() {
                 display: "grid", gridTemplateColumns: creditorCols,
                 padding: "13px 28px", borderBottom: "1px solid #F2EFE9",
                 cursor: "pointer", alignItems: "center", transition: "background 0.1s",
+                fontFamily: MONO, fontVariantNumeric: "tabular-nums",
                 background: selectedIds.has(rowId) ? "#FFF8F5" : "transparent",
               }}
               onMouseEnter={(e) => { if (!selectedIds.has(rowId)) e.currentTarget.style.background = "#FAF8F5"; }}
@@ -885,13 +892,13 @@ function CreditorsTab() {
               <div style={{ display: "flex", alignItems: "center" }}>
                 <Checkbox checked={selectedIds.has(rowId)} onChange={() => toggleSelect(rowId)} />
               </div>
-              <div>
+              <div style={{ fontFamily: SANS }}>
                 <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>{c.name}</div>
                 {c.estimate_item_title && (
                   <div style={{ fontSize: 10, color: "#A89070", marginTop: 2 }}>← Смета: {c.estimate_item_title}</div>
                 )}
               </div>
-              <div style={{ fontSize: 12, color: "#6B6355", paddingRight: 16, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <div style={{ fontSize: 12, color: "#6B6355", paddingRight: 16, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: SANS }}>
                 {c.description || "—"}
               </div>
               <div style={{ fontSize: 13, color: "#6B6355" }}>{fmt(c.amount_plan ?? c.total)}</div>
@@ -925,9 +932,10 @@ function CreditorsTab() {
             display: "grid", gridTemplateColumns: creditorCols,
             padding: "10px 28px", borderTop: "1px solid #EDEBE6",
             alignItems: "center", background: "#FAF8F5",
+            fontFamily: MONO, fontVariantNumeric: "tabular-nums",
           }}>
             <div />
-            <div style={{ fontSize: 11, color: "#A89070" }}>{filteredItems.length} записей</div>
+            <div style={{ fontSize: 11, color: "#A89070", fontFamily: SANS }}>{filteredItems.length} записей</div>
             <div style={{ fontSize: 12, color: "#6B6355", fontWeight: 500 }}>{fmt(totalOwed)}</div>
             <div style={{ fontSize: 12, color: "#4A7C59", fontWeight: 500 }}>{fmt(totalPaid)}</div>
             <div />
@@ -972,11 +980,11 @@ export default function Debtors() {
           <div style={{ display: "flex", gap: 28 }}>
             <div style={{ textAlign: "right" }}>
               <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 3 }}>ЖДЁМ ОТ КЛИЕНТОВ</div>
-              <div style={{ fontSize: 18, fontWeight: 700, color: "#4A7C59" }}>{fmt(receivable)}</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: "#4A7C59", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(receivable)}</div>
             </div>
             <div style={{ textAlign: "right" }}>
               <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 3 }}>МЫ ДОЛЖНЫ</div>
-              <div style={{ fontSize: 18, fontWeight: 700, color: "#8B3A3A" }}>{fmt(payable)}</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: "#8B3A3A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(payable)}</div>
             </div>
           </div>
         </div>

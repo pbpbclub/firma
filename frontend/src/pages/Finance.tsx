@@ -4,6 +4,7 @@ import { financeApi, ordersApi } from "../api";
 import { MagnifyingGlass, X, LinkSimple } from "@phosphor-icons/react";
 import { ColumnFilter, AmountFilter, PeriodFilter } from "../components/TableFilters";
 import { Modal } from "../components/ui/Modal";
+import { MONO } from "../components/ui/Num";
 
 function Checkbox({ checked, indeterminate = false, onChange }: {
   checked: boolean; indeterminate?: boolean; onChange: () => void;
@@ -438,7 +439,7 @@ export default function Finance() {
                 <div style={{ display: "flex", alignItems: "center" }}>
                   <Checkbox checked={selectedIds.has(String(t.id))} onChange={() => toggleSelect(String(t.id))} />
                 </div>
-                <div style={{ fontSize: 12, color: "#A89070" }}>{fmtDate(t.date)}</div>
+                <div style={{ fontSize: 12, color: "#A89070", fontFamily: MONO }}>{fmtDate(t.date)}</div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, overflow: "hidden" }}>
                   <BankBadge bank={t.bank || t.source || ""} />
                   <div style={{ fontSize: 13, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -458,7 +459,7 @@ export default function Finance() {
                   }
                 </div>
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: t.direction === "in" ? "#4A7C59" : "#8B3A3A" }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: t.direction === "in" ? "#4A7C59" : "#8B3A3A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
                     {t.direction === "in" ? "+" : "−"}{fmt(t.amount)}
                   </div>
                   {t.direction === "out" && creditorByFinTx.has(String(t.id)) && (
@@ -530,7 +531,7 @@ export default function Finance() {
         {/* Total balance */}
         <div style={{ padding: "24px 20px 20px", borderBottom: "1px solid #EDEBE6" }}>
           <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 8 }}>ИТОГО НА СЧЕТАХ</div>
-          <div style={{ fontSize: 24, fontWeight: 700, color: (balance?.total ?? 0) >= 0 ? "#4A7C59" : "#8B3A3A", letterSpacing: "-0.02em" }}>
+          <div style={{ fontSize: 24, fontWeight: 700, color: (balance?.total ?? 0) >= 0 ? "#4A7C59" : "#8B3A3A", letterSpacing: "-0.02em", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
             {fmt(balance?.total ?? 0)}
           </div>
         </div>
@@ -541,7 +542,7 @@ export default function Finance() {
             <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em", marginBottom: 6 }}>
               {(a.name || a.account).toUpperCase()}
             </div>
-            <div style={{ fontSize: 17, fontWeight: 700, color: "#1A1A1A" }}>{fmt(a.balance)}</div>
+            <div style={{ fontSize: 17, fontWeight: 700, color: "#1A1A1A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(a.balance)}</div>
           </div>
         ))}
 
@@ -551,16 +552,16 @@ export default function Finance() {
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span style={{ fontSize: 12, color: "#A89070" }}>Поступления</span>
-              <span style={{ fontSize: 13, fontWeight: 600, color: "#4A7C59" }}>+{fmt(totalIn)}</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "#4A7C59", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>+{fmt(totalIn)}</span>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span style={{ fontSize: 12, color: "#A89070" }}>Списания</span>
-              <span style={{ fontSize: 13, fontWeight: 600, color: "#8B3A3A" }}>−{fmt(totalOut)}</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "#8B3A3A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>−{fmt(totalOut)}</span>
             </div>
             <div style={{ height: 1, background: "#EDEBE6" }} />
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span style={{ fontSize: 12, color: "#A89070" }}>Чистый поток</span>
-              <span style={{ fontSize: 13, fontWeight: 700, color: (totalIn - totalOut) >= 0 ? "#4A7C59" : "#8B3A3A" }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: (totalIn - totalOut) >= 0 ? "#4A7C59" : "#8B3A3A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
                 {(totalIn - totalOut) >= 0 ? "+" : "−"}{fmt(totalIn - totalOut)}
               </span>
             </div>

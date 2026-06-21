@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Plus, X } from "@phosphor-icons/react";
 import { UnitSelect, WorkTypeSelect, ContractorSelect, EditableText } from "./Selects";
 import { pctToMarkup, fmtMoney, fmtNum } from "./priceMath";
+import { MONO } from "./Num";
 
 // ── Единый калькулятор: шапка колонок, секция, строка, футер цены ─────────────
 //
@@ -12,7 +13,7 @@ import { pctToMarkup, fmtMoney, fmtNum } from "./priceMath";
 
 const labelStyle: React.CSSProperties = { fontSize: 10, color: "#A89070", letterSpacing: "0.04em" };
 const sectionLabelStyle: React.CSSProperties = { ...labelStyle, marginTop: 18, marginBottom: 6, textTransform: "uppercase" };
-const numCell: React.CSSProperties = { fontSize: 12, color: "#1A1A1A", textAlign: "right", fontVariantNumeric: "tabular-nums" };
+const numCell: React.CSSProperties = { fontSize: 12, color: "#1A1A1A", textAlign: "right", fontFamily: MONO, fontVariantNumeric: "tabular-nums" };
 
 function cols(withContractor?: boolean) {
   return withContractor
@@ -221,7 +222,7 @@ export function CalcFooter({ cost, pct, onPctChange, withQuantity, quantity = 1 
               <input
                 type="number" min="0" max="1000" value={pct}
                 onChange={e => onPctChange(parseFloat(e.target.value) || 0)}
-                style={{ width: 52, border: "1px solid #EDEBE6", background: "transparent", fontSize: 12, color: "#1A1A1A", outline: "none", padding: "3px 6px", textAlign: "right" }}
+                style={{ width: 52, border: "1px solid #EDEBE6", background: "transparent", fontSize: 12, color: "#1A1A1A", outline: "none", padding: "3px 6px", textAlign: "right", fontFamily: MONO }}
               />
               <span style={{ fontSize: 11 }}>%</span>
             </span>

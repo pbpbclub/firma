@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { MONO } from "./Num";
 
 // Общие селекты калькулятора — вынесены из EstimateEditor для переиспользования
 // в калькуляторе сметы и каталога (единый паттерн).
@@ -38,7 +39,7 @@ export function EditableText({
         onClick={e => { e.stopPropagation(); setEditing(true); }}
         style={{
           cursor: "text", display: "inline-block", minWidth: 12, width: "100%",
-          textAlign: align ?? "left", fontVariantNumeric: numeric ? "tabular-nums" : undefined, ...style,
+          textAlign: align ?? "left", fontFamily: numeric ? MONO : undefined, fontVariantNumeric: numeric ? "tabular-nums" : undefined, ...style,
         }}
       >
         {value !== null && value !== undefined && value !== ""
@@ -59,7 +60,7 @@ export function EditableText({
       }}
       style={{
         width: "100%", border: "none", borderBottom: "1px solid #E8592A",
-        outline: "none", fontSize: "inherit", fontFamily: "inherit",
+        outline: "none", fontSize: "inherit", fontFamily: numeric ? MONO : "inherit",
         background: "transparent", padding: "0 2px",
         textAlign: align ?? "left", fontVariantNumeric: numeric ? "tabular-nums" : undefined, ...style,
       }}
@@ -86,7 +87,7 @@ export function BrandSelect({ value, onChange }: {
               background: active ? color : "transparent",
               border: `1px solid ${active ? color : "#EDEBE6"}`,
               color: active ? "#FFFFFF" : color,
-              fontSize: 11, fontWeight: 600, padding: "4px 8px", cursor: "pointer",
+              fontSize: 11, fontWeight: 600, padding: "4px 8px", cursor: "pointer", fontFamily: MONO,
             }}
           >{b ?? "—"}</button>
         );
