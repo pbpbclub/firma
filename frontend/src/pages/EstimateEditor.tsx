@@ -1030,27 +1030,41 @@ export default function EstimateEditor() {
                   )}
                 </div>
 
-                {/* Qty */}
+                {/* Qty — правка сохраняет пер-юнит (итоги масштабируются) */}
                 <div style={{ fontSize: 13, color: "#1A1A1A", fontWeight: 500 }}>
                   {editMode ? (
                     <EditCell
                       value={item.quantity ?? 1}
                       numeric
-                      onSave={v => estimatesApi.updateItem(item.id, { quantity: parseInt(v) || 1 }).then(() => refetch())}
+                      onSave={v => {
+                        const oldQty = item.quantity || 1;
+                        const newQty = parseInt(v) || 1;
+                        const costUnit = (item.cost_total || 0) / oldQty;
+                        const saleUnit = (item.sale_price || 0) / oldQty;
+                        const payload: any = { quantity: newQty, sale_price: Math.round(saleUnit * newQty) };
+                        if ((item.lines?.length ?? 0) === 0) payload.cost_total = Math.round(costUnit * newQty);
+                        estimatesApi.updateItem(item.id, payload).then(() => refetch());
+                      }}
                     />
                   ) : (
                     item.quantity ?? 1
                   )}
                 </div>
 
-                {/* Markup */}
+                {/* Markup — задаёт цену: sale = cost × markup */}
                 <div style={{ fontSize: 12, color: "#6B6355" }}>
                   {editMode ? (
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
                       ×<EditCell
                         value={item.markup ?? 2}
                         numeric
-                        onSave={v => estimatesApi.updateItem(item.id, { markup: parseFloat(v) || 1 }).then(() => refetch())}
+                        onSave={v => {
+                          const markup = parseFloat(v) || 1;
+                          const cost = item.cost_total || 0;
+                          const payload: any = { markup };
+                          if (cost > 0) payload.sale_price = Math.round(cost * markup);
+                          estimatesApi.updateItem(item.id, payload).then(() => refetch());
+                        }}
                       />
                     </span>
                   ) : (
@@ -1058,30 +1072,40 @@ export default function EstimateEditor() {
                   )}
                 </div>
 
-                {/* Себест./шт */}
+                {/* Себест./шт — редактируемо только у позиций без строк */}
                 {(() => {
                   const qty = item.quantity || 1;
-                  const costUnit = qty > 1 ? Math.round((item.cost_total || 0) / qty) : null;
+                  const costUnit = Math.round((item.cost_total || 0) / qty);
+                  const hasLines = (item.lines?.length ?? 0) > 0;
+                  if (editMode && !hasLines) {
+                    return (
+                      <div style={{ fontSize: 11, color: "#6B6355", textAlign: "right" }}>
+                        <EditCell
+                          value={costUnit}
+                          numeric
+                          display={costUnit > 0 ? fmt(costUnit) : "—"}
+                          style={{ textAlign: "right" }}
+                          onSave={v => {
+                            const newCostUnit = parseFloat(v) || 0;
+                            const cost_total = Math.round(newCostUnit * qty);
+                            const payload: any = { cost_total };
+                            if (cost_total > 0) payload.markup = Math.round((item.sale_price || 0) / cost_total * 1000) / 1000;
+                            estimatesApi.updateItem(item.id, payload).then(() => refetch());
+                          }}
+                        />
+                      </div>
+                    );
+                  }
                   return (
                     <div style={{ fontSize: 11, color: "#A89070", textAlign: "right" }}>
-                      {costUnit !== null ? fmt(costUnit) : <span style={{ color: "#EDEBE6" }}>—</span>}
+                      {qty > 1 && costUnit > 0 ? fmt(costUnit) : <span style={{ color: "#EDEBE6" }}>—</span>}
                     </div>
                   );
                 })()}
 
-                {/* Себест. итого — инлайн-правка только у позиций без расчёта (без строк) */}
+                {/* Себест. итого — read-only (вычисляется) */}
                 <div style={{ fontSize: 13, color: "#6B6355", textAlign: "right" }}>
-                  {editMode && (item.lines?.length ?? 0) === 0 ? (
-                    <EditCell
-                      value={item.cost_total ?? 0}
-                      numeric
-                      display={fmt(item.cost_total)}
-                      style={{ textAlign: "right" }}
-                      onSave={v => estimatesApi.updateItem(item.id, { cost_total: parseFloat(v) || 0 }).then(() => refetch())}
-                    />
-                  ) : (
-                    fmt(item.cost_total)
-                  )}
+                  {fmt(item.cost_total)}
                 </div>
 
                 {/* Факт */}
@@ -1102,61 +1126,43 @@ export default function EstimateEditor() {
                   )}
                 </div>
 
-                {/* К опл./шт */}
+                {/* К опл./шт — редактируемо (цена клиенту за штуку) */}
                 {(() => {
                   const qty = item.quantity || 1;
-                  const priceUnit = qty > 1 ? Math.round(clientPriceForItem(item) / qty) : null;
+                  const priceUnit = Math.round(clientPriceForItem(item) / qty);
+                  if (editMode) {
+                    return (
+                      <div style={{ fontSize: 11, color: isBank ? "#E8592A" : "#6B6355", textAlign: "right" }}>
+                        <EditCell
+                          value={priceUnit}
+                          numeric
+                          display={priceUnit > 0 ? fmt(priceUnit) : "—"}
+                          style={{ textAlign: "right", color: isBank ? "#E8592A" : "#1A1A1A" }}
+                          onSave={v => {
+                            const newPriceUnit = parseFloat(v) || 0;
+                            const clientTotal = newPriceUnit * qty;
+                            const sale_new = isBank
+                              ? Math.round(clientTotal / (1 + (item.bank_pct ?? bankPct) / 100))
+                              : Math.round(clientTotal);
+                            const cost = item.cost_total || 0;
+                            const payload: any = { sale_price: sale_new };
+                            if (cost > 0) payload.markup = Math.round(sale_new / cost * 1000) / 1000;
+                            estimatesApi.updateItem(item.id, payload).then(() => refetch());
+                          }}
+                        />
+                      </div>
+                    );
+                  }
                   return (
                     <div style={{ fontSize: 11, color: isBank ? "#E8592A" : "#A89070", textAlign: "right", opacity: 0.7 }}>
-                      {priceUnit !== null ? fmt(priceUnit) : <span style={{ color: "#EDEBE6" }}>—</span>}
+                      {qty > 1 && priceUnit > 0 ? fmt(priceUnit) : <span style={{ color: "#EDEBE6" }}>—</span>}
                     </div>
                   );
                 })()}
 
-                {/* К оплате итого */}
-                <div style={{ fontSize: 13, fontWeight: 700, textAlign: "right", position: "relative" }}>
-                  {isBank ? (
-                    <>
-                      {editMode ? (
-                        <EditCell
-                          value={clientPriceForItem(item)}
-                          numeric
-                          display={fmt(clientPriceForItem(item))}
-                          style={{ fontWeight: 700, textAlign: "right", color: "#E8592A" }}
-                          onSave={v => {
-                            const entered = parseFloat(v) || 0;
-                            const salePrice = item.sale_price || 0;
-                            const newBankPct = salePrice > 0 ? (entered / salePrice - 1) * 100 : bankPct;
-                            estimatesApi.updateItem(item.id, { bank_pct: newBankPct }).then(() => refetch());
-                          }}
-                        />
-                      ) : (
-                        <span style={{ color: "#E8592A" }}>{fmt(clientPriceForItem(item))}</span>
-                      )}
-                      {editMode && (
-                        <div style={{ position: "absolute", right: 0, bottom: -11, fontSize: 9, color: "#A89070", whiteSpace: "nowrap" }}>
-                          {(item.bank_pct ?? bankPct).toFixed(1)}%
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    editMode ? (
-                      <EditCell
-                        value={item.sale_price ?? 0}
-                        numeric
-                        display={fmt(item.sale_price)}
-                        style={{ fontWeight: 700, textAlign: "right" }}
-                        onSave={v => {
-                          const entered = parseFloat(v) || 0;
-                          const cost = item.cost_total || 0;
-                          const newMarkup = cost > 0 ? Math.round((entered / cost) * 1000) / 1000 : 1;
-                          estimatesApi.updateItem(item.id, { markup: newMarkup }).then(() => refetch());
-                        }}
-                      />
-                    ) : (
-                      fmt(item.sale_price)
-                    )
-                  )}
+                {/* К оплате итого — read-only (вычисляется = К опл./шт × кол-во) */}
+                <div style={{ fontSize: 13, fontWeight: 700, textAlign: "right", color: isBank ? "#E8592A" : "#1A1A1A" }}>
+                  {fmt(clientPriceForItem(item))}
                 </div>
 
                 {/* Col 6: Δ Доход */}
