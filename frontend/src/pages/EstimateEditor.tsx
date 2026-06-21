@@ -1061,9 +1061,9 @@ export default function EstimateEditor() {
                   );
                 })()}
 
-                {/* Себест. итого */}
+                {/* Себест. итого — инлайн-правка только у позиций без расчёта (без строк) */}
                 <div style={{ fontSize: 13, color: "#6B6355", textAlign: "right" }}>
-                  {editMode ? (
+                  {editMode && (item.lines?.length ?? 0) === 0 ? (
                     <EditCell
                       value={item.cost_total ?? 0}
                       numeric

@@ -226,10 +226,15 @@ def add_item(set_id: str, body: ItemCreate):
             raise HTTPException(status_code=404, detail="Set not found")
         item_id = str(uuid.uuid4())
         bank_pct = body.bank_pct if body.bank_pct is not None else (set_row["bank_pct"] or 13)
+        sort_order = body.sort_order
+        if not sort_order:
+            sort_order = conn.execute(
+                "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM estimate_items WHERE set_id = ?", (set_id,)
+            ).fetchone()[0]
         conn.execute(
             """INSERT INTO estimate_items (id, set_id, title, category, markup, quantity, overhead_pct, tax_pct, cost_total, sale_price, bank_pct, sort_order, created_at)
                VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, 0, ?, ?, ?)""",
-            (item_id, set_id, body.title, body.category, body.markup, body.quantity, bank_pct, body.sort_order, _now())
+            (item_id, set_id, body.title, body.category, body.markup, body.quantity, bank_pct, sort_order, _now())
         )
         conn.commit()
         set_status = conn.execute("SELECT status FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
