@@ -1,8 +1,11 @@
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { catalogApi } from "../api";
 import { MagnifyingGlass, Plus, X, Trash } from "@phosphor-icons/react";
 import { ColumnFilter, AmountFilter } from "../components/TableFilters";
+import { Modal, ConfirmModal } from "../components/ui/Modal";
+import { CalcHeader, CalcSection, CalcRow, CalcFooter } from "../components/ui/Calc";
+import { BrandSelect } from "../components/ui/Selects";
 
 function Checkbox({ checked, indeterminate = false, onChange }: {
   checked: boolean; indeterminate?: boolean; onChange: () => void;
@@ -25,10 +28,6 @@ function Checkbox({ checked, indeterminate = false, onChange }: {
 function fmt(n: number) {
   if (!n) return "—";
   return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) + " ₽";
-}
-
-function fmtNum(n: number) {
-  return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n);
 }
 
 type LineType = "material" | "labor" | "delivery";
@@ -67,156 +66,11 @@ interface CatalogItemFull extends CatalogItem {
   }>;
 }
 
-function ConfirmModal({ message, onConfirm, onCancel }: {
-  message: string;
-  onConfirm: () => void;
-  onCancel: () => void;
-}) {
-  return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 1100, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ background: "#fff", padding: "28px 32px", maxWidth: 380, boxShadow: "0 8px 40px rgba(0,0,0,0.18)", display: "flex", flexDirection: "column", gap: 20 }}>
-        <div style={{ fontSize: 13, color: "#1A1A1A", lineHeight: 1.5 }}>{message}</div>
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button onClick={onCancel} style={{ padding: "7px 16px", background: "#F2EFE9", border: "none", cursor: "pointer", fontSize: 12, color: "#6B6355" }}>
-            Отмена
-          </button>
-          <button onClick={onConfirm} style={{ padding: "7px 16px", background: "#8B3A3A", border: "none", cursor: "pointer", fontSize: 12, color: "#fff", fontWeight: 600 }}>
-            Удалить безвозвратно
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-const TYPE_LABELS: Record<LineType, string> = {
-  material: "Материал",
-  labor: "Работа",
-  delivery: "Доставка",
-};
-
 let keyCounter = 0;
 function newKey() { return String(++keyCounter); }
 
 function emptyLine(type: LineType): Line {
   return { _key: newKey(), type, title: "", qty: 1, unit: type === "labor" ? "ч" : "шт", unit_price: 0 };
-}
-
-// ─── Material autocomplete row ────────────────────────────────────────────
-
-function MaterialRow({
-  line,
-  onChange,
-  onRemove,
-}: {
-  line: Line;
-  onChange: (l: Line) => void;
-  onRemove: () => void;
-}) {
-  const [materialSearch, setMaterialSearch] = useState(line.title);
-  const [showSuggestions, setShowSuggestions] = useState(false);
-
-  const { data: suggestions = [] } = useQuery({
-    queryKey: ["materials-suggest", materialSearch],
-    queryFn: () => catalogApi.materials(materialSearch || undefined),
-    enabled: line.type === "material" && showSuggestions && materialSearch.length > 0,
-  });
-
-  const lineTotal = line.qty * line.unit_price;
-
-  const fieldStyle: React.CSSProperties = {
-    border: "1px solid #EDEBE6",
-    background: "transparent",
-    fontSize: 12,
-    color: "#1A1A1A",
-    outline: "none",
-    padding: "4px 7px",
-    borderRadius: 0,
-    width: "100%",
-    boxSizing: "border-box",
-  };
-
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 60px 72px 90px 80px 20px", gap: 6, alignItems: "center", padding: "6px 0", borderBottom: "1px solid #F2EFE9" }}>
-      {/* Title */}
-      <div style={{ position: "relative" }}>
-        <input
-          style={fieldStyle}
-          value={line.type === "material" ? materialSearch : line.title}
-          placeholder={TYPE_LABELS[line.type]}
-          onChange={(e) => {
-            if (line.type === "material") {
-              setMaterialSearch(e.target.value);
-              setShowSuggestions(true);
-              onChange({ ...line, title: e.target.value, material_id: undefined });
-            } else {
-              onChange({ ...line, title: e.target.value });
-            }
-          }}
-          onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
-        />
-        {showSuggestions && (suggestions as any[]).length > 0 && (
-          <div style={{
-            position: "absolute", top: "100%", left: 0, right: 0, zIndex: 100,
-            background: "#FFFFFF", border: "1px solid #EDEBE6", boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
-            maxHeight: 180, overflowY: "auto",
-          }}>
-            {(suggestions as any[]).map((m: any) => (
-              <div
-                key={m.id}
-                onMouseDown={() => {
-                  setMaterialSearch(m.name);
-                  setShowSuggestions(false);
-                  onChange({ ...line, title: m.name, unit: m.unit || "шт", unit_price: m.price || 0, material_id: m.id });
-                }}
-                style={{ padding: "7px 10px", fontSize: 12, cursor: "pointer", borderBottom: "1px solid #F2EFE9" }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = "#FAF8F5")}
-                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-              >
-                <span style={{ color: "#1A1A1A" }}>{m.name}</span>
-                <span style={{ color: "#A89070", marginLeft: 8 }}>{m.unit} · {fmt(m.price)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Qty */}
-      <input
-        style={{ ...fieldStyle, textAlign: "right" }}
-        type="number"
-        min="0"
-        value={line.qty}
-        onChange={(e) => onChange({ ...line, qty: parseFloat(e.target.value) || 0 })}
-      />
-
-      {/* Unit */}
-      <input
-        style={fieldStyle}
-        value={line.unit}
-        onChange={(e) => onChange({ ...line, unit: e.target.value })}
-      />
-
-      {/* Price */}
-      <input
-        style={{ ...fieldStyle, textAlign: "right" }}
-        type="number"
-        min="0"
-        value={line.unit_price}
-        onChange={(e) => onChange({ ...line, unit_price: parseFloat(e.target.value) || 0 })}
-      />
-
-      {/* Total */}
-      <div style={{ fontSize: 12, color: "#1A1A1A", fontWeight: 600, textAlign: "right" }}>
-        {lineTotal > 0 ? fmtNum(lineTotal) : "—"}
-      </div>
-
-      {/* Remove */}
-      <button onClick={onRemove} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 0, display: "flex", alignItems: "center" }}>
-        <X size={13} />
-      </button>
-    </div>
-  );
 }
 
 // ─── Calculator Modal ────────────────────────────────────────────────────────
@@ -242,22 +96,13 @@ function CalculatorModal({
     item?.lines?.map((l) => ({ _key: newKey(), type: l.type as LineType, title: l.title, qty: l.qty, unit: l.unit, unit_price: l.unit_price, material_id: l.material_id })) ?? []
   );
   const [saving, setSaving] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const costTotal = lines.reduce((s, l) => s + l.qty * l.unit_price, 0);
-  const markupAmt = costTotal * markupPct / 100;
-  const salePrice = costTotal + markupAmt;
 
-  const updateLine = useCallback((key: string, updated: Line) => {
-    setLines((prev) => prev.map((l) => l._key === key ? updated : l));
-  }, []);
-
-  const removeLine = useCallback((key: string) => {
-    setLines((prev) => prev.filter((l) => l._key !== key));
-  }, []);
-
-  const addLine = (type: LineType) => setLines((prev) => [...prev, emptyLine(type)]);
+  const updateLine = (key: string, updated: Line) => setLines(prev => prev.map(l => l._key === key ? updated : l));
+  const removeLine = (key: string) => setLines(prev => prev.filter(l => l._key !== key));
+  const addLine = (type: LineType) => setLines(prev => [...prev, emptyLine(type)]);
 
   const save = async () => {
     if (!title.trim()) return;
@@ -274,262 +119,102 @@ function CalculatorModal({
       })),
     };
     try {
-      if (isNew) {
-        await catalogApi.items.create(payload);
-      } else {
-        await catalogApi.items.update(item!.id, payload);
-      }
+      if (isNew) await catalogApi.items.create(payload);
+      else await catalogApi.items.update(item!.id, payload);
       qc.invalidateQueries({ queryKey: ["catalog-items"] });
       onSaved();
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   };
 
   const deleteItem = async () => {
     if (!item?.id) return;
-    setDeleting(true);
-    try {
-      await catalogApi.items.delete(item.id);
-      qc.invalidateQueries({ queryKey: ["catalog-items"] });
-      onSaved();
-    } finally {
-      setDeleting(false);
-    }
+    await catalogApi.items.delete(item.id);
+    qc.invalidateQueries({ queryKey: ["catalog-items"] });
+    onSaved();
   };
 
-  const materialLines = lines.filter((l) => l.type === "material");
-  const laborLines = lines.filter((l) => l.type === "labor");
-  const deliveryLines = lines.filter((l) => l.type === "delivery");
+  const materialLines = lines.filter(l => l.type === "material");
+  const laborLines = lines.filter(l => l.type === "labor");
+  const deliveryLines = lines.filter(l => l.type === "delivery");
 
   const inputBase: React.CSSProperties = {
-    border: "1px solid #EDEBE6", background: "transparent",
-    fontSize: 13, color: "#1A1A1A", outline: "none",
-    padding: "6px 10px", borderRadius: 0, boxSizing: "border-box",
+    border: "1px solid #EDEBE6", background: "transparent", fontSize: 13, color: "#1A1A1A",
+    outline: "none", padding: "6px 10px", boxSizing: "border-box", width: "100%",
   };
+  const fieldLabel: React.CSSProperties = { fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 };
+  const CATEGORIES = ["Столы", "Уличная мебель", "Мягкая мебель", "Металлокаркасы", "Стулья", "Каркас дивана", "Кашпо", "Перегородки", "Полки", "Скамейки", "Доставка"];
 
-  const sectionLabel: React.CSSProperties = {
-    fontSize: 10, color: "#A89070", letterSpacing: "0.06em",
-    marginBottom: 8, marginTop: 20,
-  };
-
-  const colHeader: React.CSSProperties = {
-    fontSize: 10, color: "#A89070", letterSpacing: "0.04em",
-  };
-
-  const addBtn: React.CSSProperties = {
-    background: "none", border: "none", cursor: "pointer",
-    fontSize: 11, color: "#A89070", padding: "6px 0",
-    display: "flex", alignItems: "center", gap: 4,
-  };
+  const renderRow = (l: Line) => (
+    <CalcRow
+      key={l._key} line={l} isMaterial={l.type === "material"}
+      withAutocomplete={l.type === "material"} materialsFetch={catalogApi.materials}
+      onPatch={p => updateLine(l._key, { ...l, ...p })}
+      onRemove={() => removeLine(l._key)}
+      onPickMaterial={m => updateLine(l._key, { ...l, title: m.name, unit: m.unit || "шт", unit_price: m.price || 0, material_id: m.id })}
+    />
+  );
 
   return (
     <>
-    <div
-      style={{
-        position: "fixed", inset: 0, zIndex: 1000,
-        background: "rgba(0,0,0,0.32)",
-        display: "flex", alignItems: "center", justifyContent: "center",
-      }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-    >
-      <div style={{
-        background: "#FFFFFF",
-        width: 680, maxWidth: "95vw",
-        maxHeight: "90vh",
-        display: "flex", flexDirection: "column",
-        boxShadow: "0 8px 40px rgba(0,0,0,0.16)",
-      }}>
-        {/* Modal header */}
-        <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid #EDEBE6", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-          <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.06em" }}>
-            {isNew ? "НОВОЕ ИЗДЕЛИЕ" : "РЕДАКТИРОВАТЬ"}
-          </div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070", display: "flex", alignItems: "center" }}>
-            <X size={16} />
-          </button>
-        </div>
+      <Modal
+        size="lg"
+        eyebrow={isNew ? "НОВОЕ ИЗДЕЛИЕ" : "РЕДАКТИРОВАТЬ"}
+        onClose={onClose}
+        onDelete={!isNew ? () => setConfirmDelete(true) : undefined}
+        onCancel={onClose}
+        onSave={save}
+        saveLabel="Сохранить в каталог"
+        saving={saving}
+        canSave={!!title.trim()}
+      >
+        <div style={{ padding: "16px 24px 0" }}>
+          <div style={fieldLabel}>НАЗВАНИЕ</div>
+          <input style={inputBase} placeholder="Название изделия" value={title} onChange={e => setTitle(e.target.value)} autoFocus />
 
-        {/* Scrollable body */}
-        <div style={{ overflowY: "auto", flex: 1, padding: "0 24px 24px" }}>
-
-          {/* Name */}
-          <div style={{ marginTop: 20 }}>
-            <div style={{ ...sectionLabel, marginTop: 0, marginBottom: 4 }}>НАЗВАНИЕ</div>
-            <input
-              style={{ ...inputBase, width: "100%" }}
-              placeholder="Название изделия"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              autoFocus
-            />
-          </div>
-
-          {/* Category + Brand */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 200px", gap: 10, marginTop: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 16, marginTop: 14, alignItems: "end" }}>
             <div>
-              <div style={{ ...sectionLabel, marginTop: 0, marginBottom: 4 }}>КАТЕГОРИЯ</div>
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                style={{ ...inputBase, width: "100%", appearance: "none", cursor: "pointer" }}
-              >
+              <div style={fieldLabel}>КАТЕГОРИЯ</div>
+              <select value={category} onChange={e => setCategory(e.target.value)} style={{ ...inputBase, appearance: "none", cursor: "pointer" }}>
                 <option value="">— не выбрана —</option>
-                {["Столы", "Уличная мебель", "Мягкая мебель", "Металлокаркасы", "Стулья", "Каркас дивана", "Кашпо", "Перегородки", "Полки", "Скамейки", "Доставка"].map(c => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-                {category && !["Столы", "Уличная мебель", "Мягкая мебель", "Металлокаркасы", "Стулья", "Каркас дивана", "Кашпо", "Перегородки", "Полки", "Скамейки", "Доставка"].includes(category) && (
-                  <option value={category}>{category}</option>
-                )}
+                {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                {category && !CATEGORIES.includes(category) && <option value={category}>{category}</option>}
               </select>
             </div>
             <div>
-              <div style={{ ...sectionLabel, marginTop: 0, marginBottom: 4 }}>БРЕНД</div>
-              <div style={{ display: "flex", gap: 6 }}>
-                {([null, "MeRA", "pbpb", "Транзит"] as (string | null)[]).map((b) => {
-                  const colors: Record<string, string> = { MeRA: "#2E6DA4", pbpb: "#7B4F9E", Транзит: "#3D8C6B" };
-                  const active = brand === b;
-                  const color = b ? colors[b] : "#A89070";
-                  return (
-                    <button
-                      key={String(b)}
-                      onClick={() => setBrand(b)}
-                      style={{
-                        background: active ? color : "transparent",
-                        border: `1px solid ${active ? color : "#EDEBE6"}`,
-                        color: active ? "#FFFFFF" : color,
-                        fontSize: 11, fontWeight: 600, padding: "4px 8px",
-                        cursor: "pointer", transition: "all 0.12s",
-                      }}
-                    >
-                      {b ?? "—"}
-                    </button>
-                  );
-                })}
-              </div>
+              <div style={fieldLabel}>БРЕНД</div>
+              <BrandSelect value={brand} onChange={setBrand} />
             </div>
           </div>
 
-          {/* Column headers for lines */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 60px 72px 90px 80px 20px", gap: 6, marginTop: 20, padding: "0 0 4px" }}>
-            <div style={colHeader}>Наименование</div>
-            <div style={{ ...colHeader, textAlign: "right" }}>Кол-во</div>
-            <div style={colHeader}>Ед.</div>
-            <div style={{ ...colHeader, textAlign: "right" }}>Цена, ₽</div>
-            <div style={{ ...colHeader, textAlign: "right" }}>Итого, ₽</div>
-            <div />
-          </div>
+          <div style={{ marginTop: 18 }}><CalcHeader /></div>
+          <CalcSection label="Материалы" addLabel="Добавить материал" onAdd={() => addLine("material")}>
+            {materialLines.map(renderRow)}
+          </CalcSection>
+          <CalcSection label="Работы" addLabel="Добавить работу" onAdd={() => addLine("labor")}>
+            {laborLines.map(renderRow)}
+          </CalcSection>
+          <CalcSection label="Доставка" addLabel="Добавить доставку" onAdd={() => addLine("delivery")}>
+            {deliveryLines.map(renderRow)}
+          </CalcSection>
 
-          {/* МАТЕРИАЛЫ */}
-          <div style={{ ...sectionLabel }}>МАТЕРИАЛЫ</div>
-          {materialLines.map((l) => (
-            <MaterialRow key={l._key} line={l} onChange={(u) => updateLine(l._key, u)} onRemove={() => removeLine(l._key)} />
-          ))}
-          <button style={addBtn} onClick={() => addLine("material")}>
-            <Plus size={11} /> Добавить материал
-          </button>
-
-          {/* РАБОТЫ */}
-          <div style={sectionLabel}>РАБОТЫ</div>
-          {laborLines.map((l) => (
-            <MaterialRow key={l._key} line={l} onChange={(u) => updateLine(l._key, u)} onRemove={() => removeLine(l._key)} />
-          ))}
-          <button style={addBtn} onClick={() => addLine("labor")}>
-            <Plus size={11} /> Добавить работу
-          </button>
-
-          {/* ДОСТАВКА */}
-          <div style={sectionLabel}>ДОСТАВКА</div>
-          {deliveryLines.map((l) => (
-            <MaterialRow key={l._key} line={l} onChange={(u) => updateLine(l._key, u)} onRemove={() => removeLine(l._key)} />
-          ))}
-          <button style={addBtn} onClick={() => addLine("delivery")}>
-            <Plus size={11} /> Добавить доставку
-          </button>
-
-          {/* Notes */}
           {(notes || isNew) && (
             <>
-              <div style={sectionLabel}>ПРИМЕЧАНИЕ</div>
-              <textarea
-                style={{ ...inputBase, width: "100%", resize: "vertical", minHeight: 48, fontFamily: "inherit" }}
-                placeholder="Примечание..."
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-              />
+              <div style={{ ...fieldLabel, marginTop: 18 }}>ПРИМЕЧАНИЕ</div>
+              <textarea style={{ ...inputBase, resize: "vertical", minHeight: 48, fontFamily: "inherit" }} placeholder="Примечание..." value={notes} onChange={e => setNotes(e.target.value)} />
             </>
           )}
-
-          {/* Summary */}
-          <div style={{ marginTop: 24, borderTop: "2px solid #EDEBE6", paddingTop: 16 }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 320, marginLeft: "auto" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#A89070" }}>
-                <span>Себестоимость</span>
-                <span style={{ fontWeight: 600, color: "#1A1A1A" }}>{fmt(costTotal)}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, color: "#A89070" }}>
-                <span>Наценка</span>
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <input
-                    type="number"
-                    min="0"
-                    max="1000"
-                    value={markupPct}
-                    onChange={(e) => setMarkupPct(parseFloat(e.target.value) || 0)}
-                    style={{ ...inputBase, width: 56, fontSize: 12, padding: "3px 7px", textAlign: "right" }}
-                  />
-                  <span style={{ fontSize: 11 }}>%</span>
-                  <span style={{ color: "#1A1A1A", fontWeight: 600, minWidth: 72, textAlign: "right" }}>+ {fmt(markupAmt)}</span>
-                </div>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 15, fontWeight: 700, color: "#1A1A1A", borderTop: "1px solid #EDEBE6", paddingTop: 10 }}>
-                <span>Продажная цена</span>
-                <span style={{ color: "#E8592A" }}>{fmt(salePrice)}</span>
-              </div>
-            </div>
-          </div>
         </div>
 
-        {/* Footer buttons */}
-        <div style={{ padding: "14px 24px", borderTop: "1px solid #EDEBE6", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
-          {!isNew ? (
-            <button
-              onClick={() => setConfirmDelete(true)}
-              disabled={deleting}
-              style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#8B3A3A", display: "flex", alignItems: "center", gap: 5 }}
-            >
-              <Trash size={13} /> Удалить
-            </button>
-          ) : <div />}
-          <div style={{ display: "flex", gap: 8 }}>
-            <button
-              onClick={onClose}
-              style={{ padding: "7px 16px", background: "#F2EFE9", border: "none", cursor: "pointer", fontSize: 12, color: "#6B6355" }}
-            >
-              Отмена
-            </button>
-            <button
-              onClick={save}
-              disabled={saving || !title.trim()}
-              style={{
-                padding: "7px 20px", background: title.trim() ? "#E8592A" : "#EDEBE6",
-                border: "none", cursor: title.trim() ? "pointer" : "default",
-                fontSize: 12, color: title.trim() ? "#FFFFFF" : "#A89070", fontWeight: 600,
-              }}
-            >
-              {saving ? "Сохраняем..." : "Сохранить в каталог"}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-    {confirmDelete && (
-      <ConfirmModal
-        message={`Удалить «${item?.title}» из каталога? Это действие безвозвратно.`}
-        onConfirm={() => { setConfirmDelete(false); deleteItem(); }}
-        onCancel={() => setConfirmDelete(false)}
-      />
-    )}
+        <CalcFooter cost={costTotal} pct={markupPct} onPctChange={setMarkupPct} />
+      </Modal>
+
+      {confirmDelete && (
+        <ConfirmModal
+          message={`Удалить «${item?.title}» из каталога? Это действие безвозвратно.`}
+          onConfirm={() => { setConfirmDelete(false); deleteItem(); }}
+          onCancel={() => setConfirmDelete(false)}
+        />
+      )}
     </>
   );
 }

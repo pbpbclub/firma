@@ -3,24 +3,14 @@ import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ordersApi, estimatesApi, catalogApi, mastersApi, workTypesApi } from "../api";
 import { useNavigationGuard, NavigationGuardModal } from "../components/NavigationGuard";
+import { Modal } from "../components/ui/Modal";
+import { CalcHeader, CalcSection, CalcRow, CalcFooter } from "../components/ui/Calc";
+import { BrandSelect, EditableText } from "../components/ui/Selects";
+import { markupToPct, pctToMarkup } from "../components/ui/priceMath";
 import {
-  ArrowLeft, Plus, Trash, Package, Wrench, Truck, Cube,
+  ArrowLeft, Plus, Trash, Package, Cube,
   X, FileText, DotsSixVertical, PencilSimple, FloppyDisk, ListChecks, CheckCircle, Circle,
 } from "@phosphor-icons/react";
-
-const TYPE_ICONS: Record<string, any> = {
-  material: Cube,
-  labor:    Wrench,
-  service:  Truck,
-  delivery: Truck,
-};
-const TYPE_COLORS: Record<string, string> = {
-  material: "#6B6355",
-  labor:    "#4A7C59",
-  service:  "#A89070",
-  delivery: "#A89070",
-};
-const TYPE_CYCLE = ["material", "labor", "service"];
 
 function fmt(n: number | null | undefined) {
   if (!n) return "—";
@@ -82,148 +72,7 @@ function EditCell({
   );
 }
 
-const BRANDS = [
-  { value: "MeRA",    color: "#2E6DA4" },
-  { value: "pbpb",    color: "#7B4F9E" },
-  { value: "Транзит", color: "#3D8C6B" },
-];
-
 // ── Item detail modal ────────────────────────────────────────────────────────
-
-const selectStyle: React.CSSProperties = {
-  width: "100%", border: "none", borderBottom: "1px solid #EDEBE6",
-  outline: "none", fontSize: 11, color: "#1A1A1A", background: "transparent",
-  padding: "2px 0", boxSizing: "border-box", cursor: "pointer", appearance: "none",
-};
-
-// Work-type dropdown (for non-material lines)
-function WorkTypeSelect({ line, workTypes, onPick, onCreate }: {
-  line: any;
-  workTypes: any[];
-  onPick: (wt: any | null) => void;
-  onCreate: (name: string) => void;
-}) {
-  const [adding, setAdding] = useState(false);
-  const [val, setVal] = useState("");
-  if (adding) {
-    return (
-      <input
-        autoFocus value={val}
-        onChange={e => setVal(e.target.value)}
-        onBlur={() => { const t = val.trim(); if (t) onCreate(t); setAdding(false); setVal(""); }}
-        onKeyDown={e => { if (e.key === "Enter") { const t = val.trim(); if (t) onCreate(t); setAdding(false); setVal(""); } if (e.key === "Escape") { setAdding(false); setVal(""); } }}
-        placeholder="Новый вид работ"
-        style={{ ...selectStyle, borderBottom: "1px solid #E8592A", cursor: "text", fontSize: 12 }}
-      />
-    );
-  }
-  return (
-    <select
-      value={line.work_type_id || ""}
-      onChange={e => {
-        const v = e.target.value;
-        if (v === "__add__") { setAdding(true); return; }
-        onPick(workTypes.find((w: any) => w.id === v) || null);
-      }}
-      style={{ ...selectStyle, fontSize: 12, color: line.work_type_id ? "#1A1A1A" : "#C8C0B0" }}
-    >
-      <option value="">— работа —</option>
-      {workTypes.map((w: any) => <option key={w.id} value={w.id}>{w.name}</option>)}
-      <option value="__add__">+ Добавить вид работ…</option>
-    </select>
-  );
-}
-
-const UNIT_OPTIONS = ["шт", "м.п.", "м²", "м³", "кг", "л", "компл.", "услуга", "ч"];
-
-// Unit dropdown — preset units + custom
-function UnitSelect({ line, onSave }: {
-  line: any;
-  onSave: (unit: string) => void;
-}) {
-  const [adding, setAdding] = useState(false);
-  const [val, setVal] = useState("");
-  const current = line.unit || "шт";
-  const isCustom = !UNIT_OPTIONS.includes(current);
-  if (adding) {
-    return (
-      <input
-        autoFocus value={val}
-        onChange={e => setVal(e.target.value)}
-        onBlur={() => { const t = val.trim(); if (t) onSave(t); setAdding(false); setVal(""); }}
-        onKeyDown={e => { if (e.key === "Enter") { const t = val.trim(); if (t) onSave(t); setAdding(false); setVal(""); } if (e.key === "Escape") { setAdding(false); setVal(""); } }}
-        placeholder="ед."
-        style={{ ...selectStyle, borderBottom: "1px solid #E8592A", cursor: "text" }}
-      />
-    );
-  }
-  return (
-    <select
-      value={isCustom ? "__custom__" : current}
-      onChange={e => {
-        const v = e.target.value;
-        if (v === "__add__") { setAdding(true); return; }
-        if (v === "__custom__") return;
-        onSave(v);
-      }}
-      style={{ ...selectStyle, color: "#6B6355" }}
-    >
-      {isCustom && <option value="__custom__">{current}</option>}
-      {UNIT_OPTIONS.map(u => <option key={u} value={u}>{u}</option>)}
-      <option value="__add__">+ своя…</option>
-    </select>
-  );
-}
-
-// Contractor dropdown — sectioned by work type, with add
-function ContractorSelect({ line, masters, onPickMaster, onCreateMaster }: {
-  line: any;
-  masters: any[];
-  onPickMaster: (masterId: string) => void;
-  onCreateMaster: (name: string) => void;
-}) {
-  const [adding, setAdding] = useState(false);
-  const [val, setVal] = useState("");
-  const wtId = line.work_type_id;
-  const linked = wtId ? masters.filter((m: any) => (m.work_type_ids || []).includes(wtId)) : [];
-  const linkedIds = new Set(linked.map((m: any) => m.id));
-  const others = masters.filter((m: any) => !linkedIds.has(m.id));
-
-  if (adding) {
-    return (
-      <input
-        autoFocus value={val}
-        onChange={e => setVal(e.target.value)}
-        onBlur={() => { const t = val.trim(); if (t) onCreateMaster(t); setAdding(false); setVal(""); }}
-        onKeyDown={e => { if (e.key === "Enter") { const t = val.trim(); if (t) onCreateMaster(t); setAdding(false); setVal(""); } if (e.key === "Escape") { setAdding(false); setVal(""); } }}
-        placeholder="Новый исполнитель"
-        style={{ ...selectStyle, borderBottom: "1px solid #E8592A", cursor: "text", fontSize: 10 }}
-      />
-    );
-  }
-  return (
-    <select
-      value={line.master_id || ""}
-      onChange={e => {
-        const v = e.target.value;
-        if (v === "__add__") { setAdding(true); return; }
-        if (v) onPickMaster(v);
-      }}
-      style={{ ...selectStyle, fontSize: 10, color: line.master_id ? "#1A1A1A" : "#C8C0B0" }}
-    >
-      <option value="">— исполнитель —</option>
-      {linked.length > 0 && (
-        <optgroup label="По этому виду работ">
-          {linked.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
-        </optgroup>
-      )}
-      <optgroup label={linked.length > 0 ? "Все исполнители" : "Исполнители"}>
-        {others.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
-      </optgroup>
-      <option value="__add__">+ Добавить исполнителя…</option>
-    </select>
-  );
-}
 
 function ItemModal({ item, onClose, onRefetch }: {
   item: any;
@@ -231,7 +80,6 @@ function ItemModal({ item, onClose, onRefetch }: {
   onRefetch: () => void;
 }) {
   const lines: any[] = item.lines ?? [];
-  const gridCols = "20px 1fr 52px 68px 88px 80px 130px 24px";
   const [syncing, setSyncing] = useState(false);
   const [synced, setSynced] = useState(false);
   const [masters, setMasters] = useState<any[]>([]);
@@ -286,176 +134,99 @@ function ItemModal({ item, onClose, onRefetch }: {
     }
   };
 
-  return (
-    <div
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200 }}
-      onClick={onClose}
+  const materialLines = lines.filter((l: any) => l.type === "material");
+  const laborLines = lines.filter((l: any) => l.type === "labor" || l.type === "service");
+  const deliveryLines = lines.filter((l: any) => l.type === "delivery");
+  const perUnitCost = lines.reduce((s: number, l: any) => s + (l.line_total || 0), 0);
+
+  const addLine = (type: string) =>
+    save(() => estimatesApi.addLine(item.id, { type, title: "", qty: 1, unit: type === "labor" ? "ч" : "шт", unit_price: 0 }));
+
+  const changeQty = (v: string) => {
+    const newQty = parseInt(v) || 1;
+    const oldQty = item.quantity || 1;
+    const costUnit = (item.cost_total || 0) / oldQty;
+    const saleUnit = (item.sale_price || 0) / oldQty;
+    const payload: any = { quantity: newQty, sale_price: Math.round(saleUnit * newQty) };
+    if ((item.lines?.length ?? 0) === 0) payload.cost_total = Math.round(costUnit * newQty);
+    save(() => estimatesApi.updateItem(item.id, payload));
+  };
+
+  const renderRow = (line: any) => (
+    <CalcRow
+      key={line.id}
+      line={line}
+      isMaterial={line.type === "material"}
+      withContractor
+      workTypes={workTypes}
+      masters={masters}
+      onPatch={p => save(() => estimatesApi.updateLine(line.id, p))}
+      onRemove={() => save(() => estimatesApi.deleteLine(line.id))}
+      onPickWorkType={wt => save(() => estimatesApi.updateLine(line.id, { work_type_id: wt?.id }))}
+      onCreateWorkType={name => createWorkType(line, name)}
+      onPickMaster={mid => pickMaster(line, mid)}
+      onCreateMaster={name => createMaster(line, name)}
+    />
+  );
+
+  const fieldLabel: React.CSSProperties = { fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 };
+
+  const syncBtn = (
+    <button
+      onClick={handleSyncToCatalog}
+      disabled={syncing}
+      style={{
+        fontSize: 11, fontWeight: 600, cursor: syncing ? "default" : "pointer",
+        border: `1px solid ${synced ? "#4A7C59" : "#EDEBE6"}`,
+        background: synced ? "#4A7C59" : "transparent",
+        color: synced ? "#FFFFFF" : syncing ? "#C8C0B0" : "#6B6355",
+        padding: "4px 10px", display: "flex", alignItems: "center", gap: 4,
+      }}
+      onMouseEnter={e => { if (!syncing && !synced) (e.currentTarget as HTMLElement).style.borderColor = "#1A1A1A"; }}
+      onMouseLeave={e => { if (!synced) (e.currentTarget as HTMLElement).style.borderColor = "#EDEBE6"; }}
     >
-      <div
-        style={{ background: "#FFFFFF", width: 680, maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,0.16)" }}
-        onClick={e => e.stopPropagation()}
-      >
-        {/* Modal header */}
-        <div style={{ padding: "16px 20px", borderBottom: "1px solid #EDEBE6", display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ flex: 1, fontSize: 15, fontWeight: 700, color: "#1A1A1A" }}>
-            <EditCell
-              value={item.title}
-              placeholder="Название позиции"
-              onSave={v => save(() => estimatesApi.updateItem(item.id, { title: v }))}
-              style={{ fontSize: 15, fontWeight: 700 }}
-            />
-          </div>
-          {/* Brand selector */}
-          <div style={{ display: "flex", gap: 4 }}>
-            {BRANDS.map(b => (
-              <button
-                key={b.value}
-                onClick={() => save(() => estimatesApi.updateItem(item.id, { brand: item.brand === b.value ? null : b.value }))}
-                style={{
-                  padding: "2px 8px", fontSize: 10, cursor: "pointer", fontWeight: 600,
-                  border: `1px solid ${item.brand === b.value ? b.color : "#EDEBE6"}`,
-                  background: item.brand === b.value ? b.color : "transparent",
-                  color: item.brand === b.value ? "#FFFFFF" : "#A89070",
-                }}
-              >{b.value}</button>
-            ))}
-          </div>
-          <button
-            onClick={onClose}
-            style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070", display: "flex", padding: 4 }}
-            onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
-            onMouseLeave={e => (e.currentTarget.style.color = "#A89070")}
-          >
-            <X size={16} />
-          </button>
+      <Package size={11} />
+      {synced ? "Сохранено ✓" : item.catalog_item_id ? "Обновить в каталоге" : "Сохранить в каталог"}
+    </button>
+  );
+
+  return (
+    <Modal size="lg" eyebrow="ПОЗИЦИЯ СМЕТЫ" onClose={onClose} footerLeft={syncBtn}>
+      <div style={{ padding: "16px 24px 0" }}>
+        <div style={fieldLabel}>НАЗВАНИЕ</div>
+        <div style={{ fontSize: 15, fontWeight: 700, color: "#1A1A1A" }}>
+          <EditableText value={item.title} placeholder="Название позиции"
+            onSave={v => save(() => estimatesApi.updateItem(item.id, { title: v }))} />
         </div>
 
-        {/* Lines header */}
-        <div style={{ display: "grid", gridTemplateColumns: gridCols, padding: "7px 20px", gap: 8, borderBottom: "1px solid #EDEBE6" }}>
-          {["", "Наименование", "Ед.", "Кол-во", "Цена", "Итого", "Исполнитель", ""].map((h, i) => (
-            <div key={i} style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>{h}</div>
-          ))}
-        </div>
-
-        {/* Lines */}
-        <div style={{ flex: 1, overflowY: "auto" }}>
-          {lines.length === 0 && (
-            <div style={{ padding: "28px 20px", textAlign: "center", color: "#C8C0B0", fontSize: 12 }}>
-              Загружаем...
-            </div>
-          )}
-          {lines.map((line: any) => {
-            const Icon = TYPE_ICONS[line.type] ?? Cube;
-            const nextType = TYPE_CYCLE[(TYPE_CYCLE.indexOf(line.type) + 1) % TYPE_CYCLE.length];
-            return (
-              <div
-                key={line.id}
-                style={{ display: "grid", gridTemplateColumns: gridCols, padding: "7px 20px", gap: 8, alignItems: "center", borderBottom: "1px solid #F2EFE9" }}
-              >
-                <button
-                  onClick={() => save(() => estimatesApi.updateLine(line.id, { type: nextType }))}
-                  title={line.type}
-                  style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "flex", color: TYPE_COLORS[line.type] ?? "#A89070" }}
-                >
-                  <Icon size={12} />
-                </button>
-                <div style={{ fontSize: 12, color: "#1A1A1A" }}>
-                  {line.type === "material" ? (
-                    <EditCell
-                      value={line.title}
-                      placeholder="Название"
-                      onSave={v => save(() => estimatesApi.updateLine(line.id, { title: v }))}
-                    />
-                  ) : (
-                    <WorkTypeSelect
-                      line={line}
-                      workTypes={workTypes}
-                      onPick={wt => save(() => estimatesApi.updateLine(line.id, { work_type_id: wt?.id }))}
-                      onCreate={name => createWorkType(line, name)}
-                    />
-                  )}
-                </div>
-                <div style={{ fontSize: 11, color: "#6B6355" }}>
-                  <UnitSelect
-                    line={line}
-                    onSave={v => save(() => estimatesApi.updateLine(line.id, { unit: v }))}
-                  />
-                </div>
-                <div style={{ fontSize: 12 }}>
-                  <EditCell
-                    value={line.qty}
-                    numeric
-                    onSave={v => save(() => estimatesApi.updateLine(line.id, { qty: parseFloat(v) || 1 }))}
-                  />
-                </div>
-                <div style={{ fontSize: 12 }}>
-                  <EditCell
-                    value={line.unit_price}
-                    numeric
-                    onSave={v => save(() => estimatesApi.updateLine(line.id, { unit_price: parseFloat(v) || 0 }))}
-                  />
-                </div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#1A1A1A" }}>
-                  {fmt(line.line_total)}
-                </div>
-                <ContractorSelect
-                  line={line}
-                  masters={masters}
-                  onPickMaster={mid => pickMaster(line, mid)}
-                  onCreateMaster={name => createMaster(line, name)}
-                />
-                <button
-                  onClick={() => save(() => estimatesApi.deleteLine(line.id))}
-                  style={{ background: "none", border: "none", cursor: "pointer", color: "#D0C8C0", padding: 0, display: "flex" }}
-                  onMouseEnter={e => (e.currentTarget.style.color = "#8B3A3A")}
-                  onMouseLeave={e => (e.currentTarget.style.color = "#D0C8C0")}
-                >
-                  <Trash size={12} />
-                </button>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Add line */}
-        <div style={{ padding: "8px 20px", borderTop: "1px solid #F2EFE9" }}>
-          <button
-            onClick={() => save(() => estimatesApi.addLine(item.id, { type: "material", title: "", qty: 1, unit: "шт", unit_price: 0 }))}
-            style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#A89070", padding: 0, display: "flex", alignItems: "center", gap: 5 }}
-            onMouseEnter={e => (e.currentTarget.style.color = "#E8592A")}
-            onMouseLeave={e => (e.currentTarget.style.color = "#A89070")}
-          >
-            <Plus size={11} /> Добавить строку
-          </button>
-        </div>
-
-        {/* Modal footer: totals + catalog save */}
-        <div style={{ padding: "12px 20px", borderTop: "1px solid #EDEBE6", background: "#FAF8F5", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <button
-            onClick={handleSyncToCatalog}
-            disabled={syncing}
-            style={{
-              fontSize: 11, fontWeight: 600, cursor: syncing ? "default" : "pointer",
-              border: `1px solid ${synced ? "#4A7C59" : "#EDEBE6"}`,
-              background: synced ? "#4A7C59" : "transparent",
-              color: synced ? "#FFFFFF" : syncing ? "#C8C0B0" : "#6B6355",
-              padding: "4px 10px", display: "flex", alignItems: "center", gap: 4,
-            }}
-            onMouseEnter={e => { if (!syncing && !synced) (e.currentTarget as HTMLElement).style.borderColor = "#1A1A1A"; }}
-            onMouseLeave={e => { if (!synced) (e.currentTarget as HTMLElement).style.borderColor = "#EDEBE6"; }}
-          >
-            <Package size={11} />
-            {synced ? "Сохранено ✓" : item.catalog_item_id ? "Обновить в каталоге" : "Сохранить в каталог"}
-          </button>
-          <div style={{ textAlign: "right" }}>
-            <div style={{ fontSize: 10, color: "#A89070", marginBottom: 2 }}>СЕБЕСТОИМОСТЬ 1 ШТ</div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: "#6B6355" }}>
-              {fmt(lines.reduce((s: number, l: any) => s + (l.line_total || 0), 0))}
+        <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: 16, marginTop: 14, alignItems: "end" }}>
+          <div>
+            <div style={fieldLabel}>КОЛ-ВО</div>
+            <div style={{ fontSize: 13, color: "#1A1A1A", width: 70, borderBottom: "1px solid #EDEBE6" }}>
+              <EditableText value={item.quantity ?? 1} numeric onSave={changeQty} />
             </div>
           </div>
+          <div>
+            <div style={fieldLabel}>БРЕНД</div>
+            <BrandSelect value={item.brand ?? null}
+              onChange={b => save(() => estimatesApi.updateItem(item.id, { brand: b }))} />
+          </div>
         </div>
+
+        <div style={{ marginTop: 18 }}><CalcHeader withContractor /></div>
+        <CalcSection label="Материалы" addLabel="Добавить материал" onAdd={() => addLine("material")}>
+          {materialLines.map(renderRow)}
+        </CalcSection>
+        <CalcSection label="Работы" addLabel="Добавить работу" onAdd={() => addLine("labor")}>
+          {laborLines.map(renderRow)}
+        </CalcSection>
+        <CalcSection label="Доставка" addLabel="Добавить доставку" onAdd={() => addLine("delivery")}>
+          {deliveryLines.map(renderRow)}
+        </CalcSection>
       </div>
-    </div>
+
+      <CalcFooter cost={perUnitCost} pct={markupToPct(item.markup)} withQuantity quantity={item.quantity ?? 1} />
+    </Modal>
   );
 }
 
@@ -1051,24 +822,27 @@ export default function EstimateEditor() {
                   )}
                 </div>
 
-                {/* Markup — задаёт цену: sale = cost × markup */}
+                {/* Наценка — в процентах; справа производный множитель ×N */}
                 <div style={{ fontSize: 12, color: "#6B6355" }}>
                   {editMode ? (
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
-                      ×<EditCell
-                        value={item.markup ?? 2}
+                      +<EditCell
+                        value={markupToPct(item.markup)}
                         numeric
                         onSave={v => {
-                          const markup = parseFloat(v) || 1;
+                          const markup = pctToMarkup(parseFloat(v) || 0);
                           const cost = item.cost_total || 0;
                           const payload: any = { markup };
                           if (cost > 0) payload.sale_price = Math.round(cost * markup);
                           estimatesApi.updateItem(item.id, payload).then(() => refetch());
                         }}
-                      />
+                      />%
                     </span>
                   ) : (
-                    `×${item.markup ?? 2}`
+                    <span style={{ display: "inline-flex", alignItems: "baseline", gap: 4 }}>
+                      <span>+{markupToPct(item.markup)}%</span>
+                      <span style={{ fontSize: 10, color: "#C8C0B0" }}>×{pctToMarkup(markupToPct(item.markup))}</span>
+                    </span>
                   )}
                 </div>
 
@@ -1223,7 +997,7 @@ export default function EstimateEditor() {
               <div />
               <div style={{ fontSize: 11, color: "#A89070" }}>Итого</div>
               <div style={{ fontSize: 12, color: "#6B6355" }}>{totalQty}</div>
-              <div style={{ fontSize: 12, color: "#6B6355" }}>×{avgMarkup.toFixed(2)}</div>
+              <div style={{ fontSize: 12, color: "#6B6355" }}>{(() => { const p = markupToPct(avgMarkup); return `${p >= 0 ? "+" : ""}${p}%`; })()}</div>
               <div style={{ fontSize: 11, color: "#A89070", textAlign: "right" }}>{totalQty > 1 ? fmt(Math.round(totalCost / totalQty)) : "—"}</div>
               <div style={{ fontSize: 12, color: "#6B6355", textAlign: "right" }}>{fmt(totalCost)}</div>
               <div style={{ fontSize: 12, color: totalFact > totalCost ? "#8B3A3A" : totalFact > 0 ? "#4A7C59" : "#C8C0B0", textAlign: "right" }}>
