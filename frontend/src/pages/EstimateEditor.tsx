@@ -707,7 +707,15 @@ export default function EstimateEditor() {
           </button>
 
           <span style={{ color: "#EDEBE6" }}>·</span>
-          <span style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A", whiteSpace: "nowrap" }}>{order?.title ?? orderId}</span>
+          <button
+            onClick={() => navigate(`/orders/${orderId}`)}
+            title="Открыть сводку по заказу"
+            style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 13, fontWeight: 500, color: "#1A1A1A", whiteSpace: "nowrap", fontFamily: "inherit", borderBottom: "1px solid transparent" }}
+            onMouseEnter={e => { e.currentTarget.style.color = "#E8592A"; e.currentTarget.style.borderBottomColor = "#E8592A"; }}
+            onMouseLeave={e => { e.currentTarget.style.color = "#1A1A1A"; e.currentTarget.style.borderBottomColor = "transparent"; }}
+          >
+            {order?.title ?? orderId}
+          </button>
         </div>
 
         {/* Middle scrollable: estimate tabs */}
