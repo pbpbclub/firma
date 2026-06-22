@@ -134,6 +134,80 @@ def get_item(item_id: str):
         conn.close()
 
 
+@router.get("/items/{item_id}/cost-history")
+def cost_history(item_id: str):
+    """Факт-себестоимость изделия по заказам vs эталон каталога.
+
+    Эталон = catalog_items.cost_total (на 1 шт). Факт по позиции = сумма
+    привязанных к её обязательствам реальных оплат (creditors.paid) — как в
+    orders.py. В средние идут только позиции с фактом (actual_paid > 0).
+    """
+    conn = get_production()
+    try:
+        _ensure_tables(conn)
+        cat = conn.execute(
+            "SELECT cost_total FROM catalog_items WHERE id = ?", (item_id,)
+        ).fetchone()
+        if not cat:
+            raise HTTPException(status_code=404, detail="Not found")
+        etalon_unit = round(cat["cost_total"] or 0, 2)
+
+        rows = conn.execute(
+            """SELECT ei.id, ei.quantity, ei.cost_total, ei.title,
+                      o.id AS order_id, o.number AS order_number,
+                      o.title AS order_title, o.status AS order_status,
+                      o.created_at AS order_date
+               FROM estimate_items ei
+               JOIN estimate_sets es ON es.id = ei.set_id
+               JOIN orders o ON o.id = es.order_id
+               WHERE ei.catalog_item_id = ?
+               ORDER BY o.created_at DESC""",
+            (item_id,)
+        ).fetchall()
+
+        history = []
+        facts = []
+        for r in rows:
+            qty = r["quantity"] or 1
+            actual_paid = conn.execute(
+                "SELECT COALESCE(SUM(paid), 0) FROM creditors WHERE estimate_item_id = ?",
+                (r["id"],)
+            ).fetchone()[0] or 0
+            plan_unit = round((r["cost_total"] or 0) / qty, 2)
+            actual_unit = round(actual_paid / qty, 2)
+            has_fact = actual_paid > 0
+            history.append({
+                "order_id": r["order_id"],
+                "order_number": r["order_number"],
+                "title": r["order_title"] or r["title"],
+                "date": r["order_date"],
+                "status": r["order_status"],
+                "qty": qty,
+                "plan_unit": plan_unit,
+                "actual_unit": actual_unit,
+                "actual_total": round(actual_paid, 2),
+                "has_fact": has_fact,
+            })
+            if has_fact:
+                facts.append(actual_unit)
+
+        stats = None
+        if facts:
+            avg_actual = round(sum(facts) / len(facts), 2)
+            stats = {
+                "count": len(facts),
+                "avg_actual_unit": avg_actual,
+                "min_actual_unit": round(min(facts), 2),
+                "max_actual_unit": round(max(facts), 2),
+                "last_actual_unit": facts[0],  # history sorted by date desc
+                "deviation_pct": round((avg_actual - etalon_unit) / etalon_unit * 100, 1) if etalon_unit else None,
+            }
+
+        return {"etalon_unit": etalon_unit, "history": history, "stats": stats}
+    finally:
+        conn.close()
+
+
 @router.post("/items")
 def create_item(body: ItemIn):
     conn = get_production()

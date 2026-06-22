@@ -112,6 +112,7 @@ export const catalogApi = {
     create: (data: any)             => api.post("/catalog/items", data).then((r) => r.data),
     update: (id: string, data: any) => api.put(`/catalog/items/${id}`, data).then((r) => r.data),
     delete: (id: string)            => api.delete(`/catalog/items/${id}`).then((r) => r.data),
+    costHistory: (id: string)       => api.get(`/catalog/items/${id}/cost-history`).then((r) => r.data),
   },
   deleteByTitles: (titles: string[]) =>
     api.delete("/catalog/by-titles", { data: { titles } }).then((r) => r.data),

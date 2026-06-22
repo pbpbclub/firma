@@ -454,9 +454,9 @@ def from_catalog(body: FromCatalog):
         ).fetchone()
         set_bank_pct = (set_bank_pct_row["bank_pct"] if set_bank_pct_row else None) or 13
         conn.execute(
-            """INSERT INTO estimate_items (id, set_id, title, category, markup, overhead_pct, tax_pct, cost_total, sale_price, bank_pct, sort_order, created_at)
-               VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, ?, ?, ?)""",
-            (item_id, body.set_id, cat["title"], cat["category"], round(markup, 4), set_bank_pct, sort_order, _now())
+            """INSERT INTO estimate_items (id, set_id, title, category, markup, overhead_pct, tax_pct, cost_total, sale_price, bank_pct, sort_order, catalog_item_id, created_at)
+               VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, ?, ?, ?, ?)""",
+            (item_id, body.set_id, cat["title"], cat["category"], round(markup, 4), set_bank_pct, sort_order, body.catalog_item_id, _now())
         )
         for i, cl in enumerate(cat_lines):
             line_id = str(uuid.uuid4())

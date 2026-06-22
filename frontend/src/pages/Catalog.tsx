@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loading } from "../components/ui/Loading";
 import { EmptyState } from "../components/ui/EmptyState";
@@ -31,6 +32,99 @@ function Checkbox({ checked, indeterminate = false, onChange }: {
 function fmt(n: number) {
   if (!n) return "—";
   return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) + " ₽";
+}
+
+const _num: React.CSSProperties = { fontFamily: MONO, fontVariantNumeric: "tabular-nums" };
+const _STATUS_RU: Record<string, string> = {
+  draft: "Черновик", estimate: "Смета", project: "Проект",
+  in_production: "В производстве", completed: "Завершён", cancelled: "Отменён",
+};
+
+function CostHistorySection({ data, onOpenOrder }: { data: any; onOpenOrder: (orderId: string) => void }) {
+  const etalon: number = data.etalon_unit || 0;
+  const stats = data.stats;
+  const history: any[] = data.history || [];
+  const histCols = "1fr 70px 64px 92px 92px 84px";
+
+  return (
+    <div style={{ padding: "18px 24px 4px", borderTop: "1px solid #EDEBE6", marginTop: 4 }}>
+      <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 12 }}>ФАКТ ПО ЗАКАЗАМ</div>
+
+      {history.length === 0 ? (
+        <EmptyState title="Ещё нет заказов с этим изделием" compact />
+      ) : (
+        <>
+          {/* Сводка эталон vs факт */}
+          <div style={{ display: "flex", gap: 28, flexWrap: "wrap", marginBottom: 16 }}>
+            <Metric label="ЭТАЛОН / ШТ" value={fmt(etalon)} color="#1A1A1A" />
+            {stats ? (
+              <>
+                <Metric label="СРЕДН. ФАКТ / ШТ" value={fmt(stats.avg_actual_unit)} color="#1A1A1A" />
+                <Metric label="МИН" value={fmt(stats.min_actual_unit)} color="#A89070" />
+                <Metric label="МАКС" value={fmt(stats.max_actual_unit)} color="#A89070" />
+                <Metric label="ПОСЛЕДНИЙ" value={fmt(stats.last_actual_unit)} color="#A89070" />
+                {stats.deviation_pct != null && (
+                  <Metric
+                    label="ОТКЛОНЕНИЕ"
+                    value={`${stats.deviation_pct > 0 ? "+" : ""}${stats.deviation_pct}%`}
+                    color={stats.deviation_pct > 0 ? "#8B3A3A" : "#4A7C59"}
+                  />
+                )}
+              </>
+            ) : (
+              <Metric label="ФАКТ" value="нет привязанных трат" color="#A89070" />
+            )}
+          </div>
+
+          {/* Список заказов */}
+          <div style={{ display: "grid", gridTemplateColumns: histCols, gap: 8, fontSize: 9, color: "#A89070", letterSpacing: "0.04em", padding: "0 0 6px", borderBottom: "1px solid #F2EFE9" }}>
+            <div>ЗАКАЗ</div>
+            <div style={{ textAlign: "right" }}>КОЛ-ВО</div>
+            <div style={{ textAlign: "right" }}>СТАТУС</div>
+            <div style={{ textAlign: "right" }}>ПЛАН/ШТ</div>
+            <div style={{ textAlign: "right" }}>ФАКТ/ШТ</div>
+            <div style={{ textAlign: "right" }}>Δ/ШТ</div>
+          </div>
+          {history.map((h) => {
+            const delta = h.has_fact ? h.actual_unit - h.plan_unit : null;
+            return (
+              <div
+                key={h.order_id + h.title}
+                onClick={() => onOpenOrder(h.order_id)}
+                style={{
+                  display: "grid", gridTemplateColumns: histCols, gap: 8, alignItems: "center",
+                  fontSize: 12, padding: "8px 0", borderBottom: "1px solid #F2EFE9", cursor: "pointer",
+                  color: h.has_fact ? "#1A1A1A" : "#A89070",
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "#FAF8F5")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+              >
+                <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <span style={_num}>{h.order_number}</span> · {h.title}
+                </div>
+                <div style={{ ..._num, textAlign: "right" }}>{h.qty}</div>
+                <div style={{ textAlign: "right", fontSize: 10, color: "#6B6355" }}>{_STATUS_RU[h.status] || h.status}</div>
+                <div style={{ ..._num, textAlign: "right", color: "#A89070" }}>{fmt(h.plan_unit)}</div>
+                <div style={{ ..._num, textAlign: "right" }}>{h.has_fact ? fmt(h.actual_unit) : "—"}</div>
+                <div style={{ ..._num, textAlign: "right", color: delta == null ? "#A89070" : delta > 0 ? "#8B3A3A" : "#4A7C59" }}>
+                  {delta == null ? "—" : `${delta > 0 ? "+" : delta < 0 ? "−" : ""}${fmt(Math.abs(delta)).replace(" ₽", "")}`}
+                </div>
+              </div>
+            );
+          })}
+        </>
+      )}
+    </div>
+  );
+}
+
+function Metric({ label, value, color }: { label: string; value: string; color: string }) {
+  return (
+    <div>
+      <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.04em", marginBottom: 3 }}>{label}</div>
+      <div style={{ ..._num, fontSize: 15, fontWeight: 700, color }}>{value}</div>
+    </div>
+  );
 }
 
 type LineType = "material" | "labor" | "delivery";
@@ -88,7 +182,14 @@ function CalculatorModal({
   onSaved: () => void;
 }) {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const isNew = !item?.id;
+
+  const { data: costHistory } = useQuery({
+    queryKey: ["catalog-cost-history", item?.id],
+    queryFn: () => catalogApi.items.costHistory(item!.id),
+    enabled: !!item?.id,
+  });
 
   const [title, setTitle] = useState(item?.title ?? "");
   const [category, setCategory] = useState(item?.category ?? "");
@@ -209,6 +310,10 @@ function CalculatorModal({
         </div>
 
         <CalcFooter cost={costTotal} pct={markupPct} onPctChange={setMarkupPct} />
+
+        {!isNew && costHistory && (
+          <CostHistorySection data={costHistory} onOpenOrder={(oid) => { onClose(); navigate(`/orders/${oid}/estimate`); }} />
+        )}
       </Modal>
 
       {confirmDelete && (
