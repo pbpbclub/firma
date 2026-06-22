@@ -35,24 +35,27 @@ export function CalcHeader({ withContractor }: { withContractor?: boolean }) {
   );
 }
 
-export function CalcSection({ label, addLabel, onAdd, children }: {
+export function CalcSection({ label, addLabel, onAdd, children, readOnly }: {
   label: string;
   addLabel: string;
   onAdd: () => void;
   children: React.ReactNode;
+  readOnly?: boolean;
 }) {
   return (
     <div>
       <div style={sectionLabelStyle}>{label}</div>
       {children}
-      <button
-        onClick={onAdd}
-        style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "#A89070", padding: "6px 0", display: "flex", alignItems: "center", gap: 4 }}
-        onMouseEnter={e => (e.currentTarget.style.color = "#E8592A")}
-        onMouseLeave={e => (e.currentTarget.style.color = "#A89070")}
-      >
-        <Plus size={11} /> {addLabel}
-      </button>
+      {!readOnly && (
+        <button
+          onClick={onAdd}
+          style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "#A89070", padding: "6px 0", display: "flex", alignItems: "center", gap: 4 }}
+          onMouseEnter={e => (e.currentTarget.style.color = "#E8592A")}
+          onMouseLeave={e => (e.currentTarget.style.color = "#A89070")}
+        >
+          <Plus size={11} /> {addLabel}
+        </button>
+      )}
     </div>
   );
 }
@@ -100,7 +103,7 @@ function MaterialTitle({ value, materialsFetch, onType, onPick }: {
 
 export function CalcRow({
   line, isMaterial, withContractor, withAutocomplete, materialsFetch,
-  workTypes = [], masters = [],
+  workTypes = [], masters = [], readOnly,
   onPatch, onRemove, onPickMaterial, onPickWorkType, onCreateWorkType, onPickMaster, onCreateMaster,
 }: {
   line: any;
@@ -110,6 +113,7 @@ export function CalcRow({
   materialsFetch?: (q?: string) => Promise<any[]>;
   workTypes?: any[];
   masters?: any[];
+  readOnly?: boolean;
   onPatch: (patch: Record<string, any>) => void;
   onRemove: () => void;
   onPickMaterial?: (m: any) => void;
@@ -119,6 +123,22 @@ export function CalcRow({
   onCreateMaster?: (name: string) => void;
 }) {
   const sum = (line.qty || 0) * (line.unit_price || 0);
+
+  if (readOnly) {
+    const contractor = masters.find((m: any) => m.id === line.master_id)?.name || line.contractor_name || "";
+    return (
+      <div style={{ display: "grid", gridTemplateColumns: cols(withContractor), gap: 8, alignItems: "center", padding: "6px 0", borderBottom: "1px solid #F2EFE9" }}>
+        <div style={{ fontSize: 12, color: "#1A1A1A" }}>{line.title || "—"}</div>
+        <div style={numCell}>{line.qty ?? "—"}</div>
+        <div style={{ fontSize: 11, color: "#6B6355" }}>{line.unit || ""}</div>
+        <div style={numCell}>{line.unit_price ? fmtNum(line.unit_price) : "—"}</div>
+        <div style={{ ...numCell, fontWeight: 600 }}>{sum > 0 ? fmtNum(sum) : "—"}</div>
+        {withContractor && <div style={{ fontSize: 10, color: contractor ? "#1A1A1A" : "#C8C0B0" }}>{contractor || "—"}</div>}
+        <div />
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: cols(withContractor), gap: 8, alignItems: "center", padding: "6px 0", borderBottom: "1px solid #F2EFE9" }}>
       {/* Наименование */}

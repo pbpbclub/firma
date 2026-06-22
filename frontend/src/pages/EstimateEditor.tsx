@@ -78,12 +78,14 @@ function EditCell({
 
 // ── Item detail modal ────────────────────────────────────────────────────────
 
-function ItemModal({ item, onClose, onRefetch }: {
+function ItemModal({ item, onClose, onRefetch, initialReadOnly }: {
   item: any;
   onClose: () => void;
   onRefetch: () => void;
+  initialReadOnly?: boolean;
 }) {
   const lines: any[] = item.lines ?? [];
+  const [readOnly, setReadOnly] = useState(!!initialReadOnly);
   const [syncing, setSyncing] = useState(false);
   const [synced, setSynced] = useState(false);
   const [masters, setMasters] = useState<any[]>([]);
@@ -121,7 +123,7 @@ function ItemModal({ item, onClose, onRefetch }: {
   };
 
   useEffect(() => {
-    if (lines.length === 0) {
+    if (!readOnly && lines.length === 0) {
       estimatesApi.addLine(item.id, { type: "material", title: "", qty: 1, unit: "шт", unit_price: 0 }).then(onRefetch);
     }
   }, []);
@@ -164,6 +166,7 @@ function ItemModal({ item, onClose, onRefetch }: {
       withContractor
       workTypes={workTypes}
       masters={masters}
+      readOnly={readOnly}
       onPatch={p => save(() => estimatesApi.updateLine(line.id, p))}
       onRemove={() => save(() => estimatesApi.deleteLine(line.id))}
       onPickWorkType={wt => save(() => estimatesApi.updateLine(line.id, { work_type_id: wt?.id }))}
@@ -194,37 +197,52 @@ function ItemModal({ item, onClose, onRefetch }: {
     </button>
   );
 
+  const editBtn = (
+    <button
+      onClick={() => setReadOnly(false)}
+      style={{ fontSize: 11, fontWeight: 600, cursor: "pointer", border: "1px solid #E8592A", background: "transparent", color: "#E8592A", padding: "4px 12px", display: "flex", alignItems: "center", gap: 5 }}
+      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "#E8592A"; (e.currentTarget as HTMLElement).style.color = "#fff"; }}
+      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#E8592A"; }}
+    >
+      <PencilSimple size={12} /> Редактировать
+    </button>
+  );
+
   return (
-    <Modal size="lg" eyebrow="ПОЗИЦИЯ СМЕТЫ" onClose={onClose} footerLeft={syncBtn}>
+    <Modal size="lg" eyebrow={readOnly ? "ПОЗИЦИЯ СМЕТЫ · ПРОСМОТР" : "ПОЗИЦИЯ СМЕТЫ"} onClose={onClose} footerLeft={readOnly ? editBtn : syncBtn}>
       <div style={{ padding: "16px 24px 0" }}>
         <div style={fieldLabel}>НАЗВАНИЕ</div>
         <div style={{ fontSize: 15, fontWeight: 700, color: "#1A1A1A" }}>
-          <EditableText value={item.title} placeholder="Название позиции"
-            onSave={v => save(() => estimatesApi.updateItem(item.id, { title: v }))} />
+          {readOnly
+            ? (item.title || <span style={{ color: "#C8C0B0" }}>Без названия</span>)
+            : <EditableText value={item.title} placeholder="Название позиции"
+                onSave={v => save(() => estimatesApi.updateItem(item.id, { title: v }))} />}
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: 16, marginTop: 14, alignItems: "end" }}>
           <div>
             <div style={fieldLabel}>КОЛ-ВО</div>
-            <div style={{ fontSize: 13, color: "#1A1A1A", width: 70, borderBottom: "1px solid #EDEBE6" }}>
-              <EditableText value={item.quantity ?? 1} numeric onSave={changeQty} />
+            <div style={{ fontSize: 13, color: "#1A1A1A", width: 70, borderBottom: readOnly ? "none" : "1px solid #EDEBE6" }}>
+              {readOnly ? (item.quantity ?? 1) : <EditableText value={item.quantity ?? 1} numeric onSave={changeQty} />}
             </div>
           </div>
           <div>
             <div style={fieldLabel}>БРЕНД</div>
-            <BrandSelect value={item.brand ?? null}
-              onChange={b => save(() => estimatesApi.updateItem(item.id, { brand: b }))} />
+            {readOnly
+              ? <span style={{ fontSize: 13, color: item.brand ? "#1A1A1A" : "#C8C0B0", fontFamily: MONO }}>{item.brand || "—"}</span>
+              : <BrandSelect value={item.brand ?? null}
+                  onChange={b => save(() => estimatesApi.updateItem(item.id, { brand: b }))} />}
           </div>
         </div>
 
         <div style={{ marginTop: 18 }}><CalcHeader withContractor /></div>
-        <CalcSection label="Материалы" addLabel="Добавить материал" onAdd={() => addLine("material")}>
+        <CalcSection label="Материалы" addLabel="Добавить материал" readOnly={readOnly} onAdd={() => addLine("material")}>
           {materialLines.map(renderRow)}
         </CalcSection>
-        <CalcSection label="Работы" addLabel="Добавить работу" onAdd={() => addLine("labor")}>
+        <CalcSection label="Работы" addLabel="Добавить работу" readOnly={readOnly} onAdd={() => addLine("labor")}>
           {laborLines.map(renderRow)}
         </CalcSection>
-        <CalcSection label="Доставка" addLabel="Добавить доставку" onAdd={() => addLine("delivery")}>
+        <CalcSection label="Доставка" addLabel="Добавить доставку" readOnly={readOnly} onAdd={() => addLine("delivery")}>
           {deliveryLines.map(renderRow)}
         </CalcSection>
       </div>
@@ -321,7 +339,7 @@ export default function EstimateEditor() {
   const [searchParams] = useSearchParams();
 
   const [selectedSetId, setSelectedSetId] = useState<string | null>(searchParams.get("set"));
-  const [openItemId, setOpenItemId] = useState<string | null>(null);
+  const [open, setOpen] = useState<{ id: string; readOnly: boolean } | null>(null);
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [invoicing, setInvoicing] = useState(false);
   const [obligating, setObligating] = useState(false);
@@ -375,7 +393,7 @@ export default function EstimateEditor() {
   const activeSetId = selectedSetId ?? ((sets as any[])[0]?.id ?? null);
   const activeSet   = (sets as any[]).find((s: any) => s.id === activeSetId) ?? null;
   const items: any[] = activeSet?.items ?? [];
-  const openItem    = items.find((it: any) => it.id === openItemId) ?? null;
+  const openItem    = open ? (items.find((it: any) => it.id === open.id) ?? null) : null;
 
   const totalCost   = items.reduce((s: number, it: any) => s + (it.cost_total || 0), 0);
   const totalSale   = items.reduce((s: number, it: any) => s + (it.sale_price || 0), 0);
@@ -415,7 +433,7 @@ export default function EstimateEditor() {
     const it = await estimatesApi.fromCatalog(activeSetId, catalogItemId);
     setCatalogOpen(false);
     await refetch();
-    setOpenItemId(it.id);
+    setOpen({ id: it.id, readOnly: false });
   };
 
   const hasObligations = items.some((it: any) => (it.obligations_count ?? 0) > 0);
@@ -779,7 +797,17 @@ export default function EstimateEditor() {
 
                 {/* Title */}
                 <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A", fontFamily: SANS }} onClick={e => e.stopPropagation()}>
-                  {editMode ? (
+                  {(item.lines?.length ?? 0) > 0 ? (
+                    <span
+                      onClick={() => setOpen({ id: item.id, readOnly: true })}
+                      title="Открыть калькулятор (просмотр)"
+                      style={{ cursor: "pointer", borderBottom: "1px dashed #C8C0B0" }}
+                      onMouseEnter={e => (e.currentTarget.style.color = "#E8592A")}
+                      onMouseLeave={e => (e.currentTarget.style.color = "#1A1A1A")}
+                    >
+                      {item.title || "Без названия"}
+                    </span>
+                  ) : editMode ? (
                     <EditCell
                       value={item.title}
                       placeholder="Без названия"
@@ -934,15 +962,21 @@ export default function EstimateEditor() {
 
                 {/* Actions: open calculator + (edit mode) delete */}
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 4 }}>
-                  <button
-                    onClick={e => { e.stopPropagation(); setOpenItemId(item.id); }}
-                    title="Открыть калькулятор"
-                    style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}
-                    onMouseEnter={e => (e.currentTarget.style.color = "#6B6355")}
-                    onMouseLeave={e => (e.currentTarget.style.color = "#C8C0B0")}
-                  >
-                    <Cube size={13} />
-                  </button>
+                  {(item.lines?.length ?? 0) > 0 ? (
+                    <span title="Рассчитано — откройте по названию позиции" style={{ color: "#4A7C59", padding: 2, display: "flex", cursor: "default" }}>
+                      <Cube size={13} weight="fill" />
+                    </span>
+                  ) : (
+                    <button
+                      onClick={e => { e.stopPropagation(); setOpen({ id: item.id, readOnly: false }); }}
+                      title="Заполнить калькулятор"
+                      style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}
+                      onMouseEnter={e => (e.currentTarget.style.color = "#6B6355")}
+                      onMouseLeave={e => (e.currentTarget.style.color = "#C8C0B0")}
+                    >
+                      <Cube size={13} />
+                    </button>
+                  )}
                   {editMode && (
                     <button
                       onClick={e => { e.stopPropagation(); estimatesApi.deleteItem(item.id).then(() => refetch()); }}
@@ -1031,7 +1065,8 @@ export default function EstimateEditor() {
       {openItem && (
         <ItemModal
           item={openItem}
-          onClose={() => setOpenItemId(null)}
+          initialReadOnly={open?.readOnly}
+          onClose={() => setOpen(null)}
           onRefetch={() => refetch()}
         />
       )}
