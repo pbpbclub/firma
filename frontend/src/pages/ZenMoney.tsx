@@ -7,6 +7,7 @@ import { zenmoneyApi, payeeRulesApi, mastersApi, customersApi, financeApi } from
 import { ColumnFilter, PeriodFilter } from "../components/TableFilters";
 import { Modal } from "../components/ui/Modal";
 import { MONO } from "../components/ui/Num";
+import { IconButton } from "../components/ui/IconButton";
 
 const fmt = (n: number) =>
   new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(Math.abs(n));
@@ -903,18 +904,9 @@ export default function ZenMoneyPage() {
                 </div>
                 <div style={{ display: "flex", justifyContent: "center", paddingTop: 1 }}>
                   {isExpense && (
-                    <button
-                      onClick={e => { e.stopPropagation(); setLinkModal(tx); }}
-                      title="Привязать к обязательству"
-                      style={{
-                        background: "none", border: "none", cursor: "pointer", padding: 2, display: "flex",
-                        color: creditorByZenTx.has(String(tx.id)) ? "#4A7C59" : "#C8C0B0",
-                      }}
-                      onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
-                      onMouseLeave={e => (e.currentTarget.style.color = creditorByZenTx.has(String(tx.id)) ? "#4A7C59" : "#C8C0B0")}
-                    >
-                      <LinkSimple size={12} />
-                    </button>
+                    <IconButton icon={LinkSimple} title="Привязать к обязательству" size={24} iconSize={12}
+                      color={creditorByZenTx.has(String(tx.id)) ? "#4A7C59" : "#C8C0B0"}
+                      onClick={e => { e.stopPropagation(); setLinkModal(tx); }} />
                   )}
                 </div>
               </div>

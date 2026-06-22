@@ -7,6 +7,7 @@ import { MagnifyingGlass, X, LinkSimple } from "@phosphor-icons/react";
 import { ColumnFilter, AmountFilter, PeriodFilter } from "../components/TableFilters";
 import { Modal } from "../components/ui/Modal";
 import { MONO } from "../components/ui/Num";
+import { IconButton } from "../components/ui/IconButton";
 
 function Checkbox({ checked, indeterminate = false, onChange }: {
   checked: boolean; indeterminate?: boolean; onChange: () => void;
@@ -477,34 +478,16 @@ export default function Finance() {
                 </div>
                 <div style={{ display: "flex", justifyContent: "center" }}>
                   {t.direction === "out" && t.source !== "fund" && (
-                    <button
-                      onClick={e => { e.stopPropagation(); setLinkModal(t); }}
-                      title="Привязать к обязательству"
-                      style={{
-                        background: "none", border: "none", cursor: "pointer", padding: 2, display: "flex",
-                        color: creditorByFinTx.has(String(t.id)) ? "#4A7C59" : "#C8C0B0",
-                      }}
-                      onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
-                      onMouseLeave={e => (e.currentTarget.style.color = creditorByFinTx.has(String(t.id)) ? "#4A7C59" : "#C8C0B0")}
-                    >
-                      <LinkSimple size={12} />
-                    </button>
+                    <IconButton icon={LinkSimple} title="Привязать к обязательству" size={24} iconSize={12}
+                      color={creditorByFinTx.has(String(t.id)) ? "#4A7C59" : "#C8C0B0"}
+                      onClick={e => { e.stopPropagation(); setLinkModal(t); }} />
                   )}
                 </div>
                 <div style={{ display: "flex", justifyContent: "center" }}>
                   {t.direction === "in" && t.source !== "fund" && (
-                    <button
-                      onClick={e => { e.stopPropagation(); setLinkOrderModal(t); }}
-                      title="Привязать к заказу"
-                      style={{
-                        background: "none", border: "none", cursor: "pointer", padding: 2, display: "flex",
-                        color: paymentByFinTx.has(String(t.id)) ? "#4A7C59" : "#C8C0B0",
-                      }}
-                      onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
-                      onMouseLeave={e => (e.currentTarget.style.color = paymentByFinTx.has(String(t.id)) ? "#4A7C59" : "#C8C0B0")}
-                    >
-                      <LinkSimple size={12} />
-                    </button>
+                    <IconButton icon={LinkSimple} title="Привязать к заказу" size={24} iconSize={12}
+                      color={paymentByFinTx.has(String(t.id)) ? "#4A7C59" : "#C8C0B0"}
+                      onClick={e => { e.stopPropagation(); setLinkOrderModal(t); }} />
                   )}
                 </div>
               </div>

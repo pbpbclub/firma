@@ -8,6 +8,7 @@ import { Bank, X, Check, Plus, LinkSimple } from "@phosphor-icons/react";
 import { ColumnFilter } from "../components/TableFilters";
 import { Modal } from "../components/ui/Modal";
 import { MONO } from "../components/ui/Num";
+import { IconButton } from "../components/ui/IconButton";
 
 const SANS = "inherit";
 
@@ -437,15 +438,9 @@ function DebtorsTab() {
               <div style={{ fontSize: 13, fontWeight: 700, color: "#E8592A" }}>{fmt(d.debt)}</div>
               <div style={{ fontSize: 12, color: deadlineColor(d.deadline) }}>{fmtDate(d.deadline)}</div>
               <div style={{ display: "flex", justifyContent: "center" }}>
-                <button
-                  onClick={e => { e.stopPropagation(); setLinkItem(d); }}
-                  title="Связать с транзакцией"
-                  style={{ background: "none", border: "none", cursor: "pointer", padding: 2, display: "flex", color: d.finance_tx_id ? "#4A7C59" : "#C8C0B0" }}
-                  onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
-                  onMouseLeave={e => (e.currentTarget.style.color = d.finance_tx_id ? "#4A7C59" : "#C8C0B0")}
-                >
-                  <LinkSimple size={13} />
-                </button>
+                <IconButton icon={LinkSimple} title="Связать с транзакцией" size={24} iconSize={13}
+                  color={d.finance_tx_id ? "#4A7C59" : "#C8C0B0"}
+                  onClick={e => { e.stopPropagation(); setLinkItem(d); }} />
               </div>
             </div>
             );
@@ -625,15 +620,9 @@ function UnallocatedTab() {
             <div style={{ fontSize: 13, color: "#4A7C59" }}>{r.paid > 0 ? fmt(r.paid) : "—"}</div>
             <div style={{ fontSize: 13, fontWeight: 700, color: "#4A7C59" }}>{fmt(r.debt)}</div>
             <div style={{ display: "flex", justifyContent: "center" }}>
-              <button
-                onClick={e => { e.stopPropagation(); setLinkItem(r); }}
-                title="Связать с транзакцией"
-                style={{ background: "none", border: "none", cursor: "pointer", padding: 2, display: "flex", color: r.finance_tx_id ? "#4A7C59" : "#C8C0B0" }}
-                onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
-                onMouseLeave={e => (e.currentTarget.style.color = r.finance_tx_id ? "#4A7C59" : "#C8C0B0")}
-              >
-                <LinkSimple size={13} />
-              </button>
+              <IconButton icon={LinkSimple} title="Связать с транзакцией" size={24} iconSize={13}
+                color={r.finance_tx_id ? "#4A7C59" : "#C8C0B0"}
+                onClick={e => { e.stopPropagation(); setLinkItem(r); }} />
             </div>
           </div>
 
@@ -891,18 +880,9 @@ function CreditorsTab() {
               </div>
               <div style={{ fontSize: 12, color: deadlineColor(c.due_date) }}>{fmtDate(c.due_date)}</div>
               <div style={{ display: "flex", justifyContent: "center" }}>
-                <button
-                  onClick={e => { e.stopPropagation(); setLinkItem(c); }}
-                  title="Связать с транзакцией"
-                  style={{
-                    background: "none", border: "none", cursor: "pointer", padding: 2, display: "flex",
-                    color: (c.finance_tx_id || c.zenmoney_tx_id) ? "#4A7C59" : "#C8C0B0",
-                  }}
-                  onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
-                  onMouseLeave={e => (e.currentTarget.style.color = (c.finance_tx_id || c.zenmoney_tx_id) ? "#4A7C59" : "#C8C0B0")}
-                >
-                  <LinkSimple size={13} />
-                </button>
+                <IconButton icon={LinkSimple} title="Связать с транзакцией" size={24} iconSize={13}
+                  color={(c.finance_tx_id || c.zenmoney_tx_id) ? "#4A7C59" : "#C8C0B0"}
+                  onClick={e => { e.stopPropagation(); setLinkItem(c); }} />
               </div>
             </div>
             );
