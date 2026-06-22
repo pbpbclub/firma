@@ -1,5 +1,7 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Loading } from "../components/ui/Loading";
+import { EmptyState } from "../components/ui/EmptyState";
 import { financeApi, ordersApi } from "../api";
 import { MagnifyingGlass, X, LinkSimple } from "@phosphor-icons/react";
 import { ColumnFilter, AmountFilter, PeriodFilter } from "../components/TableFilters";
@@ -122,8 +124,8 @@ function LinkCreditorModal({ tx, creditorByFinTx, onClose }: {
 
         {/* List */}
         <div style={{ flex: 1, overflowY: "auto" }}>
-          {isFetching && <div style={{ padding: 32, textAlign: "center", color: "#A89070", fontSize: 12 }}>Загружаем...</div>}
-          {!isFetching && filtered.length === 0 && <div style={{ padding: 32, textAlign: "center", color: "#C8C0B0", fontSize: 12 }}>Обязательства не найдены</div>}
+          {isFetching && <Loading compact />}
+          {!isFetching && filtered.length === 0 && <EmptyState compact title="Обязательства не найдены" />}
           {!isFetching && filtered.map((c: any) => {
             const isLinked = currentCreditor?.id === c.id;
             return (
@@ -216,8 +218,8 @@ function LinkOrderModal({ tx, paymentByFinTx, onClose }: {
             style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "5px 10px", fontSize: 12, outline: "none" }} />
         </div>
         <div style={{ flex: 1, overflowY: "auto" }}>
-          {isFetching && <div style={{ padding: 32, textAlign: "center", color: "#A89070", fontSize: 12 }}>Загружаем...</div>}
-          {!isFetching && filtered.length === 0 && <div style={{ padding: 32, textAlign: "center", color: "#C8C0B0", fontSize: 12 }}>Заказы не найдены</div>}
+          {isFetching && <Loading compact />}
+          {!isFetching && filtered.length === 0 && <EmptyState compact title="Заказы не найдены" />}
           {!isFetching && filtered.map((o: any) => (
             <div key={o.id} onClick={() => link.mutate({ orderId: o.id, txId: String(tx.id) })}
               style={{ display: "grid", gridTemplateColumns: "1fr 100px 80px", padding: "9px 20px", borderBottom: "1px solid #F2EFE9", cursor: "pointer", alignItems: "center", gap: 10 }}
@@ -420,9 +422,9 @@ export default function Finance() {
         {/* Rows */}
         <div style={{ flex: 1, overflowY: "auto" }}>
           {isLoading ? (
-            <div style={{ padding: 48, textAlign: "center", color: "#A89070", fontSize: 13 }}>Загружаем...</div>
+            <Loading />
           ) : filteredTxs.length === 0 ? (
-            <div style={{ padding: 48, textAlign: "center", color: "#A89070", fontSize: 13 }}>Транзакций нет</div>
+            <EmptyState title="Транзакций нет" />
           ) : (
             filteredTxs.map((t: any, i: number) => (
               <div

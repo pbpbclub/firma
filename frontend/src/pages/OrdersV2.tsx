@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { Loading } from "../components/ui/Loading";
+import { EmptyState } from "../components/ui/EmptyState";
 import { MONO } from "../components/ui/Num";
 import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { useNavigate } from "react-router-dom";
@@ -782,9 +784,9 @@ export default function OrdersV2() {
         {/* Rows */}
         <div style={{ flex: 1, overflow: "auto" }}>
           {isLoading ? (
-            <div style={{ padding: 40, textAlign: "center", color: "#A89070", fontSize: 12 }}>Загружаем...</div>
+            <Loading compact />
           ) : pageData.length === 0 ? (
-            <div style={{ padding: 40, textAlign: "center", color: "#A89070", fontSize: 12 }}>Заказов нет</div>
+            <EmptyState compact title="Заказов нет" />
           ) : (
             pageData.map((o: any) => {
               const st = STATUS_MAP[o.status] || { label: o.status, color: "#A89070" };

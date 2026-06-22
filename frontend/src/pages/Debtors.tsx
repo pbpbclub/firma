@@ -1,5 +1,7 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Loading } from "../components/ui/Loading";
+import { EmptyState } from "../components/ui/EmptyState";
 import { financeApi, zenmoneyApi, ordersApi } from "../api";
 import { useNavigate } from "react-router-dom";
 import { Bank, X, Check, Plus, LinkSimple } from "@phosphor-icons/react";
@@ -92,8 +94,8 @@ function LinkInTxModal({ title, name, amount, linkedTxId, onLink, onClose }: {
         </div>
 
         <div style={{ flex: 1, overflowY: "auto" }}>
-          {loading && <div style={{ padding: 32, textAlign: "center", color: "#A89070", fontSize: 12 }}>Загружаем...</div>}
-          {!loading && filtered.length === 0 && <div style={{ padding: 32, textAlign: "center", color: "#C8C0B0", fontSize: 12 }}>Транзакции не найдены</div>}
+          {loading && <Loading compact />}
+          {!loading && filtered.length === 0 && <EmptyState compact title="Транзакции не найдены" />}
           {!loading && filtered.map((t: any) => {
             const isLinked = String(t.id) === String(linkedTxId);
             const label = t.counterparty || t.purpose || "—";
@@ -343,7 +345,7 @@ function DebtorsTab() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["debtors"] }); setLinkItem(null); },
   });
 
-  if (isLoading) return <div style={{ padding: 48, textAlign: "center", color: "#A89070", fontSize: 13 }}>Загружаем...</div>;
+  if (isLoading) return <Loading />;
 
   return (
     <>
@@ -400,9 +402,7 @@ function DebtorsTab() {
       </div>
 
       {filtered.length === 0 ? (
-        <div style={{ padding: 48, textAlign: "center", color: "#A89070", fontSize: 13 }}>
-          Нет согласованных смет с задолженностью
-        </div>
+        <EmptyState title="Нет согласованных смет с задолженностью" />
       ) : (
         <>
           {filtered.map((d: any, i: number) => {
@@ -570,8 +570,8 @@ function UnallocatedTab() {
 
   const items: any[] = data?.open_items || [];
 
-  if (isLoading) return <div style={{ padding: 48, textAlign: "center", color: "#A89070", fontSize: 13 }}>Загружаем...</div>;
-  if (items.length === 0) return <div style={{ padding: 48, textAlign: "center", color: "#A89070", fontSize: 13 }}>Нет нераспределённых счетов</div>;
+  if (isLoading) return <Loading />;
+  if (items.length === 0) return <EmptyState title="Нет нераспределённых счетов" />;
 
   const recCols = "2fr 2fr 120px 120px 120px 28px";
 
@@ -747,8 +747,8 @@ function LinkTxModal({ creditor, onClose }: { creditor: any; onClose: () => void
 
         {/* List */}
         <div style={{ flex: 1, overflowY: "auto" }}>
-          {loading && <div style={{ padding: 32, textAlign: "center", color: "#A89070", fontSize: 12 }}>Загружаем...</div>}
-          {!loading && filtered.length === 0 && <div style={{ padding: 32, textAlign: "center", color: "#C8C0B0", fontSize: 12 }}>Транзакции не найдены</div>}
+          {loading && <Loading compact />}
+          {!loading && filtered.length === 0 && <EmptyState compact title="Транзакции не найдены" />}
           {!loading && filtered.map((t: any) => {
             const isLinked = String(t.id) === String(linkedId);
             const label = t.counterparty || t.payee || t.purpose || t.comment || "—";
@@ -802,7 +802,7 @@ function CreditorsTab() {
   const uniqueContragents = useMemo(() => [...new Set(items.map((c: any) => c.name).filter(Boolean))].sort() as string[], [items]);
   const filteredItems = contragentFilter ? items.filter((c: any) => c.name === contragentFilter) : items;
 
-  if (isLoading) return <div style={{ padding: 48, textAlign: "center", color: "#A89070", fontSize: 13 }}>Загружаем...</div>;
+  if (isLoading) return <Loading />;
 
   return (
     <>
@@ -850,9 +850,7 @@ function CreditorsTab() {
       </div>
 
       {filteredItems.length === 0 ? (
-        <div style={{ padding: 48, textAlign: "center", color: "#A89070", fontSize: 13 }}>
-          Нет открытых обязательств
-        </div>
+        <EmptyState title="Нет открытых обязательств" />
       ) : (
         <>
           {filteredItems.map((c: any, i: number) => {

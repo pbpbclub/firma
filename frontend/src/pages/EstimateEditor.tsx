@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { EmptyState } from "../components/ui/EmptyState";
 import { ordersApi, estimatesApi, catalogApi, mastersApi, workTypesApi } from "../api";
 import { useNavigationGuard, NavigationGuardModal } from "../components/NavigationGuard";
 import { Modal, ConfirmModal } from "../components/ui/Modal";
@@ -258,7 +259,7 @@ function CatalogModal({ onClose, onSelect }: {
         </div>
         <div style={{ flex: 1, overflowY: "auto" }}>
           {filtered.length === 0 ? (
-            <div style={{ padding: 40, textAlign: "center", color: "#A89070", fontSize: 12 }}>Каталог пуст</div>
+            <EmptyState compact title="Каталог пуст" />
           ) : (
             filtered.map((c: any) => (
               <div
@@ -733,9 +734,7 @@ export default function EstimateEditor() {
           {/* ─ Item rows ──────────────────────────────────────────────────── */}
           <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
             {items.length === 0 && (
-              <div style={{ padding: "48px 28px", textAlign: "center", color: "#C8C0B0", fontSize: 13 }}>
-                Добавьте позиции в смету
-              </div>
+              <EmptyState title="Добавьте позиции в смету" />
             )}
 
             {items.map((item: any, idx: number) => (

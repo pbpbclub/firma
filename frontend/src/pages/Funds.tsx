@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Loading } from "../components/ui/Loading";
+import { EmptyState } from "../components/ui/EmptyState";
 import { MONO } from "../components/ui/Num";
 import { Modal } from "../components/ui/Modal";
 import { fundsApi } from "../api";
@@ -154,7 +156,7 @@ function FundDetailModal({ fund, onClose, onRefresh }: {
           {/* История */}
           <div style={{ flex: 1, overflowY: "auto" }}>
             {txList.length === 0 ? (
-              <div style={{ padding: 40, textAlign: "center", color: "#A89070", fontSize: 13 }}>Нет операций</div>
+              <EmptyState title="Нет операций" />
             ) : (
               txList.map((tx: any) => (
                 <div key={tx.id}
@@ -288,7 +290,7 @@ export default function Funds() {
       </div>
 
       {isLoading ? (
-        <div style={{ padding: 48, textAlign: "center", color: "#A89070", fontSize: 13 }}>Загружаем...</div>
+        <Loading />
       ) : fundList.length === 0 ? (
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12, color: "#A89070", fontSize: 13 }}>
           <div>Фондов нет — создайте первый</div>

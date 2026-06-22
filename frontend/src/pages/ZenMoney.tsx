@@ -1,5 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Loading } from "../components/ui/Loading";
+import { EmptyState } from "../components/ui/EmptyState";
 import { Briefcase, MagnifyingGlass, X, ArrowsClockwise, Tag, PencilSimple, Trash, LinkSimple } from "@phosphor-icons/react";
 import { zenmoneyApi, payeeRulesApi, mastersApi, customersApi, financeApi } from "../api";
 import { ColumnFilter, PeriodFilter } from "../components/TableFilters";
@@ -394,8 +396,8 @@ function LinkZenModal({ tx, creditorByZenTx, onClose }: {
             style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "5px 10px", fontSize: 12, outline: "none" }} />
         </div>
         <div style={{ flex: 1, overflowY: "auto" }}>
-          {isFetching && <div style={{ padding: 32, textAlign: "center", color: "#A89070", fontSize: 12 }}>Загружаем...</div>}
-          {!isFetching && filtered.length === 0 && <div style={{ padding: 32, textAlign: "center", color: "#C8C0B0", fontSize: 12 }}>Обязательства не найдены</div>}
+          {isFetching && <Loading compact />}
+          {!isFetching && filtered.length === 0 && <EmptyState compact title="Обязательства не найдены" />}
           {!isFetching && filtered.map((c: any) => {
             const isLinked = currentCreditor?.id === c.id;
             return (
@@ -804,9 +806,7 @@ export default function ZenMoneyPage() {
         {/* Transactions scroll area */}
         <div style={{ flex: 1, overflowY: "auto", padding: "0 28px 24px" }}>
           {filteredTx.length === 0 && (
-            <div style={{ padding: "40px 0", textAlign: "center", color: "#A89070", fontSize: 13 }}>
-              Нет операций
-            </div>
+            <EmptyState title="Нет операций" />
           )}
           {filteredTx.slice(0, 200).map((tx: any) => {
             const isExpense = tx.outcome > 0 && tx.income === 0;

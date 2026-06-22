@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { MONO } from "../components/ui/Num";
 import { ConfirmModal } from "../components/ui/Modal";
+import { Loading } from "../components/ui/Loading";
 import { ordersApi, customersApi, estimatesApi } from "../api";
 import { ArrowLeft, Plus, CaretRight, Trash } from "@phosphor-icons/react";
 import { useNavigationGuard, NavigationGuardModal } from "../components/NavigationGuard";
@@ -133,7 +134,7 @@ export default function OrderDetail() {
   const paidTotal = order?.payments?.reduce((s: number, p: any) => s + p.amount, 0) ?? 0;
 
   if (isLoading || !form) {
-    return <div style={{ padding: 40, color: "#A89070", fontSize: 13 }}>Загружаем...</div>;
+    return <Loading />;
   }
 
   return (

@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Loading } from "../components/ui/Loading";
+import { EmptyState } from "../components/ui/EmptyState";
 import { catalogApi } from "../api";
 import { MagnifyingGlass, Plus, X, Trash } from "@phosphor-icons/react";
 import { ColumnFilter, AmountFilter } from "../components/TableFilters";
@@ -425,11 +427,9 @@ export default function Catalog() {
                   <div><AmountFilter label="ПРОДАЖНАЯ ЦЕНА" min={priceMin} max={priceMax} onChange={(mn, mx) => { setPriceMin(mn); setPriceMax(mx); }} /></div>
                 </div>
                 {loadingSaved ? (
-                  <div style={{ padding: 48, textAlign: "center", color: "#A89070", fontSize: 13 }}>Загружаем...</div>
+                  <Loading />
                 ) : filteredItems.length === 0 ? (
-                  <div style={{ padding: 48, textAlign: "center", color: "#A89070", fontSize: 13 }}>
-                    {catFilter ? "Нет изделий в этой категории" : "Каталог пуст — нажмите + чтобы добавить первое изделие"}
-                  </div>
+                  <EmptyState title={catFilter ? "Нет изделий в этой категории" : "Каталог пуст — нажмите + чтобы добавить первое изделие"} />
                 ) : filteredItems.map((item) => (
             <div
               key={item.id}
@@ -524,9 +524,9 @@ export default function Catalog() {
             <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>МАКС.</div>
           </div>
           {loadingSmets ? (
-            <div style={{ padding: 48, textAlign: "center", color: "#A89070", fontSize: 13 }}>Загружаем...</div>
+            <Loading />
           ) : filteredSmets.length === 0 ? (
-            <div style={{ padding: 48, textAlign: "center", color: "#A89070", fontSize: 13 }}>Ничего не найдено</div>
+            <EmptyState title="Ничего не найдено" />
           ) : filteredSmets.map((item: any, i: number) => {
             const rowId = item.title || String(i);
             return (

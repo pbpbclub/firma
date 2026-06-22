@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Loading } from "../components/ui/Loading";
+import { EmptyState } from "../components/ui/EmptyState";
 import { MONO } from "../components/ui/Num";
 import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { useNavigate, useParams } from "react-router-dom";
@@ -831,9 +833,9 @@ export default function Customers() {
 
         <div style={{ flex: 1, overflow: "auto" }}>
           {isLoading ? (
-            <div style={{ padding: 40, textAlign: "center", color: "#A89070", fontSize: 12 }}>Загружаем...</div>
+            <Loading compact />
           ) : pageItems.length === 0 ? (
-            <div style={{ padding: 40, textAlign: "center", color: "#A89070", fontSize: 12 }}>Ничего не найдено</div>
+            <EmptyState compact title="Ничего не найдено" />
           ) : pageItems.map((item: any) => {
             const isActive = tab === "clients" ? id === item.id : selectedMaster?.id === item.id;
             return (
