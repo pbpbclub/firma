@@ -4,6 +4,7 @@ import { Loading } from "../components/ui/Loading";
 import { EmptyState } from "../components/ui/EmptyState";
 import { MONO } from "../components/ui/Num";
 import { Modal, ConfirmModal } from "../components/ui/Modal";
+import { IconButton } from "../components/ui/IconButton";
 import { useNavigate, useParams } from "react-router-dom";
 import { useNavigationGuard, NavigationGuardModal } from "../components/NavigationGuard";
 import {
@@ -331,15 +332,7 @@ function CustomerDetail({ customerId, onClose }: { customerId: string; onClose: 
           {customer.full_name && <div style={{ fontSize: 11, color: "#A89070" }}>{customer.full_name}</div>}
         </div>
         <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-          <button
-            onClick={() => setEditing(true)}
-            title="Редактировать"
-            style={{ display: "flex", alignItems: "center", padding: 6, border: "none", background: "none", cursor: "pointer", color: "#C8C0B0" }}
-            onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
-            onMouseLeave={e => (e.currentTarget.style.color = "#C8C0B0")}
-          >
-            <PencilSimple size={16} />
-          </button>
+          <IconButton icon={PencilSimple} title="Редактировать" size={28} iconSize={16} color="#C8C0B0" onClick={() => setEditing(true)} />
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 6 }}
             onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
             onMouseLeave={e => (e.currentTarget.style.color = "#C8C0B0")}>
@@ -554,15 +547,7 @@ function MasterDetail({ masterId, onClose }: { masterId: string; onClose: () => 
           )}
         </div>
         <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-          <button
-            onClick={() => setEditing(true)}
-            title="Редактировать"
-            style={{ display: "flex", alignItems: "center", padding: 6, border: "none", background: "none", cursor: "pointer", color: "#C8C0B0" }}
-            onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
-            onMouseLeave={e => (e.currentTarget.style.color = "#C8C0B0")}
-          >
-            <PencilSimple size={16} />
-          </button>
+          <IconButton icon={PencilSimple} title="Редактировать" size={28} iconSize={16} color="#C8C0B0" onClick={() => setEditing(true)} />
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 6 }}
             onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
             onMouseLeave={e => (e.currentTarget.style.color = "#C8C0B0")}>

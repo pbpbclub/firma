@@ -239,14 +239,8 @@ function PayeeRulePopup({ payee, ruleId, onClose }: {
         <div style={{ display: "flex", gap: 4 }}>
           {ruleId && !editing && (
             <>
-              <button onClick={() => setEditing(true)} title="Редактировать"
-                style={{ background: "none", border: "none", cursor: "pointer", padding: 2, color: "#6B6355" }}>
-                <PencilSimple size={13} />
-              </button>
-              <button onClick={() => del.mutate()} title="Удалить"
-                style={{ background: "none", border: "none", cursor: "pointer", padding: 2, color: "#8B3A3A" }}>
-                <Trash size={13} />
-              </button>
+              <IconButton icon={PencilSimple} title="Редактировать" size={22} iconSize={13} onClick={() => setEditing(true)} />
+              <IconButton icon={Trash} title="Удалить" tone="danger" size={22} iconSize={13} onClick={() => del.mutate()} />
             </>
           )}
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 2, color: "#A89070" }}>

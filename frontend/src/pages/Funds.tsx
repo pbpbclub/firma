@@ -4,6 +4,7 @@ import { Loading } from "../components/ui/Loading";
 import { EmptyState } from "../components/ui/EmptyState";
 import { MONO } from "../components/ui/Num";
 import { Modal } from "../components/ui/Modal";
+import { IconButton } from "../components/ui/IconButton";
 import { fundsApi } from "../api";
 import { Plus, Minus, Trash } from "@phosphor-icons/react";
 import { ColumnFilter } from "../components/TableFilters";
@@ -169,11 +170,7 @@ function FundDetailModal({ fund, onClose, onRefresh }: {
                   <div style={{ fontSize: 13, fontWeight: 700, color: tx.direction === "in" ? "#4A7C59" : "#8B3A3A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
                     {tx.direction === "in" ? "+" : "−"}{fmt(tx.amount)}
                   </div>
-                  <button onClick={() => deleteTx(tx.id)}
-                    style={{ background: "none", border: "none", cursor: "pointer", color: "#D0C8C0", padding: 0, display: "flex" }}
-                    onMouseEnter={e => (e.currentTarget.style.color = "#8B3A3A")}
-                    onMouseLeave={e => (e.currentTarget.style.color = "#D0C8C0")}
-                  ><Trash size={12} /></button>
+                  <IconButton icon={Trash} title="Удалить операцию" tone="danger" size={22} iconSize={12} color="#D0C8C0" onClick={() => deleteTx(tx.id)} />
                 </div>
               ))
             )}
