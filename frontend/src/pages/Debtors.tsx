@@ -7,7 +7,7 @@ import { ColumnFilter } from "../components/TableFilters";
 import { Modal } from "../components/ui/Modal";
 import { MONO } from "../components/ui/Num";
 
-const SANS = "system-ui, -apple-system, sans-serif";
+const SANS = "inherit";
 
 function Checkbox({ checked, indeterminate = false, onChange }: {
   checked: boolean; indeterminate?: boolean; onChange: () => void;

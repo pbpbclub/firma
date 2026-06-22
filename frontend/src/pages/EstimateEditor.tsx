@@ -9,7 +9,7 @@ import { BrandSelect, EditableText } from "../components/ui/Selects";
 import { markupToPct, pctToMarkup } from "../components/ui/priceMath";
 import { MONO } from "../components/ui/Num";
 
-const SANS = "system-ui, -apple-system, sans-serif";
+const SANS = "inherit";
 import {
   ArrowLeft, Plus, Trash, Package, Cube,
   X, FileText, DotsSixVertical, PencilSimple, FloppyDisk, ListChecks, CheckCircle, Circle,

@@ -34,8 +34,12 @@
 @layer base {
   body {
     @apply bg-gray-50 text-gray-900 antialiased;
-    font-family: 'JBMNum', system-ui, -apple-system, sans-serif;
+    font-family: 'JetBrains Mono', system-ui, -apple-system, sans-serif;
     margin: 0;
+  }
+  /* Контролы по умолчанию не наследуют шрифт — заставляем. */
+  input, textarea, select, button {
+    font-family: inherit;
   }
   #root {
     min-height: 100svh;
