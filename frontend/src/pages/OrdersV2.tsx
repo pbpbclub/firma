@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { MONO } from "../components/ui/Num";
+import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { useNavigate } from "react-router-dom";
 import { ordersApi, customersApi, brandsApi } from "../api";
 import { MagnifyingGlass, DotsThree, Plus, Files, CaretRight, Archive, ArrowCounterClockwise, CaretDown, X, Trash, PencilSimple, UserCircle } from "@phosphor-icons/react";
@@ -379,12 +380,15 @@ function NewOrderModal({ onClose, onCreated }: {
   }
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ background: "#fff", width: 440, boxShadow: "0 8px 40px rgba(0,0,0,0.18)", display: "flex", flexDirection: "column" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 24px 16px", borderBottom: "1px solid #EDEBE6" }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: "#1A1A1A" }}>Новый заказ</div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070" }}><X size={18} /></button>
-        </div>
+    <Modal
+      size="md"
+      eyebrow="НОВЫЙ ЗАКАЗ"
+      onClose={onClose}
+      onCancel={onClose}
+      onSave={handleSubmit}
+      saveLabel={saving ? "Создаём..." : "Создать и открыть смету →"}
+      saving={saving}
+    >
         <div style={{ padding: "16px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
           <div>
             <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>НАЗВАНИЕ *</div>
@@ -498,15 +502,7 @@ function NewOrderModal({ onClose, onCreated }: {
           </div>
           {error && <div style={{ fontSize: 11, color: "#8B3A3A" }}>{error}</div>}
         </div>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "14px 24px", borderTop: "1px solid #EDEBE6" }}>
-          <button onClick={onClose} style={{ padding: "7px 16px", border: "1px solid #EDEBE6", background: "none", fontSize: 12, cursor: "pointer", color: "#6B6355" }}>Отмена</button>
-          <button onClick={handleSubmit} disabled={saving}
-            style={{ padding: "7px 20px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, cursor: saving ? "default" : "pointer", fontWeight: 600, opacity: saving ? 0.7 : 1 }}>
-            {saving ? "Создаём..." : "Создать и открыть смету →"}
-          </button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -752,33 +748,12 @@ export default function OrdersV2() {
 
               {/* Confirm delete modal */}
               {confirmDelete && (
-                <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}
-                  onClick={() => setConfirmDelete(false)}>
-                  <div style={{ background: "#FFF", padding: "28px 32px", width: 360, boxShadow: "0 8px 40px rgba(0,0,0,0.18)" }}
-                    onClick={e => e.stopPropagation()}>
-                    <div style={{ fontSize: 16, fontWeight: 700, color: "#1A1A1A", marginBottom: 8, letterSpacing: "-0.02em" }}>
-                      Удалить {selectedIds.size} {selectedIds.size === 1 ? "заказ" : selectedIds.size < 5 ? "заказа" : "заказов"}?
-                    </div>
-                    <div style={{ fontSize: 12, color: "#6B6355", marginBottom: 24, lineHeight: 1.5 }}>
-                      Это действие необратимо. Все данные заказа, включая сметы и платежи, будут удалены навсегда.
-                    </div>
-                    <div style={{ display: "flex", gap: 10 }}>
-                      <button
-                        onClick={() => bulkDelete.mutate([...selectedIds])}
-                        disabled={bulkDelete.isPending}
-                        style={{ flex: 1, background: "#8B3A3A", color: "#FFF", border: "none", padding: "9px 0", fontSize: 12, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
-                      >
-                        {bulkDelete.isPending ? "Удаляем..." : "Удалить"}
-                      </button>
-                      <button
-                        onClick={() => setConfirmDelete(false)}
-                        style={{ flex: 1, background: "none", border: "1px solid #EDEBE6", padding: "9px 0", fontSize: 12, cursor: "pointer", fontFamily: "inherit", color: "#6B6355" }}
-                      >
-                        Отмена
-                      </button>
-                    </div>
-                  </div>
-                </div>
+                <ConfirmModal
+                  message={`Удалить ${selectedIds.size} ${selectedIds.size === 1 ? "заказ" : selectedIds.size < 5 ? "заказа" : "заказов"}? Это действие необратимо — сметы и платежи будут удалены навсегда.`}
+                  confirmLabel={bulkDelete.isPending ? "Удаляем..." : "Удалить"}
+                  onConfirm={() => bulkDelete.mutate([...selectedIds])}
+                  onCancel={() => setConfirmDelete(false)}
+                />
               )}
             </>
           );

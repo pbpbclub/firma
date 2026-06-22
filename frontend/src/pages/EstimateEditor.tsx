@@ -3,7 +3,7 @@ import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ordersApi, estimatesApi, catalogApi, mastersApi, workTypesApi } from "../api";
 import { useNavigationGuard, NavigationGuardModal } from "../components/NavigationGuard";
-import { Modal } from "../components/ui/Modal";
+import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { CalcHeader, CalcSection, CalcRow, CalcFooter } from "../components/ui/Calc";
 import { BrandSelect, EditableText } from "../components/ui/Selects";
 import { markupToPct, pctToMarkup } from "../components/ui/priceMath";
@@ -12,7 +12,7 @@ import { MONO } from "../components/ui/Num";
 const SANS = "inherit";
 import {
   ArrowLeft, Plus, Trash, Package, Cube,
-  X, FileText, DotsSixVertical, PencilSimple, FloppyDisk, ListChecks, CheckCircle, Circle,
+  FileText, DotsSixVertical, PencilSimple, FloppyDisk, ListChecks, CheckCircle, Circle,
 } from "@phosphor-icons/react";
 
 function fmt(n: number | null | undefined) {
@@ -246,20 +246,7 @@ function CatalogModal({ onClose, onSelect }: {
   );
 
   return (
-    <div
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200 }}
-      onClick={onClose}
-    >
-      <div
-        style={{ background: "#FFFFFF", width: 440, maxHeight: 500, display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,0.16)" }}
-        onClick={e => e.stopPropagation()}
-      >
-        <div style={{ padding: "14px 20px", borderBottom: "1px solid #EDEBE6", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A" }}>Из каталога</span>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070", display: "flex" }}>
-            <X size={15} />
-          </button>
-        </div>
+    <Modal size="sm" eyebrow="ИЗ КАТАЛОГА" onClose={onClose}>
         <div style={{ padding: "8px 20px", borderBottom: "1px solid #EDEBE6" }}>
           <input
             autoFocus
@@ -290,8 +277,7 @@ function CatalogModal({ onClose, onSelect }: {
             ))
           )}
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -1063,97 +1049,43 @@ export default function EstimateEditor() {
 
     {/* Confirm delete estimate set */}
     {confirmDeleteSet && (
-      <div style={{ position: "fixed", inset: 0, zIndex: 2000, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ background: "#FFF", width: 380, padding: "28px 32px", boxShadow: "0 8px 40px rgba(0,0,0,0.2)" }}>
-          <div style={{ fontSize: 16, fontWeight: 700, color: "#1A1A1A", marginBottom: 8, letterSpacing: "-0.02em" }}>
-            Удалить смету?
-          </div>
-          <div style={{ fontSize: 13, color: "#6B6355", marginBottom: 24, lineHeight: 1.6 }}>
-            Смета «{activeSet?.title || `Смета ${(sets as any[]).findIndex((s: any) => s.id === activeSetId) + 1}`}» и все её позиции будут удалены без возможности восстановления.
-          </div>
-          <div style={{ display: "flex", gap: 10 }}>
-            <button
-              onClick={async () => {
-                const remaining = (sets as any[]).filter((s: any) => s.id !== activeSetId);
-                await estimatesApi.deleteSet(activeSetId!);
-                setConfirmDeleteSet(false);
-                setEditMode(false);
-                setSelectedSetId(remaining[0]?.id ?? null);
-                refetch();
-              }}
-              style={{ flex: 1, background: "#8B3A3A", color: "#FFF", border: "none", padding: "9px 0", fontSize: 12, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
-            >
-              Удалить
-            </button>
-            <button
-              onClick={() => setConfirmDeleteSet(false)}
-              style={{ flex: 1, background: "none", border: "1px solid #EDEBE6", padding: "9px 0", fontSize: 12, cursor: "pointer", fontFamily: "inherit", color: "#1A1A1A", fontWeight: 600 }}
-            >
-              Отмена
-            </button>
-          </div>
-        </div>
-      </div>
+      <ConfirmModal
+        message={`Смета «${activeSet?.title || `Смета ${(sets as any[]).findIndex((s: any) => s.id === activeSetId) + 1}`}» и все её позиции будут удалены без возможности восстановления.`}
+        confirmLabel="Удалить"
+        onConfirm={async () => {
+          const remaining = (sets as any[]).filter((s: any) => s.id !== activeSetId);
+          await estimatesApi.deleteSet(activeSetId!);
+          setConfirmDeleteSet(false);
+          setEditMode(false);
+          setSelectedSetId(remaining[0]?.id ?? null);
+          refetch();
+        }}
+        onCancel={() => setConfirmDeleteSet(false)}
+      />
     )}
 
     {/* Confirm revert obligations */}
     {confirmRevert && (
-      <div style={{ position: "fixed", inset: 0, zIndex: 2000, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ background: "#FFF", width: 380, padding: "28px 32px", boxShadow: "0 8px 40px rgba(0,0,0,0.2)" }}>
-          <div style={{ fontSize: 16, fontWeight: 700, color: "#1A1A1A", marginBottom: 8, letterSpacing: "-0.02em" }}>
-            Вернуть обязательства?
-          </div>
-          <div style={{ fontSize: 13, color: "#6B6355", marginBottom: 24, lineHeight: 1.6 }}>
-            Все обязательства, созданные по этой смете, будут удалены. Если по ним уже зафиксированы оплаты — они тоже пропадут.
-          </div>
-          <div style={{ display: "flex", gap: 10 }}>
-            <button
-              onClick={async () => {
-                setConfirmRevert(false);
-                await estimatesApi.deleteObligations(activeSetId!);
-                refetch();
-              }}
-              style={{ flex: 1, background: "#8B3A3A", color: "#FFF", border: "none", padding: "9px 0", fontSize: 12, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
-            >
-              Удалить обязательства
-            </button>
-            <button
-              onClick={() => setConfirmRevert(false)}
-              style={{ flex: 1, background: "none", border: "1px solid #EDEBE6", padding: "9px 0", fontSize: 12, cursor: "pointer", fontFamily: "inherit", color: "#1A1A1A", fontWeight: 600 }}
-            >
-              Отмена
-            </button>
-          </div>
-        </div>
-      </div>
+      <ConfirmModal
+        message="Все обязательства, созданные по этой смете, будут удалены. Если по ним уже зафиксированы оплаты — они тоже пропадут."
+        confirmLabel="Удалить обязательства"
+        onConfirm={async () => {
+          setConfirmRevert(false);
+          await estimatesApi.deleteObligations(activeSetId!);
+          refetch();
+        }}
+        onCancel={() => setConfirmRevert(false)}
+      />
     )}
 
     {/* Confirm switching estimate while in edit mode */}
     {pendingSwitchId && (
-      <div style={{ position: "fixed", inset: 0, zIndex: 2000, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ background: "#FFF", width: 380, padding: "28px 32px", boxShadow: "0 8px 40px rgba(0,0,0,0.2)" }}>
-          <div style={{ fontSize: 16, fontWeight: 700, color: "#1A1A1A", marginBottom: 8, letterSpacing: "-0.02em" }}>
-            Несохранённые изменения
-          </div>
-          <div style={{ fontSize: 13, color: "#6B6355", marginBottom: 24, lineHeight: 1.6 }}>
-            Если перейти на другую смету сейчас, все незаписанные изменения будут потеряны.
-          </div>
-          <div style={{ display: "flex", gap: 10 }}>
-            <button
-              onClick={() => { setSelectedSetId(pendingSwitchId); setEditMode(false); setPendingSwitchId(null); }}
-              style={{ flex: 1, background: "#1A1A1A", color: "#FFF", border: "none", padding: "9px 0", fontSize: 12, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
-            >
-              Перейти без сохранения
-            </button>
-            <button
-              onClick={() => setPendingSwitchId(null)}
-              style={{ flex: 1, background: "none", border: "1px solid #EDEBE6", padding: "9px 0", fontSize: 12, cursor: "pointer", fontFamily: "inherit", color: "#1A1A1A", fontWeight: 600 }}
-            >
-              Остаться
-            </button>
-          </div>
-        </div>
-      </div>
+      <ConfirmModal
+        message="Если перейти на другую смету сейчас, все незаписанные изменения будут потеряны."
+        confirmLabel="Перейти без сохранения"
+        onConfirm={() => { setSelectedSetId(pendingSwitchId); setEditMode(false); setPendingSwitchId(null); }}
+        onCancel={() => setPendingSwitchId(null)}
+      />
     )}
     </>
   );

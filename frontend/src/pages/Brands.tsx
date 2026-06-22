@@ -2,8 +2,9 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MONO } from "../components/ui/Num";
+import { Modal } from "../components/ui/Modal";
 import { brandsApi, financeApi, businessUnitsApi, ordersApi } from "../api";
-import { X, Plus, Trash } from "@phosphor-icons/react";
+import { Plus, Trash } from "@phosphor-icons/react";
 import { ColumnFilter } from "../components/TableFilters";
 
 function fmt(n: number) {
@@ -84,13 +85,30 @@ function BrandModal({ brand, onClose }: { brand: any; onClose: () => void }) {
   };
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ background: "#fff", width: 480, maxHeight: "88vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,0.18)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 24px 14px", borderBottom: "1px solid #EDEBE6" }}>
-          <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.06em" }}>{isNew ? "НОВЫЙ БРЕНД" : "РЕДАКТИРОВАТЬ БРЕНД"}</div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070" }}><X size={16} /></button>
-        </div>
-        <div style={{ padding: "16px 24px", overflowY: "auto", display: "flex", flexDirection: "column", gap: 12 }}>
+    <Modal
+      size="md"
+      eyebrow={isNew ? "НОВЫЙ БРЕНД" : "РЕДАКТИРОВАТЬ БРЕНД"}
+      onClose={onClose}
+      onCancel={onClose}
+      onSave={save}
+      saveLabel="Сохранить"
+      saving={saving}
+      canSave={!!form.name.trim()}
+      footerLeft={!isNew ? (
+        confirmDel ? (
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <span style={{ fontSize: 11, color: "#8B3A3A" }}>Удалить?</span>
+            <button onClick={del} disabled={deleting} style={{ fontSize: 11, color: "#fff", background: "#8B3A3A", border: "none", padding: "4px 10px", cursor: "pointer" }}>Да</button>
+            <button onClick={() => setConfirmDel(false)} style={{ fontSize: 11, color: "#6B6355", background: "none", border: "none", cursor: "pointer" }}>Нет</button>
+          </div>
+        ) : (
+          <button onClick={() => setConfirmDel(true)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#8B3A3A", display: "flex", alignItems: "center", gap: 5 }}>
+            <Trash size={13} /> Удалить
+          </button>
+        )
+      ) : undefined}
+    >
+        <div style={{ padding: "16px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
           {FIELDS.map(f => (
             <div key={f.key}>
               <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>{f.label.toUpperCase()}</div>
@@ -151,30 +169,7 @@ function BrandModal({ brand, onClose }: { brand: any; onClose: () => void }) {
             </div>
           )}
         </div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 24px", borderTop: "1px solid #EDEBE6" }}>
-          {!isNew ? (
-            confirmDel ? (
-              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                <span style={{ fontSize: 11, color: "#8B3A3A" }}>Удалить?</span>
-                <button onClick={del} disabled={deleting} style={{ fontSize: 11, color: "#fff", background: "#8B3A3A", border: "none", padding: "4px 10px", cursor: "pointer" }}>Да</button>
-                <button onClick={() => setConfirmDel(false)} style={{ fontSize: 11, color: "#6B6355", background: "none", border: "none", cursor: "pointer" }}>Нет</button>
-              </div>
-            ) : (
-              <button onClick={() => setConfirmDel(true)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#8B3A3A", display: "flex", alignItems: "center", gap: 5 }}>
-                <Trash size={13} /> Удалить
-              </button>
-            )
-          ) : <div />}
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={onClose} style={{ padding: "7px 16px", background: "#F2EFE9", border: "none", cursor: "pointer", fontSize: 12, color: "#6B6355" }}>Отмена</button>
-            <button onClick={save} disabled={saving || !form.name.trim()}
-              style={{ padding: "7px 18px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600, opacity: saving || !form.name.trim() ? 0.5 : 1 }}>
-              {saving ? "..." : "Сохранить"}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -217,13 +212,30 @@ function BusinessUnitModal({ unit, onClose }: { unit: any; onClose: () => void }
   };
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ background: "#fff", width: 520, maxHeight: "88vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,0.18)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 24px 14px", borderBottom: "1px solid #EDEBE6" }}>
-          <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.06em" }}>{isNew ? "НОВАЯ БИЗНЕС-ЕДИНИЦА" : "БИЗНЕС-ЕДИНИЦА"}</div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070" }}><X size={16} /></button>
-        </div>
-        <div style={{ padding: "16px 24px", overflowY: "auto", display: "flex", flexDirection: "column", gap: 12 }}>
+    <Modal
+      size="md"
+      eyebrow={isNew ? "НОВАЯ БИЗНЕС-ЕДИНИЦА" : "БИЗНЕС-ЕДИНИЦА"}
+      onClose={onClose}
+      onCancel={onClose}
+      onSave={save}
+      saveLabel="Сохранить"
+      saving={saving}
+      canSave={!!form.name.trim()}
+      footerLeft={!isNew ? (
+        confirmDel ? (
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <span style={{ fontSize: 11, color: "#8B3A3A" }}>Удалить?</span>
+            <button onClick={async () => { await businessUnitsApi.delete(unit.id); refresh(); onClose(); }} style={{ fontSize: 11, color: "#fff", background: "#8B3A3A", border: "none", padding: "4px 10px", cursor: "pointer" }}>Да</button>
+            <button onClick={() => setConfirmDel(false)} style={{ fontSize: 11, color: "#6B6355", background: "none", border: "none", cursor: "pointer" }}>Нет</button>
+          </div>
+        ) : (
+          <button onClick={() => setConfirmDel(true)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#8B3A3A", display: "flex", alignItems: "center", gap: 5 }}>
+            <Trash size={13} /> Удалить
+          </button>
+        )
+      ) : undefined}
+    >
+        <div style={{ padding: "16px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: 10 }}>
             <div>
               <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>НАЗВАНИЕ</div>
@@ -277,30 +289,7 @@ function BusinessUnitModal({ unit, onClose }: { unit: any; onClose: () => void }
           )}
           {isNew && <div style={{ fontSize: 11, color: "#A89070" }}>Счета можно добавить после создания.</div>}
         </div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 24px", borderTop: "1px solid #EDEBE6" }}>
-          {!isNew ? (
-            confirmDel ? (
-              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                <span style={{ fontSize: 11, color: "#8B3A3A" }}>Удалить?</span>
-                <button onClick={async () => { await businessUnitsApi.delete(unit.id); refresh(); onClose(); }} style={{ fontSize: 11, color: "#fff", background: "#8B3A3A", border: "none", padding: "4px 10px", cursor: "pointer" }}>Да</button>
-                <button onClick={() => setConfirmDel(false)} style={{ fontSize: 11, color: "#6B6355", background: "none", border: "none", cursor: "pointer" }}>Нет</button>
-              </div>
-            ) : (
-              <button onClick={() => setConfirmDel(true)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#8B3A3A", display: "flex", alignItems: "center", gap: 5 }}>
-                <Trash size={13} /> Удалить
-              </button>
-            )
-          ) : <div />}
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={onClose} style={{ padding: "7px 16px", background: "#F2EFE9", border: "none", cursor: "pointer", fontSize: 12, color: "#6B6355" }}>Закрыть</button>
-            <button onClick={save} disabled={saving || !form.name.trim()}
-              style={{ padding: "7px 18px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600, opacity: saving || !form.name.trim() ? 0.5 : 1 }}>
-              {saving ? "..." : "Сохранить"}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 

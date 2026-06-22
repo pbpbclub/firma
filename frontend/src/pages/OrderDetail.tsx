@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { MONO } from "../components/ui/Num";
+import { ConfirmModal } from "../components/ui/Modal";
 import { ordersApi, customersApi, estimatesApi } from "../api";
 import { ArrowLeft, Plus, CaretRight, Trash } from "@phosphor-icons/react";
 import { useNavigationGuard, NavigationGuardModal } from "../components/NavigationGuard";
@@ -176,36 +177,12 @@ export default function OrderDetail() {
 
         {/* Delete confirmation modal */}
         {confirmDelete && (
-          <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}
-            onClick={() => setConfirmDelete(false)}>
-            <div style={{ background: "#FFF", padding: "28px 32px", width: 380, boxShadow: "0 8px 40px rgba(0,0,0,0.18)" }}
-              onClick={e => e.stopPropagation()}>
-              <div style={{ fontSize: 16, fontWeight: 700, color: "#1A1A1A", marginBottom: 6, letterSpacing: "-0.02em" }}>
-                Удалить заказ?
-              </div>
-              <div style={{ fontSize: 13, color: "#6B6355", marginBottom: 4 }}>
-                {order?.title} · {order?.number}
-              </div>
-              <div style={{ fontSize: 12, color: "#A89070", marginBottom: 24, lineHeight: 1.6 }}>
-                Это действие необратимо. Все данные заказа, включая сметы и платежи, будут удалены навсегда.
-              </div>
-              <div style={{ display: "flex", gap: 10 }}>
-                <button
-                  onClick={() => deleteMutation.mutate()}
-                  disabled={deleteMutation.isPending}
-                  style={{ flex: 1, background: "#8B3A3A", color: "#FFF", border: "none", padding: "9px 0", fontSize: 12, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
-                >
-                  {deleteMutation.isPending ? "Удаляем..." : "Удалить"}
-                </button>
-                <button
-                  onClick={() => setConfirmDelete(false)}
-                  style={{ flex: 1, background: "none", border: "1px solid #EDEBE6", padding: "9px 0", fontSize: 12, cursor: "pointer", fontFamily: "inherit", color: "#6B6355" }}
-                >
-                  Отмена
-                </button>
-              </div>
-            </div>
-          </div>
+          <ConfirmModal
+            message={`Удалить заказ «${order?.title ?? ""}» (${order?.number ?? ""})? Это действие необратимо — сметы и платежи будут удалены навсегда.`}
+            confirmLabel={deleteMutation.isPending ? "Удаляем..." : "Удалить"}
+            onConfirm={() => deleteMutation.mutate()}
+            onCancel={() => setConfirmDelete(false)}
+          />
         )}
       </div>
 

@@ -150,14 +150,17 @@ function AddCreditorModal({ onClose }: { onClose: () => void }) {
   });
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ background: "#fff", width: 440, padding: 28, boxShadow: "0 8px 40px rgba(0,0,0,0.18)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-          <div style={{ fontSize: 16, fontWeight: 700, color: "#1A1A1A" }}>Новое обязательство</div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070" }}><X size={18} /></button>
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+    <Modal
+      size="md"
+      eyebrow="НОВОЕ ОБЯЗАТЕЛЬСТВО"
+      onClose={onClose}
+      onCancel={onClose}
+      onSave={() => mutate()}
+      saveLabel="Добавить"
+      saving={isPending}
+      canSave={!!name.trim() && !!total}
+    >
+        <div style={{ padding: "18px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
           <div>
             <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>КОНТРАГЕНТ *</div>
             <input
@@ -201,20 +204,7 @@ function AddCreditorModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 20 }}>
-          <button onClick={onClose} style={{ padding: "7px 16px", border: "1px solid #EDEBE6", background: "none", fontSize: 12, cursor: "pointer", color: "#6B6355" }}>
-            Отмена
-          </button>
-          <button
-            disabled={!name.trim() || !total || isPending}
-            onClick={() => mutate()}
-            style={{ padding: "7px 16px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600, opacity: !name.trim() || !total ? 0.4 : 1 }}
-          >
-            Добавить
-          </button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -243,12 +233,9 @@ function PayCreditorModal({ item, onClose }: { item: any; onClose: () => void })
   });
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ background: "#fff", width: 440, padding: 28, boxShadow: "0 8px 40px rgba(0,0,0,0.18)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-          <div style={{ fontSize: 16, fontWeight: 700, color: "#1A1A1A" }}>{item.name}</div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070" }}><X size={18} /></button>
-        </div>
+    <Modal size="md" eyebrow="ОБЯЗАТЕЛЬСТВО" onClose={onClose}>
+      <div style={{ padding: "18px 24px" }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: "#1A1A1A", marginBottom: 14 }}>{item.name}</div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -314,7 +301,7 @@ function PayCreditorModal({ item, onClose }: { item: any; onClose: () => void })
           </div>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -508,13 +495,17 @@ function AddReceivableModal({ onClose }: { onClose: () => void }) {
   });
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ background: "#fff", width: 440, padding: 28, boxShadow: "0 8px 40px rgba(0,0,0,0.18)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-          <div style={{ fontSize: 16, fontWeight: 700, color: "#1A1A1A" }}>Новый счёт</div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070" }}><X size={18} /></button>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+    <Modal
+      size="md"
+      eyebrow="НОВЫЙ СЧЁТ"
+      onClose={onClose}
+      onCancel={onClose}
+      onSave={() => mutate()}
+      saveLabel="Добавить"
+      saving={isPending}
+      canSave={!!client.trim() && !!amount}
+    >
+        <div style={{ padding: "18px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
           <div>
             <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>КЛИЕНТ *</div>
             <input value={client} onChange={e => setClient(e.target.value)}
@@ -552,16 +543,7 @@ function AddReceivableModal({ onClose }: { onClose: () => void }) {
               style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none", resize: "vertical", fontFamily: "inherit" }} />
           </div>
         </div>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 20 }}>
-          <button onClick={onClose} style={{ padding: "7px 16px", border: "1px solid #EDEBE6", background: "none", fontSize: 12, cursor: "pointer", color: "#6B6355" }}>Отмена</button>
-          <button disabled={!client.trim() || !amount || isPending}
-            onClick={() => mutate()}
-            style={{ padding: "7px 16px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600, opacity: !client.trim() || !amount ? 0.4 : 1 }}>
-            Добавить
-          </button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 

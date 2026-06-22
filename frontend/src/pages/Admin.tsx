@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { UploadSimple, CheckCircle, WarningCircle, X, Plus, ArrowsClockwise } from "@phosphor-icons/react";
 import { adminApi, authApi, zenmoneyApi, payeeRulesApi, mastersApi, customersApi } from "../api";
+import { ConfirmModal } from "../components/ui/Modal";
 
 function fmt(n: number | null | undefined) {
   if (n == null) return "—";
@@ -460,40 +461,12 @@ function ImportsSection() {
 
       {/* Confirmation modal */}
       {confirmImport && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ background: "#fff", width: 420, boxShadow: "0 8px 40px rgba(0,0,0,0.18)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 24px 16px", borderBottom: "1px solid #EDEBE6" }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: "#1A1A1A" }}>Удалить выписку?</div>
-              <button onClick={() => setConfirmId(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070" }}><X size={18} /></button>
-            </div>
-            <div style={{ padding: "20px 24px" }}>
-              <div style={{ fontSize: 13, color: "#1A1A1A", marginBottom: 8 }}>
-                <strong>{confirmImport.filename || SOURCE_LABELS[confirmImport.source] || confirmImport.source}</strong>
-              </div>
-              <div style={{ fontSize: 12, color: "#A89070", marginBottom: 16 }}>
-                Загружена {fmtDatetime(confirmImport.imported_at)} · {confirmImport.rows_added} транзакций
-              </div>
-              <div style={{ fontSize: 13, color: "#6B6355", padding: "10px 14px", background: "#FFF8F5", border: "1px solid #F0D8C8", marginBottom: 20 }}>
-                Все транзакции этой выписки будут удалены из базы данных. Это действие нельзя отменить.
-              </div>
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                <button
-                  onClick={() => setConfirmId(null)}
-                  style={{ padding: "7px 16px", border: "1px solid #EDEBE6", background: "none", fontSize: 12, cursor: "pointer", color: "#6B6355" }}
-                >
-                  Отмена
-                </button>
-                <button
-                  onClick={() => deleteImport.mutate(confirmImport.id)}
-                  disabled={deleteImport.isPending}
-                  style={{ padding: "7px 20px", border: "none", background: "#8B3A3A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600, opacity: deleteImport.isPending ? 0.7 : 1 }}
-                >
-                  {deleteImport.isPending ? "Удаляем..." : "Да, удалить"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <ConfirmModal
+          message={`«${confirmImport.filename || SOURCE_LABELS[confirmImport.source] || confirmImport.source}» (загружена ${fmtDatetime(confirmImport.imported_at)}, ${confirmImport.rows_added} транзакций). Все транзакции этой выписки будут удалены из базы. Отменить нельзя.`}
+          confirmLabel={deleteImport.isPending ? "Удаляем..." : "Да, удалить"}
+          onConfirm={() => deleteImport.mutate(confirmImport.id)}
+          onCancel={() => setConfirmId(null)}
+        />
       )}
     </div>
   );

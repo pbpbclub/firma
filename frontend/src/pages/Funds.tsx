@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MONO } from "../components/ui/Num";
+import { Modal } from "../components/ui/Modal";
 import { fundsApi } from "../api";
-import { Plus, Minus, Trash, X } from "@phosphor-icons/react";
+import { Plus, Minus, Trash } from "@phosphor-icons/react";
 import { ColumnFilter } from "../components/TableFilters";
 
 const PRESET_COLORS = [
@@ -43,12 +44,16 @@ function TxModal({ fund, mode, onClose, onDone }: {
   };
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 300 }} onClick={onClose}>
-      <div style={{ background: "#FFFFFF", width: 360, boxShadow: "0 8px 40px rgba(0,0,0,0.14)", display: "flex", flexDirection: "column" }} onClick={e => e.stopPropagation()}>
-        <div style={{ padding: "16px 20px", borderBottom: "1px solid #EDEBE6", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "#1A1A1A" }}>{isDeposit ? "Пополнить" : "Списать"} — {fund.name}</div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070", display: "flex" }}><X size={15} /></button>
-        </div>
+    <Modal
+      size="sm"
+      eyebrow={(isDeposit ? "ПОПОЛНИТЬ" : "СПИСАТЬ") + " — " + fund.name}
+      onClose={onClose}
+      onCancel={onClose}
+      onSave={submit}
+      saveLabel={isDeposit ? "Пополнить" : "Списать"}
+      saving={loading}
+      canSave={!!amount}
+    >
         <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
           <div>
             <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.05em", marginBottom: 4 }}>СУММА, ₽</div>
@@ -67,15 +72,7 @@ function TxModal({ fund, mode, onClose, onDone }: {
               style={{ width: "100%", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 12, outline: "none", boxSizing: "border-box" }} />
           </div>
         </div>
-        <div style={{ padding: "12px 20px", borderTop: "1px solid #EDEBE6", display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button onClick={onClose} style={{ padding: "6px 14px", border: "1px solid #EDEBE6", background: "transparent", fontSize: 12, cursor: "pointer", color: "#6B6355" }}>Отмена</button>
-          <button onClick={submit} disabled={loading || !amount}
-            style={{ padding: "6px 16px", border: "none", fontSize: 12, fontWeight: 600, cursor: loading ? "default" : "pointer", background: isDeposit ? "#4A7C59" : "#8B3A3A", color: "#FFFFFF", opacity: loading || !amount ? 0.6 : 1 }}>
-            {loading ? "..." : isDeposit ? "Пополнить" : "Списать"}
-          </button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -111,8 +108,7 @@ function FundDetailModal({ fund, onClose, onRefresh }: {
 
   return (
     <>
-      <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200 }} onClick={onClose}>
-        <div style={{ background: "#FFFFFF", width: 560, maxHeight: "75vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,0.14)" }} onClick={e => e.stopPropagation()}>
+      <Modal size="lg" eyebrow="ФОНД" onClose={onClose}>
 
           {/* Шапка */}
           <div style={{ padding: "18px 24px", borderBottom: "1px solid #EDEBE6", display: "flex", alignItems: "center", gap: 12 }}>
@@ -121,11 +117,10 @@ function FundDetailModal({ fund, onClose, onRefresh }: {
               <div style={{ fontSize: 16, fontWeight: 700, color: "#1A1A1A" }}>{fund.name}</div>
               {fund.description && <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>{fund.description}</div>}
             </div>
-            <div style={{ textAlign: "right", marginRight: 16 }}>
+            <div style={{ textAlign: "right" }}>
               <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.05em", marginBottom: 2 }}>БАЛАНС</div>
               <div style={{ fontSize: 20, fontWeight: 700, color: fund.balance > 0 ? "#1A1A1A" : "#C8C0B0", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(fund.balance)}</div>
             </div>
-            <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070", display: "flex" }}><X size={16} /></button>
           </div>
 
           {/* Кнопки действий */}
@@ -181,8 +176,7 @@ function FundDetailModal({ fund, onClose, onRefresh }: {
               ))
             )}
           </div>
-        </div>
-      </div>
+      </Modal>
 
       {txModal && (
         <TxModal fund={fund} mode={txModal} onClose={() => setTxModal(null)} onDone={handleTxDone} />
@@ -209,13 +203,16 @@ function CreateFundModal({ onClose, onDone }: { onClose: () => void; onDone: () 
   };
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200 }} onClick={onClose}>
-      <div style={{ background: "#FFFFFF", width: 380, boxShadow: "0 8px 40px rgba(0,0,0,0.14)", display: "flex", flexDirection: "column" }} onClick={e => e.stopPropagation()}>
-        <div style={{ padding: "16px 20px", borderBottom: "1px solid #EDEBE6", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "#1A1A1A" }}>Новый фонд</div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070", display: "flex" }}><X size={15} /></button>
-        </div>
-
+    <Modal
+      size="sm"
+      eyebrow="НОВЫЙ ФОНД"
+      onClose={onClose}
+      onCancel={onClose}
+      onSave={submit}
+      saveLabel="Создать"
+      saving={loading}
+      canSave={!!name.trim()}
+    >
         <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
           <div>
             <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.05em", marginBottom: 4 }}>НАЗВАНИЕ</div>
@@ -245,15 +242,7 @@ function CreateFundModal({ onClose, onDone }: { onClose: () => void; onDone: () 
           </div>
         </div>
 
-        <div style={{ padding: "12px 20px", borderTop: "1px solid #EDEBE6", display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button onClick={onClose} style={{ padding: "6px 14px", border: "1px solid #EDEBE6", background: "transparent", fontSize: 12, cursor: "pointer", color: "#6B6355" }}>Отмена</button>
-          <button onClick={submit} disabled={loading || !name.trim()}
-            style={{ padding: "6px 16px", border: "none", fontSize: 12, fontWeight: 600, cursor: loading ? "default" : "pointer", background: color, color: "#FFFFFF", opacity: loading || !name.trim() ? 0.5 : 1 }}>
-            {loading ? "..." : "Создать"}
-          </button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
