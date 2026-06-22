@@ -91,6 +91,12 @@ function ItemModal({ item, onClose, onRefetch, initialReadOnly }: {
   const [masters, setMasters] = useState<any[]>([]);
   const [workTypes, setWorkTypes] = useState<any[]>([]);
 
+  const { data: etalonItem } = useQuery({
+    queryKey: ["catalog-item", item.catalog_item_id],
+    queryFn: () => catalogApi.items.get(item.catalog_item_id),
+    enabled: !!item.catalog_item_id,
+  });
+
   const reloadMasters = () =>
     mastersApi.list().then((data: any) => setMasters(Array.isArray(data) ? data : (data?.masters ?? [])));
 
@@ -234,6 +240,29 @@ function ItemModal({ item, onClose, onRefetch, initialReadOnly }: {
                   onChange={b => save(() => estimatesApi.updateItem(item.id, { brand: b }))} />}
           </div>
         </div>
+
+        {item.catalog_item_id ? (
+          <div style={{ marginTop: 14, padding: "10px 12px", background: "#FAF8F5", borderLeft: "2px solid #E8592A" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>
+              <span style={{ color: "#E8592A" }}>●</span> ЭТАЛОН ИЗ КАТАЛОГА
+              {etalonItem?.title && <span style={{ color: "#6B6355" }}>· «{etalonItem.title}»</span>}
+            </div>
+            {etalonItem?.cost_total != null && (() => {
+              const et = etalonItem.cost_total as number;
+              const curUnit = lines.length ? perUnitCost : (item.cost_total || 0) / (item.quantity || 1);
+              const dev = et ? Math.round((curUnit - et) / et * 100) : null;
+              return (
+                <div style={{ marginTop: 6, fontSize: 12, fontFamily: MONO, fontVariantNumeric: "tabular-nums", color: "#1A1A1A" }}>
+                  эталон {fmt(et)}/шт · текущий {fmt(curUnit)}/шт
+                  {dev != null && <span style={{ color: curUnit <= et ? "#4A7C59" : "#8B3A3A", marginLeft: 6 }}>Δ {dev > 0 ? "+" : ""}{dev}%</span>}
+                </div>
+              );
+            })()}
+            <div style={{ marginTop: 4, fontSize: 10, color: "#A89070" }}>Правки этой позиции попадут в историю карточки</div>
+          </div>
+        ) : (
+          <div style={{ marginTop: 14, fontSize: 10, color: "#C8C0B0" }}>Не из каталога — правки не копятся в историю карточки</div>
+        )}
 
         <div style={{ marginTop: 18 }}><CalcHeader withContractor /></div>
         <CalcSection label="Материалы" addLabel="Добавить материал" readOnly={readOnly} onAdd={() => addLine("material")}>

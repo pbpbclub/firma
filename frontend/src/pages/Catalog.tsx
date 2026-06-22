@@ -43,6 +43,7 @@ const _STATUS_RU: Record<string, string> = {
 function CostHistorySection({ data, onOpenOrder }: { data: any; onOpenOrder: (orderId: string) => void }) {
   const etalon: number = data.etalon_unit || 0;
   const stats = data.stats;
+  const planStats = data.plan_stats;
   const history: any[] = data.history || [];
   const histCols = "1fr 70px 64px 92px 92px 84px";
 
@@ -57,6 +58,18 @@ function CostHistorySection({ data, onOpenOrder }: { data: any; onOpenOrder: (or
           {/* Сводка эталон vs факт */}
           <div style={{ display: "flex", gap: 28, flexWrap: "wrap", marginBottom: 16 }}>
             <Metric label="ЭТАЛОН / ШТ" value={fmt(etalon)} color="#1A1A1A" />
+            {planStats && (
+              <>
+                <Metric label="СРЕДН. ПЛАН / ШТ" value={fmt(planStats.avg_plan_unit)} color="#1A1A1A" />
+                {planStats.deviation_pct != null && (
+                  <Metric
+                    label="ПЛАН Δ К ЭТАЛОНУ"
+                    value={`${planStats.deviation_pct > 0 ? "+" : ""}${planStats.deviation_pct}%`}
+                    color={planStats.deviation_pct > 0 ? "#8B3A3A" : "#4A7C59"}
+                  />
+                )}
+              </>
+            )}
             {stats ? (
               <>
                 <Metric label="СРЕДН. ФАКТ / ШТ" value={fmt(stats.avg_actual_unit)} color="#1A1A1A" />

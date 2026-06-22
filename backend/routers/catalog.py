@@ -167,6 +167,7 @@ def cost_history(item_id: str):
 
         history = []
         facts = []
+        plans = []
         for r in rows:
             qty = r["quantity"] or 1
             actual_paid = conn.execute(
@@ -188,8 +189,21 @@ def cost_history(item_id: str):
                 "actual_total": round(actual_paid, 2),
                 "has_fact": has_fact,
             })
+            plans.append(plan_unit)
             if has_fact:
                 facts.append(actual_unit)
+
+        plan_stats = None
+        if plans:
+            avg_plan = round(sum(plans) / len(plans), 2)
+            plan_stats = {
+                "count": len(plans),
+                "avg_plan_unit": avg_plan,
+                "min_plan_unit": round(min(plans), 2),
+                "max_plan_unit": round(max(plans), 2),
+                "last_plan_unit": plans[0],  # history sorted by date desc
+                "deviation_pct": round((avg_plan - etalon_unit) / etalon_unit * 100, 1) if etalon_unit else None,
+            }
 
         stats = None
         if facts:
@@ -203,7 +217,7 @@ def cost_history(item_id: str):
                 "deviation_pct": round((avg_actual - etalon_unit) / etalon_unit * 100, 1) if etalon_unit else None,
             }
 
-        return {"etalon_unit": etalon_unit, "history": history, "stats": stats}
+        return {"etalon_unit": etalon_unit, "history": history, "stats": stats, "plan_stats": plan_stats}
     finally:
         conn.close()
 
