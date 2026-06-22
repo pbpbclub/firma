@@ -113,6 +113,7 @@ class ItemUpdate(BaseModel):
     quantity: Optional[int] = None
     sort_order: Optional[int] = None
     cost_total: Optional[float] = None
+    sale_price: Optional[float] = None
     bank_pct: Optional[float] = None
 
 
