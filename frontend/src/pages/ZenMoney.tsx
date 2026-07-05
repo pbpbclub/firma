@@ -418,6 +418,12 @@ function LinkZenModal({ tx, creditorByZenTx, onClose }: {
   );
 }
 
+const DIR_FILTERS = [
+  { v: "", l: "Все" },
+  { v: "in", l: "Поступления" },
+  { v: "out", l: "Списания" },
+];
+
 export default function ZenMoneyPage() {
   const queryClient = useQueryClient();
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth);
@@ -435,6 +441,7 @@ export default function ZenMoneyPage() {
   });
   const [activePayeePopup, setActivePayeePopup] = useState<{ txId: string; payee: string; ruleId: number | null } | null>(null);
   const [search, setSearch] = useState("");
+  const [direction, setDirection] = useState(""); // "" | "in" | "out" — подвкладки Все/Поступления/Списания
   const [catFilter, setCatFilter] = useState("");
   const [payeeFilter, setPayeeFilter] = useState("");
   const [amountFilter, setAmountFilter] = useState("");
@@ -531,6 +538,8 @@ export default function ZenMoneyPage() {
 
   const filteredTx = useMemo(() => {
     let result = displayTx;
+    if (direction === "in") result = result.filter((t: any) => t.income > 0);
+    if (direction === "out") result = result.filter((t: any) => t.outcome > 0);
     if (bankFilter) result = result.filter((t: any) => {
       const isExp = t.outcome > 0 && t.income === 0;
       return detectBank(isExp ? (t.outcome_account || "") : (t.income_account || "")).name === bankFilter;
@@ -547,7 +556,7 @@ export default function ZenMoneyPage() {
     if (dateFrom) result = result.filter((t: any) => t.date >= dateFrom);
     if (dateTo) result = result.filter((t: any) => t.date <= dateTo);
     return result;
-  }, [displayTx, bankFilter, catFilter, payeeFilter, amountFilter, dateFrom, dateTo]);
+  }, [displayTx, direction, bankFilter, catFilter, payeeFilter, amountFilter, dateFrom, dateTo]);
 
   // Chart
   const maxVal = Math.max(...(cashflow as any[]).map((r: any) => Math.max(r.incomes, r.expenses)), 1);
@@ -680,6 +689,28 @@ export default function ZenMoneyPage() {
             </div>
           </div>
 
+          {/* Direction sub-tabs: Все / Поступления / Списания */}
+          {!showBusiness && (
+            <div style={{ display: "flex", gap: 24, borderBottom: "1px solid #EDEBE6", marginBottom: 16 }}>
+              {DIR_FILTERS.map((f) => (
+                <button
+                  key={f.v}
+                  onClick={() => setDirection(f.v)}
+                  style={{
+                    fontSize: 13, padding: "0 0 12px",
+                    border: "none", background: "none", cursor: "pointer",
+                    color: direction === f.v ? "#1A1A1A" : "#A89070",
+                    fontWeight: direction === f.v ? 600 : 400,
+                    borderBottom: direction === f.v ? "2px solid #E8592A" : "2px solid transparent",
+                    marginBottom: -1,
+                  }}
+                >
+                  {f.l}
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* Month summary strip */}
           {!showBusiness && report && (
             <div style={{
@@ -699,7 +730,7 @@ export default function ZenMoneyPage() {
                 </div>
               </div>
               <div>
-                <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>БАЛАНС</div>
+                <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>ЧИСТЫЙ ПОТОК</div>
                 <div style={{
                   fontSize: 18, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: "tabular-nums",
                   color: report.incomes - report.expenses >= 0 ? "#4A7C59" : "#8B3A3A",

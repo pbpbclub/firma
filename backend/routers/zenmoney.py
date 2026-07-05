@@ -70,8 +70,10 @@ def sync_zenmoney():
 def get_accounts():
     conn = get_zenmoney()
     try:
+        # type='cash' исключаем: отрицательный «кэш» — артефакт трекинга ZenMoney,
+        # это не реальные деньги на счетах и ломает сумму остатков.
         rows = conn.execute(
-            "SELECT id, title, type, balance FROM zm_accounts WHERE archive=0 ORDER BY balance DESC"
+            "SELECT id, title, type, balance FROM zm_accounts WHERE archive=0 AND type != 'cash' ORDER BY balance DESC"
         ).fetchall()
         return [dict(r) for r in rows]
     finally:
@@ -87,18 +89,20 @@ def get_balance_at_date(date: str):
         raise HTTPException(status_code=400, detail="date должна быть в формате YYYY-MM-DD")
     conn = get_zenmoney()
     try:
+        # type='cash' исключаем (артефакт ZenMoney — см. /accounts).
         rows = conn.execute(
-            "SELECT id, title, balance FROM zm_accounts WHERE archive=0 ORDER BY balance DESC"
+            "SELECT id, title, balance FROM zm_accounts WHERE archive=0 AND type != 'cash' ORDER BY balance DESC"
         ).fetchall()
         accounts = []
         for r in rows:
+            # В zm_transactions income_account/outcome_account хранят НАЗВАНИЕ счёта (title), не id.
             inflow = conn.execute(
                 "SELECT COALESCE(SUM(income),0) s FROM zm_transactions WHERE income_account=? AND date>? AND deleted=0",
-                (r["id"], date),
+                (r["title"], date),
             ).fetchone()["s"]
             outflow = conn.execute(
                 "SELECT COALESCE(SUM(outcome),0) s FROM zm_transactions WHERE outcome_account=? AND date>? AND deleted=0",
-                (r["id"], date),
+                (r["title"], date),
             ).fetchone()["s"]
             accounts.append({
                 "id": r["id"], "title": r["title"],

@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loading } from "../components/ui/Loading";
 import { EmptyState } from "../components/ui/EmptyState";
-import { financeApi, ordersApi } from "../api";
+import { financeApi, zenmoneyApi, ordersApi } from "../api";
 import { MagnifyingGlass, X, LinkSimple } from "@phosphor-icons/react";
 import { ColumnFilter, AmountFilter, PeriodFilter } from "../components/TableFilters";
 import { Modal } from "../components/ui/Modal";
@@ -280,7 +280,9 @@ export default function Finance() {
     return m;
   }, [paymentsMapData]);
 
-  const { data: balance } = useQuery({ queryKey: ["balance"], queryFn: financeApi.balance });
+  const [asOf, setAsOf] = useState(new Date().toISOString().slice(0, 10));
+  const { data: balance } = useQuery({ queryKey: ["fin-bal-at", asOf], queryFn: () => financeApi.balanceAtDate(asOf) });
+  const { data: zmBal } = useQuery({ queryKey: ["zm-bal-at", asOf], queryFn: () => zenmoneyApi.balanceAtDate(asOf) });
   const { data: summary } = useQuery({ queryKey: ["dds-summary"], queryFn: financeApi.summary });
   const { data: txs = [], isLoading } = useQuery({
     queryKey: ["transactions", direction, search],
@@ -513,23 +515,46 @@ export default function Finance() {
       {/* ── Right: summary panel ────────────────────────── */}
       <div style={{ width: 280, flexShrink: 0, display: "flex", flexDirection: "column", overflowY: "auto" }}>
 
-        {/* Total balance */}
-        <div style={{ padding: "24px 20px 20px", borderBottom: "1px solid #EDEBE6" }}>
-          <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 8 }}>ИТОГО НА СЧЕТАХ</div>
+        {/* Business balance as of date */}
+        <div style={{ padding: "20px 20px 16px", borderBottom: "1px solid #EDEBE6" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <span style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>ИТОГО НА СЧЕТАХ</span>
+            <input
+              type="date"
+              value={asOf}
+              max={new Date().toISOString().slice(0, 10)}
+              onChange={(e) => setAsOf(e.target.value)}
+              style={{ border: "1px solid #EDEBE6", padding: "3px 6px", fontSize: 11, fontFamily: MONO, outline: "none", color: "#6B6355" }}
+            />
+          </div>
           <div style={{ fontSize: 24, fontWeight: 700, color: (balance?.total ?? 0) >= 0 ? "#4A7C59" : "#8B3A3A", letterSpacing: "-0.02em", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
             {fmt(balance?.total ?? 0)}
           </div>
+          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 7 }}>
+            {balance?.accounts?.map((a: any) => (
+              <div key={a.account} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 12, color: "#6B6355" }}>{a.name || a.account}</span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(a.balance)}</span>
+              </div>
+            ))}
+          </div>
         </div>
 
-        {/* Per-account */}
-        {balance?.accounts?.map((a: any) => (
-          <div key={a.account} style={{ padding: "14px 20px", borderBottom: "1px solid #F2EFE9" }}>
-            <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em", marginBottom: 6 }}>
-              {(a.name || a.account).toUpperCase()}
-            </div>
-            <div style={{ fontSize: 17, fontWeight: 700, color: "#1A1A1A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(a.balance)}</div>
+        {/* Personal (ZenMoney) balance as of the same date */}
+        <div style={{ padding: "16px 20px", borderBottom: "1px solid #EDEBE6" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <span style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>ЛИЧНЫЕ · ZENMONEY</span>
+            <span style={{ fontSize: 15, fontWeight: 700, color: (zmBal?.total ?? 0) >= 0 ? "#4A7C59" : "#8B3A3A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(zmBal?.total ?? 0)}</span>
           </div>
-        ))}
+          <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+            {zmBal?.accounts?.filter((a: any) => Math.abs(a.balance) > 0.005).map((a: any) => (
+              <div key={a.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 12, color: "#6B6355", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 160 }}>{a.title}</span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(a.balance)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
 
         {/* Period summary */}
         <div style={{ padding: "16px 20px", borderBottom: "1px solid #EDEBE6" }}>
