@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { max-width: 560px; margin: 30px auto; padding: 0 16px;
+           font: 14px/1.5 -apple-system, system-ui, sans-serif; color: #1A1A1A; }
+    h1 { font-size: 18px; letter-spacing: -0.02em; }
+    label { display: block; margin: 16px 0 4px; font-size: 13px; color: #6B6355; }
+    input, select { width: 100%; padding: 7px 8px; border: 1px solid #EDEBE6;
+                    font-size: 14px; }
+    input[type=number] { width: 100px; }
+    button { margin-top: 18px; padding: 8px 16px; border: none;
+             background: #E8592A; color: #fff; font-size: 14px; cursor: pointer; }
+    #saved { color: #4A7C59; margin-left: 10px; font-size: 13px; }
+    .hint { font-size: 12px; color: #A89070; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Настройки — IG Outreach Logger</h1>
+
+  <label>URL приёмника</label>
+  <input type="url" id="webhookUrl" placeholder="https://pichcgpdfsbzdtxtcfwe.supabase.co/functions/v1/ingest-designers" />
+  <div class="hint">Кнопка ⬆︎ шлёт строки сюда. Для pbpb.club: …/functions/v1/ingest-designers. (Можно и Apps Script URL для Google-таблицы.)</div>
+
+  <label>Ingest-токен (pbpb.club)</label>
+  <input type="password" id="ingestToken" placeholder="секрет INGEST_TOKEN" autocomplete="off" />
+  <div class="hint">Уходит как Authorization: Bearer. Нужен для отправки в pbpb.club. Для Apps Script не требуется.</div>
+
+  <label>Твой аккаунт Instagram (чтобы исключать себя при сборе @логинов)</label>
+  <input type="text" id="ownAccount" placeholder="pbpb.furn" />
+  <div class="hint">Без @ и без ссылки — просто логин, например pbpb.furn</div>
+
+  <label>Фильтр по умолчанию — «не старше N часов»</label>
+  <input type="number" id="defaultHours" min="1" value="2" />
+
+  <label>Режим по умолчанию</label>
+  <select id="defaultMode">
+    <option value="hours">не старше N часов</option>
+    <option value="period">период с…по</option>
+  </select>
+
+  <div>
+    <button id="save">Сохранить</button>
+    <span id="saved" hidden>Сохранено ✓</span>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

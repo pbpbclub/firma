@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    :root { --orange: #E8592A; --line: #EDEBE6; --muted: #6B6355; }
+    * { box-sizing: border-box; }
+    body { width: 420px; margin: 0; padding: 14px;
+           font: 13px/1.4 -apple-system, system-ui, sans-serif; color: #1A1A1A; }
+    h1 { font-size: 15px; margin: 0 0 10px; letter-spacing: -0.02em; }
+    .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+    label { font-size: 12px; color: var(--muted); }
+    input[type=number], input[type=date] {
+      padding: 4px 6px; border: 1px solid var(--line); font-size: 13px; }
+    input[type=number] { width: 64px; }
+    input[type=date] { width: 130px; }
+    button { padding: 7px 12px; border: none; background: var(--orange); color: #fff;
+             font-size: 13px; cursor: pointer; }
+    button.secondary { background: #fff; color: #1A1A1A; border: 1px solid var(--line); }
+    button:disabled { opacity: .5; cursor: default; }
+    #status { font-size: 12px; color: var(--muted); margin: 8px 0; min-height: 16px; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    th, td { text-align: left; padding: 3px 4px; border-bottom: 1px solid var(--line);
+             vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; }
+    .wrap { max-height: 260px; overflow: auto; margin-top: 6px; }
+    .warn { color: #8B3A3A; }
+    .ok { color: #4A7C59; }
+    a { color: var(--orange); text-decoration: none; }
+    .config-link { font-size: 11px; }
+    pre { background: #FAF8F5; padding: 6px; font-size: 10px; max-height: 120px;
+          overflow: auto; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>IG Outreach Logger</h1>
+
+  <div class="row">
+    <label><input type="radio" name="mode" value="hours" checked /> не старше</label>
+    <input type="number" id="hours" min="1" value="2" /> <label>ч</label>
+  </div>
+  <div class="row">
+    <label><input type="radio" name="mode" value="period" /> период с</label>
+    <input type="date" id="fromDate" />
+    <label>по</label>
+    <input type="date" id="toDate" />
+  </div>
+
+  <div class="row">
+    <button id="logins">Собрать @логины</button>
+    <input type="number" id="loginLimit" min="1" value="1000" title="макс. чатов за один прогон (предохранитель)" />
+    <button id="copytsv" class="secondary" disabled title="Копировать для Google-таблицы">📋</button>
+    <button id="write" class="secondary" disabled title="Отправить в pbpb.club">⬆︎</button>
+  </div>
+
+  <div class="row">
+    <button id="loginsAll" class="secondary" title="старые диалоги блоками, с памятью места">Старые: блок</button>
+    <input type="number" id="batchSize" min="1" value="50" title="размер блока старых диалогов" />
+    <a class="config-link" href="#" id="resetBatch">↺ сброс памяти блоков</a>
+  </div>
+
+  <div id="status"></div>
+  <div class="wrap"><table id="preview"></table></div>
+  <pre id="raw" hidden></pre>
+  <div class="row" style="margin-top:6px;">
+    <a class="config-link" href="#" id="copydbg" hidden>⧉ Скопировать отладку для Клода</a>
+  </div>
+
+  <div class="row" style="margin-top:10px;">
+    <a class="config-link" href="#" id="opts">⚙ Настройки (URL таблицы, дефолты)</a>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

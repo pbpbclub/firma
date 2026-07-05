@@ -46,6 +46,7 @@ def create_rule(body: dict = Body(...)):
     entity_type = body.get("entity_type") or None
     entity_id = body.get("entity_id") or None
     entity_name = (body.get("entity_name") or "").strip() or None
+    category = (body.get("category") or "").strip() or None
 
     conn = get_production()
     try:
@@ -57,17 +58,17 @@ def create_rule(body: dict = Body(...)):
             # Upsert: обновляем существующее правило вместо ошибки
             conn.execute(
                 """UPDATE payee_rules SET display_name=?, entity_type=?, entity_id=?, entity_name=?,
-                   updated_at=datetime('now') WHERE id=?""",
-                (display_name, entity_type, entity_id, entity_name, existing["id"]),
+                   category=?, updated_at=datetime('now') WHERE id=?""",
+                (display_name, entity_type, entity_id, entity_name, category, existing["id"]),
             )
             conn.commit()
             return dict(conn.execute("SELECT * FROM payee_rules WHERE id = ?", (existing["id"],)).fetchone())
 
         conn.execute(
             """INSERT INTO payee_rules
-               (pattern, match_type, display_name, entity_type, entity_id, entity_name)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (pattern.lower(), match_type, display_name, entity_type, entity_id, entity_name),
+               (pattern, match_type, display_name, entity_type, entity_id, entity_name, category)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (pattern.lower(), match_type, display_name, entity_type, entity_id, entity_name, category),
         )
         conn.commit()
         rule_id = conn.execute("SELECT last_insert_rowid() as id").fetchone()["id"]
@@ -86,7 +87,7 @@ def update_rule(rule_id: int, body: dict = Body(...)):
 
         fields = []
         params = []
-        for key in ("pattern", "match_type", "display_name", "entity_type", "entity_id", "entity_name"):
+        for key in ("pattern", "match_type", "display_name", "entity_type", "entity_id", "entity_name", "category"):
             if key in body:
                 val = body[key]
                 if key == "pattern" and val:

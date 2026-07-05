@@ -14,23 +14,60 @@ ACCOUNT_NAMES = {
 
 @router.get("/balance")
 def get_balance():
+    """Текущий остаток = реальные балансы от банка (account_balances), а не разница по транзакциям."""
     conn = get_finance()
     try:
-        rows = conn.execute(
-            """
-            SELECT account,
-                SUM(CASE WHEN direction='in' THEN amount ELSE -amount END) as balance
-            FROM transactions
-            GROUP BY account
-            ORDER BY account
-            """
-        ).fetchall()
-        accounts = [
-            {**dict(r), "name": ACCOUNT_NAMES.get(r["account"], r["account"])}
-            for r in rows
-        ]
-        total = sum(r["balance"] for r in rows)
-        return {"accounts": accounts, "total": round(total, 2)}
+        accounts = []
+        for acc, name in ACCOUNT_NAMES.items():
+            row = conn.execute(
+                "SELECT balance FROM account_balances WHERE account=? ORDER BY updated_at DESC LIMIT 1",
+                (acc,),
+            ).fetchone()
+            bal = round(row["balance"], 2) if row else 0.0
+            accounts.append({"account": acc, "name": name, "balance": bal})
+        total = round(sum(a["balance"] for a in accounts), 2)
+        return {"accounts": accounts, "total": total}
+    except Exception as e:
+        return {"error": str(e), "accounts": [], "total": 0}
+    finally:
+        conn.close()
+
+
+def _valid_date(date: str) -> bool:
+    try:
+        from datetime import datetime
+        datetime.strptime(date, "%Y-%m-%d")
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
+@router.get("/balance-at-date")
+def get_balance_at_date(date: str):
+    """Остаток на дату D (включительно) = реальный остаток − движения ПОСЛЕ D."""
+    if not _valid_date(date):
+        raise HTTPException(status_code=400, detail="date должна быть в формате YYYY-MM-DD")
+    conn = get_finance()
+    try:
+        accounts = []
+        for acc, name in ACCOUNT_NAMES.items():
+            row = conn.execute(
+                "SELECT balance FROM account_balances WHERE account=? ORDER BY updated_at DESC LIMIT 1",
+                (acc,),
+            ).fetchone()
+            current = row["balance"] if row else 0.0
+            after = conn.execute(
+                """
+                SELECT COALESCE(SUM(CASE WHEN direction='in' THEN amount ELSE -amount END), 0) AS s
+                FROM transactions WHERE account=? AND date > ?
+                """,
+                (acc, date),
+            ).fetchone()["s"]
+            accounts.append({"account": acc, "name": name, "balance": round(current - after, 2)})
+        total = round(sum(a["balance"] for a in accounts), 2)
+        return {"accounts": accounts, "total": total, "date": date}
+    except HTTPException:
+        raise
     except Exception as e:
         return {"error": str(e), "accounts": [], "total": 0}
     finally:

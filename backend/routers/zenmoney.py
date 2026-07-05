@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, HTTPException
 from typing import Optional
 from db import get_zenmoney, get_analytics, get_production
 import json
@@ -7,6 +7,46 @@ import subprocess
 from datetime import datetime, timedelta
 
 router = APIRouter()
+
+_CATEGORY_RU: dict[str, str] = {
+    "Entertainment":       "Развлечения",
+    "Food & Drink":        "Еда",
+    "Food and Drink":      "Еда",
+    "Transport":           "Транспорт",
+    "Shopping":            "Покупки",
+    "Health & Fitness":    "Здоровье",
+    "Health and Fitness":  "Здоровье",
+    "Travel":              "Путешествия",
+    "Home":                "Дом",
+    "Education":           "Образование",
+    "Personal Care":       "Личный уход",
+    "Bills & Utilities":   "Коммунальные",
+    "Bills and Utilities": "Коммунальные",
+    "Clothing":            "Одежда",
+    "Groceries":           "Продукты",
+    "Auto & Transport":    "Авто/транспорт",
+    "Business Services":   "Услуги",
+    "Transfers":           "Переводы",
+    "Income":              "Доходы",
+    "Delivery":            "Доставка",
+    "Taxi":                "Такси",
+    "Restaurants":         "Рестораны",
+    "Coffee Shops":        "Кофе",
+    "Gas & Fuel":          "Топливо",
+    "Parking":             "Парковка",
+    "Gym":                 "Спортзал",
+    "Pharmacy":            "Аптека",
+    "Electronics":         "Электроника",
+    "Supermarkets":        "Супермаркеты",
+    "General":             "Разное",
+    "Cash & ATM":          "Наличные",
+    "Fees & Charges":      "Комиссии",
+    "Insurance":           "Страхование",
+    "Investments":         "Инвестиции",
+    "Loans":               "Кредиты",
+    "Salary":              "Зарплата",
+    "Freelance":           "Фриланс",
+}
 
 
 @router.post("/sync")
@@ -34,6 +74,42 @@ def get_accounts():
             "SELECT id, title, type, balance FROM zm_accounts WHERE archive=0 ORDER BY balance DESC"
         ).fetchall()
         return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+@router.get("/balance-at-date")
+def get_balance_at_date(date: str):
+    """Остаток на дату D (включительно) = текущий баланс − движения ПОСЛЕ D (истории баланса нет)."""
+    try:
+        datetime.strptime(date, "%Y-%m-%d")
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="date должна быть в формате YYYY-MM-DD")
+    conn = get_zenmoney()
+    try:
+        rows = conn.execute(
+            "SELECT id, title, balance FROM zm_accounts WHERE archive=0 ORDER BY balance DESC"
+        ).fetchall()
+        accounts = []
+        for r in rows:
+            inflow = conn.execute(
+                "SELECT COALESCE(SUM(income),0) s FROM zm_transactions WHERE income_account=? AND date>? AND deleted=0",
+                (r["id"], date),
+            ).fetchone()["s"]
+            outflow = conn.execute(
+                "SELECT COALESCE(SUM(outcome),0) s FROM zm_transactions WHERE outcome_account=? AND date>? AND deleted=0",
+                (r["id"], date),
+            ).fetchone()["s"]
+            accounts.append({
+                "id": r["id"], "title": r["title"],
+                "balance": round(r["balance"] - (inflow - outflow), 2),
+            })
+        total = round(sum(a["balance"] for a in accounts), 2)
+        return {"accounts": accounts, "total": total, "date": date}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e), "accounts": [], "total": 0}
     finally:
         conn.close()
 
@@ -68,10 +144,14 @@ def get_transactions(
         params.append(limit)
 
         rows = conn.execute(sql, params).fetchall()
+        rules = _load_payee_rules()
         result = []
         for r in rows:
             d = dict(r)
             d["tags"] = json.loads(d.get("tags") or "[]")
+            resolved = _resolve_payee((d.get("payee") or "").strip(), rules, [])
+            zen_cat = d["tags"][0] if d["tags"] else ""
+            d["display_category"] = resolved.get("category") or _CATEGORY_RU.get(zen_cat) or (zen_cat or None)
             result.append(d)
         return result
     finally:
@@ -110,8 +190,9 @@ def get_report(month: Optional[str] = None):
         categories = []
         for r in expense_rows:
             tags = json.loads(r["tags"] or "[]")
+            raw = tags[0] if tags else ""
             categories.append({
-                "category": tags[0] if tags else "Без категории",
+                "category": _CATEGORY_RU.get(raw, raw) if raw else "Без категории",
                 "total": round(r["total"], 2),
                 "count": r["cnt"],
             })
@@ -254,6 +335,7 @@ def _resolve_payee(payee: str, rules: list[dict], contractors: list[dict]) -> di
                 "entity_type": rule["entity_type"],
                 "entity_id": rule["entity_id"],
                 "entity_name": rule["entity_name"],
+                "category": rule.get("category") or None,
             }
 
     # Слой 2: алгоритм
@@ -332,6 +414,8 @@ def get_business_transactions(months: int = Query(3, le=12)):
                 d["entity_type"] = resolved.get("entity_type")
                 d["entity_id"] = resolved.get("entity_id")
                 d["is_business_income"] = is_biz_income
+                zen_cat = d["tags"][0] if d["tags"] else ""
+                d["display_category"] = resolved.get("category") or _CATEGORY_RU.get(zen_cat) or (zen_cat or None)
                 result.append(d)
 
         return result
