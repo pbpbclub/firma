@@ -385,13 +385,21 @@ def delete_order(order_id: str):
         if not r:
             raise HTTPException(status_code=404, detail="Not found")
         oid = r["id"]
-        # Удаляем связанные данные
+        # ИНВАРИАНТ: заказ — план-оболочка. Удаляем ТОЛЬКО его план-данные в production.db.
+        # Факты не удаляем никогда: банковские транзакции (finance.db/ДДС), личные финансы
+        # (zenmoney.db), каталог, обязательства (creditors) — основа системы.
         conn.execute("DELETE FROM payments WHERE order_id = ?", (oid,))
         conn.execute("DELETE FROM stages WHERE order_id = ?", (oid,))
         conn.execute("DELETE FROM events WHERE order_id = ?", (oid,))
-        conn.execute("DELETE FROM estimate_items WHERE set_id IN (SELECT id FROM estimate_sets WHERE order_id = ?)", (oid,))
+        conn.execute("DELETE FROM expenses WHERE order_id = ?", (oid,))  # legacy MES, FK на orders
+        # Порядок важен: FK включены (estimate_lines → estimate_items → estimate_sets),
+        # удаляем от листьев к корню, иначе IntegrityError и заказ не удаляется.
         conn.execute("DELETE FROM estimate_lines WHERE item_id IN (SELECT ei.id FROM estimate_items ei JOIN estimate_sets es ON ei.set_id = es.id WHERE es.order_id = ?)", (oid,))
+        conn.execute("DELETE FROM estimate_items WHERE set_id IN (SELECT id FROM estimate_sets WHERE order_id = ?)", (oid,))
         conn.execute("DELETE FROM estimate_sets WHERE order_id = ?", (oid,))
+        # Обязательства сохраняем (это долги-факты, с привязками к транзакциям),
+        # только отвязываем от удаляемого заказа и его смет.
+        conn.execute("UPDATE creditors SET order_id = NULL, estimate_item_id = NULL, estimate_line_id = NULL WHERE order_id = ?", (oid,))
         conn.execute("DELETE FROM orders WHERE id = ?", (oid,))
         conn.commit()
         return {"ok": True}

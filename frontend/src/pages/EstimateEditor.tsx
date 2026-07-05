@@ -21,6 +21,13 @@ function fmt(n: number | null | undefined) {
   return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) + " ₽";
 }
 
+// sale_price храним с копейками: введённое клиентское «к оплате» первично, и
+// round(sale × (1+банк%)) обязан воспроизводить его точно. Округление sale до
+// целого рубля теряло рубль на обратном пересчёте (15300×3 → 45899).
+function round2(n: number) {
+  return Math.round(n * 100) / 100;
+}
+
 function EditCell({
   value, onSave, numeric, placeholder, style, display,
 }: {
@@ -159,7 +166,7 @@ function ItemModal({ item, onClose, onRefetch, initialReadOnly }: {
     const oldQty = item.quantity || 1;
     const costUnit = (item.cost_total || 0) / oldQty;
     const saleUnit = (item.sale_price || 0) / oldQty;
-    const payload: any = { quantity: newQty, sale_price: Math.round(saleUnit * newQty) };
+    const payload: any = { quantity: newQty, sale_price: round2(saleUnit * newQty) };
     if ((item.lines?.length ?? 0) === 0) payload.cost_total = Math.round(costUnit * newQty);
     save(() => estimatesApi.updateItem(item.id, payload));
   };
@@ -215,7 +222,7 @@ function ItemModal({ item, onClose, onRefetch, initialReadOnly }: {
   );
 
   return (
-    <Modal size="lg" eyebrow={readOnly ? "ПОЗИЦИЯ СМЕТЫ · ПРОСМОТР" : "ПОЗИЦИЯ СМЕТЫ"} onClose={onClose} footerLeft={readOnly ? editBtn : syncBtn}>
+    <Modal size="lg" eyebrow={readOnly ? "ПОЗИЦИЯ СМЕТЫ · ПРОСМОТР" : "ПОЗИЦИЯ СМЕТЫ"} onClose={onClose} footerLeft={readOnly ? editBtn : syncBtn} onSave={onClose} saveLabel="ОК">
       <div style={{ padding: "16px 24px 0" }}>
         <div style={fieldLabel}>НАЗВАНИЕ</div>
         <div style={{ fontSize: 15, fontWeight: 700, color: "#1A1A1A" }}>
@@ -858,7 +865,7 @@ export default function EstimateEditor() {
                         const newQty = parseInt(v) || 1;
                         const costUnit = (item.cost_total || 0) / oldQty;
                         const saleUnit = (item.sale_price || 0) / oldQty;
-                        const payload: any = { quantity: newQty, sale_price: Math.round(saleUnit * newQty) };
+                        const payload: any = { quantity: newQty, sale_price: round2(saleUnit * newQty) };
                         if ((item.lines?.length ?? 0) === 0) payload.cost_total = Math.round(costUnit * newQty);
                         estimatesApi.updateItem(item.id, payload).then(() => refetch());
                       }}
@@ -879,7 +886,7 @@ export default function EstimateEditor() {
                           const markup = pctToMarkup(parseFloat(v) || 0);
                           const cost = item.cost_total || 0;
                           const payload: any = { markup };
-                          if (cost > 0) payload.sale_price = Math.round(cost * markup);
+                          if (cost > 0) payload.sale_price = round2(cost * markup);
                           estimatesApi.updateItem(item.id, payload).then(() => refetch());
                         }}
                       />%
@@ -959,10 +966,12 @@ export default function EstimateEditor() {
                           style={{ textAlign: "right", color: isBank ? "#E8592A" : "#1A1A1A" }}
                           onSave={v => {
                             const newPriceUnit = parseFloat(v) || 0;
+                            // Введённое «к оплате/шт» — первичный показатель: итог = ввод × qty,
+                            // банковский % — производная (sale без округления до рубля).
                             const clientTotal = newPriceUnit * qty;
                             const sale_new = isBank
-                              ? Math.round(clientTotal / (1 + (item.bank_pct ?? bankPct) / 100))
-                              : Math.round(clientTotal);
+                              ? round2(clientTotal / (1 + (item.bank_pct ?? bankPct) / 100))
+                              : round2(clientTotal);
                             const cost = item.cost_total || 0;
                             const payload: any = { sale_price: sale_new };
                             if (cost > 0) payload.markup = Math.round(sale_new / cost * 1000) / 1000;

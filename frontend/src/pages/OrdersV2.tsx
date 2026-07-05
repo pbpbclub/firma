@@ -536,6 +536,11 @@ export default function OrdersV2() {
       if (selected && selectedIds.has(selected.id)) setSelected(null);
       qc.invalidateQueries({ queryKey: ["orders-v2"] });
     },
+    onError: (e: any) => {
+      setConfirmDelete(false);
+      qc.invalidateQueries({ queryKey: ["orders-v2"] });
+      alert("Не удалось удалить: " + (e?.response?.data?.detail || e?.message || "ошибка сервера"));
+    },
   });
   const [amountMin, setAmountMin] = useState("");
   const [amountMax, setAmountMax] = useState("");
@@ -751,7 +756,7 @@ export default function OrdersV2() {
               {/* Confirm delete modal */}
               {confirmDelete && (
                 <ConfirmModal
-                  message={`Удалить ${selectedIds.size} ${selectedIds.size === 1 ? "заказ" : selectedIds.size < 5 ? "заказа" : "заказов"}? Это действие необратимо — сметы и платежи будут удалены навсегда.`}
+                  message={`Удалить ${selectedIds.size} ${selectedIds.size === 1 ? "заказ" : selectedIds.size < 5 ? "заказа" : "заказов"}? Удалятся план заказа, сметы и записи платежей по нему. Банковские транзакции (ДДС), личные финансы и каталог не затрагиваются. Обязательства сохранятся без привязки к заказу.`}
                   confirmLabel={bulkDelete.isPending ? "Удаляем..." : "Удалить"}
                   onConfirm={() => bulkDelete.mutate([...selectedIds])}
                   onCancel={() => setConfirmDelete(false)}

@@ -92,6 +92,14 @@ export const financeApi = {
     api.get("/finance/transactions/suggest", { params: { name, amount, direction: "in" } }).then((r) => r.data),
   suggestCreditors: (counterparty: string, amount: number) =>
     api.get("/finance/creditors/suggest", { params: { counterparty, amount } }).then((r) => r.data),
+  fixedObligations: (month?: string) =>
+    api.get("/finance/fixed-obligations", { params: month ? { month } : {} }).then((r) => r.data),
+  createFixedObligation: (data: { name: string; amount: number; pay_day?: number; note?: string }) =>
+    api.post("/finance/fixed-obligations", data).then((r) => r.data),
+  updateFixedObligation: (id: string, data: { name?: string; amount?: number; pay_day?: number; note?: string; active?: number }) =>
+    api.patch(`/finance/fixed-obligations/${id}`, data).then((r) => r.data),
+  deleteFixedObligation: (id: string) =>
+    api.delete(`/finance/fixed-obligations/${id}`).then((r) => r.data),
   receivables: () => api.get("/finance/receivables").then((r) => r.data),
   createReceivable: (data: { client: string; inn?: string; invoice_num?: string; invoice_date?: string; amount: number; paid?: number; note?: string }) =>
     api.post("/finance/receivables", data).then((r) => r.data),

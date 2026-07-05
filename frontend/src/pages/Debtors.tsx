@@ -222,17 +222,17 @@ function PayCreditorModal({ item, onClose }: { item: any; onClose: () => void })
 
   const update = useMutation({
     mutationFn: (data: any) => financeApi.updateCreditor(item.id, data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["creditors"] }); onClose(); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["creditors"] }); qc.invalidateQueries({ queryKey: ["fixed-obligations"] }); onClose(); },
   });
 
   const close = useMutation({
     mutationFn: () => financeApi.updateCreditor(item.id, { status: "closed" }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["creditors"] }); onClose(); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["creditors"] }); qc.invalidateQueries({ queryKey: ["fixed-obligations"] }); onClose(); },
   });
 
   const del = useMutation({
     mutationFn: () => financeApi.deleteCreditor(item.id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["creditors"] }); onClose(); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["creditors"] }); qc.invalidateQueries({ queryKey: ["fixed-obligations"] }); onClose(); },
   });
 
   return (
@@ -673,7 +673,7 @@ function LinkTxModal({ creditor, onClose }: { creditor: any; onClose: () => void
   const link = useMutation({
     mutationFn: (data: { finance_tx_id?: string | null; zenmoney_tx_id?: string | null; paid?: number }) =>
       financeApi.updateCreditor(creditor.id, data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["creditors"] }); onClose(); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["creditors"] }); qc.invalidateQueries({ queryKey: ["fixed-obligations"] }); onClose(); },
   });
 
   const txs: any[] = tab === "finance" ? (finTxs as any[]) : (zenTxs as any[]);
@@ -908,13 +908,249 @@ function CreditorsTab() {
   );
 }
 
+// ── Постоянные обязательства ────────────────────────────────────────────────
+
+function AddFixedModal({ item, onClose }: { item?: any; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [name, setName] = useState(item?.name ?? "");
+  const [amount, setAmount] = useState(item ? String(item.amount) : "");
+  const [payDay, setPayDay] = useState(item?.pay_day ? String(item.pay_day) : "");
+  const [note, setNote] = useState(item?.note ?? "");
+  const [active, setActive] = useState(item ? !!item.active : true);
+
+  const { mutate, isPending } = useMutation({
+    mutationFn: () => {
+      const data = {
+        name: name.trim(),
+        amount: parseFloat(amount) || 0,
+        pay_day: payDay ? parseInt(payDay) : undefined,
+        note: note.trim() || undefined,
+      };
+      return item
+        ? financeApi.updateFixedObligation(item.id, { ...data, active: active ? 1 : 0 })
+        : financeApi.createFixedObligation(data);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["fixed-obligations"] });
+      onClose();
+    },
+  });
+
+  const { mutate: remove, isPending: removing } = useMutation({
+    mutationFn: () => financeApi.deleteFixedObligation(item.id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["fixed-obligations"] });
+      onClose();
+    },
+  });
+
+  return (
+    <Modal
+      size="md"
+      eyebrow={item ? "ПОСТОЯННОЕ ОБЯЗАТЕЛЬСТВО" : "НОВОЕ ПОСТОЯННОЕ ОБЯЗАТЕЛЬСТВО"}
+      onClose={onClose}
+      onCancel={onClose}
+      onSave={() => mutate()}
+      saveLabel={item ? "Сохранить" : "Добавить"}
+      saving={isPending}
+      canSave={!!name.trim() && !!amount}
+    >
+      <div style={{ padding: "18px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
+        <div>
+          <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>НАЗВАНИЕ *</div>
+          <input
+            value={name} onChange={e => setName(e.target.value)}
+            style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none" }}
+            placeholder="Аренда цеха"
+          />
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>СУММА В МЕСЯЦ, ₽ *</div>
+            <input
+              type="number" value={amount} onChange={e => setAmount(e.target.value)}
+              style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none" }}
+              placeholder="50000"
+            />
+          </div>
+          <div>
+            <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>ДЕНЬ ОПЛАТЫ (1–28)</div>
+            <input
+              type="number" min={1} max={28} value={payDay} onChange={e => setPayDay(e.target.value)}
+              style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none" }}
+              placeholder="5"
+            />
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>ЗАМЕТКА</div>
+          <textarea
+            value={note} onChange={e => setNote(e.target.value)} rows={2}
+            style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none", resize: "vertical", fontFamily: "inherit" }}
+            placeholder="Помещение на Остужева..."
+          />
+        </div>
+        {item && (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#6B6355", cursor: "pointer" }}>
+              <Checkbox checked={active} onChange={() => setActive(!active)} />
+              Активно (создаётся каждый месяц)
+            </label>
+            <button
+              onClick={() => { if (confirm("Удалить постоянное обязательство? История оплат прошлых месяцев сохранится.")) remove(); }}
+              disabled={removing}
+              style={{ fontSize: 11, color: "#8B3A3A", background: "none", border: "none", cursor: "pointer", padding: 0 }}
+            >
+              Удалить
+            </button>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+const fixedCols = "1.8fr 1.6fr 110px 70px 110px 110px 90px 28px";
+
+function FixedTab() {
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  const [month, setMonth] = useState(currentMonth);
+  const [editTemplate, setEditTemplate] = useState<any>(null);
+  const [payItem, setPayItem] = useState<any>(null);
+  const [linkItem, setLinkItem] = useState<any>(null);
+  const { data, isLoading } = useQuery({
+    queryKey: ["fixed-obligations", month],
+    queryFn: () => financeApi.fixedObligations(month),
+  });
+
+  const items: any[] = data?.items || [];
+  const totals = data?.totals || { plan_month: 0, paid_month: 0, debt_month: 0 };
+
+  // Экземпляр месяца → объект для существующих модалок оплаты/привязки
+  const toCreditor = (f: any) => ({
+    id: f.creditor_id, name: f.name, total: f.month_total, paid: f.paid,
+    debt: f.debt, description: f.note, due_date: f.due_date, status: f.status,
+    finance_tx_id: f.finance_tx_id, zenmoney_tx_id: f.zenmoney_tx_id,
+  });
+
+  const monthOptions = useMemo(() => {
+    const now = new Date();
+    return Array.from({ length: 12 }, (_, i) => {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    });
+  }, []);
+
+  if (isLoading) return <Loading />;
+
+  return (
+    <>
+      {editTemplate && <AddFixedModal item={editTemplate} onClose={() => setEditTemplate(null)} />}
+      {payItem && <PayCreditorModal item={payItem} onClose={() => setPayItem(null)} />}
+      {linkItem && <LinkTxModal creditor={linkItem} onClose={() => setLinkItem(null)} />}
+
+      <div style={{ padding: "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+        <div style={{ fontSize: 11, color: "#6B6355" }}>{items.length} постоянных · нагрузка {fmt(totals.plan_month)}/мес</div>
+        <select
+          value={month} onChange={e => setMonth(e.target.value)}
+          style={{ fontSize: 12, border: "1px solid #EDEBE6", background: "none", color: "#1A1A1A", padding: "4px 8px", cursor: "pointer", outline: "none" }}
+        >
+          {monthOptions.map(m => (
+            <option key={m} value={m}>
+              {new Date(m + "-01").toLocaleDateString("ru-RU", { month: "long", year: "numeric" })}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: fixedCols, padding: "8px 28px", borderBottom: "1px solid #EDEBE6", alignItems: "center" }}>
+        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>НАЗВАНИЕ</div>
+        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ЗАМЕТКА</div>
+        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>СУММА/МЕС</div>
+        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ДЕНЬ</div>
+        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ОПЛАЧЕНО</div>
+        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ОСТАТОК</div>
+        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ШАБЛОН</div>
+        <div />
+      </div>
+
+      {items.length === 0 ? (
+        <EmptyState title="Нет постоянных обязательств" hint="Добавь регулярные расходы: аренда, зарплаты, подписки" />
+      ) : (
+        <>
+          {items.map((f: any, i: number) => (
+            <div
+              key={i}
+              onClick={() => f.creditor_id && setPayItem(toCreditor(f))}
+              style={{
+                display: "grid", gridTemplateColumns: fixedCols,
+                padding: "13px 28px", borderBottom: "1px solid #F2EFE9",
+                cursor: f.creditor_id ? "pointer" : "default", alignItems: "center",
+                fontFamily: MONO, fontVariantNumeric: "tabular-nums",
+                opacity: f.active ? 1 : 0.45,
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "#FAF8F5"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+            >
+              <div style={{ fontFamily: SANS }}>
+                <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>{f.name}</div>
+                {!f.active && <div style={{ fontSize: 10, color: "#A89070", marginTop: 2 }}>выключено</div>}
+              </div>
+              <div style={{ fontSize: 12, color: "#6B6355", paddingRight: 16, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: SANS }}>
+                {f.note || "—"}
+              </div>
+              <div style={{ fontSize: 13, color: "#6B6355" }}>{fmt(f.month_total ?? f.amount)}</div>
+              <div style={{ fontSize: 12, color: deadlineColor(f.due_date) }}>{f.pay_day ? `до ${f.pay_day}-го` : "—"}</div>
+              <div style={{ fontSize: 13, color: "#4A7C59" }}>{f.paid > 0 ? fmt(f.paid) : "—"}</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: f.creditor_id == null ? "#C8C0B0" : f.debt > 0 ? "#8B3A3A" : "#4A7C59" }}>
+                {f.creditor_id == null ? "—" : f.debt > 0 ? fmt(f.debt) : "Закрыт"}
+              </div>
+              <div>
+                <button
+                  onClick={e => { e.stopPropagation(); setEditTemplate(f); }}
+                  style={{ fontSize: 11, color: "#A89070", background: "none", border: "1px solid #EDEBE6", padding: "3px 8px", cursor: "pointer" }}
+                >
+                  Изменить
+                </button>
+              </div>
+              <div style={{ display: "flex", justifyContent: "center" }}>
+                {f.creditor_id && (
+                  <IconButton icon={LinkSimple} title="Связать с транзакцией" size={24} iconSize={13}
+                    color={(f.finance_tx_id || f.zenmoney_tx_id) ? "#4A7C59" : "#C8C0B0"}
+                    onClick={e => { e.stopPropagation(); setLinkItem(toCreditor(f)); }} />
+                )}
+              </div>
+            </div>
+          ))}
+
+          <div style={{
+            display: "grid", gridTemplateColumns: fixedCols,
+            padding: "10px 28px", borderTop: "1px solid #EDEBE6",
+            alignItems: "center", background: "#FAF8F5",
+            fontFamily: MONO, fontVariantNumeric: "tabular-nums",
+          }}>
+            <div style={{ fontSize: 11, color: "#A89070", fontFamily: SANS }}>ИТОГО В МЕСЯЦ</div>
+            <div />
+            <div style={{ fontSize: 12, color: "#6B6355", fontWeight: 500 }}>{fmt(totals.plan_month)}</div>
+            <div />
+            <div style={{ fontSize: 12, color: "#4A7C59", fontWeight: 500 }}>{fmt(totals.paid_month)}</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: totals.debt_month > 0 ? "#8B3A3A" : "#4A7C59" }}>{fmt(totals.debt_month)}</div>
+            <div /><div />
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
 // ── Главная страница ────────────────────────────────────────────────────────
 
 export default function Debtors() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState<"debtors" | "unallocated" | "creditors">("debtors");
+  const [tab, setTab] = useState<"debtors" | "unallocated" | "creditors" | "fixed">("debtors");
   const [addCreditorOpen, setAddCreditorOpen] = useState(false);
   const [addReceivableOpen, setAddReceivableOpen] = useState(false);
+  const [addFixedOpen, setAddFixedOpen] = useState(false);
 
   const { data: debtData } = useQuery({ queryKey: ["debtors"], queryFn: financeApi.debtors });
   const { data: credData } = useQuery({ queryKey: ["creditors"], queryFn: () => financeApi.creditors() });
@@ -927,6 +1163,7 @@ export default function Debtors() {
   const TABS = [
     { id: "debtors",     label: "Нам должны" },
     { id: "creditors",   label: "Мы должны" },
+    { id: "fixed",       label: "Постоянные" },
     { id: "unallocated", label: openRecCount > 0 ? `Нераспределённые (${openRecCount})` : "Нераспределённые" },
   ];
 
@@ -973,6 +1210,7 @@ export default function Debtors() {
       {/* Modals */}
       {addCreditorOpen && <AddCreditorModal onClose={() => setAddCreditorOpen(false)} />}
       {addReceivableOpen && <AddReceivableModal onClose={() => setAddReceivableOpen(false)} />}
+      {addFixedOpen && <AddFixedModal onClose={() => setAddFixedOpen(false)} />}
 
       {/* Toolbar */}
       <div style={{ padding: "12px 28px", borderBottom: "1px solid #EDEBE6", display: "flex", justifyContent: "flex-end", flexShrink: 0 }}>
@@ -984,6 +1222,12 @@ export default function Debtors() {
         )}
         {tab === "creditors" && (
           <button onClick={() => setAddCreditorOpen(true)}
+            style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
+            <Plus size={13} weight="bold" /> Добавить
+          </button>
+        )}
+        {tab === "fixed" && (
+          <button onClick={() => setAddFixedOpen(true)}
             style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
             <Plus size={13} weight="bold" /> Добавить
           </button>
@@ -1001,6 +1245,7 @@ export default function Debtors() {
         {tab === "debtors" && <DebtorsTab />}
         {tab === "unallocated" && <UnallocatedTab />}
         {tab === "creditors" && <CreditorsTab />}
+        {tab === "fixed" && <FixedTab />}
       </div>
     </div>
   );

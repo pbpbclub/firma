@@ -211,6 +211,33 @@ def ensure_creditors_plan_schema():
         conn.close()
 
 
+def ensure_fixed_obligations_schema():
+    """Постоянные обязательства: шаблоны + месячные экземпляры в creditors (kind='fixed')."""
+    conn = get_production()
+    try:
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(creditors)").fetchall()}
+        for col in ("kind TEXT", "period TEXT", "fixed_id TEXT"):
+            name = col.split()[0]
+            if name not in existing:
+                conn.execute(f"ALTER TABLE creditors ADD COLUMN {col}")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS fixed_obligations (
+                id         TEXT PRIMARY KEY,
+                name       TEXT NOT NULL,
+                amount     REAL NOT NULL,
+                pay_day    INTEGER,
+                note       TEXT,
+                active     INTEGER DEFAULT 1,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 _SEED_WORK_TYPES = [
     "Сварка", "Гибка", "Трубогиб", "Лазерная резка",
     "Порошковая покраска", "Покраска",

@@ -378,12 +378,13 @@ def get_creditors(status: Optional[str] = None):
         """
         params = []
         if status == "all":
-            pass  # no filter
+            pass  # без фильтров: ДДС сопоставляет транзакции со ВСЕМИ обязательствами, вкл. постоянные
         elif status:
-            sql += " AND c.status = ?"
+            sql += " AND c.status = ? AND (c.kind IS NULL OR c.kind != 'fixed')"
             params.append(status)
         else:
-            sql += " AND c.status = 'open'"
+            # kind='fixed' живут во вкладке «Постоянные» — в «Мы должны» не показываем
+            sql += " AND c.status = 'open' AND (c.kind IS NULL OR c.kind != 'fixed')"
         sql += " ORDER BY c.created_at DESC"
         rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
         for r in rows:
@@ -458,6 +459,155 @@ def delete_creditor(creditor_id: str):
         if not conn.execute("SELECT id FROM creditors WHERE id = ?", (creditor_id,)).fetchone():
             raise HTTPException(status_code=404, detail="Not found")
         conn.execute("DELETE FROM creditors WHERE id = ?", (creditor_id,))
+        conn.commit()
+        return {"ok": True}
+    finally:
+        conn.close()
+
+
+# ── Постоянные обязательства (шаблоны + месячные экземпляры в creditors) ─────
+
+class FixedObligationIn(BaseModel):
+    name: str
+    amount: float
+    pay_day: Optional[int] = None
+    note: Optional[str] = None
+
+
+class FixedObligationPatch(BaseModel):
+    name: Optional[str] = None
+    amount: Optional[float] = None
+    pay_day: Optional[int] = None
+    note: Optional[str] = None
+    active: Optional[int] = None
+
+
+def _current_month() -> str:
+    from datetime import date
+    return date.today().strftime("%Y-%m")
+
+
+@router.get("/fixed-obligations")
+def list_fixed_obligations(month: Optional[str] = None):
+    """Шаблоны постоянных расходов + состояние оплаты за месяц.
+
+    Экземпляры до-создаются в creditors (kind='fixed', period=месяц) при первом
+    обращении за месяц — гасятся обычной механикой (PATCH /creditors/{id})."""
+    month = month or _current_month()
+    import re as _re
+    if not _re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+        raise HTTPException(status_code=400, detail="month должен быть в формате YYYY-MM")
+    conn = get_production()
+    try:
+        templates = [dict(r) for r in conn.execute(
+            "SELECT * FROM fixed_obligations ORDER BY COALESCE(pay_day, 99), name"
+        ).fetchall()]
+
+        # До-создаём экземпляры за месяц для активных шаблонов
+        for t in templates:
+            if not t["active"]:
+                continue
+            exists = conn.execute(
+                "SELECT id FROM creditors WHERE fixed_id = ? AND period = ?",
+                (t["id"], month),
+            ).fetchone()
+            if not exists:
+                day = min(max(int(t["pay_day"] or 1), 1), 28)
+                conn.execute(
+                    """INSERT INTO creditors (id, name, total, paid, description, due_date,
+                                              status, kind, period, fixed_id)
+                       VALUES (?, ?, ?, 0, ?, ?, 'open', 'fixed', ?, ?)""",
+                    (str(uuid.uuid4()), t["name"], t["amount"], t["note"],
+                     f"{month}-{day:02d}", month, t["id"]),
+                )
+        conn.commit()
+
+        items = []
+        for t in templates:
+            inst = conn.execute(
+                "SELECT id, total, paid, status, due_date, finance_tx_id, zenmoney_tx_id "
+                "FROM creditors WHERE fixed_id = ? AND period = ?",
+                (t["id"], month),
+            ).fetchone()
+            row = {**t, "creditor_id": None, "month_total": None, "paid": 0.0,
+                   "debt": None, "status": None, "due_date": None,
+                   "finance_tx_id": None, "zenmoney_tx_id": None}
+            if inst:
+                row.update({
+                    "creditor_id": inst["id"],
+                    "month_total": inst["total"],
+                    "paid": inst["paid"],
+                    "debt": round(inst["total"] - inst["paid"], 2),
+                    "status": inst["status"],
+                    "due_date": inst["due_date"],
+                    "finance_tx_id": inst["finance_tx_id"],
+                    "zenmoney_tx_id": inst["zenmoney_tx_id"],
+                })
+            items.append(row)
+
+        act = [i for i in items if i["creditor_id"]]
+        plan_month = sum(i["month_total"] or 0 for i in act)
+        paid_month = sum(i["paid"] or 0 for i in act)
+        return {
+            "month": month,
+            "items": items,
+            "totals": {
+                "plan_month": round(plan_month, 2),
+                "paid_month": round(paid_month, 2),
+                "debt_month": round(plan_month - paid_month, 2),
+            },
+        }
+    finally:
+        conn.close()
+
+
+@router.post("/fixed-obligations", status_code=201)
+def create_fixed_obligation(body: FixedObligationIn):
+    conn = get_production()
+    try:
+        fid = str(uuid.uuid4())
+        conn.execute(
+            "INSERT INTO fixed_obligations (id, name, amount, pay_day, note) VALUES (?, ?, ?, ?, ?)",
+            (fid, body.name, body.amount, body.pay_day, body.note),
+        )
+        conn.commit()
+        return dict(conn.execute("SELECT * FROM fixed_obligations WHERE id = ?", (fid,)).fetchone())
+    finally:
+        conn.close()
+
+
+@router.patch("/fixed-obligations/{fixed_id}")
+def update_fixed_obligation(fixed_id: str, body: FixedObligationPatch):
+    conn = get_production()
+    try:
+        if not conn.execute("SELECT id FROM fixed_obligations WHERE id = ?", (fixed_id,)).fetchone():
+            raise HTTPException(status_code=404, detail="Not found")
+        fields, params = [], []
+        for field, val in body.model_dump(exclude_none=True).items():
+            fields.append(f"{field} = ?")
+            params.append(val)
+        if fields:
+            params.append(fixed_id)
+            conn.execute(f"UPDATE fixed_obligations SET {', '.join(fields)} WHERE id = ?", params)
+            conn.commit()
+        return dict(conn.execute("SELECT * FROM fixed_obligations WHERE id = ?", (fixed_id,)).fetchone())
+    finally:
+        conn.close()
+
+
+@router.delete("/fixed-obligations/{fixed_id}")
+def delete_fixed_obligation(fixed_id: str):
+    """Удаляет шаблон; прошлые месячные экземпляры (история оплат) остаются."""
+    conn = get_production()
+    try:
+        if not conn.execute("SELECT id FROM fixed_obligations WHERE id = ?", (fixed_id,)).fetchone():
+            raise HTTPException(status_code=404, detail="Not found")
+        conn.execute("DELETE FROM fixed_obligations WHERE id = ?", (fixed_id,))
+        # Неоплаченный экземпляр ТЕКУЩЕГО месяца убираем, чтобы не висел мусор
+        conn.execute(
+            "DELETE FROM creditors WHERE fixed_id = ? AND period = ? AND paid = 0",
+            (fixed_id, _current_month()),
+        )
         conn.commit()
         return {"ok": True}
     finally:

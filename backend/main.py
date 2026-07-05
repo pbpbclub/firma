@@ -4,7 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
 from auth import get_current_user, init_admin
-from db import ensure_customer_schema, ensure_payee_rules_schema, ensure_orders_schema, ensure_catalog_schema, ensure_estimate_items_schema, ensure_catalog_material_fk, ensure_estimate_bank_pct_schema, ensure_creditor_estimate_item_schema, ensure_creditor_tx_link_schema, ensure_order_tx_link_schema, ensure_receivable_tx_link_schema, ensure_payee_rules_category_schema, ensure_estimate_lines_contractor_schema, ensure_creditors_plan_schema, ensure_work_types_schema, ensure_brands_schema, ensure_business_units_schema
+from db import ensure_customer_schema, ensure_payee_rules_schema, ensure_orders_schema, ensure_catalog_schema, ensure_estimate_items_schema, ensure_catalog_material_fk, ensure_estimate_bank_pct_schema, ensure_creditor_estimate_item_schema, ensure_creditor_tx_link_schema, ensure_order_tx_link_schema, ensure_receivable_tx_link_schema, ensure_payee_rules_category_schema, ensure_estimate_lines_contractor_schema, ensure_creditors_plan_schema, ensure_work_types_schema, ensure_brands_schema, ensure_business_units_schema, ensure_fixed_obligations_schema
 from routers import orders, finance, catalog, taxes, users, estimates, funds
 from routers import customers, masters, zenmoney, admin, payee_rules, yos, work_types, brands, business_units
 
@@ -68,3 +68,4 @@ def startup():
     ensure_work_types_schema()
     ensure_brands_schema()
     ensure_business_units_schema()
+    ensure_fixed_obligations_schema()
