@@ -71,6 +71,8 @@ export const businessUnitsApi = {
 
 export const financeApi = {
   balance: () => api.get("/finance/balance").then((r) => r.data),
+  balanceAtDate: (date: string) =>
+    api.get("/finance/balance-at-date", { params: { date } }).then((r) => r.data),
   byBrand: () => api.get("/finance/by-brand").then((r) => r.data),
   transactions: (params?: Record<string, string>) =>
     api.get("/finance/transactions", { params }).then((r) => r.data),
@@ -168,6 +170,8 @@ export const workTypesApi = {
 
 export const zenmoneyApi = {
   accounts: () => api.get("/zenmoney/accounts").then((r) => r.data),
+  balanceAtDate: (date: string) =>
+    api.get("/zenmoney/balance-at-date", { params: { date } }).then((r) => r.data),
   transactions: (params?: Record<string, string | number>) =>
     api.get("/zenmoney/transactions", { params }).then((r) => r.data),
   report: (month?: string) =>
