@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { EmptyState } from "../components/ui/EmptyState";
-import { ordersApi, estimatesApi, catalogApi, mastersApi, workTypesApi } from "../api";
+import { ordersApi, estimatesApi, catalogApi, mastersApi, workTypesApi, materialsApi } from "../api";
 import { useNavigationGuard, NavigationGuardModal } from "../components/NavigationGuard";
 import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { CalcHeader, CalcSection, CalcRow, CalcFooter } from "../components/ui/Calc";
@@ -180,11 +180,17 @@ function ItemModal({ item, onClose, onRefetch, initialReadOnly }: {
       line={line}
       isMaterial={line.type === "material"}
       withContractor
+      withAutocomplete={line.type === "material"}
+      materialsFetch={materialsApi.search}
       workTypes={workTypes}
       masters={masters}
       readOnly={readOnly}
       onPatch={p => save(() => estimatesApi.updateLine(line.id, p))}
       onRemove={() => save(() => estimatesApi.deleteLine(line.id))}
+      onPickMaterial={m => save(() => estimatesApi.updateLine(line.id, {
+        title: m.name, unit: m.unit || "шт", unit_price: m.price || 0,
+        material_code: m.id, price_supplier: m.supplier, price_date: m.price_date,
+      }))}
       onPickWorkType={wt => save(() => estimatesApi.updateLine(line.id, { work_type_id: wt?.id }))}
       onCreateWorkType={name => createWorkType(line, name)}
       onPickMaster={mid => pickMaster(line, mid)}
@@ -435,6 +441,11 @@ export default function EstimateEditor() {
   const activeSet   = (sets as any[]).find((s: any) => s.id === activeSetId) ?? null;
   const isApproved  = activeSet?.status === "approved";
   useEffect(() => { if (isApproved && editMode) setEditMode(false); }, [isApproved]);
+  const { data: priceCheck } = useQuery({
+    queryKey: ["estimate-price-check", activeSetId, activeSet?.updated_at],
+    queryFn: () => estimatesApi.priceCheck(activeSetId!),
+    enabled: !!activeSetId,
+  });
   const items: any[] = activeSet?.items ?? [];
   const openItem    = open ? (items.find((it: any) => it.id === open.id) ?? null) : null;
 
@@ -795,6 +806,26 @@ export default function EstimateEditor() {
               </div>
             );
           })()}
+
+          {/* ─ Алерт протухшей сметы (возраст >14 дней или металл подорожал >5%) ─ */}
+          {priceCheck?.stale && (
+            <div style={{ margin: "8px 28px 0", padding: "9px 12px", background: "#FFF4EE", borderLeft: "2px solid #E8592A", display: "flex", flexDirection: "column", gap: 4 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: "#8B3A3A", display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ color: "#E8592A" }}>⚠</span> Пересчитать перед выставлением счёта
+              </div>
+              {priceCheck.stale_age && (
+                <div style={{ fontSize: 11, color: "#6B6355" }}>
+                  Смета не обновлялась {priceCheck.age_days} дн. (порог 14) — цены могли устареть.
+                </div>
+              )}
+              {priceCheck.risen?.map((r: any) => (
+                <div key={r.line_id} style={{ fontSize: 11, color: "#6B6355", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
+                  «{r.title}»: в смете {fmt(r.frozen_price)} → сейчас {fmt(r.current_price)} ({r.supplier})
+                  <span style={{ color: "#8B3A3A", fontWeight: 600, marginLeft: 6 }}>+{r.pct}%</span>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* ─ Table: horizontally scrollable, vertically flex ───────────── */}
           <div style={{ flex: 1, overflowX: "auto", display: "flex", flexDirection: "column", minHeight: 0 }}>

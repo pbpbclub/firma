@@ -92,7 +92,8 @@ function MaterialTitle({ value, materialsFetch, onType, onPick }: {
               onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
             >
               <span style={{ color: "#1A1A1A" }}>{m.name}</span>
-              <span style={{ color: "#A89070", marginLeft: 8 }}>{m.unit} · {fmtMoney(m.price)}</span>
+              <span style={{ color: "#A89070", marginLeft: 8 }}>{m.unit} · {m.no_price ? "нет цены" : fmtMoney(m.price)}</span>
+              {m.supplier_label && !m.no_price && <span style={{ color: "#4A7C59", marginLeft: 6, fontSize: 10 }}>{m.supplier_label}{(m.alternatives?.length ?? 0) > 1 ? ` (деш.)` : ""}</span>}
             </div>
           ))}
         </div>
@@ -147,7 +148,7 @@ export function CalcRow({
           <MaterialTitle
             value={line.title}
             materialsFetch={materialsFetch}
-            onType={v => onPatch({ title: v, material_id: undefined })}
+            onType={v => onPatch({ title: v, material_id: undefined, material_code: undefined, price_supplier: undefined, price_date: undefined })}
             onPick={m => (onPickMaterial ?? (() => {}))(m)}
           />
         ) : !isMaterial && onPickWorkType ? (

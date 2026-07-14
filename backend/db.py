@@ -206,6 +206,24 @@ def ensure_estimate_lines_contractor_schema():
         conn.close()
 
 
+def ensure_estimate_lines_price_schema():
+    """Заморозка цены материала в строке сметы: поставщик + дата прайса (material_id уже есть)."""
+    conn = get_production()
+    try:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        if "estimate_lines" not in tables:
+            return
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(estimate_lines)").fetchall()}
+        # material_code — код живой номенклатуры (materials.db); отдельно от legacy material_id (FK на production.db materials)
+        for col in ("material_code TEXT", "price_supplier TEXT", "price_date TEXT"):
+            name = col.split()[0]
+            if name not in existing:
+                conn.execute(f"ALTER TABLE estimate_lines ADD COLUMN {col}")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_creditors_plan_schema():
     conn = get_production()
     try:

@@ -129,6 +129,13 @@ export const catalogApi = {
     api.delete("/catalog/by-titles", { data: { titles } }).then((r) => r.data),
 };
 
+export const materialsApi = {
+  search: (q?: string) =>
+    api.get("/materials/search", { params: q ? { q } : {} }).then((r) => r.data),
+  prices: (code: string) =>
+    api.get(`/materials/${encodeURIComponent(code)}/prices`).then((r) => r.data),
+};
+
 export const fundsApi = {
   list:         ()                                   => api.get("/funds").then(r => r.data),
   create:       (data: { name: string; description?: string; color?: string }) =>
@@ -146,6 +153,7 @@ export const estimatesApi = {
   updateSet:   (setId: string, data: any)   => api.put(`/estimates/sets/${setId}`, data).then(r => r.data),
   deleteSet:   (setId: string)              => api.delete(`/estimates/sets/${setId}`).then(r => r.data),
   newVersion:  (setId: string)              => api.post(`/estimates/sets/${setId}/new-version`).then(r => r.data),
+  priceCheck:  (setId: string)              => api.get(`/estimates/sets/${setId}/price-check`).then(r => r.data),
   addItem:     (setId: string, data?: any)  => api.post(`/estimates/sets/${setId}/items`, data ?? {}).then(r => r.data),
   updateItem:  (itemId: string, data: any)  => api.put(`/estimates/items/${itemId}`, data).then(r => r.data),
   deleteItem:  (itemId: string)             => api.delete(`/estimates/items/${itemId}`).then(r => r.data),

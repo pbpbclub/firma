@@ -2,13 +2,26 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from typing import Optional, List
 from pydantic import BaseModel
-from db import get_production
+from db import get_production, get_materials
+from routers.materials import cheapest_price
 import uuid, subprocess, glob, os
 from datetime import datetime
 
 router = APIRouter()
 
 # ─── helpers ────────────────────────────────────────────────────────────────
+
+def _lookup_cheapest(code: str):
+    """Самая дешёвая актуальная цена по карточке номенклатуры (materials.db) или None."""
+    if not code:
+        return None
+    mconn = get_materials()
+    try:
+        return cheapest_price(mconn, code)
+    except Exception:
+        return None
+    finally:
+        mconn.close()
 
 def _recalc_item(conn, item_id: str):
     """Recalculate cost_total from lines. Does NOT touch sale_price."""
@@ -143,6 +156,9 @@ class LineCreate(BaseModel):
     master_id: Optional[str] = None
     contractor_name: Optional[str] = None
     work_type_id: Optional[str] = None
+    material_code: Optional[str] = None
+    price_supplier: Optional[str] = None
+    price_date: Optional[str] = None
 
 
 class LineUpdate(BaseModel):
@@ -155,6 +171,9 @@ class LineUpdate(BaseModel):
     master_id: Optional[str] = None
     contractor_name: Optional[str] = None
     work_type_id: Optional[str] = None
+    material_code: Optional[str] = None
+    price_supplier: Optional[str] = None
+    price_date: Optional[str] = None
 
 
 class FromCatalog(BaseModel):
@@ -280,14 +299,83 @@ def new_set_version(set_id: str):
             for ln in conn.execute("SELECT * FROM estimate_lines WHERE item_id = ? ORDER BY sort_order", (it["id"],)):
                 conn.execute(
                     """INSERT INTO estimate_lines (id, item_id, type, title, qty, unit, unit_price, line_total,
-                                                   material_id, sort_order, master_id, contractor_name, work_type_id, created_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                                   material_id, sort_order, master_id, contractor_name, work_type_id,
+                                                   material_code, price_supplier, price_date, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (str(uuid.uuid4()), new_item_id, ln["type"], ln["title"], ln["qty"], ln["unit"],
                      ln["unit_price"], ln["line_total"], ln["material_id"], ln["sort_order"],
-                     ln["master_id"], ln["contractor_name"], ln["work_type_id"], now)
+                     ln["master_id"], ln["contractor_name"], ln["work_type_id"],
+                     ln["material_code"], ln["price_supplier"], ln["price_date"], now)
                 )
         conn.commit()
         return dict(conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (new_id,)).fetchone())
+    finally:
+        conn.close()
+
+
+@router.get("/sets/{set_id}/price-check")
+def price_check(set_id: str):
+    """Проверка протухшей сметы: возраст >14 дней или подорожание металла >5%.
+
+    Сравнивает замороженную цену привязанных материалов с текущей дешёвой из прайса.
+    Возвращает алерты для баннера «пересчитать перед выставлением счёта»."""
+    STALE_DAYS = 14
+    RISE_PCT = 5.0
+    conn = get_production()
+    try:
+        s = conn.execute("SELECT id, created_at, updated_at FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
+        if not s:
+            raise HTTPException(status_code=404, detail="Not found")
+        # Возраст сметы — по последнему изменению
+        age_days = None
+        ref = s["updated_at"] or s["created_at"]
+        if ref:
+            try:
+                dt = datetime.fromisoformat(ref.replace("Z", ""))
+                age_days = (datetime.utcnow() - dt).days
+            except Exception:
+                age_days = None
+
+        mat_lines = conn.execute(
+            """SELECT el.id, el.title, el.unit_price, el.material_code, el.price_supplier, el.price_date
+               FROM estimate_lines el JOIN estimate_items ei ON ei.id = el.item_id
+               WHERE ei.set_id = ? AND el.material_code IS NOT NULL AND el.material_code != ''""",
+            (set_id,)
+        ).fetchall()
+
+        mconn = get_materials()
+        risen = []
+        linked = 0
+        try:
+            for ln in mat_lines:
+                linked += 1
+                best = cheapest_price(mconn, ln["material_code"])
+                if not best or not ln["unit_price"] or ln["unit_price"] <= 0:
+                    continue
+                cur = best["price"]
+                frozen = ln["unit_price"]
+                pct = round((cur - frozen) / frozen * 100, 1)
+                if pct > RISE_PCT:
+                    risen.append({
+                        "line_id": ln["id"],
+                        "title": ln["title"],
+                        "frozen_price": frozen,
+                        "current_price": cur,
+                        "supplier": best.get("supplier_label") or best.get("supplier"),
+                        "pct": pct,
+                    })
+        finally:
+            mconn.close()
+
+        stale_age = age_days is not None and age_days > STALE_DAYS
+        return {
+            "age_days": age_days,
+            "stale_age": stale_age,
+            "linked_materials": linked,
+            "risen": risen,
+            "any_risen": len(risen) > 0,
+            "stale": bool(stale_age or risen),
+        }
     finally:
         conn.close()
 
@@ -428,7 +516,18 @@ def add_line(item_id: str, body: LineCreate):
             raise HTTPException(status_code=404, detail="Item not found")
         _assert_item_editable(conn, item_id)
         line_id = str(uuid.uuid4())
-        line_total = round(body.qty * body.unit_price, 2)
+        unit_price = body.unit_price
+        price_supplier = body.price_supplier
+        price_date = body.price_date
+        # Привязка к номенклатуре: замораживаем самую дешёвую актуальную цену + дату прайса.
+        if body.material_code and (unit_price == 0 or not price_date):
+            best = _lookup_cheapest(body.material_code)
+            if best:
+                if unit_price == 0:
+                    unit_price = best["price"]
+                price_supplier = price_supplier or best["supplier"]
+                price_date = price_date or best["price_date"]
+        line_total = round(body.qty * unit_price, 2)
         title = body.title
         # If work_type chosen, sync title to its name
         if body.work_type_id:
@@ -436,10 +535,11 @@ def add_line(item_id: str, body: LineCreate):
             if wt:
                 title = wt["name"]
         conn.execute(
-            """INSERT INTO estimate_lines (id, item_id, type, title, qty, unit, unit_price, line_total, sort_order, master_id, contractor_name, work_type_id, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (line_id, item_id, body.type, title, body.qty, body.unit, body.unit_price, line_total,
-             body.sort_order, body.master_id, body.contractor_name, body.work_type_id, _now())
+            """INSERT INTO estimate_lines (id, item_id, type, title, qty, unit, unit_price, line_total, sort_order, master_id, contractor_name, work_type_id, material_code, price_supplier, price_date, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (line_id, item_id, body.type, title, body.qty, body.unit, unit_price, line_total,
+             body.sort_order, body.master_id, body.contractor_name, body.work_type_id,
+             body.material_code, price_supplier, price_date, _now())
         )
         _recalc_item(conn, item_id)
         _touch_set(conn, item_id)
@@ -464,6 +564,13 @@ def update_line(line_id: str, body: LineUpdate):
             wt = conn.execute("SELECT name FROM work_types WHERE id = ?", (fields["work_type_id"],)).fetchone()
             if wt:
                 fields["title"] = wt["name"]
+        # Привязка к номенклатуре: если пришёл material_code без явной цены/даты — заморозить дешёвую.
+        if fields.get("material_code") and ("unit_price" not in fields or "price_date" not in fields):
+            best = _lookup_cheapest(fields["material_code"])
+            if best:
+                fields.setdefault("unit_price", best["price"])
+                fields.setdefault("price_supplier", best["supplier"])
+                fields.setdefault("price_date", best["price_date"])
         # recalc line_total
         qty = fields.get("qty", row["qty"])
         unit_price = fields.get("unit_price", row["unit_price"])
