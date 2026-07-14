@@ -5,6 +5,7 @@ PRODUCTION_DB = Path("/opt/ai-os/data/production.db")
 FINANCE_DB = Path("/opt/fin-agent/data/finance.db")
 ANALYTICS_DB = Path("/opt/fin-agent/data/analytics.db")
 ZENMONEY_DB = Path("/opt/fin-agent/data/zenmoney.db")
+MATERIALS_DB = Path("/opt/ai-os/data/materials.db")
 
 
 def get_production():
@@ -28,6 +29,13 @@ def get_analytics():
 
 def get_zenmoney():
     conn = sqlite3.connect(ZENMONEY_DB)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def get_materials():
+    """Единая номенклатура + живые прайсы поставщиков (materials.db, read-only)."""
+    conn = sqlite3.connect(f"file:{MATERIALS_DB}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     return conn
 
