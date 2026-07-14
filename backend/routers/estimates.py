@@ -78,6 +78,22 @@ def _sync_order_if_approved(conn, item_id: str):
         _sync_order_from_set(conn, row["id"])
 
 
+def _assert_set_editable(conn, set_id: str):
+    """Утверждённая смета заморожена: клиент её согласовал, правки — только новой версией."""
+    row = conn.execute("SELECT status FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
+    if row and row["status"] == "approved":
+        raise HTTPException(
+            status_code=409,
+            detail="Смета утверждена и заморожена. Создай новую версию (POST /sets/{id}/new-version).",
+        )
+
+
+def _assert_item_editable(conn, item_id: str):
+    row = conn.execute("SELECT set_id FROM estimate_items WHERE id = ?", (item_id,)).fetchone()
+    if row:
+        _assert_set_editable(conn, row["set_id"])
+
+
 # ─── Models ─────────────────────────────────────────────────────────────────
 
 class SetCreate(BaseModel):
@@ -176,6 +192,9 @@ def update_set(set_id: str, body: SetUpdate):
         fields = {k: v for k, v in body.model_dump().items() if v is not None}
         if not fields:
             return dict(row)
+        # У утверждённой сметы суммы согласованы с клиентом: менять payment_type/bank_pct нельзя.
+        if row["status"] == "approved" and ("payment_type" in fields or "bank_pct" in fields):
+            raise HTTPException(status_code=409, detail="Смета утверждена — тип оплаты и банковский % заморожены. Создай новую версию.")
         fields["updated_at"] = _now()
         set_clause = ", ".join(f"{k} = ?" for k in fields)
         conn.execute(
@@ -190,6 +209,11 @@ def update_set(set_id: str, body: SetUpdate):
         conn.commit()
         updated = conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
         if updated["status"] == "approved":
+            # Одна активная смета на заказ: остальные сеты уходят в superseded.
+            conn.execute(
+                "UPDATE estimate_sets SET status = 'superseded', updated_at = ? WHERE order_id = ? AND id != ? AND status != 'superseded'",
+                (_now(), updated["order_id"], set_id)
+            )
             _sync_order_from_set(conn, set_id)
             conn.commit()
         return dict(conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (set_id,)).fetchone())
@@ -201,9 +225,11 @@ def update_set(set_id: str, body: SetUpdate):
 def delete_set(set_id: str):
     conn = get_production()
     try:
-        row = conn.execute("SELECT id FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
+        row = conn.execute("SELECT id, status FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Not found")
+        if row["status"] == "approved":
+            raise HTTPException(status_code=409, detail="Утверждённую смету нельзя удалить (по ней выставлен счёт). Сначала переведи в superseded.")
         # cascade manually (SQLite foreign keys may not be enforced)
         items = conn.execute("SELECT id FROM estimate_items WHERE set_id = ?", (set_id,)).fetchall()
         for item in items:
@@ -212,6 +238,56 @@ def delete_set(set_id: str):
         conn.execute("DELETE FROM estimate_sets WHERE id = ?", (set_id,))
         conn.commit()
         return {"ok": True}
+    finally:
+        conn.close()
+
+
+@router.post("/sets/{set_id}/new-version")
+def new_set_version(set_id: str):
+    """Новая редактируемая версия сметы: полная копия (позиции + строки) в статусе draft.
+
+    Утверждённая смета заморожена (клиент согласовал) — правки идут в новой версии;
+    при её утверждении старая автоматически уйдёт в superseded."""
+    conn = get_production()
+    try:
+        src = conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
+        if not src:
+            raise HTTPException(status_code=404, detail="Not found")
+        now = _now()
+        new_id = str(uuid.uuid4())
+        base_title = (src["title"] or "Смета").split(" · v")[0]
+        version = conn.execute(
+            "SELECT COUNT(*) FROM estimate_sets WHERE order_id = ?", (src["order_id"],)
+        ).fetchone()[0] + 1
+        conn.execute(
+            """INSERT INTO estimate_sets (id, order_id, title, status, payment_type, bank_pct, notes, created_at, updated_at)
+               VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?)""",
+            (new_id, src["order_id"], f"{base_title} · v{version}", src["payment_type"], src["bank_pct"], src["notes"], now, now)
+        )
+        items = conn.execute(
+            "SELECT * FROM estimate_items WHERE set_id = ? ORDER BY sort_order", (set_id,)
+        ).fetchall()
+        for it in items:
+            new_item_id = str(uuid.uuid4())
+            conn.execute(
+                """INSERT INTO estimate_items (id, set_id, title, category, brand, markup, quantity, overhead_pct,
+                                               tax_pct, cost_total, sale_price, bank_pct, sort_order, catalog_item_id, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (new_item_id, new_id, it["title"], it["category"], it["brand"], it["markup"], it["quantity"],
+                 it["overhead_pct"], it["tax_pct"], it["cost_total"], it["sale_price"], it["bank_pct"],
+                 it["sort_order"], it["catalog_item_id"], now)
+            )
+            for ln in conn.execute("SELECT * FROM estimate_lines WHERE item_id = ? ORDER BY sort_order", (it["id"],)):
+                conn.execute(
+                    """INSERT INTO estimate_lines (id, item_id, type, title, qty, unit, unit_price, line_total,
+                                                   material_id, sort_order, master_id, contractor_name, work_type_id, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (str(uuid.uuid4()), new_item_id, ln["type"], ln["title"], ln["qty"], ln["unit"],
+                     ln["unit_price"], ln["line_total"], ln["material_id"], ln["sort_order"],
+                     ln["master_id"], ln["contractor_name"], ln["work_type_id"], now)
+                )
+        conn.commit()
+        return dict(conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (new_id,)).fetchone())
     finally:
         conn.close()
 
@@ -225,6 +301,7 @@ def add_item(set_id: str, body: ItemCreate):
         set_row = conn.execute("SELECT id, bank_pct FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
         if not set_row:
             raise HTTPException(status_code=404, detail="Set not found")
+        _assert_set_editable(conn, set_id)
         item_id = str(uuid.uuid4())
         bank_pct = body.bank_pct if body.bank_pct is not None else (set_row["bank_pct"] or 13)
         sort_order = body.sort_order
@@ -254,6 +331,7 @@ def update_item(item_id: str, body: ItemUpdate):
         row = conn.execute("SELECT * FROM estimate_items WHERE id = ?", (item_id,)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Not found")
+        _assert_item_editable(conn, item_id)
         fields = {k: v for k, v in body.model_dump().items() if v is not None}
         if fields:
             set_clause = ", ".join(f"{k} = ?" for k in fields)
@@ -281,6 +359,7 @@ def delete_item(item_id: str):
         if not item_row:
             raise HTTPException(status_code=404, detail="Not found")
         set_id = item_row["set_id"]
+        _assert_set_editable(conn, set_id)
         _touch_set(conn, item_id)
         conn.execute("DELETE FROM estimate_lines WHERE item_id = ?", (item_id,))
         conn.execute("DELETE FROM estimate_items WHERE id = ?", (item_id,))
@@ -347,6 +426,7 @@ def add_line(item_id: str, body: LineCreate):
     try:
         if not conn.execute("SELECT id FROM estimate_items WHERE id = ?", (item_id,)).fetchone():
             raise HTTPException(status_code=404, detail="Item not found")
+        _assert_item_editable(conn, item_id)
         line_id = str(uuid.uuid4())
         line_total = round(body.qty * body.unit_price, 2)
         title = body.title
@@ -377,6 +457,7 @@ def update_line(line_id: str, body: LineUpdate):
         row = conn.execute("SELECT * FROM estimate_lines WHERE id = ?", (line_id,)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Not found")
+        _assert_item_editable(conn, row["item_id"])
         fields = {k: v for k, v in body.model_dump().items() if v is not None}
         # If work_type chosen, sync title to its name
         if "work_type_id" in fields:
@@ -416,6 +497,7 @@ def delete_line(line_id: str):
         if not row:
             raise HTTPException(status_code=404, detail="Not found")
         item_id = row["item_id"]
+        _assert_item_editable(conn, item_id)
         conn.execute("DELETE FROM estimate_lines WHERE id = ?", (line_id,))
         _recalc_item(conn, item_id)
         _touch_set(conn, item_id)
@@ -434,6 +516,7 @@ def from_catalog(body: FromCatalog):
     try:
         if not conn.execute("SELECT id FROM estimate_sets WHERE id = ?", (body.set_id,)).fetchone():
             raise HTTPException(status_code=404, detail="Set not found")
+        _assert_set_editable(conn, body.set_id)
         cat = conn.execute("SELECT * FROM catalog_items WHERE id = ?", (body.catalog_item_id,)).fetchone()
         if not cat:
             raise HTTPException(status_code=404, detail="Catalog item not found")

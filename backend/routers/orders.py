@@ -150,6 +150,111 @@ def payments_map():
         conn.close()
 
 
+# ── План/Факт по заказу ──────────────────────────────────────────────────────
+
+# Категории для план-факта: и строки сметы, и expenses сводим в 4 корзины.
+_CAT_BUCKETS = ["Материалы", "Работы", "Доставка", "Прочее"]
+
+def _bucket(raw: str) -> str:
+    r = (raw or "").lower()
+    if r in ("material", "материал", "материалы"): return "Материалы"
+    if r in ("labor", "service", "work", "работа", "работы", "услуга"): return "Работы"
+    if r in ("delivery", "доставка"): return "Доставка"
+    return "Прочее"
+
+
+def _plan_fact(conn, oid: str, cost_plan: float, paid_total: float) -> dict:
+    """План (из активной сметы) / Факт (expenses + оплаченные обязательства) по категориям.
+
+    План себестоимости — из строк утверждённой сметы (иначе последней не-superseded).
+    Факт — фактические траты: expenses (вносит fin-agent) + creditors.paid (обязательства)."""
+    # Активная смета: approved, иначе последняя не superseded
+    est = conn.execute(
+        """SELECT id FROM estimate_sets WHERE order_id = ?
+           ORDER BY CASE status WHEN 'approved' THEN 0 WHEN 'superseded' THEN 2 ELSE 1 END, created_at DESC
+           LIMIT 1""", (oid,)
+    ).fetchone()
+
+    plan_by = {b: 0.0 for b in _CAT_BUCKETS}
+    if est:
+        # cost_total позиции = Σ(line_total) × quantity → план по категории = Σ line_total×qty
+        rows = conn.execute(
+            """SELECT el.type AS t, COALESCE(SUM(el.line_total * ei.quantity), 0) AS s
+               FROM estimate_lines el JOIN estimate_items ei ON ei.id = el.item_id
+               WHERE ei.set_id = ? GROUP BY el.type""", (est["id"],)
+        ).fetchall()
+        for r in rows:
+            plan_by[_bucket(r["t"])] += r["s"] or 0
+
+    fact_by = {b: 0.0 for b in _CAT_BUCKETS}
+    for r in conn.execute("SELECT category AS c, COALESCE(SUM(amount),0) AS s FROM expenses WHERE order_id = ? GROUP BY category", (oid,)):
+        fact_by[_bucket(r["c"])] += r["s"] or 0
+    cred_paid = conn.execute("SELECT COALESCE(SUM(paid),0) FROM creditors WHERE order_id = ?", (oid,)).fetchone()[0] or 0
+    fact_by["Прочее"] += cred_paid  # обязательства без явной категории — в «Прочее»
+
+    plan_detail_sum = round(sum(plan_by.values()), 2)
+    # Если у сметы нет строк детализации — плановая себестоимость лежит в cost_plan «без разбивки»
+    plan_total = plan_detail_sum if plan_detail_sum > 0 else round(cost_plan or 0, 2)
+    if plan_detail_sum == 0 and (cost_plan or 0) > 0:
+        plan_by["Прочее"] += round(cost_plan or 0, 2)
+
+    categories = []
+    for b in _CAT_BUCKETS:
+        p, f = round(plan_by[b], 2), round(fact_by[b], 2)
+        if p == 0 and f == 0:
+            continue
+        categories.append({"category": b, "plan": p, "fact": f, "delta": round(f - p, 2)})
+
+    cost_fact = round(sum(fact_by.values()), 2)
+    return {
+        "has_estimate": est is not None,
+        "detailed": plan_detail_sum > 0,
+        "cost_plan": plan_total,
+        "cost_fact": cost_fact,
+        "cost_delta": round(cost_fact - plan_total, 2),
+        "margin_plan": round(paid_total - plan_total, 2) if paid_total else None,
+        "margin_fact": round(paid_total - cost_fact, 2),
+        "categories": categories,
+    }
+
+
+@router.get("/plan-fact-summary")
+def plan_fact_summary():
+    """Сводка план/факт по всем активным заказам одним экраном (ТЗ 12)."""
+    conn = get_production()
+    try:
+        rows = conn.execute(
+            """SELECT o.id, o.number, o.title, o.status, o.price_plan, o.cost_plan,
+                      COALESCE(SUM(p.amount), 0) AS paid_total
+               FROM orders o LEFT JOIN payments p ON p.order_id = o.id
+               WHERE o.status NOT IN ('completed', 'cancelled')
+               GROUP BY o.id ORDER BY o.deadline IS NULL, o.deadline ASC""",
+        ).fetchall()
+        out = []
+        for r in rows:
+            pf = _plan_fact(conn, r["id"], r["cost_plan"] or 0, r["paid_total"] or 0)
+            if not pf["has_estimate"]:
+                continue
+            out.append({
+                "id": r["id"],
+                "number": r["number"],
+                "title": r["title"],
+                "status": r["status"],
+                "status_label": STATUS_LABELS.get(r["status"], r["status"]),
+                "price_plan": r["price_plan"] or 0,
+                "paid_total": r["paid_total"] or 0,
+                "cost_plan": pf["cost_plan"],
+                "cost_fact": pf["cost_fact"],
+                "cost_delta": pf["cost_delta"],
+                "margin_fact": pf["margin_fact"],
+                "overspent": pf["cost_fact"] > pf["cost_plan"],
+                "detailed": pf["detailed"],
+            })
+        return {"orders": out}
+    finally:
+        conn.close()
+
+
 @router.get("/{order_id}")
 def get_order(order_id: str):
     conn = get_production()
@@ -192,6 +297,7 @@ def get_order(order_id: str):
         ).fetchall()
 
         paid_total = sum(p["amount"] for p in payments)
+        pf = _plan_fact(conn, oid, order.get("cost_plan") or 0, paid_total)
 
         return {
             **order,
@@ -200,6 +306,7 @@ def get_order(order_id: str):
             "paid_total": paid_total,
             "debt": round((order["price_plan"] or 0) - paid_total, 2),
             "margin": round((order["price_plan"] or 0) - (order["cost_plan"] or 0), 2),
+            "plan_fact": pf,
             "payments": [dict(p) for p in payments],
             "estimate_sets": [dict(e) for e in estimate_sets],
             "stages": [dict(s) for s in stages],

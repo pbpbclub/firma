@@ -545,6 +545,13 @@ export default function OrdersV2() {
   const [amountMin, setAmountMin] = useState("");
   const [amountMax, setAmountMax] = useState("");
   const [showNewOrder, setShowNewOrder] = useState(false);
+  const [summaryMode, setSummaryMode] = useState(false);
+
+  const { data: summary } = useQuery({
+    queryKey: ["orders-plan-fact-summary"],
+    queryFn: () => ordersApi.planFactSummary(),
+    enabled: summaryMode,
+  });
 
   const { data = [], isLoading } = useQuery({
     queryKey: ["orders-v2", status, search, archiveMode],
@@ -686,7 +693,7 @@ export default function OrdersV2() {
 
           {/* Status tabs */}
           <div style={{ display: "flex", gap: 24, borderBottom: "1px solid #EDEBE6" }}>
-            {!archiveMode && STATUSES.map((s) => (
+            {!archiveMode && !summaryMode && STATUSES.map((s) => (
               <button
                 key={s.value}
                 onClick={() => { setStatus(s.value); setPage(0); }}
@@ -704,7 +711,22 @@ export default function OrdersV2() {
               </button>
             ))}
             <button
-              onClick={() => { setArchiveMode(!archiveMode); setStatus(""); setPage(0); setSelected(null); }}
+              onClick={() => { setSummaryMode(!summaryMode); setArchiveMode(false); setStatus(summaryMode ? "in_production" : ""); setPage(0); setSelected(null); }}
+              style={{
+                fontSize: 13, padding: "0 0 12px",
+                border: "none", background: "none", cursor: "pointer",
+                color: summaryMode ? "#1A1A1A" : "#A89070",
+                fontWeight: summaryMode ? 600 : 400,
+                borderBottom: summaryMode ? "2px solid #E8592A" : "2px solid transparent",
+                marginBottom: -1,
+                marginLeft: (archiveMode || summaryMode) ? 0 : "auto",
+                transition: "all 0.15s",
+              }}
+            >
+              Сводка П/Ф
+            </button>
+            <button
+              onClick={() => { setArchiveMode(!archiveMode); setSummaryMode(false); setStatus(""); setPage(0); setSelected(null); }}
               style={{
                 fontSize: 13, padding: "0 0 12px",
                 border: "none", background: "none", cursor: "pointer",
@@ -712,7 +734,7 @@ export default function OrdersV2() {
                 fontWeight: archiveMode ? 600 : 400,
                 borderBottom: archiveMode ? "2px solid #A89070" : "2px solid transparent",
                 marginBottom: -1,
-                marginLeft: archiveMode ? 0 : "auto",
+                marginLeft: summaryMode ? 0 : (archiveMode ? 0 : "auto"),
                 transition: "all 0.15s",
                 display: "flex", alignItems: "center", gap: 5,
               }}
@@ -723,6 +745,72 @@ export default function OrdersV2() {
           </div>
         </div>
 
+        {summaryMode ? (
+          <div style={{ flex: 1, overflow: "auto", padding: "8px 28px 24px" }}>
+            {!summary ? (
+              <Loading compact />
+            ) : summary.orders.length === 0 ? (
+              <EmptyState compact title="Нет активных заказов со сметой" />
+            ) : (() => {
+              const rows = [...summary.orders].sort((a: any, b: any) => (b.overspent ? 1 : 0) - (a.overspent ? 1 : 0) || b.cost_delta - a.cost_delta);
+              const tPlan = rows.reduce((s: number, o: any) => s + o.cost_plan, 0);
+              const tFact = rows.reduce((s: number, o: any) => s + o.cost_fact, 0);
+              const tMargin = rows.reduce((s: number, o: any) => s + o.margin_fact, 0);
+              const overCount = rows.filter((o: any) => o.overspent).length;
+              const SUM_COLS = "1.8fr 1fr 1fr 1fr 1fr";
+              return (
+                <>
+                  <div style={{ fontSize: 11, color: "#6B6355", padding: "6px 0 12px" }}>
+                    {rows.length} активных со сметой
+                    {overCount > 0 && <span style={{ color: "#8B3A3A", fontWeight: 600 }}> · {overCount} с перерасходом</span>}
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: SUM_COLS, gap: "0 16px", padding: "8px 0",
+                    borderBottom: "1px solid #EDEBE6", fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>
+                    <span>ЗАКАЗ</span>
+                    <span style={{ textAlign: "right" }}>СЕБ. ПЛАН</span>
+                    <span style={{ textAlign: "right" }}>СЕБ. ФАКТ</span>
+                    <span style={{ textAlign: "right" }}>Δ</span>
+                    <span style={{ textAlign: "right" }}>МАРЖА ФАКТ</span>
+                  </div>
+                  {rows.map((o: any) => (
+                    <div key={o.id}
+                      onClick={() => { setSummaryMode(false); setStatus("in_production"); setSelected(o); }}
+                      style={{ display: "grid", gridTemplateColumns: SUM_COLS, gap: "0 16px", padding: "11px 0",
+                        borderBottom: "1px solid #F7F5F1", cursor: "pointer", alignItems: "center",
+                        background: o.overspent ? "#FFF8F5" : "transparent", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = "#FAF8F5"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = o.overspent ? "#FFF8F5" : "transparent"; }}
+                    >
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A", fontFamily: "inherit" }}>{o.title}</div>
+                        <div style={{ fontSize: 9, color: "#A89070", marginTop: 2 }}>{o.number} · {o.status_label}{!o.detailed && " · план без разбивки"}</div>
+                      </div>
+                      <span style={{ textAlign: "right", fontSize: 12, color: "#6B6355" }}>{fmt(o.cost_plan)}</span>
+                      <span style={{ textAlign: "right", fontSize: 12, color: o.overspent ? "#8B3A3A" : "#1A1A1A", fontWeight: o.overspent ? 700 : 400 }}>{fmt(o.cost_fact)}</span>
+                      <span style={{ textAlign: "right", fontSize: 12, fontWeight: 600,
+                        color: o.cost_delta === 0 ? "#A89070" : o.cost_delta > 0 ? "#8B3A3A" : "#4A7C59" }}>
+                        {o.cost_delta === 0 ? "—" : (o.cost_delta > 0 ? "+" : "") + fmt(o.cost_delta)}
+                      </span>
+                      <span style={{ textAlign: "right", fontSize: 12, fontWeight: 600, color: o.margin_fact >= 0 ? "#4A7C59" : "#8B3A3A" }}>{fmt(o.margin_fact)}</span>
+                    </div>
+                  ))}
+                  <div style={{ display: "grid", gridTemplateColumns: SUM_COLS, gap: "0 16px", padding: "12px 0",
+                    fontWeight: 700, fontFamily: MONO, fontVariantNumeric: "tabular-nums", fontSize: 12 }}>
+                    <span>Итого</span>
+                    <span style={{ textAlign: "right", color: "#6B6355" }}>{fmt(tPlan)}</span>
+                    <span style={{ textAlign: "right", color: "#1A1A1A" }}>{fmt(tFact)}</span>
+                    <span style={{ textAlign: "right", color: tFact > tPlan ? "#8B3A3A" : "#4A7C59" }}>{(tFact - tPlan > 0 ? "+" : "") + fmt(tFact - tPlan)}</span>
+                    <span style={{ textAlign: "right", color: tMargin >= 0 ? "#4A7C59" : "#8B3A3A" }}>{fmt(tMargin)}</span>
+                  </div>
+                  <div style={{ fontSize: 10, color: "#A89070", marginTop: 12, lineHeight: 1.5 }}>
+                    Факт себестоимости — фактические траты (expenses fin-агента) + оплаченные обязательства.
+                    Маржа считается по факту. Заказы с фактом выше плана подсвечены.
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        ) : (<>
         {/* Filter / selection bar — always visible to prevent layout shift */}
         {(() => {
           const hasFilters = !!(titleFilter || customerFilter || brandFilter || amountMin || amountMax);
@@ -886,6 +974,7 @@ export default function OrdersV2() {
             </button>
           </div>
         </div>
+        </>)}
       </div>
 
       {/* ── Right: detail panel ─────────────────────────── */}
@@ -1003,6 +1092,90 @@ export default function OrdersV2() {
                 ))}
               </div>
             </div>
+
+            {/* План-Факт */}
+            {detail?.plan_fact?.has_estimate && (() => {
+              const pf = detail.plan_fact;
+              const barPct = (fact: number, plan: number) => {
+                const base = Math.max(plan, fact, 1);
+                return { f: Math.min(100, (fact / base) * 100), p: Math.min(100, (plan / base) * 100) };
+              };
+              const overCost = pf.cost_fact > pf.cost_plan;
+              const marginPlan = pf.margin_plan;
+              const marginFact = pf.margin_fact;
+              const Metric = ({ label, fact, plan, barColor, factColor }: any) => (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 5 }}>
+                    <span style={{ fontSize: 11, color: "#6B6355" }}>{label}</span>
+                    <span style={{ fontSize: 13 }}>
+                      <span style={{ fontWeight: 700, color: factColor, fontVariantNumeric: "tabular-nums" }}>{fmt(fact)}</span>
+                      {plan != null && <span style={{ color: "#A89070", fontVariantNumeric: "tabular-nums" }}> / {fmt(plan)}</span>}
+                    </span>
+                  </div>
+                  <div style={{ height: 2, background: "#EDEBE6", position: "relative" }}>
+                    <div style={{ position: "absolute", left: 0, top: 0, height: 2, background: barColor, width: `${barPct(fact, plan ?? fact).f}%` }} />
+                    {plan != null && plan > 0 && (
+                      <div style={{ position: "absolute", top: -2, height: 6, width: 1, background: "#A89070", left: `${barPct(fact, plan).p}%` }} />
+                    )}
+                  </div>
+                </div>
+              );
+              return (
+                <div style={{ marginBottom: 24 }}>
+                  <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 16, textTransform: "uppercase" }}>
+                    План-Факт
+                    {!pf.detailed && (
+                      <span style={{ marginLeft: 8, textTransform: "none", letterSpacing: 0, color: "#A89070", fontSize: 10 }}>
+                        · смета без детализации, план в «Прочее»
+                      </span>
+                    )}
+                  </div>
+
+                  <Metric label="Себестоимость" fact={pf.cost_fact} plan={pf.cost_plan}
+                    barColor="#E8592A" factColor={overCost ? "#8B3A3A" : "#1A1A1A"} />
+                  <Metric label="Маржа (по факту)" fact={marginFact} plan={marginPlan}
+                    barColor={marginFact >= 0 ? "#4A7C59" : "#8B3A3A"}
+                    factColor={marginFact >= 0 ? "#4A7C59" : "#8B3A3A"} />
+
+                  {pf.categories.length > 0 && (
+                    <div style={{ marginTop: 14 }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: "0 16px",
+                        fontSize: 10, color: "#A89070", letterSpacing: "0.04em", paddingBottom: 6, borderBottom: "1px solid #EDEBE6" }}>
+                        <span>КАТЕГОРИЯ</span>
+                        <span style={{ textAlign: "right" }}>ПЛАН</span>
+                        <span style={{ textAlign: "right" }}>ФАКТ</span>
+                        <span style={{ textAlign: "right", minWidth: 70 }}>Δ</span>
+                      </div>
+                      {pf.categories.map((c: any) => {
+                        const over = c.delta > 0;
+                        return (
+                          <div key={c.category} style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: "0 16px",
+                            fontSize: 12, padding: "7px 0", borderBottom: "1px solid #F2EFE9", fontVariantNumeric: "tabular-nums" }}>
+                            <span style={{ color: "#1A1A1A" }}>{c.category}</span>
+                            <span style={{ textAlign: "right", color: "#6B6355" }}>{fmt(c.plan)}</span>
+                            <span style={{ textAlign: "right", color: "#1A1A1A" }}>{fmt(c.fact)}</span>
+                            <span style={{ textAlign: "right", minWidth: 70, fontWeight: 600,
+                              color: c.delta === 0 ? "#A89070" : over ? "#8B3A3A" : "#4A7C59" }}>
+                              {c.delta === 0 ? "—" : (over ? "+" : "") + fmt(c.delta)}
+                            </span>
+                          </div>
+                        );
+                      })}
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: "0 16px",
+                        fontSize: 12, padding: "8px 0", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
+                        <span>Итого</span>
+                        <span style={{ textAlign: "right", color: "#6B6355" }}>{fmt(pf.cost_plan)}</span>
+                        <span style={{ textAlign: "right", color: "#1A1A1A" }}>{fmt(pf.cost_fact)}</span>
+                        <span style={{ textAlign: "right", minWidth: 70,
+                          color: pf.cost_delta === 0 ? "#A89070" : pf.cost_delta > 0 ? "#8B3A3A" : "#4A7C59" }}>
+                          {pf.cost_delta === 0 ? "—" : (pf.cost_delta > 0 ? "+" : "") + fmt(pf.cost_delta)}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Progress */}
             <div style={{ marginBottom: 24 }}>

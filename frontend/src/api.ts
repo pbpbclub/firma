@@ -24,6 +24,7 @@ export const ordersApi = {
   list: (params?: Record<string, string | boolean>) =>
     api.get("/orders", { params }).then((r) => r.data),
   get: (id: string) => api.get(`/orders/${id}`).then((r) => r.data),
+  planFactSummary: () => api.get("/orders/plan-fact-summary").then((r) => r.data),
   estimate: (id: string) => api.get(`/orders/${id}/estimate`).then((r) => r.data),
   updateStatus: (id: string, status: string) => api.patch(`/orders/${id}/status`, { status }).then((r) => r.data),
   archive: (id: string) => api.patch(`/orders/${id}/archive`).then((r) => r.data),
@@ -144,6 +145,7 @@ export const estimatesApi = {
   createSet:   (orderId: string, data?: any) => api.post("/estimates/sets", { order_id: orderId, ...data }).then(r => r.data),
   updateSet:   (setId: string, data: any)   => api.put(`/estimates/sets/${setId}`, data).then(r => r.data),
   deleteSet:   (setId: string)              => api.delete(`/estimates/sets/${setId}`).then(r => r.data),
+  newVersion:  (setId: string)              => api.post(`/estimates/sets/${setId}/new-version`).then(r => r.data),
   addItem:     (setId: string, data?: any)  => api.post(`/estimates/sets/${setId}/items`, data ?? {}).then(r => r.data),
   updateItem:  (itemId: string, data: any)  => api.put(`/estimates/items/${itemId}`, data).then(r => r.data),
   deleteItem:  (itemId: string)             => api.delete(`/estimates/items/${itemId}`).then(r => r.data),

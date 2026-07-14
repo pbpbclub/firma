@@ -28,6 +28,9 @@ function round2(n: number) {
   return Math.round(n * 100) / 100;
 }
 
+// Порог маржи: если наценка (sale/cost) ниже ×1.8 — тонкая маржа, предупреждаем.
+const LOW_MARKUP = 1.8;
+
 function EditCell({
   value, onSave, numeric, placeholder, style, display,
 }: {
@@ -426,8 +429,12 @@ export default function EstimateEditor() {
     })();
   }, [sets, setsLoading]);
 
-  const activeSetId = selectedSetId ?? ((sets as any[])[0]?.id ?? null);
+  // superseded — исторические версии, в табах не показываем (одна активная смета на заказ)
+  const visibleSets = (sets as any[]).filter((s: any) => s.status !== "superseded");
+  const activeSetId = selectedSetId ?? (visibleSets[0]?.id ?? (sets as any[])[0]?.id ?? null);
   const activeSet   = (sets as any[]).find((s: any) => s.id === activeSetId) ?? null;
+  const isApproved  = activeSet?.status === "approved";
+  useEffect(() => { if (isApproved && editMode) setEditMode(false); }, [isApproved]);
   const items: any[] = activeSet?.items ?? [];
   const openItem    = open ? (items.find((it: any) => it.id === open.id) ?? null) : null;
 
@@ -542,7 +549,7 @@ export default function EstimateEditor() {
               scrollbarWidth: "none",
             }}>
               <span style={{ color: "#EDEBE6", flexShrink: 0 }}>·</span>
-              {(sets as any[]).map((s: any, i: number) => {
+              {visibleSets.map((s: any, i: number) => {
                 const isActive = activeSetId === s.id;
                 const label = s.title || `Смета ${i + 1}`;
                 return (
@@ -711,8 +718,23 @@ export default function EstimateEditor() {
 
               <div style={{ width: 1, height: 18, background: "#EDEBE6", margin: "0 2px" }} />
 
-              {/* Редактировать / Сохранить */}
-              {editMode ? (
+              {/* Утверждённая смета заморожена — правки только новой версией */}
+              {isApproved ? (
+                <button
+                  onClick={async () => {
+                    const nv = await estimatesApi.newVersion(activeSet.id);
+                    await refetch();
+                    setSelectedSetId(nv.id);
+                    setEditMode(true);
+                  }}
+                  title="Смета согласована и заморожена. Создать редактируемую версию"
+                  style={{ padding: "5px 12px", border: "1px solid #EDEBE6", background: "transparent", color: "#6B6355", fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "#1A1A1A"; (e.currentTarget as HTMLElement).style.color = "#1A1A1A"; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "#EDEBE6"; (e.currentTarget as HTMLElement).style.color = "#6B6355"; }}
+                >
+                  <PencilSimple size={14} /> Новая версия
+                </button>
+              ) : editMode ? (
                 <button
                   onClick={() => setEditMode(false)}
                   title="Сохранить"
@@ -875,29 +897,37 @@ export default function EstimateEditor() {
                   )}
                 </div>
 
-                {/* Наценка — в процентах; справа производный множитель ×N */}
-                <div style={{ fontSize: 12, color: "#6B6355" }}>
-                  {editMode ? (
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
-                      +<EditCell
-                        value={markupToPct(item.markup)}
-                        numeric
-                        onSave={v => {
-                          const markup = pctToMarkup(parseFloat(v) || 0);
-                          const cost = item.cost_total || 0;
-                          const payload: any = { markup };
-                          if (cost > 0) payload.sale_price = round2(cost * markup);
-                          estimatesApi.updateItem(item.id, payload).then(() => refetch());
-                        }}
-                      />%
-                    </span>
-                  ) : (
-                    <span style={{ display: "inline-flex", alignItems: "baseline", gap: 4 }}>
-                      <span>+{markupToPct(item.markup)}%</span>
-                      <span style={{ fontSize: 10, color: "#C8C0B0" }}>×{pctToMarkup(markupToPct(item.markup))}</span>
-                    </span>
-                  )}
-                </div>
+                {/* Наценка — производная (sale/cost). Красная + ⚠, если ниже 1.8 */}
+                {(() => {
+                  const lowMargin = (item.cost_total || 0) > 0 && (item.markup || 0) < LOW_MARKUP;
+                  const col = lowMargin ? "#8B3A3A" : "#6B6355";
+                  return (
+                    <div style={{ fontSize: 12, color: col }} title={lowMargin ? `Наценка ниже ×${LOW_MARKUP} — тонкая маржа` : undefined}>
+                      {editMode ? (
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 2, color: col }}>
+                          +<EditCell
+                            value={markupToPct(item.markup)}
+                            numeric
+                            style={{ color: col }}
+                            onSave={v => {
+                              const markup = pctToMarkup(parseFloat(v) || 0);
+                              const cost = item.cost_total || 0;
+                              const payload: any = { markup };
+                              if (cost > 0) payload.sale_price = round2(cost * markup);
+                              estimatesApi.updateItem(item.id, payload).then(() => refetch());
+                            }}
+                          />%
+                        </span>
+                      ) : (
+                        <span style={{ display: "inline-flex", alignItems: "baseline", gap: 4 }}>
+                          {lowMargin && <span style={{ fontSize: 11 }} title={`ниже ×${LOW_MARKUP}`}>⚠</span>}
+                          <span>+{markupToPct(item.markup)}%</span>
+                          <span style={{ fontSize: 10, color: "#C8C0B0" }}>×{pctToMarkup(markupToPct(item.markup))}</span>
+                        </span>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Себест./шт — редактируемо только у позиций без калькулятора; со строками — правка в кубе */}
                 {(() => {
@@ -1058,7 +1088,10 @@ export default function EstimateEditor() {
               <div />
               <div style={{ fontSize: 11, color: "#A89070", fontFamily: SANS }}>Итого</div>
               <div style={{ fontSize: 12, color: "#6B6355" }}>{totalQty}</div>
-              <div style={{ fontSize: 12, color: "#6B6355" }}>{(() => { const p = markupToPct(avgMarkup); return `${p >= 0 ? "+" : ""}${p}%`; })()}</div>
+              <div style={{ fontSize: 12, color: avgMarkup > 0 && avgMarkup < LOW_MARKUP ? "#8B3A3A" : "#6B6355" }}
+                title={avgMarkup > 0 && avgMarkup < LOW_MARKUP ? `Средняя наценка ниже ×${LOW_MARKUP}` : undefined}>
+                {(() => { const p = markupToPct(avgMarkup); const low = avgMarkup > 0 && avgMarkup < LOW_MARKUP; return `${low ? "⚠ " : ""}${p >= 0 ? "+" : ""}${p}%`; })()}
+              </div>
               <div style={{ fontSize: 11, color: "#A89070", textAlign: "right" }}>{totalQty > 1 ? fmt(Math.round(totalCost / totalQty)) : "—"}</div>
               <div style={{ fontSize: 12, color: "#6B6355", textAlign: "right" }}>{fmt(totalCost)}</div>
               <div style={{ fontSize: 12, color: totalFact > totalCost ? "#8B3A3A" : totalFact > 0 ? "#4A7C59" : "#C8C0B0", textAlign: "right" }}>
