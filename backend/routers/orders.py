@@ -72,18 +72,24 @@ def list_orders(
         params.append(limit)
 
         rows = conn.execute(sql, params).fetchall()
-        return [
-            {
+        out = []
+        for r in rows:
+            m = _margin(conn, r["id"], r["price_plan"], r["cost_plan"])
+            out.append({
                 **dict(r),
                 "status_label": STATUS_LABELS.get(r["status"], r["status"]),
                 "priority_label": PRIORITY_LABELS.get(r["priority"], r["priority"]),
                 "debt": round((r["price_plan"] or 0) - (r["paid_total"] or 0), 2),
-                "margin": round(
-                    ((r["price_plan"] or 0) - (r["cost_plan"] or 0)), 2
-                ),
-            }
-            for r in rows
-        ]
+                # margin остаётся валовой (значение прежнее) — рядом полная лестница
+                "margin": m["gross_profit"],
+                "gross_profit": m["gross_profit"],
+                "tax": m["tax"],
+                "tax_pct": m["tax_pct"],
+                "net_profit": m["net_profit"],
+                "payment_type": m["payment_type"],
+                "has_estimate": m["has_estimate"],
+            })
+        return out
     finally:
         conn.close()
 
@@ -163,17 +169,58 @@ def _bucket(raw: str) -> str:
     return "Прочее"
 
 
-def _plan_fact(conn, oid: str, cost_plan: float, paid_total: float) -> dict:
+# ── Лестница прибыли ─────────────────────────────────────────────────────────
+# Выручка (price_plan, к оплате клиентом)
+#   − прямая себестоимость (cost_plan)   = валовая прибыль
+#   − УСН 6% (только с безнала)          = чистая прибыль
+# Следующий этаж (пока не делаем) — постоянные затраты.
+#
+# Про безнал: estimate_items.sale_price — цена «как за нал», при payment_type=bank
+# сверху накручивается bank_pct и получается price_plan. Остаток надбавки после налога —
+# это прибыль (подтверждено Юрой 17.07.2026), поэтому вычитаем только налог.
+TAX_PCT = 6.0
+
+
+def _active_set(conn, oid: str):
+    """Активная смета заказа: approved, иначе последняя не-superseded.
+
+    Именно «иначе», а не «только approved»: у заказа может не быть утверждённой сметы
+    (ORD-024 — draft), и тогда считать всё равно надо."""
+    return conn.execute(
+        """SELECT id, payment_type, bank_pct, status FROM estimate_sets WHERE order_id = ?
+           ORDER BY CASE status WHEN 'approved' THEN 0 WHEN 'superseded' THEN 2 ELSE 1 END, created_at DESC
+           LIMIT 1""", (oid,)
+    ).fetchone()
+
+
+def _margin(conn, oid: str, price_plan, cost_plan, est=None) -> dict:
+    """Лестница прибыли по заказу. Единый источник правды — не дублировать выражением."""
+    if est is None:
+        est = _active_set(conn, oid)
+    is_bank = bool(est and est["payment_type"] == "bank")
+    revenue = round(price_plan or 0, 2)
+    cost = round(cost_plan or 0, 2)
+    gross = round(revenue - cost, 2)
+    # УСН платится с того, что прошло через счёт → только безнал.
+    tax = round(revenue * TAX_PCT / 100, 2) if is_bank else 0.0
+    return {
+        "revenue": revenue,
+        "cost": cost,
+        "gross_profit": gross,
+        "tax": tax,
+        "tax_pct": TAX_PCT if is_bank else 0.0,
+        "net_profit": round(gross - tax, 2),
+        "payment_type": (est["payment_type"] if est else None) or "cash",
+        "has_estimate": est is not None,
+    }
+
+
+def _plan_fact(conn, oid: str, cost_plan: float, paid_total: float, price_plan: float = 0) -> dict:
     """План (из активной сметы) / Факт (expenses + оплаченные обязательства) по категориям.
 
     План себестоимости — из строк утверждённой сметы (иначе последней не-superseded).
     Факт — фактические траты: expenses (вносит fin-agent) + creditors.paid (обязательства)."""
-    # Активная смета: approved, иначе последняя не superseded
-    est = conn.execute(
-        """SELECT id FROM estimate_sets WHERE order_id = ?
-           ORDER BY CASE status WHEN 'approved' THEN 0 WHEN 'superseded' THEN 2 ELSE 1 END, created_at DESC
-           LIMIT 1""", (oid,)
-    ).fetchone()
+    est = _active_set(conn, oid)
 
     plan_by = {b: 0.0 for b in _CAT_BUCKETS}
     if est:
@@ -206,14 +253,40 @@ def _plan_fact(conn, oid: str, cost_plan: float, paid_total: float) -> dict:
         categories.append({"category": b, "plan": p, "fact": f, "delta": round(f - p, 2)})
 
     cost_fact = round(sum(fact_by.values()), 2)
+
+    # Маржа — от выручки, а НЕ от оплаченного: заплатил клиент или нет,
+    # прибыльность заказа от этого не меняется. Налог берём из общей лестницы.
+    m = _margin(conn, oid, price_plan, plan_total, est=est)
+    tax = m["tax"]
+    gross_plan = round(m["revenue"] - plan_total, 2)
+
+    # Прогноз: «выручка − факт» врал бы вверх, пока расходы не внесены целиком
+    # (у ORD-023 внесена только резка → вышло бы +210к «прибыли» на пустом месте).
+    # Поэтому берём наибольшее из плана и факта: план ещё предстоит потратить,
+    # а перерасход сверх него уже съел маржу. Прогноз никогда не завышает.
+    cost_expected = max(plan_total, cost_fact)
+    gross_forecast = round(m["revenue"] - cost_expected, 2)
+
     return {
         "has_estimate": est is not None,
         "detailed": plan_detail_sum > 0,
+        # Внесена ли хоть одна фактическая трата и какая доля плана закрыта фактом.
+        # UI обязан смотреть сюда, прежде чем выдавать факт за полную картину.
+        "has_facts": cost_fact > 0,
+        "cost_coverage": round(cost_fact / plan_total, 4) if plan_total > 0 else None,
         "cost_plan": plan_total,
         "cost_fact": cost_fact,
         "cost_delta": round(cost_fact - plan_total, 2),
-        "margin_plan": round(paid_total - plan_total, 2) if paid_total else None,
-        "margin_fact": round(paid_total - cost_fact, 2),
+        "cost_expected": round(cost_expected, 2),
+        "revenue": m["revenue"],
+        "tax": tax,
+        "gross_plan": gross_plan,
+        "net_plan": round(gross_plan - tax, 2),
+        "gross_forecast": gross_forecast,
+        "net_forecast": round(gross_forecast - tax, 2),
+        # Не маржа, а касса: сколько денег пришло минус сколько потрачено.
+        # Полезно для кассового разрыва, но прибылью это называть нельзя.
+        "cash_collected_vs_cost": round(paid_total - cost_fact, 2),
         "categories": categories,
     }
 
@@ -232,7 +305,7 @@ def plan_fact_summary():
         ).fetchall()
         out = []
         for r in rows:
-            pf = _plan_fact(conn, r["id"], r["cost_plan"] or 0, r["paid_total"] or 0)
+            pf = _plan_fact(conn, r["id"], r["cost_plan"] or 0, r["paid_total"] or 0, r["price_plan"] or 0)
             if not pf["has_estimate"]:
                 continue
             out.append({
@@ -246,7 +319,11 @@ def plan_fact_summary():
                 "cost_plan": pf["cost_plan"],
                 "cost_fact": pf["cost_fact"],
                 "cost_delta": pf["cost_delta"],
-                "margin_fact": pf["margin_fact"],
+                "net_plan": pf["net_plan"],
+                "net_forecast": pf["net_forecast"],
+                "tax": pf["tax"],
+                "has_facts": pf["has_facts"],
+                "cost_coverage": pf["cost_coverage"],
                 "overspent": pf["cost_fact"] > pf["cost_plan"],
                 "detailed": pf["detailed"],
             })
@@ -297,15 +374,24 @@ def get_order(order_id: str):
         ).fetchall()
 
         paid_total = sum(p["amount"] for p in payments)
-        pf = _plan_fact(conn, oid, order.get("cost_plan") or 0, paid_total)
+        price_plan = order.get("price_plan") or 0
+        pf = _plan_fact(conn, oid, order.get("cost_plan") or 0, paid_total, price_plan)
+        m = _margin(conn, oid, price_plan, order.get("cost_plan") or 0)
 
         return {
             **order,
             "status_label": STATUS_LABELS.get(order["status"], order["status"]),
             "priority_label": PRIORITY_LABELS.get(order["priority"], order["priority"]),
             "paid_total": paid_total,
-            "debt": round((order["price_plan"] or 0) - paid_total, 2),
-            "margin": round((order["price_plan"] or 0) - (order["cost_plan"] or 0), 2),
+            "debt": round(price_plan - paid_total, 2),
+            # margin остаётся валовой (значение прежнее) — рядом полная лестница
+            "margin": m["gross_profit"],
+            "gross_profit": m["gross_profit"],
+            "tax": m["tax"],
+            "tax_pct": m["tax_pct"],
+            "net_profit": m["net_profit"],
+            "payment_type": m["payment_type"],
+            "has_estimate": m["has_estimate"],
             "plan_fact": pf,
             "payments": [dict(p) for p in payments],
             "estimate_sets": [dict(e) for e in estimate_sets],

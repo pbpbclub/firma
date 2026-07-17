@@ -755,7 +755,7 @@ export default function OrdersV2() {
               const rows = [...summary.orders].sort((a: any, b: any) => (b.overspent ? 1 : 0) - (a.overspent ? 1 : 0) || b.cost_delta - a.cost_delta);
               const tPlan = rows.reduce((s: number, o: any) => s + o.cost_plan, 0);
               const tFact = rows.reduce((s: number, o: any) => s + o.cost_fact, 0);
-              const tMargin = rows.reduce((s: number, o: any) => s + o.margin_fact, 0);
+              const tMargin = rows.reduce((s: number, o: any) => s + o.net_forecast, 0);
               const overCount = rows.filter((o: any) => o.overspent).length;
               const SUM_COLS = "1.8fr 1fr 1fr 1fr 1fr";
               return (
@@ -770,7 +770,7 @@ export default function OrdersV2() {
                     <span style={{ textAlign: "right" }}>СЕБ. ПЛАН</span>
                     <span style={{ textAlign: "right" }}>СЕБ. ФАКТ</span>
                     <span style={{ textAlign: "right" }}>Δ</span>
-                    <span style={{ textAlign: "right" }}>МАРЖА ФАКТ</span>
+                    <span style={{ textAlign: "right" }}>ЧИСТАЯ ПРОГНОЗ</span>
                   </div>
                   {rows.map((o: any) => (
                     <div key={o.id}
@@ -791,7 +791,10 @@ export default function OrdersV2() {
                         color: o.cost_delta === 0 ? "#A89070" : o.cost_delta > 0 ? "#8B3A3A" : "#4A7C59" }}>
                         {o.cost_delta === 0 ? "—" : (o.cost_delta > 0 ? "+" : "") + fmt(o.cost_delta)}
                       </span>
-                      <span style={{ textAlign: "right", fontSize: 12, fontWeight: 600, color: o.margin_fact >= 0 ? "#4A7C59" : "#8B3A3A" }}>{fmt(o.margin_fact)}</span>
+                      <span style={{ textAlign: "right", fontSize: 12, fontWeight: 600, color: o.net_forecast < o.net_plan ? "#8B3A3A" : o.net_forecast >= 0 ? "#4A7C59" : "#8B3A3A" }}
+                        title={o.net_forecast < o.net_plan ? `Перерасход съел ${fmt(o.net_plan - o.net_forecast)} от плановой ${fmt(o.net_plan)}` : `План ${fmt(o.net_plan)}`}>
+                        {fmt(o.net_forecast)}
+                      </span>
                     </div>
                   ))}
                   <div style={{ display: "grid", gridTemplateColumns: SUM_COLS, gap: "0 16px", padding: "12px 0",
@@ -804,7 +807,9 @@ export default function OrdersV2() {
                   </div>
                   <div style={{ fontSize: 10, color: "#A89070", marginTop: 12, lineHeight: 1.5 }}>
                     Факт себестоимости — фактические траты (expenses fin-агента) + оплаченные обязательства.
-                    Маржа считается по факту. Заказы с фактом выше плана подсвечены.
+                    Чистая прогноз = выручка − большее из плана и факта затрат − УСН 6% (с безнала).
+                    Пока расходы внесены не полностью, прогноз держится плана — завышать он не может.
+                    Заказы с фактом выше плана подсвечены.
                   </div>
                 </>
               );
@@ -1074,15 +1079,20 @@ export default function OrdersV2() {
               <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 16, textTransform: "uppercase" }}>Финансы</div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "16px 32px" }}>
                 {(() => {
-                  const ebitda = selected.margin || 0;
-                  const taxes = Math.round((selected.price_plan || 0) * 0.06);
-                  const netMargin = ebitda - taxes;
+                  // Лестница считается на бэке (_margin): налог берётся только с безнала,
+                  // здесь ничего не досчитываем — иначе на нал попадёт фантомный УСН.
+                  const d: any = detail ?? selected;
+                  const gross = d.gross_profit ?? selected.margin ?? 0;
+                  const tax = d.tax ?? 0;
+                  const net = d.net_profit ?? gross;
+                  const isBank = d.payment_type === "bank";
                   return [
                     { label: "Стоимость", value: fmt(selected.price_plan), color: "#1A1A1A" },
                     { label: "Оплачено",  value: fmt(paidTotal),           color: "#4A7C59" },
                     { label: "Долг",      value: selected.debt > 0 ? fmt(selected.debt) : "Оплачено", color: selected.debt > 0 ? "#E8592A" : "#4A7C59" },
-                    { label: "EBITDA",    value: fmt(ebitda),              color: "#1A1A1A" },
-                    { label: "Маржа",     value: fmt(netMargin),           color: netMargin > 0 ? "#4A7C59" : "#8B3A3A" },
+                    { label: "Валовая",   value: fmt(gross),               color: "#1A1A1A" },
+                    ...(isBank ? [{ label: `УСН ${d.tax_pct ?? 6}%`, value: `−${fmt(tax)}`, color: "#8B3A3A" }] : []),
+                    { label: "Чистая",    value: fmt(net),                 color: net > 0 ? "#4A7C59" : "#8B3A3A" },
                   ];
                 })().map((item) => (
                   <div key={item.label}>
@@ -1101,8 +1111,11 @@ export default function OrdersV2() {
                 return { f: Math.min(100, (fact / base) * 100), p: Math.min(100, (plan / base) * 100) };
               };
               const overCost = pf.cost_fact > pf.cost_plan;
-              const marginPlan = pf.margin_plan;
-              const marginFact = pf.margin_fact;
+              // Прогноз считает бэк от max(план, факт) — он не завышает, пока
+              // расходы внесены не целиком. Доля внесённого — в cost_coverage.
+              const netPlan = pf.net_plan;
+              const netForecast = pf.net_forecast;
+              const coveragePct = pf.cost_coverage != null ? Math.round(pf.cost_coverage * 100) : null;
               const Metric = ({ label, fact, plan, barColor, factColor }: any) => (
                 <div style={{ marginBottom: 14 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 5 }}>
@@ -1133,9 +1146,16 @@ export default function OrdersV2() {
 
                   <Metric label="Себестоимость" fact={pf.cost_fact} plan={pf.cost_plan}
                     barColor="#E8592A" factColor={overCost ? "#8B3A3A" : "#1A1A1A"} />
-                  <Metric label="Маржа (по факту)" fact={marginFact} plan={marginPlan}
-                    barColor={marginFact >= 0 ? "#4A7C59" : "#8B3A3A"}
-                    factColor={marginFact >= 0 ? "#4A7C59" : "#8B3A3A"} />
+                  <Metric label="Чистая: прогноз / план" fact={netForecast} plan={netPlan}
+                    barColor={netForecast >= 0 ? "#4A7C59" : "#8B3A3A"}
+                    factColor={netForecast < netPlan ? "#8B3A3A" : netForecast >= 0 ? "#4A7C59" : "#8B3A3A"} />
+
+                  <div style={{ fontSize: 10, color: "#A89070", lineHeight: 1.5, marginBottom: 12 }}>
+                    {pf.has_facts
+                      ? <>Внесено {coveragePct}% плановых затрат. Прогноз считается от большего из плана и факта — пока расходы внесены не полностью, он держится плана и растёт только перерасход.</>
+                      : <>Фактические траты ещё не внесены — прогноз равен плану. Расходы заводит фин-агент.</>}
+                    {pf.tax > 0 && <> Налог УСН {fmt(pf.tax)} уже вычтен.</>}
+                  </div>
 
                   {pf.categories.length > 0 && (
                     <div style={{ marginTop: 14 }}>

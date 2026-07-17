@@ -40,7 +40,7 @@ echo "=== 5. Nginx конфиг ==="
 cat > /etc/nginx/sites-available/firma << 'EOF'
 server {
     listen 80;
-    server_name firma.nekitai.com;
+    server_name firma.yuranek.com;
 
     root /opt/firma/frontend/dist;
     index index.html;
@@ -65,4 +65,4 @@ echo ""
 echo "=== Готово! ==="
 echo "Внутренняя проверка: curl http://localhost:8001/api/health"
 echo "SSL — через Cloudflare автоматически (proxied включён)"
-echo "Открывай: https://firma.nekitai.com"
+echo "Открывай: https://firma.yuranek.com"

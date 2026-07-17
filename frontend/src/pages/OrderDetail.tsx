@@ -393,7 +393,10 @@ export default function OrderDetail() {
                 { label: "Стоимость", value: fmt(order?.price_plan),  color: "#1A1A1A" },
                 { label: "Оплачено",  value: fmt(paidTotal),          color: "#4A7C59" },
                 { label: "Долг",      value: order?.debt > 0 ? fmt(order.debt) : "—", color: order?.debt > 0 ? "#E8592A" : "#C8C0B0" },
-                { label: "Маржа",     value: fmt(order?.margin),      color: "#1A1A1A" },
+                // Чистая — уже за вычетом УСН (только с безнала); считает бэк
+                { label: order?.tax > 0 ? "Чистая (−УСН)" : "Чистая",
+                  value: fmt(order?.net_profit ?? order?.margin),
+                  color: (order?.net_profit ?? order?.margin ?? 0) >= 0 ? "#4A7C59" : "#8B3A3A" },
               ].map(item => (
                 <div key={item.label}>
                   <div style={{ fontSize: 9, color: "#A89070", marginBottom: 4 }}>{item.label}</div>
