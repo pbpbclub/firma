@@ -6,8 +6,9 @@ import { MONO } from "../components/ui/Num";
 import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { useNavigate } from "react-router-dom";
 import { ordersApi, customersApi, brandsApi } from "../api";
-import { MagnifyingGlass, DotsThree, Plus, Files, CaretRight, Archive, ArrowCounterClockwise, CaretDown, X, Trash, PencilSimple, UserCircle } from "@phosphor-icons/react";
+import { MagnifyingGlass, DotsThree, Plus, Files, CaretRight, Archive, ArrowCounterClockwise, CaretDown, X, Trash, UserCircle } from "@phosphor-icons/react";
 import { ColumnFilter, AmountFilter } from "../components/TableFilters";
+import { ProfitLadder, PlanFactBlock } from "../components/OrderFinance";
 
 const BRANDS: { value: string; color: string }[] = [
   { value: "MeRA",    color: "#2E6DA4" },
@@ -910,7 +911,16 @@ export default function OrdersV2() {
                     <Checkbox checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} />
                   </div>
                   <div style={{ fontSize: 13, fontWeight: 500, color: isActive ? "#FFFFFF" : "#1A1A1A", lineHeight: 1.4 }}>
-                    {o.title}
+                    {/* Клик по названию — в монитор заказа; клик по остальной строке — панель */}
+                    <span
+                      onClick={(e) => { e.stopPropagation(); navigate(`/orders/${o.id}`); }}
+                      title="Открыть заказ"
+                      style={{ borderBottom: "1px solid transparent", transition: "border-color 0.1s" }}
+                      onMouseEnter={(e) => (e.currentTarget.style.borderBottomColor = isActive ? "rgba(255,255,255,0.6)" : "#C8C0B0")}
+                      onMouseLeave={(e) => (e.currentTarget.style.borderBottomColor = "transparent")}
+                    >
+                      {o.title}
+                    </span>
                     {o.brand && (
                       <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.05em", marginTop: 2, color: isActive ? "rgba(255,255,255,0.75)" : (BRAND_COLOR[o.brand] || "#A89070"), fontFamily: MONO }}>
                         {o.brand}
@@ -1000,7 +1010,13 @@ export default function OrdersV2() {
             alignItems: "flex-start",
           }}>
             <div>
-              <div style={{ fontSize: 24, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em", maxWidth: 300 }}>
+              <div
+                onClick={() => navigate(`/orders/${selected.id}`)}
+                title="Открыть заказ"
+                style={{ fontSize: 24, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em", maxWidth: 300, cursor: "pointer", display: "inline-block", borderBottom: "1px solid transparent" }}
+                onMouseEnter={(e) => (e.currentTarget.style.borderBottomColor = "#C8C0B0")}
+                onMouseLeave={(e) => (e.currentTarget.style.borderBottomColor = "transparent")}
+              >
                 {selected.title}
               </div>
               <div style={{ fontSize: 11, color: "#A89070", marginTop: 8 }}>
@@ -1026,10 +1042,9 @@ export default function OrdersV2() {
                 <EstimatesDropdown orderId={selected.id} sets={detail?.estimate_sets ?? []} />
                 <button
                   onClick={() => navigate(`/orders/${selected.id}`)}
-                  title="Редактировать"
-                  style={{ width: 28, height: 28, padding: 0, border: "none", background: "#E8592A", color: "#FFFFFF", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                  style={{ height: 28, padding: "0 12px", border: "none", background: "#E8592A", color: "#FFFFFF", cursor: "pointer", display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}
                 >
-                  <PencilSimple size={15} />
+                  Открыть заказ <CaretRight size={12} />
                 </button>
                 <button
                   onClick={handleArchive}
@@ -1077,125 +1092,15 @@ export default function OrdersV2() {
             {/* Finances */}
             <div style={{ marginBottom: 24 }}>
               <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 16, textTransform: "uppercase" }}>Финансы</div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "16px 32px" }}>
-                {(() => {
-                  // Лестница считается на бэке (_margin): налог берётся только с безнала,
-                  // здесь ничего не досчитываем — иначе на нал попадёт фантомный УСН.
-                  const d: any = detail ?? selected;
-                  const gross = d.gross_profit ?? selected.margin ?? 0;
-                  const tax = d.tax ?? 0;
-                  const net = d.net_profit ?? gross;
-                  const isBank = d.payment_type === "bank";
-                  return [
-                    { label: "Стоимость", value: fmt(selected.price_plan), color: "#1A1A1A" },
-                    { label: "Оплачено",  value: fmt(paidTotal),           color: "#4A7C59" },
-                    { label: "Долг",      value: selected.debt > 0 ? fmt(selected.debt) : "Оплачено", color: selected.debt > 0 ? "#E8592A" : "#4A7C59" },
-                    { label: "Валовая",   value: fmt(gross),               color: "#1A1A1A" },
-                    ...(isBank ? [{ label: `УСН ${d.tax_pct ?? 6}%`, value: `−${fmt(tax)}`, color: "#8B3A3A" }] : []),
-                    { label: "Чистая",    value: fmt(net),                 color: net > 0 ? "#4A7C59" : "#8B3A3A" },
-                  ];
-                })().map((item) => (
-                  <div key={item.label}>
-                    <div style={{ fontSize: 10, color: "#A89070", marginBottom: 4 }}>{item.label}</div>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: item.color }}>{item.value}</div>
-                  </div>
-                ))}
-              </div>
+              <ProfitLadder order={detail ?? selected} paidTotal={paidTotal} />
             </div>
 
             {/* План-Факт */}
-            {detail?.plan_fact?.has_estimate && (() => {
-              const pf = detail.plan_fact;
-              const barPct = (fact: number, plan: number) => {
-                const base = Math.max(plan, fact, 1);
-                return { f: Math.min(100, (fact / base) * 100), p: Math.min(100, (plan / base) * 100) };
-              };
-              const overCost = pf.cost_fact > pf.cost_plan;
-              // Прогноз считает бэк от max(план, факт) — он не завышает, пока
-              // расходы внесены не целиком. Доля внесённого — в cost_coverage.
-              const netPlan = pf.net_plan;
-              const netForecast = pf.net_forecast;
-              const coveragePct = pf.cost_coverage != null ? Math.round(pf.cost_coverage * 100) : null;
-              const Metric = ({ label, fact, plan, barColor, factColor }: any) => (
-                <div style={{ marginBottom: 14 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 5 }}>
-                    <span style={{ fontSize: 11, color: "#6B6355" }}>{label}</span>
-                    <span style={{ fontSize: 13 }}>
-                      <span style={{ fontWeight: 700, color: factColor, fontVariantNumeric: "tabular-nums" }}>{fmt(fact)}</span>
-                      {plan != null && <span style={{ color: "#A89070", fontVariantNumeric: "tabular-nums" }}> / {fmt(plan)}</span>}
-                    </span>
-                  </div>
-                  <div style={{ height: 2, background: "#EDEBE6", position: "relative" }}>
-                    <div style={{ position: "absolute", left: 0, top: 0, height: 2, background: barColor, width: `${barPct(fact, plan ?? fact).f}%` }} />
-                    {plan != null && plan > 0 && (
-                      <div style={{ position: "absolute", top: -2, height: 6, width: 1, background: "#A89070", left: `${barPct(fact, plan).p}%` }} />
-                    )}
-                  </div>
-                </div>
-              );
-              return (
-                <div style={{ marginBottom: 24 }}>
-                  <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 16, textTransform: "uppercase" }}>
-                    План-Факт
-                    {!pf.detailed && (
-                      <span style={{ marginLeft: 8, textTransform: "none", letterSpacing: 0, color: "#A89070", fontSize: 10 }}>
-                        · смета без детализации, план в «Прочее»
-                      </span>
-                    )}
-                  </div>
-
-                  <Metric label="Себестоимость" fact={pf.cost_fact} plan={pf.cost_plan}
-                    barColor="#E8592A" factColor={overCost ? "#8B3A3A" : "#1A1A1A"} />
-                  <Metric label="Чистая: прогноз / план" fact={netForecast} plan={netPlan}
-                    barColor={netForecast >= 0 ? "#4A7C59" : "#8B3A3A"}
-                    factColor={netForecast < netPlan ? "#8B3A3A" : netForecast >= 0 ? "#4A7C59" : "#8B3A3A"} />
-
-                  <div style={{ fontSize: 10, color: "#A89070", lineHeight: 1.5, marginBottom: 12 }}>
-                    {pf.has_facts
-                      ? <>Внесено {coveragePct}% плановых затрат. Прогноз считается от большего из плана и факта — пока расходы внесены не полностью, он держится плана и растёт только перерасход.</>
-                      : <>Фактические траты ещё не внесены — прогноз равен плану. Расходы заводит фин-агент.</>}
-                    {pf.tax > 0 && <> Налог УСН {fmt(pf.tax)} уже вычтен.</>}
-                  </div>
-
-                  {pf.categories.length > 0 && (
-                    <div style={{ marginTop: 14 }}>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: "0 16px",
-                        fontSize: 10, color: "#A89070", letterSpacing: "0.04em", paddingBottom: 6, borderBottom: "1px solid #EDEBE6" }}>
-                        <span>КАТЕГОРИЯ</span>
-                        <span style={{ textAlign: "right" }}>ПЛАН</span>
-                        <span style={{ textAlign: "right" }}>ФАКТ</span>
-                        <span style={{ textAlign: "right", minWidth: 70 }}>Δ</span>
-                      </div>
-                      {pf.categories.map((c: any) => {
-                        const over = c.delta > 0;
-                        return (
-                          <div key={c.category} style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: "0 16px",
-                            fontSize: 12, padding: "7px 0", borderBottom: "1px solid #F2EFE9", fontVariantNumeric: "tabular-nums" }}>
-                            <span style={{ color: "#1A1A1A" }}>{c.category}</span>
-                            <span style={{ textAlign: "right", color: "#6B6355" }}>{fmt(c.plan)}</span>
-                            <span style={{ textAlign: "right", color: "#1A1A1A" }}>{fmt(c.fact)}</span>
-                            <span style={{ textAlign: "right", minWidth: 70, fontWeight: 600,
-                              color: c.delta === 0 ? "#A89070" : over ? "#8B3A3A" : "#4A7C59" }}>
-                              {c.delta === 0 ? "—" : (over ? "+" : "") + fmt(c.delta)}
-                            </span>
-                          </div>
-                        );
-                      })}
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: "0 16px",
-                        fontSize: 12, padding: "8px 0", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
-                        <span>Итого</span>
-                        <span style={{ textAlign: "right", color: "#6B6355" }}>{fmt(pf.cost_plan)}</span>
-                        <span style={{ textAlign: "right", color: "#1A1A1A" }}>{fmt(pf.cost_fact)}</span>
-                        <span style={{ textAlign: "right", minWidth: 70,
-                          color: pf.cost_delta === 0 ? "#A89070" : pf.cost_delta > 0 ? "#8B3A3A" : "#4A7C59" }}>
-                          {pf.cost_delta === 0 ? "—" : (pf.cost_delta > 0 ? "+" : "") + fmt(pf.cost_delta)}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
+            {detail?.plan_fact?.has_estimate && (
+              <div style={{ marginBottom: 24 }}>
+                <PlanFactBlock planFact={detail.plan_fact} />
+              </div>
+            )}
 
             {/* Progress */}
             <div style={{ marginBottom: 24 }}>

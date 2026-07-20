@@ -7,6 +7,7 @@ import { Loading } from "../components/ui/Loading";
 import { ordersApi, customersApi, estimatesApi, expensesApi } from "../api";
 import { ArrowLeft, Plus, CaretRight, Trash, LinkSimple, PencilSimple } from "@phosphor-icons/react";
 import { ExpenseModal, EXPENSE_CATEGORIES } from "../components/ExpenseModal";
+import { ProfitLadder, PlanFactBlock } from "../components/OrderFinance";
 import { useNavigationGuard, NavigationGuardModal } from "../components/NavigationGuard";
 
 const ALL_STATUSES = [
@@ -153,8 +154,6 @@ export default function OrderDetail() {
       priority: form.priority,
       deadline: form.deadline || null,
       customer_id: form.customer_id && form.customer_id !== "__new__" ? form.customer_id : null,
-      price_plan: form.price_plan ? parseFloat(form.price_plan) : null,
-      cost_plan: form.cost_plan ? parseFloat(form.cost_plan) : null,
     });
   };
 
@@ -353,25 +352,19 @@ export default function OrderDetail() {
                 </div>
               )}
             </div>
+            {/* Плановые суммы — из сметы, read-only: _sync_order_from_set перезапишет
+                любую ручную правку при утверждении сметы. Правятся в редакторе сметы. */}
             <div>
               <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>СТОИМОСТЬ (план)</div>
-              <input
-                type="number"
-                value={form.price_plan}
-                onChange={e => field({ price_plan: e.target.value })}
-                placeholder="0"
-                style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none", fontFamily: "inherit" }}
-              />
+              <div style={{ padding: "7px 10px", fontSize: 13, fontFamily: MONO, fontVariantNumeric: "tabular-nums", color: "#1A1A1A", background: "#FAF8F5" }}>
+                {fmt(order?.price_plan)} <span style={{ fontSize: 9, color: "#A89070", fontFamily: "inherit" }}>из сметы</span>
+              </div>
             </div>
             <div>
               <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>СЕБЕСТОИМОСТЬ (план)</div>
-              <input
-                type="number"
-                value={form.cost_plan}
-                onChange={e => field({ cost_plan: e.target.value })}
-                placeholder="0"
-                style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none", fontFamily: "inherit" }}
-              />
+              <div style={{ padding: "7px 10px", fontSize: 13, fontFamily: MONO, fontVariantNumeric: "tabular-nums", color: "#1A1A1A", background: "#FAF8F5" }}>
+                {fmt(order?.cost_plan)} <span style={{ fontSize: 9, color: "#A89070", fontFamily: "inherit" }}>из сметы</span>
+              </div>
             </div>
             <div>
               <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>ДЕДЛАЙН</div>
@@ -400,6 +393,9 @@ export default function OrderDetail() {
               <div style={{ fontSize: 12, color: "#C8C0B0", padding: "8px 0" }}>Сметы не добавлены</div>
             ) : (
               (estimates as any[]).map((s: any, i: number) => {
+                // Эндпоинт отдаёт сметы с позициями, но без агрегата по сете —
+                // суммируем из items. Клиентская цена для безнала = sale × (1+bank%),
+                // та же формула, что в _sync_order_from_set и редакторе сметы.
                 const items = s.items ?? [];
                 const isBank = s.payment_type === "bank";
                 const bpct = s.bank_pct ?? 13;
@@ -438,25 +434,10 @@ export default function OrderDetail() {
             )}
           </div>
 
-          {/* Financial summary */}
+          {/* Финансы — та же лестница, что в панели списка (считает бэк) */}
           <div style={{ paddingTop: 24, borderTop: "1px solid #EDEBE6", marginBottom: 32 }}>
             <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 14 }}>ФИНАНСЫ</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px 24px" }}>
-              {[
-                { label: "Стоимость", value: fmt(order?.price_plan),  color: "#1A1A1A" },
-                { label: "Оплачено",  value: fmt(paidTotal),          color: "#4A7C59" },
-                { label: "Долг",      value: order?.debt > 0 ? fmt(order.debt) : "—", color: order?.debt > 0 ? "#E8592A" : "#C8C0B0" },
-                // Чистая — уже за вычетом УСН (только с безнала); считает бэк
-                { label: order?.tax > 0 ? "Чистая (−УСН)" : "Чистая",
-                  value: fmt(order?.net_profit ?? order?.margin),
-                  color: (order?.net_profit ?? order?.margin ?? 0) >= 0 ? "#4A7C59" : "#8B3A3A" },
-              ].map(item => (
-                <div key={item.label}>
-                  <div style={{ fontSize: 9, color: "#A89070", marginBottom: 4 }}>{item.label}</div>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: item.color, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{item.value}</div>
-                </div>
-              ))}
-            </div>
+            {order && <ProfitLadder order={order} paidTotal={paidTotal} />}
             {order?.price_plan > 0 && (
               <div style={{ marginTop: 14 }}>
                 <div style={{ height: 2, background: "#F2EFE9" }}>
@@ -465,6 +446,13 @@ export default function OrderDetail() {
               </div>
             )}
           </div>
+
+          {/* План-Факт */}
+          {order?.plan_fact?.has_estimate && (
+            <div style={{ paddingTop: 24, borderTop: "1px solid #EDEBE6", marginBottom: 32 }}>
+              <PlanFactBlock planFact={order.plan_fact} />
+            </div>
+          )}
 
           {/* Расходы (факт) */}
           <div style={{ paddingTop: 24, borderTop: "1px solid #EDEBE6", marginBottom: 32 }}>
