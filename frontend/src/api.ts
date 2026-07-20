@@ -142,6 +142,17 @@ export const expensesApi = {
     api.delete(`/orders/${orderId}/expenses/${expenseId}`, { params: withGroup ? { with_group: true } : {} }).then((r) => r.data),
 };
 
+export const inboxApi = {
+  list: (params: Record<string, string | number>) =>
+    api.get("/expenses/inbox", { params }).then((r) => r.data),
+  fromTx: (data: {
+    source: string; tx_id: string; title?: string | null; category: string;
+    supplier?: string | null; master_id?: string | null; expense_date?: string | null;
+    allocations: { order_id: string; amount: number }[];
+  }) => api.post("/expenses/from-tx", data).then((r) => r.data),
+  deleteGroup: (groupId: string) => api.delete(`/expenses/groups/${groupId}`).then((r) => r.data),
+};
+
 export const materialsApi = {
   search: (q?: string) =>
     api.get("/materials/search", { params: q ? { q } : {} }).then((r) => r.data),

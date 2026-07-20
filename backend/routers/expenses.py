@@ -1,0 +1,273 @@
+"""Разноска прошлых трат: банковские и ZenMoney-списания → expenses по заказам.
+
+Инбокс показывает только НЕразнесённые списания. «Разнесено» — это не флаг на
+транзакции (его негде хранить: finance.db и zenmoney.db веб только читает), а
+производный признак: id транзакции встречается в expenses / creditors / zm_links.
+Три разных файла БД, ATTACH в проекте не используется → анти-джойн делаем в Python.
+"""
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
+from typing import Optional, List
+from uuid import uuid4
+from datetime import date, timedelta
+
+from db import get_production, get_finance, get_zenmoney
+from routers.zenmoney import _load_payee_rules, _resolve_payee, _CATEGORY_RU
+
+router = APIRouter()
+
+# ZenMoney — 3.5к исходящих за всё время. Без окна инбокс бесполезен;
+# Юра заполняет «от какой-то даты», поэтому окно расширяемое фильтром.
+ZEN_DEFAULT_DAYS = 90
+
+# Категория расхода по подсказке из payee_rules / тега ZenMoney.
+_CATEGORY_GUESS = {
+    "материал": "material", "материалы": "material", "metal": "material",
+    "работа": "work", "работы": "work", "услуга": "work", "услуги": "work",
+    "доставка": "delivery", "транспорт": "delivery", "transport": "delivery",
+}
+
+
+def _guess_category(hint: Optional[str]) -> str:
+    return _CATEGORY_GUESS.get((hint or "").strip().lower(), "other")
+
+
+def _allocated_ids() -> tuple[set, set]:
+    """id уже разнесённых транзакций: (банк, zenmoney).
+
+    Источники: expenses (наша разноска), creditors (привязка обязательств),
+    zm_links (разноска фин-агента, expenses не создаёт)."""
+    bank, zen = set(), set()
+    conn = get_production()
+    try:
+        for tbl in ("expenses", "creditors"):
+            for col, dest in (("finance_tx_id", bank), ("zenmoney_tx_id", zen)):
+                try:
+                    for r in conn.execute(f"SELECT DISTINCT {col} FROM {tbl} WHERE {col} IS NOT NULL AND {col} != ''"):
+                        dest.add(str(r[0]))
+                except Exception:
+                    pass  # колонки может не быть на старой схеме
+    finally:
+        conn.close()
+    try:
+        zc = get_zenmoney()
+        try:
+            for r in zc.execute("SELECT DISTINCT zm_tx_id FROM zm_links WHERE zm_tx_id IS NOT NULL AND zm_tx_id != ''"):
+                zen.add(str(r[0]))
+        finally:
+            zc.close()
+    except Exception:
+        pass
+    return bank, zen
+
+
+@router.get("/inbox")
+def inbox(
+    source: str = Query("bank", pattern="^(bank|zen)$"),
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    search: Optional[str] = None,
+    amount_min: Optional[float] = None,
+    amount_max: Optional[float] = None,
+    limit: int = Query(100, le=500),
+):
+    """Неразнесённые списания. payee_hint — подсказка поставщика/категории."""
+    bank_done, zen_done = _allocated_ids()
+    rules = _load_payee_rules()
+    out = []
+
+    if source == "bank":
+        conn = get_finance()
+        try:
+            sql = "SELECT * FROM transactions WHERE direction = 'out'"
+            params: list = []
+            if date_from:
+                sql += " AND date >= ?"; params.append(date_from)
+            if date_to:
+                sql += " AND date <= ?"; params.append(date_to)
+            if amount_min is not None:
+                sql += " AND amount >= ?"; params.append(amount_min)
+            if amount_max is not None:
+                sql += " AND amount <= ?"; params.append(amount_max)
+            if search:
+                sql += " AND (counterparty LIKE ? OR purpose LIKE ?)"; params += [f"%{search}%"] * 2
+            sql += " ORDER BY date DESC, id DESC LIMIT ?"
+            params.append(limit * 3)  # запас: часть отсеется как разнесённая
+            for r in conn.execute(sql, params).fetchall():
+                if str(r["id"]) in bank_done:
+                    continue
+                res = _resolve_payee(r["counterparty"] or "", rules, [])
+                out.append({
+                    "id": str(r["id"]), "source": "bank", "date": r["date"], "amount": r["amount"],
+                    "counterparty": r["counterparty"], "purpose": r["purpose"], "bank": r["bank"],
+                    "payee_hint": res.get("display_name"),
+                    "master_id": res.get("entity_id") if res.get("entity_type") == "master" else None,
+                    "category_hint": _guess_category(res.get("category")),
+                })
+                if len(out) >= limit:
+                    break
+        finally:
+            conn.close()
+    else:
+        if not date_from:
+            date_from = (date.today() - timedelta(days=ZEN_DEFAULT_DAYS)).isoformat()
+        conn = get_zenmoney()
+        try:
+            sql = "SELECT * FROM zm_transactions WHERE outcome > 0 AND income = 0 AND deleted = 0"
+            params: list = []
+            if date_from:
+                sql += " AND date >= ?"; params.append(date_from)
+            if date_to:
+                sql += " AND date <= ?"; params.append(date_to)
+            if amount_min is not None:
+                sql += " AND outcome >= ?"; params.append(amount_min)
+            if amount_max is not None:
+                sql += " AND outcome <= ?"; params.append(amount_max)
+            if search:
+                sql += " AND (payee LIKE ? OR comment LIKE ?)"; params += [f"%{search}%"] * 2
+            sql += " ORDER BY date DESC LIMIT ?"
+            params.append(limit * 3)
+            import json as _json
+            for r in conn.execute(sql, params).fetchall():
+                if str(r["id"]) in zen_done:
+                    continue
+                res = _resolve_payee(r["payee"] or "", rules, [])
+                try:
+                    tags = _json.loads(r["tags"] or "[]")
+                except Exception:
+                    tags = []
+                zen_cat = tags[0] if tags else ""
+                out.append({
+                    "id": str(r["id"]), "source": "zen", "date": r["date"], "amount": r["outcome"],
+                    "counterparty": r["payee"], "purpose": r["comment"], "account": r["outcome_account"],
+                    "payee_hint": res.get("display_name"),
+                    "master_id": res.get("entity_id") if res.get("entity_type") == "master" else None,
+                    "category_hint": _guess_category(res.get("category") or _CATEGORY_RU.get(zen_cat) or zen_cat),
+                    "zen_tag": _CATEGORY_RU.get(zen_cat) or zen_cat or None,
+                })
+                if len(out) >= limit:
+                    break
+        finally:
+            conn.close()
+
+    return {"items": out, "count": len(out), "source": source}
+
+
+class Allocation(BaseModel):
+    order_id: str
+    amount: float
+
+
+class FromTxIn(BaseModel):
+    source: str                      # bank | zen
+    tx_id: str
+    title: Optional[str] = None
+    category: str = "other"
+    supplier: Optional[str] = None
+    master_id: Optional[str] = None
+    expense_date: Optional[str] = None
+    allocations: List[Allocation]
+
+
+@router.post("/from-tx", status_code=201)
+def create_from_tx(body: FromTxIn):
+    """Разнести транзакцию на 1..N заказов. N>1 — одна поездка на несколько заказов."""
+    from routers.orders import EXPENSE_CATEGORIES
+
+    if body.source not in ("bank", "zen"):
+        raise HTTPException(status_code=400, detail="source must be bank|zen")
+    if body.category not in EXPENSE_CATEGORIES:
+        raise HTTPException(status_code=400, detail=f"category must be one of {'|'.join(EXPENSE_CATEGORIES)}")
+    if not body.allocations:
+        raise HTTPException(status_code=400, detail="allocations required")
+    if any(a.amount is None or a.amount <= 0 for a in body.allocations):
+        raise HTTPException(status_code=400, detail="each allocation amount must be > 0")
+
+    # Транзакция должна существовать и быть ещё не разнесённой
+    bank_done, zen_done = _allocated_ids()
+    if body.source == "bank":
+        if str(body.tx_id) in bank_done:
+            raise HTTPException(status_code=409, detail="Транзакция уже разнесена")
+        c = get_finance()
+        try:
+            tx = c.execute("SELECT * FROM transactions WHERE id = ?", (body.tx_id,)).fetchone()
+        finally:
+            c.close()
+        if not tx:
+            raise HTTPException(status_code=404, detail="Транзакция не найдена")
+        tx_amount, tx_date = tx["amount"], tx["date"]
+        tx_payee, tx_note = tx["counterparty"], tx["purpose"]
+    else:
+        if str(body.tx_id) in zen_done:
+            raise HTTPException(status_code=409, detail="Транзакция уже разнесена")
+        c = get_zenmoney()
+        try:
+            tx = c.execute("SELECT * FROM zm_transactions WHERE id = ?", (body.tx_id,)).fetchone()
+        finally:
+            c.close()
+        if not tx:
+            raise HTTPException(status_code=404, detail="Транзакция не найдена")
+        tx_amount, tx_date = tx["outcome"], tx["date"]
+        tx_payee, tx_note = tx["payee"], tx["comment"]
+
+    total = round(sum(a.amount for a in body.allocations), 2)
+    if abs(total - round(tx_amount or 0, 2)) > 0.01:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Сумма разноски {total} не сходится с транзакцией {round(tx_amount or 0, 2)}"
+        )
+
+    title = (body.title or tx_payee or tx_note or "Расход").strip()
+    supplier = body.supplier or tx_payee
+    exp_date = body.expense_date or (tx_date or "")[:10] or None
+    group_id = str(uuid4()) if len(body.allocations) > 1 else None
+    fin_id = body.tx_id if body.source == "bank" else None
+    zen_id = body.tx_id if body.source == "zen" else None
+    src = "bank" if body.source == "bank" else "zenmoney"
+
+    conn = get_production()
+    try:
+        created = []
+        for a in body.allocations:
+            o = conn.execute("SELECT id FROM orders WHERE id = ? OR number = ?", (a.order_id, a.order_id)).fetchone()
+            if not o:
+                raise HTTPException(status_code=404, detail=f"Заказ не найден: {a.order_id}")
+            oid = o["id"]
+            # Тот же платёж мог уже стоять обязательством по этому заказу — связываем,
+            # чтобы факт не задвоился (см. инвариант в orders._plan_fact).
+            cred = None
+            col = "finance_tx_id" if body.source == "bank" else "zenmoney_tx_id"
+            cr = conn.execute(f"SELECT id FROM creditors WHERE order_id = ? AND {col} = ?", (oid, body.tx_id)).fetchone()
+            if cr:
+                cred = cr["id"]
+            eid = str(uuid4())
+            conn.execute(
+                """INSERT INTO expenses (id, order_id, title, amount, category, supplier, master_id,
+                                         expense_date, source, creditor_id, finance_tx_id, zenmoney_tx_id,
+                                         group_id, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), ?, ?, ?, ?, ?, datetime('now'))""",
+                (eid, oid, title, a.amount, body.category, supplier, body.master_id,
+                 exp_date, src, cred, fin_id, zen_id, group_id)
+            )
+            created.append(eid)
+        conn.commit()
+        rows = [dict(r) for r in conn.execute(
+            f"SELECT * FROM expenses WHERE id IN ({','.join('?' * len(created))})", created
+        ).fetchall()]
+        return {"ok": True, "group_id": group_id, "created": len(rows), "items": rows}
+    finally:
+        conn.close()
+
+
+@router.delete("/groups/{group_id}")
+def delete_group(group_id: str):
+    """Откат всей разноски одной поездки/платежа."""
+    conn = get_production()
+    try:
+        cur = conn.execute("DELETE FROM expenses WHERE group_id = ?", (group_id,))
+        conn.commit()
+        if not cur.rowcount:
+            raise HTTPException(status_code=404, detail="Not found")
+        return {"ok": True, "deleted": cur.rowcount}
+    finally:
+        conn.close()

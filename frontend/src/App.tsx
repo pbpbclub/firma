@@ -15,6 +15,7 @@ import OrderDetail from "./pages/OrderDetail";
 import Funds from "./pages/Funds";
 import ZenMoney from "./pages/ZenMoney";
 import Admin from "./pages/Admin";
+import ExpensesInbox from "./pages/ExpensesInbox";
 import Brands from "./pages/Brands";
 
 const queryClient = new QueryClient({
@@ -44,6 +45,7 @@ const router = createBrowserRouter([
       { path: "/funds", element: <Funds /> },
       { path: "/brands", element: <Brands /> },
       { path: "/zenmoney", element: <ZenMoney /> },
+      { path: "/expenses", element: <ExpensesInbox /> },
       { path: "/admin", element: <Admin /> },
     ],
   },
