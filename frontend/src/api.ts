@@ -195,6 +195,7 @@ export const estimatesApi = {
 
 export const mastersApi = {
   list: () => api.get("/masters").then((r) => r.data),
+  wikiOnly: () => api.get("/masters/wiki-only").then((r) => r.data),
   get: (id: string) => api.get(`/masters/${id}`).then((r) => r.data),
   create: (data: { name: string; role?: string; specialization?: string; work_type_id?: string }) =>
     api.post("/masters", data).then((r) => r.data),

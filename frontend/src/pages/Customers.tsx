@@ -3,15 +3,15 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loading } from "../components/ui/Loading";
 import { EmptyState } from "../components/ui/EmptyState";
 import { MONO } from "../components/ui/Num";
-import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { IconButton } from "../components/ui/IconButton";
 import { useNavigate, useParams } from "react-router-dom";
 import { useNavigationGuard, NavigationGuardModal } from "../components/NavigationGuard";
 import {
-  MagnifyingGlass, DotsThree, Plus, CaretRight,
-  PencilSimple, Check, X, Tag,
+  MagnifyingGlass, Plus, CaretRight, PencilSimple, X,
 } from "@phosphor-icons/react";
-import { customersApi, mastersApi, financeApi, payeeRulesApi } from "../api";
+import { customersApi } from "../api";
+import { EditModal, type FieldDef } from "../components/EditModal";
+import { PayeeRulesSection } from "../components/PayeeRulesSection";
 import { ColumnFilter } from "../components/TableFilters";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -30,16 +30,7 @@ function fmt(n: number) {
   return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) + " ₽";
 }
 
-function fmtDate(s: string) {
-  if (!s) return "—";
-  return new Date(s).toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
-}
-
 const PAGE_SIZE = 15;
-
-const STATUS_COLORS: Record<string, string> = {
-  favorite: "#E8592A", stable: "#4A7C59", available: "#A89070", risk: "#8B3A3A",
-};
 
 const CUSTOMER_STATUS_COLORS: Record<string, string> = {
   "VIP": "#E8592A", "Постоянный": "#4A7C59", "Разовый": "#A89070", "Холодный": "#6B6355",
@@ -52,185 +43,11 @@ const ORDER_STATUS_LABELS: Record<string, string> = {
 
 // ── Edit modal ─────────────────────────────────────────────────────────────
 
-type FieldDef = { key: string; label: string; type?: "text" | "textarea" | "select"; options?: { v: string; l: string }[] };
 
-function EditModal({
-  title, fields, initial, onSave, onClose, onDelete, isPending,
-}: {
-  title: string;
-  fields: FieldDef[];
-  initial: Record<string, any>;
-  onSave: (data: Record<string, any>) => void;
-  onClose: () => void;
-  onDelete?: () => void;
-  isPending: boolean;
-}) {
-  const [draft, setDraft] = useState<Record<string, any>>({ ...initial });
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const set = (key: string, val: string) => setDraft(d => ({ ...d, [key]: val }));
-
-  return (
-    <>
-      <Modal
-        size="md"
-        eyebrow={title}
-        onClose={onClose}
-        onDelete={onDelete ? () => setConfirmDelete(true) : undefined}
-        onCancel={onClose}
-        onSave={() => onSave(Object.fromEntries(Object.entries(draft).map(([k, v]) => [k, (v as string)?.trim() || null])))}
-        saving={isPending}
-      >
-          <div style={{ padding: "16px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
-            {fields.map(f => (
-              <div key={f.key}>
-                <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>{f.label.toUpperCase()}</div>
-                {f.type === "textarea" ? (
-                  <textarea
-                    value={draft[f.key] ?? ""}
-                    onChange={e => set(f.key, e.target.value)}
-                    rows={3}
-                    style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 12, outline: "none", resize: "vertical", fontFamily: "inherit" }}
-                  />
-                ) : f.type === "select" ? (
-                  <select
-                    value={draft[f.key] ?? ""}
-                    onChange={e => set(f.key, e.target.value)}
-                    style={{ width: "100%", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 12, outline: "none", background: "#fff" }}
-                  >
-                    <option value="">—</option>
-                    {f.options?.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
-                  </select>
-                ) : (
-                  <input
-                    value={draft[f.key] ?? ""}
-                    onChange={e => set(f.key, e.target.value)}
-                    style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 12, outline: "none" }}
-                  />
-                )}
-              </div>
-            ))}
-          </div>
-      </Modal>
-
-      {confirmDelete && (
-        <ConfirmModal
-          message="Запись будет удалена. Это действие нельзя отменить."
-          confirmLabel="Да, удалить"
-          onConfirm={() => onDelete?.()}
-          onCancel={() => setConfirmDelete(false)}
-        />
-      )}
-    </>
-  );
-}
 
 // ── Payee rules section ───────────────────────────────────────────────────
 
-const MATCH_TYPE_LABELS: Record<string, string> = { exact: "точное", contains: "содержит", prefix: "с начала" };
 
-function PayeeRulesSection({ entityType, entityId }: { entityType: string; entityId: string }) {
-  const qc = useQueryClient();
-  const [adding, setAdding] = useState(false);
-  const [form, setForm] = useState({ pattern: "", match_type: "exact", display_name: "" });
-
-  const { data: rules = [] } = useQuery({
-    queryKey: ["payee-rules", entityType, entityId],
-    queryFn: () => payeeRulesApi.list({ entity_type: entityType, entity_id: entityId }),
-  });
-
-  const create = useMutation({
-    mutationFn: () => payeeRulesApi.create({
-      ...form,
-      entity_type: entityType,
-      entity_id: entityId,
-    }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["payee-rules", entityType, entityId] });
-      qc.invalidateQueries({ queryKey: ["zm-business"] });
-      setAdding(false);
-      setForm({ pattern: "", match_type: "exact", display_name: "" });
-    },
-  });
-
-  const del = useMutation({
-    mutationFn: (id: number) => payeeRulesApi.delete(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["payee-rules", entityType, entityId] });
-      qc.invalidateQueries({ queryKey: ["zm-business"] });
-    },
-  });
-
-  const inputStyle: React.CSSProperties = {
-    width: "100%", boxSizing: "border-box", fontSize: 11,
-    border: "1px solid #EDEBE6", padding: "5px 8px", outline: "none", fontFamily: "inherit",
-  };
-
-  return (
-    <div style={{ marginTop: 20 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-        <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>
-          ZENMONEY <span style={{ color: "#C8C0B0", fontWeight: 400 }}>· паттерны</span>
-        </div>
-        <button onClick={() => setAdding(v => !v)}
-          style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070", padding: 0, display: "flex", alignItems: "center" }}>
-          <Tag size={12} />
-        </button>
-      </div>
-
-      {(rules as any[]).length === 0 && !adding && (
-        <div style={{ fontSize: 11, color: "#C8C0B0", paddingBottom: 6 }}>Нет привязанных паттернов</div>
-      )}
-
-      {(rules as any[]).map((r: any) => (
-        <div key={r.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "5px 0", borderBottom: "1px solid #F2EFE9" }}>
-          <div>
-            <code style={{ fontSize: 10, background: "#F2EFE9", padding: "1px 4px" }}>{r.pattern}</code>
-            <span style={{ fontSize: 10, color: "#A89070", marginLeft: 5 }}>{MATCH_TYPE_LABELS[r.match_type]}</span>
-            {r.display_name && <span style={{ fontSize: 10, color: "#6B6355", marginLeft: 5 }}>→ {r.display_name}</span>}
-          </div>
-          <button onClick={() => del.mutate(r.id)}
-            style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2 }}>
-            <X size={11} />
-          </button>
-        </div>
-      ))}
-
-      {adding && (
-        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6, padding: "10px", background: "#FAF8F5", border: "1px solid #EDEBE6" }}>
-          <div>
-            <div style={{ fontSize: 9, color: "#A89070", marginBottom: 2 }}>ПАТТЕРН (нижний регистр)</div>
-            <input value={form.pattern} onChange={e => setForm(f => ({ ...f, pattern: e.target.value }))}
-              placeholder="имя плательщика" style={inputStyle} />
-          </div>
-          <div>
-            <div style={{ fontSize: 9, color: "#A89070", marginBottom: 2 }}>ТИП</div>
-            <select value={form.match_type} onChange={e => setForm(f => ({ ...f, match_type: e.target.value }))}
-              style={{ ...inputStyle, cursor: "pointer" }}>
-              <option value="exact">Точное</option>
-              <option value="contains">Содержит</option>
-              <option value="prefix">С начала</option>
-            </select>
-          </div>
-          <div>
-            <div style={{ fontSize: 9, color: "#A89070", marginBottom: 2 }}>МЕТКА (необязательно)</div>
-            <input value={form.display_name} onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))}
-              placeholder="отображаемое имя" style={inputStyle} />
-          </div>
-          <div style={{ display: "flex", gap: 6 }}>
-            <button onClick={() => create.mutate()} disabled={!form.pattern || create.isPending}
-              style={{ flex: 1, background: "#1A1A1A", color: "#FFF", border: "none", padding: "5px 0", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
-              {create.isPending ? "..." : "Сохранить"}
-            </button>
-            <button onClick={() => setAdding(false)}
-              style={{ background: "none", border: "1px solid #EDEBE6", padding: "5px 10px", fontSize: 11, cursor: "pointer", fontFamily: "inherit", color: "#6B6355" }}>
-              Отмена
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ── Customer detail panel ──────────────────────────────────────────────────
 
@@ -418,299 +235,32 @@ function CustomerDetail({ customerId, onClose }: { customerId: string; onClose: 
 
 // ── Master detail panel ────────────────────────────────────────────────────
 
-const MASTER_FIELDS: FieldDef[] = [
-  { key: "name",           label: "Имя / Название" },
-  { key: "role",           label: "Роль",
-    type: "select", options: [{ v: "Мастер", l: "Мастер" }, { v: "Подрядчик", l: "Подрядчик" }] },
-  { key: "specialization", label: "Специализация" },
-  { key: "phone",          label: "Телефон" },
-  { key: "telegram",       label: "Telegram" },
-  { key: "email",          label: "Email" },
-  { key: "pay_scheme",     label: "Схема оплаты",
-    type: "select", options: [
-      { v: "percent",  l: "% от счёта" },
-      { v: "fixed",    l: "Фиксированная ставка" },
-      { v: "per_unit", l: "За единицу" },
-      { v: "other",    l: "Другое" },
-    ]},
-  { key: "pay_rate",  label: "Ставка / %" },
-  { key: "pay_note",  label: "Условия оплаты" },
-  { key: "notes",     label: "Заметки (карточка)", type: "textarea" },
-  { key: "wiki_notes",label: "Вики (fin-agent)",   type: "textarea" },
-  { key: "status",    label: "Статус",
-    type: "select", options: [
-      { v: "favorite",  l: "Постоянный" },
-      { v: "stable",    l: "Стабильный" },
-      { v: "available", l: "Доступен" },
-      { v: "risk",      l: "Риск" },
-    ]},
-];
 
-function MasterDetail({ masterId, onClose }: { masterId: string; onClose: () => void }) {
-  const qc = useQueryClient();
-  const [editing, setEditing] = useState(false);
-  const [editCreditor, setEditCreditor] = useState<any>(null);
-  const blocker = useNavigationGuard(editing || !!editCreditor);
-
-  const { data, isLoading } = useQuery({
-    queryKey: ["master", masterId],
-    queryFn: () => mastersApi.get(masterId),
-  });
-
-  const save = useMutation({
-    mutationFn: (patch: Record<string, any>) => mastersApi.update(masterId, patch),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["master", masterId] });
-      qc.invalidateQueries({ queryKey: ["masters"] });
-      setEditing(false);
-    },
-  });
-
-  const del = useMutation({
-    mutationFn: () => mastersApi.delete(masterId),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["masters"] });
-      setEditing(false);
-      onClose();
-    },
-  });
-
-  const saveCreditor = useMutation({
-    mutationFn: (patch: any) => financeApi.updateCreditor(editCreditor.id, patch),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["master", masterId] });
-      qc.invalidateQueries({ queryKey: ["creditors"] });
-      setEditCreditor(null);
-    },
-  });
-
-  if (isLoading) return <div style={{ padding: 40, textAlign: "center", color: "#A89070", fontSize: 13 }}>Загружаем...</div>;
-  const master = data?.master;
-  if (!master) return null;
-  const wiki = data?.wiki || {};
-  const creditors: any[] = data?.creditors || [];
-  const totalDebt = data?.total_debt ?? 0;
-
-  const statusLabel: Record<string, string> = {
-    favorite: "Постоянный", stable: "Стабильный", available: "Доступен", risk: "Риск",
-  };
-
-  // Initial values for edit modal include wiki fields
-  const editInitial = {
-    name:           master.name,
-    role:           master.role,
-    specialization: master.specialization || wiki.wiki_spec || "",
-    phone:          master.phone,
-    telegram:       master.telegram,
-    email:          master.email,
-    pay_scheme:     wiki.pay_scheme || "",
-    pay_rate:       wiki.pay_rate != null ? String(wiki.pay_rate) : "",
-    pay_note:       wiki.pay_note || "",
-    notes:          master.notes || "",
-    wiki_notes:     wiki.wiki_notes || "",
-    status:         master.status,
-  };
-
-  const Row = ({ label, value, mono }: { label: string; value?: string | null; mono?: boolean }) => (
-    <div style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid #F2EFE9" }}>
-      <div style={{ fontSize: 11, color: "#A89070" }}>{label}</div>
-      <div style={{ fontSize: 12, fontWeight: 500, color: value ? "#1A1A1A" : "#C8C0B0", textAlign: "right", maxWidth: 240, fontFamily: mono && value ? MONO : undefined, fontVariantNumeric: mono ? "tabular-nums" : undefined }}>{value || "—"}</div>
-    </div>
-  );
-
-  return (
-    <>
-      {editing && (
-        <EditModal
-          title={`Редактировать: ${master.name}`}
-          fields={MASTER_FIELDS}
-          initial={editInitial}
-          isPending={save.isPending}
-          onSave={(d) => save.mutate(d)}
-          onClose={() => setEditing(false)}
-          onDelete={() => del.mutate()}
-        />
-      )}
-
-      {/* Header */}
-      <div style={{ padding: "22px 24px 16px", borderBottom: "1px solid #EDEBE6", display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexShrink: 0 }}>
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
-            <div style={{ fontSize: 21, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em", maxWidth: 260 }}>{master.name}</div>
-            <span style={{ fontSize: 9, color: STATUS_COLORS[master.status] || "#A89070", border: `1px solid ${STATUS_COLORS[master.status] || "#EDEBE6"}`, padding: "2px 6px", letterSpacing: "0.04em" }}>
-              {statusLabel[master.status] || master.status}
-            </span>
-          </div>
-          <div style={{ fontSize: 12, color: "#A89070" }}>{master.role}{master.specialization ? ` · ${master.specialization}` : ""}</div>
-          {totalDebt > 0 && (
-            <div style={{ marginTop: 6, fontSize: 13, fontWeight: 700, color: "#8B3A3A" }}>Долг: <span style={{ fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(totalDebt)}</span></div>
-          )}
-        </div>
-        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-          <IconButton icon={PencilSimple} title="Редактировать" size={28} iconSize={16} color="#C8C0B0" onClick={() => setEditing(true)} />
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 6 }}
-            onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
-            onMouseLeave={e => (e.currentTarget.style.color = "#C8C0B0")}>
-            <DotsThree size={20} />
-          </button>
-        </div>
-      </div>
-
-      <div style={{ flex: 1, overflowY: "auto", padding: "18px 24px" }}>
-
-        {/* Contacts */}
-        <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10 }}>КОНТАКТЫ</div>
-        <Row label="Телефон"  value={master.phone} mono />
-        <Row label="Telegram" value={master.telegram} />
-        <Row label="Email"    value={master.email} />
-
-        {/* Payment */}
-        {(wiki.pay_label || wiki.pay_note || wiki.prepay_pct) && (
-          <>
-            <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10, marginTop: 18 }}>ОПЛАТА</div>
-            {wiki.pay_label && <Row label="Схема" value={wiki.pay_label} />}
-            {wiki.prepay_pct > 0 && <Row label="Предоплата" value={`${wiki.prepay_pct}%`} mono />}
-          </>
-        )}
-
-        {/* Wiki notes */}
-        {(master.notes || wiki.wiki_notes) && (
-          <>
-            <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10, marginTop: 18 }}>ВИКИ</div>
-            {(wiki.wiki_notes || master.notes) && (
-              <div style={{ padding: "10px 12px", background: "#FAF8F5", fontSize: 12, color: "#1A1A1A", lineHeight: 1.7, borderLeft: "3px solid #EDEBE6" }}>
-                {wiki.wiki_notes || master.notes}
-              </div>
-            )}
-            {wiki.wiki_notes && master.notes && wiki.wiki_notes !== master.notes && (
-              <div style={{ padding: "10px 12px", background: "#FFF8F5", fontSize: 12, color: "#6B6355", lineHeight: 1.7, borderLeft: "3px solid #FAD0C0", marginTop: 6 }}>
-                {master.notes}
-              </div>
-            )}
-          </>
-        )}
-
-        {/* Obligations */}
-        <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10, marginTop: 18 }}>
-          ОБЯЗАТЕЛЬСТВА
-          {creditors.filter(c => c.status === "open").length > 0 &&
-            <span style={{ color: "#8B3A3A", marginLeft: 6 }}>· {creditors.filter(c => c.status === "open").length} открытых</span>}
-        </div>
-
-        {creditors.length === 0 ? (
-          <div style={{ fontSize: 12, color: "#C8C0B0" }}>Нет зафиксированных долгов</div>
-        ) : (
-          creditors.map((c: any) => (
-            <div key={c.id}>
-              <div
-                onClick={() => setEditCreditor(editCreditor?.id === c.id ? null : c)}
-                style={{
-                  padding: "9px 12px", marginBottom: 6, cursor: "pointer",
-                  background: c.status === "open" ? "#FFF8F5" : "#FAF8F5",
-                  borderLeft: `3px solid ${c.status === "open" ? "#E8592A" : "#EDEBE6"}`,
-                }}
-                onMouseEnter={e => (e.currentTarget.style.background = "#F5EDE8")}
-                onMouseLeave={e => (e.currentTarget.style.background = c.status === "open" ? "#FFF8F5" : "#FAF8F5")}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <div style={{ fontSize: 11, color: "#6B6355", flex: 1, paddingRight: 8 }}>{c.description || "—"}</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: c.status === "open" ? "#8B3A3A" : "#A89070", flexShrink: 0, fontFamily: c.status === "open" ? MONO : undefined, fontVariantNumeric: "tabular-nums" }}>
-                    {c.status === "open" ? fmt(c.debt) : <span style={{ fontSize: 10 }}>Закрыт</span>}
-                  </div>
-                </div>
-                {(c.paid > 0 || c.due_date) && (
-                  <div style={{ fontSize: 10, color: "#A89070", marginTop: 3 }}>
-                    {c.paid > 0 && `оплачено ${fmt(c.paid)} из ${fmt(c.total)}`}
-                    {c.paid > 0 && c.due_date && " · "}
-                    {c.due_date && `до ${fmtDate(c.due_date)}`}
-                  </div>
-                )}
-              </div>
-
-              {/* Inline creditor editor */}
-              {editCreditor?.id === c.id && (
-                <div style={{ padding: "12px 14px", marginBottom: 8, background: "#fff", border: "1px solid #EDEBE6" }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
-                    <div>
-                      <div style={{ fontSize: 9, color: "#A89070", marginBottom: 3 }}>СУММА ₽</div>
-                      <input type="number" defaultValue={c.total} id={`ec-total-${c.id}`}
-                        style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "5px 8px", fontSize: 12, outline: "none" }} />
-                    </div>
-                    <div>
-                      <div style={{ fontSize: 9, color: "#A89070", marginBottom: 3 }}>ОПЛАЧЕНО ₽</div>
-                      <input type="number" defaultValue={c.paid} id={`ec-paid-${c.id}`}
-                        style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "5px 8px", fontSize: 12, outline: "none" }} />
-                    </div>
-                  </div>
-                  <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                    <button onClick={() => saveCreditor.mutate({ status: "closed" })}
-                      style={{ padding: "4px 10px", border: "1px solid #4A7C59", background: "none", fontSize: 11, cursor: "pointer", color: "#4A7C59", display: "flex", alignItems: "center", gap: 4 }}>
-                      <Check size={11} /> Закрыть
-                    </button>
-                    <button onClick={() => {
-                      const t = parseFloat((document.getElementById(`ec-total-${c.id}`) as HTMLInputElement).value);
-                      const p = parseFloat((document.getElementById(`ec-paid-${c.id}`) as HTMLInputElement).value);
-                      saveCreditor.mutate({ total: isNaN(t) ? c.total : t, paid: isNaN(p) ? c.paid : p });
-                    }} style={{ padding: "4px 10px", border: "none", background: "#E8592A", color: "#fff", fontSize: 11, cursor: "pointer", fontWeight: 600 }}>
-                      Сохранить
-                    </button>
-                    <button onClick={() => setEditCreditor(null)}
-                      style={{ padding: "4px 10px", border: "1px solid #EDEBE6", background: "none", fontSize: 11, cursor: "pointer", color: "#A89070" }}>
-                      ✕
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          ))
-        )}
-
-        <PayeeRulesSection entityType="master" entityId={masterId} />
-      </div>
-
-      <NavigationGuardModal blocker={blocker} />
-    </>
-  );
-}
 
 // ── Main page ──────────────────────────────────────────────────────────────
-
-const TABS = [
-  { id: "clients",  label: "Клиенты" },
-  { id: "masters",  label: "Исполнители" },
-];
 
 export default function Customers() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
-  const [tab, setTab] = useState<"clients" | "masters">("clients");
   const [search, setSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [page, setPage] = useState(0);
-  const [selectedMaster, setSelectedMaster] = useState<any>(null);
   const [nameFilter, setNameFilter] = useState("");
   const clearFilters = () => { setNameFilter(""); setPage(0); };
 
   const { data: customers = [], isLoading: loadingC } = useQuery({
     queryKey: ["customers", search],
     queryFn: () => customersApi.list(search),
-    enabled: tab === "clients",
   });
 
-  const { data: masters = [], isLoading: loadingM } = useQuery({
-    queryKey: ["masters"],
-    queryFn: mastersApi.list,
-    enabled: tab === "masters",
-  });
-
-  const rightOpen = tab === "clients" ? !!id : !!selectedMaster;
-  const allItems = (tab === "clients" ? customers : masters) as any[];
+  const rightOpen = !!id;
+  const allItems = customers as any[];
   const uniqueNames = [...new Set(allItems.map((i: any) => i.name).filter(Boolean))].sort() as string[];
   const filteredItems = nameFilter ? allItems.filter((i: any) => i.name === nameFilter) : allItems;
   const totalCount = filteredItems.length;
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
   const pageItems = filteredItems.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
-  const isLoading = tab === "clients" ? loadingC : loadingM;
+  const isLoading = loadingC;
 
   const cols = rightOpen ? "32px 1fr" : "32px 2fr 130px 150px";
 
@@ -738,10 +288,7 @@ export default function Customers() {
     );
   }
 
-  const closeRight = () => {
-    if (tab === "clients") navigate("/customers");
-    else setSelectedMaster(null);
-  };
+  const closeRight = () => navigate("/customers");
 
   return (
     <div style={{ display: "flex", height: "100%", minHeight: 0 }}>
@@ -755,7 +302,7 @@ export default function Customers() {
       }}>
         <div style={{ padding: "24px 28px 0" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-            <div style={{ fontSize: 26, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em" }}>Контакты</div>
+            <div style={{ fontSize: 26, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em" }}>Клиенты</div>
             {searchOpen ? (
               <div style={{ position: "relative" }}>
                 <MagnifyingGlass size={13} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "#A89070" }} />
@@ -775,18 +322,6 @@ export default function Customers() {
             )}
           </div>
 
-          <div style={{ display: "flex", gap: 24, borderBottom: "1px solid #EDEBE6" }}>
-            {TABS.map(t => (
-              <button key={t.id}
-                onClick={() => { setTab(t.id as any); setPage(0); setSearch(""); setNameFilter(""); if (t.id !== "clients") navigate("/customers"); setSelectedMaster(null); }}
-                style={{
-                  fontSize: 13, padding: "0 0 12px", border: "none", background: "none", cursor: "pointer",
-                  color: tab === t.id ? "#1A1A1A" : "#A89070",
-                  fontWeight: tab === t.id ? 600 : 400,
-                  borderBottom: tab === t.id ? "2px solid #E8592A" : "2px solid transparent", marginBottom: -1,
-                }}>{t.label}</button>
-            ))}
-          </div>
         </div>
 
         {(() => {
@@ -807,10 +342,10 @@ export default function Customers() {
           <div />
           {!rightOpen ? (
             <>
-              <div><ColumnFilter label={tab === "clients" ? "КЛИЕНТ" : "ИСПОЛНИТЕЛЬ"} options={uniqueNames} value={nameFilter} onChange={(v) => { setNameFilter(v); setPage(0); }} /></div>
+              <div><ColumnFilter label="КЛИЕНТ" options={uniqueNames} value={nameFilter} onChange={(v) => { setNameFilter(v); setPage(0); }} /></div>
               <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>ТЕЛЕФОН</div>
               <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>
-                {tab === "clients" ? "ИНН" : "РОЛЬ / ДОЛГ"}
+                ИНН
               </div>
             </>
           ) : <div />}
@@ -822,12 +357,11 @@ export default function Customers() {
           ) : pageItems.length === 0 ? (
             <EmptyState compact title="Ничего не найдено" />
           ) : pageItems.map((item: any) => {
-            const isActive = tab === "clients" ? id === item.id : selectedMaster?.id === item.id;
+            const isActive = id === item.id;
             return (
               <div key={item.id}
                 onClick={() => {
-                  if (tab === "clients") navigate(isActive ? "/customers" : `/customers/${item.id}`);
-                  else setSelectedMaster(isActive ? null : item);
+                  navigate(isActive ? "/customers" : `/customers/${item.id}`);
                 }}
                 style={{
                   display: "grid", gridTemplateColumns: cols,
@@ -840,10 +374,10 @@ export default function Customers() {
               >
                 <div style={{
                   width: 26, height: 26, borderRadius: "50%",
-                  background: isActive ? "rgba(255,255,255,0.25)" : (tab === "masters" && item.debt > 0 ? "#FFF0EC" : "#F2EFE9"),
+                  background: isActive ? "rgba(255,255,255,0.25)" : "#F2EFE9",
                   display: "flex", alignItems: "center", justifyContent: "center",
                   fontSize: 9, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", flexShrink: 0,
-                  color: isActive ? "#fff" : (tab === "masters" && item.debt > 0 ? "#8B3A3A" : "#1A1A1A"),
+                  color: isActive ? "#fff" : "#1A1A1A",
                 }}>{initials(item.name)}</div>
 
                 <div style={{ fontSize: 12, fontWeight: 500, color: isActive ? "#fff" : "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -855,16 +389,8 @@ export default function Customers() {
                     <div style={{ fontSize: 11, color: isActive ? "rgba(255,255,255,0.7)" : "#6B6355", fontFamily: MONO }}>
                       {item.phone || "—"}
                     </div>
-                    <div style={{ fontSize: 11, color: isActive ? "rgba(255,255,255,0.7)" : "#6B6355", fontFamily: tab === "clients" ? MONO : undefined }}>
-                      {tab === "clients"
-                        ? (item.inn || "—")
-                        : <span>
-                            {item.role || "—"}
-                            {item.debt > 0 && !isActive && (
-                              <span style={{ marginLeft: 8, fontWeight: 700, color: "#8B3A3A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(item.debt)}</span>
-                            )}
-                          </span>
-                      }
+                    <div style={{ fontSize: 11, color: isActive ? "rgba(255,255,255,0.7)" : "#6B6355", fontFamily: MONO }}>
+                      {item.inn || "—"}
                     </div>
                   </>
                 )}
@@ -890,11 +416,7 @@ export default function Customers() {
       {/* Right panel */}
       {rightOpen && (
         <div style={{ flex: "0 0 50%", display: "flex", flexDirection: "column", animation: "slideIn 0.18s ease", minWidth: 0 }}>
-          {tab === "clients" && id
-            ? <CustomerDetail customerId={id} onClose={closeRight} />
-            : selectedMaster
-              ? <MasterDetail masterId={selectedMaster.id} onClose={closeRight} />
-              : null}
+          {id && <CustomerDetail customerId={id} onClose={closeRight} />}
         </div>
       )}
 

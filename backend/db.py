@@ -22,7 +22,29 @@ def get_finance():
 
 
 def get_analytics():
+    """Вики фин-агента. Может быть недоступна на запись — см. get_analytics_ro().
+
+    Базу держит фин-агент; веб пишет в неё только best-effort (pay-поля мастеров).
+    Все вызовы обязаны быть в try/except: падать из-за чужой БД нельзя."""
     conn = sqlite3.connect(ANALYTICS_DB)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def get_analytics_ro():
+    """Чтение вики, устойчивое к WAL.
+
+    analytics.db переведена фин-агентом в journal_mode=wal, а сайдкары
+    analytics.db-wal/-shm принадлежат root без ACL для нашего пользователя.
+    SQLite открывает их даже при mode=ro, поэтому обычный connect падает
+    с «unable to open database file». immutable=1 читает файл напрямую,
+    минуя WAL: для справочника подрядчиков этого достаточно, но свежие
+    незачекпойнченные записи фин-агента могут быть не видны."""
+    try:
+        conn = sqlite3.connect(f"file:{ANALYTICS_DB}?mode=ro", uri=True)
+        conn.execute("SELECT 1 FROM sqlite_master LIMIT 1")
+    except sqlite3.OperationalError:
+        conn = sqlite3.connect(f"file:{ANALYTICS_DB}?immutable=1", uri=True)
     conn.row_factory = sqlite3.Row
     return conn
 

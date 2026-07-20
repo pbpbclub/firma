@@ -14,6 +14,7 @@ import {
   HandCoins,
   Buildings,
   Receipt,
+  Wrench,
 } from "@phosphor-icons/react";
 import { getUser, logout } from "../auth";
 
@@ -25,6 +26,7 @@ const nav = [
   { to: "/expenses", icon: Receipt, label: "Разноска" },
   { to: "/debtors", icon: CurrencyDollar, label: "Обязательства" },
   { to: "/customers", icon: User, label: "Клиенты" },
+  { to: "/contractors", icon: Wrench, label: "Подрядчики" },
   { to: "/brands", icon: Buildings, label: "Бренды" },
   { to: "/catalog", icon: Package, label: "Каталог" },
   { to: "/taxes", icon: Calculator, label: "Налоги" },
