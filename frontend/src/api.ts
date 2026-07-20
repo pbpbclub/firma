@@ -129,6 +129,19 @@ export const catalogApi = {
     api.delete("/catalog/by-titles", { data: { titles } }).then((r) => r.data),
 };
 
+export const expensesApi = {
+  list: (orderId: string) => api.get(`/orders/${orderId}/expenses`).then((r) => r.data),
+  create: (orderId: string, data: {
+    title: string; amount: number; category: string; supplier?: string | null;
+    master_id?: string | null; expense_date?: string | null;
+    finance_tx_id?: string | null; zenmoney_tx_id?: string | null; creditor_id?: string | null;
+  }) => api.post(`/orders/${orderId}/expenses`, data).then((r) => r.data),
+  update: (orderId: string, expenseId: string, data: Record<string, any>) =>
+    api.put(`/orders/${orderId}/expenses/${expenseId}`, data).then((r) => r.data),
+  delete: (orderId: string, expenseId: string, withGroup = false) =>
+    api.delete(`/orders/${orderId}/expenses/${expenseId}`, { params: withGroup ? { with_group: true } : {} }).then((r) => r.data),
+};
+
 export const materialsApi = {
   search: (q?: string) =>
     api.get("/materials/search", { params: q ? { q } : {} }).then((r) => r.data),

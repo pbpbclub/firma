@@ -236,7 +236,20 @@ def _plan_fact(conn, oid: str, cost_plan: float, paid_total: float, price_plan: 
     fact_by = {b: 0.0 for b in _CAT_BUCKETS}
     for r in conn.execute("SELECT category AS c, COALESCE(SUM(amount),0) AS s FROM expenses WHERE order_id = ? GROUP BY category", (oid,)):
         fact_by[_bucket(r["c"])] += r["s"] or 0
-    cred_paid = conn.execute("SELECT COALESCE(SUM(paid),0) FROM creditors WHERE order_id = ?", (oid,)).fetchone()[0] or 0
+    # ИНВАРИАНТ: одна оплата = один факт. Обязательство попадает в факт, только если
+    # оно НЕ покрыто расходом — иначе тот же платёж считался бы дважды (как expense
+    # и как creditors.paid). Расход знает о покрытии через creditor_id либо через
+    # совпадение id транзакции банка/ZenMoney.
+    cred_paid = conn.execute(
+        """SELECT COALESCE(SUM(c.paid), 0) FROM creditors c
+           WHERE c.order_id = ?
+             AND NOT EXISTS (
+               SELECT 1 FROM expenses e WHERE e.order_id = c.order_id AND (
+                    e.creditor_id = c.id
+                 OR (e.finance_tx_id  IS NOT NULL AND e.finance_tx_id  = c.finance_tx_id)
+                 OR (e.zenmoney_tx_id IS NOT NULL AND e.zenmoney_tx_id = c.zenmoney_tx_id)))""",
+        (oid,)
+    ).fetchone()[0] or 0
     fact_by["Прочее"] += cred_paid  # обязательства без явной категории — в «Прочее»
 
     plan_detail_sum = round(sum(plan_by.values()), 2)
@@ -671,5 +684,154 @@ def delete_payment(order_id: str, payment_id: str):
         conn.execute("DELETE FROM payments WHERE id = ?", (payment_id,))
         conn.commit()
         return {"ok": True}
+    finally:
+        conn.close()
+
+
+# ── Фактические траты по заказу ──────────────────────────────────────────────
+# Категория — только из 4 корзин: _bucket тотальная, любое иное значение молча
+# уедет в «Прочее» и потеряется в план-факте.
+EXPENSE_CATEGORIES = ("material", "work", "delivery", "other")
+
+
+class ExpenseIn(BaseModel):
+    title: str
+    amount: float
+    category: str = "other"
+    supplier: Optional[str] = None
+    master_id: Optional[str] = None
+    expense_date: Optional[str] = None   # YYYY-MM-DD, по умолчанию сегодня
+    finance_tx_id: Optional[str] = None
+    zenmoney_tx_id: Optional[str] = None
+    creditor_id: Optional[str] = None
+
+
+def _resolve_order(conn, order_id: str):
+    r = conn.execute("SELECT id FROM orders WHERE id = ? OR number = ?", (order_id, order_id)).fetchone()
+    if not r:
+        raise HTTPException(status_code=404, detail="Not found")
+    return r["id"]
+
+
+def _validate_expense(body: ExpenseIn):
+    if not (body.title or "").strip():
+        raise HTTPException(status_code=400, detail="title required")
+    # У payments валидации суммы нет, но тащить этот пробел в новый код не будем:
+    # нулевой/отрицательный расход молча испортит факт и маржу.
+    if body.amount is None or body.amount <= 0:
+        raise HTTPException(status_code=400, detail="amount must be > 0")
+    if body.category not in EXPENSE_CATEGORIES:
+        raise HTTPException(status_code=400, detail=f"category must be one of {'|'.join(EXPENSE_CATEGORIES)}")
+
+
+def _autolink_creditor(conn, oid: str, body: ExpenseIn) -> Optional[str]:
+    """Расход, оплативший обязательство, должен знать об этом — иначе двойной счёт.
+
+    Если creditor_id не указан явно, ищем обязательство того же заказа с той же
+    транзакцией банка/ZenMoney (правило дедупа, см. _plan_fact)."""
+    if body.creditor_id:
+        return body.creditor_id
+    if body.finance_tx_id:
+        r = conn.execute(
+            "SELECT id FROM creditors WHERE order_id = ? AND finance_tx_id = ?", (oid, body.finance_tx_id)
+        ).fetchone()
+        if r:
+            return r["id"]
+    if body.zenmoney_tx_id:
+        r = conn.execute(
+            "SELECT id FROM creditors WHERE order_id = ? AND zenmoney_tx_id = ?", (oid, body.zenmoney_tx_id)
+        ).fetchone()
+        if r:
+            return r["id"]
+    return None
+
+
+@router.get("/{order_id}/expenses")
+def list_expenses(order_id: str):
+    conn = get_production()
+    try:
+        oid = _resolve_order(conn, order_id)
+        # Один запрос, агрегация в Python (code_rules: без N+1 на строку).
+        rows = [dict(r) for r in conn.execute(
+            "SELECT * FROM expenses WHERE order_id = ? ORDER BY expense_date DESC, created_at DESC", (oid,)
+        ).fetchall()]
+        by_category = {}
+        for r in rows:
+            b = _bucket(r["category"])
+            by_category[b] = round(by_category.get(b, 0) + (r["amount"] or 0), 2)
+        return {
+            "items": rows,
+            "total": round(sum(r["amount"] or 0 for r in rows), 2),
+            "by_category": by_category,
+        }
+    finally:
+        conn.close()
+
+
+@router.post("/{order_id}/expenses", status_code=201)
+def add_expense(order_id: str, body: ExpenseIn):
+    _validate_expense(body)
+    conn = get_production()
+    try:
+        oid = _resolve_order(conn, order_id)
+        eid = str(uuid4())
+        conn.execute(
+            """INSERT INTO expenses (id, order_id, title, amount, category, supplier, master_id,
+                                     expense_date, source, creditor_id, finance_tx_id, zenmoney_tx_id, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), 'manual', ?, ?, ?, datetime('now'))""",
+            (eid, oid, body.title.strip(), body.amount, body.category, body.supplier, body.master_id,
+             body.expense_date, _autolink_creditor(conn, oid, body), body.finance_tx_id, body.zenmoney_tx_id)
+        )
+        conn.commit()
+        return dict(conn.execute("SELECT * FROM expenses WHERE id = ?", (eid,)).fetchone())
+    finally:
+        conn.close()
+
+
+@router.put("/{order_id}/expenses/{expense_id}")
+def update_expense(order_id: str, expense_id: str, body: ExpenseIn):
+    _validate_expense(body)
+    conn = get_production()
+    try:
+        r = conn.execute(
+            "SELECT id, order_id FROM expenses WHERE id = ? AND order_id IN (SELECT id FROM orders WHERE id = ? OR number = ?)",
+            (expense_id, order_id, order_id)
+        ).fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="Not found")
+        conn.execute(
+            """UPDATE expenses SET title = ?, amount = ?, category = ?, supplier = ?, master_id = ?,
+                      expense_date = COALESCE(?, expense_date), creditor_id = ?,
+                      finance_tx_id = ?, zenmoney_tx_id = ?
+               WHERE id = ?""",
+            (body.title.strip(), body.amount, body.category, body.supplier, body.master_id,
+             body.expense_date, _autolink_creditor(conn, r["order_id"], body),
+             body.finance_tx_id, body.zenmoney_tx_id, expense_id)
+        )
+        conn.commit()
+        return dict(conn.execute("SELECT * FROM expenses WHERE id = ?", (expense_id,)).fetchone())
+    finally:
+        conn.close()
+
+
+@router.delete("/{order_id}/expenses/{expense_id}")
+def delete_expense(order_id: str, expense_id: str, with_group: bool = False):
+    """with_group=true удаляет всю группу разноски (одна поездка на несколько заказов)."""
+    conn = get_production()
+    try:
+        r = conn.execute(
+            "SELECT id, group_id FROM expenses WHERE id = ? AND order_id IN (SELECT id FROM orders WHERE id = ? OR number = ?)",
+            (expense_id, order_id, order_id)
+        ).fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="Not found")
+        if with_group and r["group_id"]:
+            cur = conn.execute("DELETE FROM expenses WHERE group_id = ?", (r["group_id"],))
+            deleted = cur.rowcount
+        else:
+            conn.execute("DELETE FROM expenses WHERE id = ?", (expense_id,))
+            deleted = 1
+        conn.commit()
+        return {"ok": True, "deleted": deleted}
     finally:
         conn.close()

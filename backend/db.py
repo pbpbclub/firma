@@ -146,6 +146,30 @@ def ensure_creditor_tx_link_schema():
         conn.close()
 
 
+def ensure_expenses_schema():
+    """Фактические траты из веба: источник, привязки к обязательству/транзакции, группа разноски.
+
+    master_id — точная связь с подрядчиком: supplier остаётся текстом («Ант Сервис
+    (Денис Мельничук)»), и по нему агрегировать нельзя — он не совпадает с именем мастера."""
+    conn = get_production()
+    try:
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(expenses)").fetchall()}
+        cols = {
+            "source": "TEXT DEFAULT 'manual'",   # manual|bank|zenmoney
+            "creditor_id": "TEXT",               # покрытое обязательство (дедуп факта)
+            "finance_tx_id": "TEXT",             # транзакция банка
+            "zenmoney_tx_id": "TEXT",            # транзакция ZenMoney
+            "group_id": "TEXT",                  # группа разнесённого расхода (одна поездка)
+            "master_id": "TEXT",                 # подрядчик из production.masters
+        }
+        for col, decl in cols.items():
+            if col not in existing:
+                conn.execute(f"ALTER TABLE expenses ADD COLUMN {col} {decl}")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_creditor_estimate_item_schema():
     conn = get_production()
     try:

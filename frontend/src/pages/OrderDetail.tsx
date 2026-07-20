@@ -4,8 +4,9 @@ import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { MONO } from "../components/ui/Num";
 import { ConfirmModal } from "../components/ui/Modal";
 import { Loading } from "../components/ui/Loading";
-import { ordersApi, customersApi, estimatesApi } from "../api";
-import { ArrowLeft, Plus, CaretRight, Trash } from "@phosphor-icons/react";
+import { ordersApi, customersApi, estimatesApi, expensesApi } from "../api";
+import { ArrowLeft, Plus, CaretRight, Trash, LinkSimple, PencilSimple } from "@phosphor-icons/react";
+import { ExpenseModal, EXPENSE_CATEGORIES } from "../components/ExpenseModal";
 import { useNavigationGuard, NavigationGuardModal } from "../components/NavigationGuard";
 
 const ALL_STATUSES = [
@@ -98,6 +99,36 @@ export default function OrderDetail() {
     },
   });
 
+  // ── Фактические траты ──────────────────────────────────────────────────
+  const [expenseModal, setExpenseModal] = useState<{ open: boolean; item?: any } | null>(null);
+  const [delExpense, setDelExpense] = useState<any>(null);
+
+  const { data: expensesData } = useQuery({
+    queryKey: ["order-expenses", id],
+    queryFn: () => expensesApi.list(id!),
+    enabled: !!id,
+  });
+
+  // Факт меняет план-факт и маржу → инвалидируем и карточку, и списки.
+  const invalidateFact = () => {
+    qc.invalidateQueries({ queryKey: ["order-expenses", id] });
+    qc.invalidateQueries({ queryKey: ["order-detail", id] });
+    qc.invalidateQueries({ queryKey: ["orders-v2"] });
+    qc.invalidateQueries({ queryKey: ["orders-plan-fact-summary"] });
+  };
+
+  const saveExpense = useMutation({
+    mutationFn: (data: any) => expenseModal?.item
+      ? expensesApi.update(id!, expenseModal.item.id, data)
+      : expensesApi.create(id!, data),
+    onSuccess: () => { invalidateFact(); setExpenseModal(null); },
+  });
+
+  const removeExpense = useMutation({
+    mutationFn: (e: any) => expensesApi.delete(id!, e.id, !!e.group_id),
+    onSuccess: () => { invalidateFact(); setDelExpense(null); },
+  });
+
   const deleteMutation = useMutation({
     mutationFn: () => ordersApi.delete(id!),
     onSuccess: () => {
@@ -183,6 +214,28 @@ export default function OrderDetail() {
             confirmLabel={deleteMutation.isPending ? "Удаляем..." : "Удалить"}
             onConfirm={() => deleteMutation.mutate()}
             onCancel={() => setConfirmDelete(false)}
+          />
+        )}
+
+        {/* Расход: создание / правка */}
+        {expenseModal?.open && (
+          <ExpenseModal
+            orderId={id!}
+            expense={expenseModal.item}
+            saving={saveExpense.isPending}
+            onSave={(d) => saveExpense.mutate(d)}
+            onClose={() => setExpenseModal(null)}
+          />
+        )}
+
+        {delExpense && (
+          <ConfirmModal
+            message={delExpense.group_id
+              ? `Удалить расход «${delExpense.title}»? Он входит в разноску на несколько заказов — удалится вся группа.`
+              : `Удалить расход «${delExpense.title}» на ${fmt(delExpense.amount)}? Факт и маржа пересчитаются.`}
+            confirmLabel={removeExpense.isPending ? "Удаляем..." : "Удалить"}
+            onConfirm={() => removeExpense.mutate(delExpense)}
+            onCancel={() => setDelExpense(null)}
           />
         )}
       </div>
@@ -410,6 +463,85 @@ export default function OrderDetail() {
                   <div style={{ height: 2, background: "#E8592A", width: `${Math.min(100, (paidTotal / order.price_plan) * 100)}%` }} />
                 </div>
               </div>
+            )}
+          </div>
+
+          {/* Расходы (факт) */}
+          <div style={{ paddingTop: 24, borderTop: "1px solid #EDEBE6", marginBottom: 32 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>
+                РАСХОДЫ (ФАКТ)
+                {expensesData?.total > 0 && (
+                  <span style={{ color: "#1A1A1A", marginLeft: 8, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
+                    {fmt(expensesData.total)}
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={() => setExpenseModal({ open: true })}
+                style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "1px solid #EDEBE6",
+                         padding: "4px 10px", fontSize: 11, color: "#6B6355", cursor: "pointer", fontFamily: "inherit" }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = "#E8592A"; e.currentTarget.style.color = "#E8592A"; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = "#EDEBE6"; e.currentTarget.style.color = "#6B6355"; }}
+              >
+                <Plus size={11} /> Добавить расход
+              </button>
+            </div>
+
+            {!expensesData?.items?.length ? (
+              <div style={{ fontSize: 12, color: "#C8C0B0" }}>
+                Трат не внесено — маржа считается по плану
+              </div>
+            ) : (
+              <>
+                {expensesData.items.map((e: any) => {
+                  const cat = EXPENSE_CATEGORIES.find(c => c.v === e.category);
+                  return (
+                    <div key={e.id}
+                      style={{ display: "grid", gridTemplateColumns: "78px 1fr 96px 110px 52px",
+                               gap: 10, alignItems: "center", padding: "9px 0", borderBottom: "1px solid #F2EFE9" }}>
+                      <div style={{ fontSize: 11, color: "#A89070", fontFamily: MONO }}>{fmtDate(e.expense_date)}</div>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 12, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {e.title}
+                          {(e.finance_tx_id || e.zenmoney_tx_id) && (
+                            <LinkSimple size={10} style={{ color: "#4A7C59", marginLeft: 5 }} />
+                          )}
+                          {e.creditor_id && (
+                            <span title="Оплата обязательства — в факте учтена один раз"
+                              style={{ fontSize: 9, color: "#4A7C59", marginLeft: 5 }}>обяз.</span>
+                          )}
+                        </div>
+                        {e.supplier && <div style={{ fontSize: 10, color: "#A89070", marginTop: 1 }}>{e.supplier}</div>}
+                      </div>
+                      <div style={{ fontSize: 10, color: "#6B6355" }}>{cat?.l ?? e.category}</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "#8B3A3A", textAlign: "right",
+                                    fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(e.amount)}</div>
+                      <div style={{ display: "flex", gap: 2, justifyContent: "flex-end" }}>
+                        <button onClick={() => setExpenseModal({ open: true, item: e })}
+                          style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 3, display: "flex" }}
+                          onMouseEnter={ev => (ev.currentTarget.style.color = "#1A1A1A")}
+                          onMouseLeave={ev => (ev.currentTarget.style.color = "#C8C0B0")}>
+                          <PencilSimple size={13} />
+                        </button>
+                        <button onClick={() => setDelExpense(e)}
+                          style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 3, display: "flex" }}
+                          onMouseEnter={ev => (ev.currentTarget.style.color = "#8B3A3A")}
+                          onMouseLeave={ev => (ev.currentTarget.style.color = "#C8C0B0")}>
+                          <Trash size={13} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+                {Object.keys(expensesData.by_category || {}).length > 1 && (
+                  <div style={{ display: "flex", gap: 14, marginTop: 10, fontSize: 10, color: "#A89070" }}>
+                    {Object.entries(expensesData.by_category).map(([k, v]: any) => (
+                      <span key={k}>{k}: <span style={{ color: "#1A1A1A", fontFamily: MONO }}>{fmt(v)}</span></span>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </div>
 
