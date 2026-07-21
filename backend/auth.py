@@ -1,9 +1,11 @@
+import os
 import sqlite3
 import secrets
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+from dotenv import load_dotenv
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
@@ -12,7 +14,12 @@ from passlib.context import CryptContext
 AUTH_DB = Path("/opt/firma/data/auth.db")
 AUTH_DB.parent.mkdir(parents=True, exist_ok=True)
 
-SECRET_KEY = "firma-secret-change-in-prod-2026"
+# Секрет только в /opt/firma/backend/.env (вне git); ротация = новое значение + рестарт,
+# все выданные токены при этом слетают.
+load_dotenv(Path("/opt/firma/backend/.env"))
+SECRET_KEY = os.environ.get("FIRMA_SECRET_KEY") or ""
+if not SECRET_KEY:
+    raise RuntimeError("FIRMA_SECRET_KEY отсутствует в /opt/firma/backend/.env")
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_DAYS = 30
 

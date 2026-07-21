@@ -4,16 +4,16 @@ const fs = require('fs');
 
 // Self-mint a fresh firma_token on every run, so the screenshot tool never
 // needs a token pasted from DevTools and never expires-out.
-// The secret is read from the single source of truth — backend/auth.py
-// (SECRET_KEY) — at runtime. Env FIRMA_SECRET overrides if set. ALGORITHM=HS256.
+// The secret lives only in backend/.env (FIRMA_SECRET_KEY, вне git; чтение —
+// через ACL для claude-runner). Env FIRMA_SECRET overrides if set. ALGORITHM=HS256.
 // The secret is never hardcoded here and never printed.
-const AUTH_PY = '/opt/firma/backend/auth.py';
+const ENV_FILE = '/opt/firma/backend/.env';
 function readSecret() {
   if (process.env.FIRMA_SECRET) return process.env.FIRMA_SECRET;
-  const src = fs.readFileSync(AUTH_PY, 'utf8');
-  const m = src.match(/SECRET_KEY\s*=\s*["']([^"']+)["']/);
-  if (!m) throw new Error('SECRET_KEY not found in ' + AUTH_PY);
-  return m[1];
+  const src = fs.readFileSync(ENV_FILE, 'utf8');
+  const m = src.match(/^FIRMA_SECRET_KEY=(.+)$/m);
+  if (!m) throw new Error('FIRMA_SECRET_KEY not found in ' + ENV_FILE);
+  return m[1].trim();
 }
 const SECRET_KEY = readSecret();
 const EMAIL = 'yuranek@pbpb.club';
