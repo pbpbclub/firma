@@ -12,7 +12,37 @@ from uuid import uuid4
 from datetime import date, timedelta
 
 from db import get_production, get_finance, get_zenmoney
-from routers.zenmoney import _load_payee_rules, _resolve_payee, _CATEGORY_RU
+from routers.zenmoney import _load_payee_rules, _resolve_payee, _CATEGORY_RU, contractor_tokens
+
+
+def _load_masters_matching():
+    """Мастера для похожести: список [{name, tokens, id}] + карта name→id."""
+    contractors, name_to_id = [], {}
+    try:
+        conn = get_production()
+        try:
+            for m in conn.execute("SELECT id, name FROM masters").fetchall():
+                nm = m["name"] or ""
+                contractors.append({"name": nm, "tokens": contractor_tokens(nm), "id": m["id"]})
+                name_to_id[nm] = m["id"]
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    return contractors, name_to_id
+
+
+def _payee_fields(res: dict, name_to_id: dict) -> dict:
+    """master_id (из правила, уверенно) / master_suggested (похожесть, предложение) / match_source."""
+    if res.get("entity_type") == "master" and res.get("entity_id"):
+        return {"master_id": res["entity_id"], "master_suggested": None, "match_source": "rule"}
+    # Алгоритм вернул имя — это предложение; резолвим имя→id мастера.
+    if res.get("matched_via") == "algorithm" and res.get("display_name"):
+        nm = res["display_name"]
+        mid = name_to_id.get(nm)
+        if mid:
+            return {"master_id": None, "master_suggested": {"id": mid, "name": nm}, "match_source": "suggest"}
+    return {"master_id": None, "master_suggested": None, "match_source": None}
 
 router = APIRouter()
 
@@ -74,6 +104,7 @@ def inbox(
     """Неразнесённые списания. payee_hint — подсказка поставщика/категории."""
     bank_done, zen_done = _allocated_ids()
     rules = _load_payee_rules()
+    masters_match, name_to_id = _load_masters_matching()
     out = []
 
     if source == "bank":
@@ -96,13 +127,13 @@ def inbox(
             for r in conn.execute(sql, params).fetchall():
                 if str(r["id"]) in bank_done:
                     continue
-                res = _resolve_payee(r["counterparty"] or "", rules, [])
+                res = _resolve_payee(r["counterparty"] or "", rules, masters_match)
                 out.append({
                     "id": str(r["id"]), "source": "bank", "date": r["date"], "amount": r["amount"],
                     "counterparty": r["counterparty"], "purpose": r["purpose"], "bank": r["bank"],
                     "payee_hint": res.get("display_name"),
-                    "master_id": res.get("entity_id") if res.get("entity_type") == "master" else None,
                     "category_hint": _guess_category(res.get("category")),
+                    **_payee_fields(res, name_to_id),
                 })
                 if len(out) >= limit:
                     break
@@ -131,7 +162,7 @@ def inbox(
             for r in conn.execute(sql, params).fetchall():
                 if str(r["id"]) in zen_done:
                     continue
-                res = _resolve_payee(r["payee"] or "", rules, [])
+                res = _resolve_payee(r["payee"] or "", rules, masters_match)
                 try:
                     tags = _json.loads(r["tags"] or "[]")
                 except Exception:
@@ -141,9 +172,9 @@ def inbox(
                     "id": str(r["id"]), "source": "zen", "date": r["date"], "amount": r["outcome"],
                     "counterparty": r["payee"], "purpose": r["comment"], "account": r["outcome_account"],
                     "payee_hint": res.get("display_name"),
-                    "master_id": res.get("entity_id") if res.get("entity_type") == "master" else None,
                     "category_hint": _guess_category(res.get("category") or _CATEGORY_RU.get(zen_cat) or zen_cat),
                     "zen_tag": _CATEGORY_RU.get(zen_cat) or zen_cat or None,
+                    **_payee_fields(res, name_to_id),
                 })
                 if len(out) >= limit:
                     break

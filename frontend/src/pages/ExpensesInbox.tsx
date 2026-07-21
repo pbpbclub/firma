@@ -4,7 +4,7 @@ import { MONO } from "../components/ui/Num";
 import { Loading } from "../components/ui/Loading";
 import { EmptyState } from "../components/ui/EmptyState";
 import { PeriodFilter, AmountFilter } from "../components/TableFilters";
-import { inboxApi, ordersApi, mastersApi, financeApi } from "../api";
+import { inboxApi, ordersApi, mastersApi, financeApi, payeeRulesApi } from "../api";
 import { EXPENSE_CATEGORIES } from "../components/ExpenseModal";
 import { MagnifyingGlass, X, Check } from "@phosphor-icons/react";
 
@@ -30,6 +30,11 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
   // Каждая строка — свой заказ, сумма, категория, подрядчик и (опц.) обязательство.
   const [allocs, setAllocs] = useState<Alloc[]>([]);
   const [error, setError] = useState("");
+  // Получатель платежа (уровень транзакции). Из правила — уверенно; из похожести —
+  // предложение. По умолчанию запоминаем, когда угадано похожестью (не правилом).
+  const [payeeMaster, setPayeeMaster] = useState<string>(tx.master_id || tx.master_suggested?.id || "");
+  const [remember, setRemember] = useState<boolean>(!!(tx.master_suggested && !tx.master_id));
+  const payeeStr = (tx.counterparty || "").trim();
 
   const { data: suggestions = [] } = useQuery({
     // amount=0 намеренно: suggest скорит сумму против price_plan (выручки заказа),
@@ -39,7 +44,8 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
   });
   const { data: masters = [] } = useQuery({ queryKey: ["masters"], queryFn: mastersApi.list });
   // Открытые обязательства — чтобы предложить закрыть долг подрядчику по заказу.
-  const { data: creditors = [] } = useQuery({ queryKey: ["creditors"], queryFn: () => financeApi.creditors() });
+  // /finance/creditors отдаёт {items, ...} — берём items.
+  const { data: creditors = [] } = useQuery({ queryKey: ["creditors"], queryFn: () => financeApi.creditors().then((d: any) => d.items ?? []) });
 
   const masterName = (mid: string) => (masters as any[]).find((m: any) => m.id === mid)?.name;
   // Найти открытое обязательство заказа с этим подрядчиком (по имени).
@@ -51,23 +57,34 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
   };
 
   const save = useMutation({
-    mutationFn: () => inboxApi.fromTx({
-      source: tx.source, tx_id: tx.id, title: title.trim() || null, category: "other",
-      expense_date: (tx.date || "").slice(0, 10) || null,
-      allocations: allocs.map(a => ({
-        order_id: a.order_id, amount: parseFloat(a.amount) || 0,
-        category: a.category, master_id: a.master_id || null,
-        supplier: masterName(a.master_id) ?? tx.counterparty,
-        creditor_id: a.creditor_id,
-      })),
-    }),
+    mutationFn: async () => {
+      await inboxApi.fromTx({
+        source: tx.source, tx_id: tx.id, title: title.trim() || null, category: "other",
+        expense_date: (tx.date || "").slice(0, 10) || null,
+        allocations: allocs.map(a => ({
+          order_id: a.order_id, amount: parseFloat(a.amount) || 0,
+          category: a.category, master_id: a.master_id || null,
+          supplier: masterName(a.master_id) ?? tx.counterparty,
+          creditor_id: a.creditor_id,
+        })),
+      });
+      // Запомнить плательщика: строка банка → подрядчик (правило на будущее).
+      if (remember && payeeMaster && payeeStr) {
+        try {
+          await payeeRulesApi.create({
+            pattern: payeeStr, match_type: "exact",
+            entity_type: "master", entity_id: payeeMaster, entity_name: masterName(payeeMaster),
+          });
+        } catch { /* правило не критично для разноски */ }
+      }
+    },
     onSuccess: onDone,
     onError: (e: any) => setError(e?.response?.data?.detail || "Не удалось разнести"),
   });
 
   const addOrder = (orderId: string) => {
     if (allocs.some(a => a.order_id === orderId)) return;
-    setAllocs([...allocs, { order_id: orderId, amount: "", category: tx.category_hint || "material", master_id: tx.master_id || "", creditor_id: null }]);
+    setAllocs([...allocs, { order_id: orderId, amount: "", category: tx.category_hint || "material", master_id: payeeMaster || "", creditor_id: null }]);
   };
   const patch = (i: number, p: Partial<Alloc>) => setAllocs(allocs.map((x, j) => j === i ? { ...x, ...p } : x));
   const splitEvenly = () => {
@@ -86,6 +103,31 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
 
   return (
     <div style={{ padding: "14px 28px 18px", background: "#FAF8F5", borderBottom: "1px solid #EDEBE6" }}>
+
+      {/* Плательщик: кто получил перевод. Правило — уверенно, похожесть — предложение. */}
+      <div style={{ marginBottom: 14, padding: "10px 12px", background: "#fff", border: "1px solid #EDEBE6" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em" }}>ПЛАТЕЛЬЩИК</div>
+          <div style={{ fontSize: 12, color: "#1A1A1A", flex: "0 0 auto" }}>{payeeStr || "—"}</div>
+          <span style={{ color: "#C8C0B0" }}>→</span>
+          <select value={payeeMaster} onChange={e => { setPayeeMaster(e.target.value); setRemember(!!e.target.value); }}
+            style={{ flex: 1, minWidth: 150, border: "1px solid " + (tx.match_source === "suggest" && payeeMaster ? "#E8592A" : "#EDEBE6"), padding: "5px 8px", fontSize: 12, outline: "none", background: "#fff", cursor: "pointer" }}>
+            <option value="">— подрядчик —</option>
+            {(masters as any[]).map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+        </div>
+        {tx.match_source === "suggest" && tx.master_suggested && (
+          <div style={{ fontSize: 10, color: "#E8592A", marginTop: 6 }}>
+            Похоже: {tx.master_suggested.name}? Проверь и подтверди.
+          </div>
+        )}
+        {payeeMaster && (
+          <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 11, color: "#6B6355", cursor: "pointer" }}>
+            <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} />
+            Запомнить: платежи «{payeeStr}» → {masterName(payeeMaster)}
+          </label>
+        )}
+      </div>
 
       <div style={{ marginBottom: 14 }}>
         <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>НАЗВАНИЕ РАСХОДА</div>

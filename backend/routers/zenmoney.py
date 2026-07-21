@@ -247,6 +247,14 @@ _EXPLICIT_INITIALS: dict[tuple[str, str], str] = {
     ("александр", "с"): "Самсонов Саша",
 }
 
+_CONTRACTOR_SKIP_TOKENS = {"ооо", "ип", "ао", "нкп", "зао", "пао"}
+
+def contractor_tokens(name: str) -> list[str]:
+    """Токены имени подрядчика для матчинга похожести (кириллица ≥3, без юр-форм)."""
+    return [t.lower() for t in re.findall(r"[А-Яа-яЁё]{3,}", name or "")
+            if t.lower() not in _CONTRACTOR_SKIP_TOKENS]
+
+
 def _match_payee_zm(payee: str, contractors: list) -> str | None:
     """Матчинг по целым словам (не подстрокам), с алиасами и явными инициалами."""
     if not payee:
