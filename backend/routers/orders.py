@@ -215,6 +215,17 @@ def _margin(conn, oid: str, price_plan, cost_plan, est=None) -> dict:
     }
 
 
+def _reserve_suggested(pf: dict, cost_plan) -> float:
+    """Подсказка суммы резерва под материалы = материальная часть плана из сметы.
+
+    Если смета без детализации (материалы не выделены) — предлагаем полную
+    плановую себестоимость: лучше зарезервировать грубо, чем не зарезервировать."""
+    for c in (pf.get("categories") or []):
+        if c["category"] == "Материалы" and c["plan"] > 0:
+            return round(c["plan"], 2)
+    return round(cost_plan or 0, 2)
+
+
 def _plan_fact(conn, oid: str, cost_plan: float, paid_total: float, price_plan: float = 0) -> dict:
     """План (из активной сметы) / Факт (expenses + оплаченные обязательства) по категориям.
 
@@ -405,6 +416,10 @@ def get_order(order_id: str):
             "net_profit": m["net_profit"],
             "payment_type": m["payment_type"],
             "has_estimate": m["has_estimate"],
+            # Резерв под материалы (ТЗ-1 задача 1). reserved_amount/reserve_released_at
+            # льются через **order; сюда — производные для UI.
+            "reserve_suggested": _reserve_suggested(pf, order.get("cost_plan") or 0),
+            "reserve_active": bool((order.get("reserved_amount") or 0) > 0 and not order.get("reserve_released_at")),
             "plan_fact": pf,
             "payments": [dict(p) for p in payments],
             "estimate_sets": [dict(e) for e in estimate_sets],
@@ -659,7 +674,7 @@ class PaymentCreate(BaseModel):
 def add_payment(order_id: str, body: PaymentCreate):
     conn = get_production()
     try:
-        r = conn.execute("SELECT id FROM orders WHERE id = ? OR number = ?", (order_id, order_id)).fetchone()
+        r = conn.execute("SELECT * FROM orders WHERE id = ? OR number = ?", (order_id, order_id)).fetchone()
         if not r:
             raise HTTPException(status_code=404, detail="Not found")
         pid = str(uuid4())
@@ -669,7 +684,13 @@ def add_payment(order_id: str, body: PaymentCreate):
             (pid, r["id"], body.amount, body.paid_at, body.note, body.bank_tx_id)
         )
         conn.commit()
-        return dict(conn.execute("SELECT * FROM payments WHERE id = ?", (pid,)).fetchone())
+        payment = dict(conn.execute("SELECT * FROM payments WHERE id = ?", (pid,)).fetchone())
+        # Подсказка резерва: пришли деньги — предложить отложить материалы из сметы.
+        pf = _plan_fact(conn, r["id"], r["cost_plan"] or 0, 0, r["price_plan"] or 0)
+        payment["order_id"] = r["id"]
+        payment["reserve_suggested"] = _reserve_suggested(pf, r["cost_plan"] or 0)
+        payment["reserve_active"] = bool((r["reserved_amount"] or 0) > 0 and not r["reserve_released_at"])
+        return payment
     finally:
         conn.close()
 
@@ -684,6 +705,54 @@ def delete_payment(order_id: str, payment_id: str):
         conn.execute("DELETE FROM payments WHERE id = ?", (payment_id,))
         conn.commit()
         return {"ok": True}
+    finally:
+        conn.close()
+
+
+# ── Резерв под материалы (ТЗ-1 задача 1) ─────────────────────────────────────
+
+class ReserveIn(BaseModel):
+    amount: float
+
+
+@router.post("/{order_id}/reserve")
+def set_reserve(order_id: str, body: ReserveIn):
+    """Отложить сумму под закупку материалов. Пере-взвод: снимает прежнее «снято»."""
+    if body.amount is None or body.amount < 0:
+        raise HTTPException(status_code=400, detail="amount must be >= 0")
+    conn = get_production()
+    try:
+        r = conn.execute("SELECT id FROM orders WHERE id = ? OR number = ?", (order_id, order_id)).fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="Not found")
+        conn.execute(
+            "UPDATE orders SET reserved_amount = ?, reserve_released_at = NULL, updated_at = datetime('now') WHERE id = ?",
+            (round(body.amount, 2), r["id"])
+        )
+        conn.commit()
+        o = dict(conn.execute("SELECT * FROM orders WHERE id = ?", (r["id"],)).fetchone())
+        o["reserve_active"] = bool((o["reserved_amount"] or 0) > 0 and not o["reserve_released_at"])
+        return o
+    finally:
+        conn.close()
+
+
+@router.post("/{order_id}/reserve/release")
+def release_reserve(order_id: str):
+    """Материалы закуплены — снять резерв (сумму оставляем как историю)."""
+    conn = get_production()
+    try:
+        r = conn.execute("SELECT id FROM orders WHERE id = ? OR number = ?", (order_id, order_id)).fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="Not found")
+        conn.execute(
+            "UPDATE orders SET reserve_released_at = datetime('now'), updated_at = datetime('now') WHERE id = ?",
+            (r["id"],)
+        )
+        conn.commit()
+        o = dict(conn.execute("SELECT * FROM orders WHERE id = ?", (r["id"],)).fetchone())
+        o["reserve_active"] = False
+        return o
     finally:
         conn.close()
 

@@ -38,6 +38,8 @@ export const ordersApi = {
     api.post(`/orders/${id}/payments`, data).then((r) => r.data),
   deletePayment: (orderId: string, paymentId: string) =>
     api.delete(`/orders/${orderId}/payments/${paymentId}`).then((r) => r.data),
+  reserve: (id: string, amount: number) => api.post(`/orders/${id}/reserve`, { amount }).then((r) => r.data),
+  releaseReserve: (id: string) => api.post(`/orders/${id}/reserve/release`).then((r) => r.data),
   suggest: (counterparty: string, amount: number) =>
     api.get("/orders/suggest", { params: { counterparty, amount } }).then((r) => r.data),
   paymentsMap: () => api.get("/orders/payments-map").then((r) => r.data),
@@ -72,6 +74,7 @@ export const businessUnitsApi = {
 
 export const financeApi = {
   balance: () => api.get("/finance/balance").then((r) => r.data),
+  freeCash: () => api.get("/finance/free-cash").then((r) => r.data),
   balanceAtDate: (date: string) =>
     api.get("/finance/balance-at-date", { params: { date } }).then((r) => r.data),
   byBrand: () => api.get("/finance/by-brand").then((r) => r.data),

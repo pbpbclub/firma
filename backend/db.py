@@ -91,6 +91,25 @@ def ensure_orders_schema():
         conn.close()
 
 
+def ensure_order_reserve_schema():
+    """Резерв предоплаты под материалы (ТЗ-1 задача 1).
+
+    reserved_amount — сколько отложено под закупку, тратить нельзя.
+    reserve_released_at — когда закупка проведена и резерв снят.
+    Активный резерв (вычитается из «свободных денег») = reserved_amount > 0
+    AND reserve_released_at IS NULL."""
+    conn = get_production()
+    try:
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(orders)").fetchall()}
+        for col in ("reserved_amount REAL DEFAULT 0", "reserve_released_at TEXT"):
+            name = col.split()[0]
+            if name not in existing:
+                conn.execute(f"ALTER TABLE orders ADD COLUMN {col}")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_catalog_schema():
     conn = get_production()
     try:

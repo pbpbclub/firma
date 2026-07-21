@@ -130,6 +130,22 @@ export default function OrderDetail() {
     onSuccess: () => { invalidateFact(); setDelExpense(null); },
   });
 
+  // ── Резерв под материалы ───────────────────────────────────────────────
+  const [reserveEdit, setReserveEdit] = useState<string | null>(null);
+  const invalidateReserve = () => {
+    qc.invalidateQueries({ queryKey: ["order-detail", id] });
+    qc.invalidateQueries({ queryKey: ["orders-v2"] });
+    qc.invalidateQueries({ queryKey: ["free-cash"] });
+  };
+  const setReserve = useMutation({
+    mutationFn: (amount: number) => ordersApi.reserve(id!, amount),
+    onSuccess: () => { invalidateReserve(); setReserveEdit(null); },
+  });
+  const releaseReserve = useMutation({
+    mutationFn: () => ordersApi.releaseReserve(id!),
+    onSuccess: () => invalidateReserve(),
+  });
+
   const deleteMutation = useMutation({
     mutationFn: () => ordersApi.delete(id!),
     onSuccess: () => {
@@ -448,6 +464,80 @@ export default function OrderDetail() {
               </div>
             )}
           </div>
+
+          {/* Резерв под материалы */}
+          {order && (
+            <div style={{ paddingTop: 24, borderTop: "1px solid #EDEBE6", marginBottom: 32 }}>
+              <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 14 }}>РЕЗЕРВ ПОД МАТЕРИАЛЫ</div>
+              {(() => {
+                const active = order.reserve_active;
+                const released = order.reserved_amount > 0 && order.reserve_released_at;
+                const suggested = order.reserve_suggested || 0;
+
+                if (reserveEdit !== null) {
+                  return (
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <input type="number" min="0" value={reserveEdit} autoFocus
+                        onChange={e => setReserveEdit(e.target.value)}
+                        style={{ width: 140, border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none", fontFamily: MONO, textAlign: "right" }} />
+                      <button onClick={() => setReserve.mutate(parseFloat(reserveEdit) || 0)} disabled={setReserve.isPending}
+                        style={{ padding: "7px 16px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                        {setReserve.isPending ? "..." : "Отложить"}
+                      </button>
+                      <button onClick={() => setReserveEdit(null)}
+                        style={{ padding: "7px 12px", border: "1px solid #EDEBE6", background: "none", color: "#A89070", fontSize: 12, cursor: "pointer" }}>Отмена</button>
+                    </div>
+                  );
+                }
+
+                if (active) {
+                  return (
+                    <div>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                        <span style={{ fontSize: 15, fontWeight: 700, color: "#E8592A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(order.reserved_amount)}</span>
+                        <span style={{ fontSize: 11, color: "#A89070" }}>отложено под закупку — тратить нельзя</span>
+                      </div>
+                      <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                        <button onClick={() => releaseReserve.mutate()} disabled={releaseReserve.isPending}
+                          style={{ padding: "6px 14px", border: "1px solid #4A7C59", background: "none", color: "#4A7C59", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+                          {releaseReserve.isPending ? "..." : "Материалы закуплены — снять резерв"}
+                        </button>
+                        <button onClick={() => setReserveEdit(String(order.reserved_amount))}
+                          style={{ padding: "6px 12px", border: "1px solid #EDEBE6", background: "none", color: "#6B6355", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>Изменить</button>
+                      </div>
+                    </div>
+                  );
+                }
+
+                if (released) {
+                  return (
+                    <div>
+                      <div style={{ fontSize: 12, color: "#A89070" }}>
+                        Резерв снят (закупка проведена) · было {fmt(order.reserved_amount)}
+                      </div>
+                      <button onClick={() => setReserveEdit(String(suggested))}
+                        style={{ marginTop: 10, padding: "6px 14px", border: "1px solid #EDEBE6", background: "none", color: "#6B6355", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>Зарезервировать снова</button>
+                    </div>
+                  );
+                }
+
+                // Резерва нет
+                return (
+                  <div>
+                    <div style={{ fontSize: 12, color: "#6B6355" }}>
+                      {suggested > 0
+                        ? <>Себестоимость материалов по смете <b style={{ fontFamily: MONO, color: "#1A1A1A" }}>{fmt(suggested)}</b> — отложить под закупку?</>
+                        : <>Резерв под материалы не задан.</>}
+                    </div>
+                    <button onClick={() => setReserveEdit(String(suggested || ""))}
+                      style={{ marginTop: 12, padding: "7px 16px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                      Зарезервировать
+                    </button>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
 
           {/* План-Факт */}
           {order?.plan_fact?.has_estimate && (

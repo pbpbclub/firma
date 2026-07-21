@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { financeApi, taxApi, ordersApi } from "../api";
 import { MONO } from "../components/ui/Num";
 
@@ -40,6 +42,9 @@ function ThinBar({ pct, color = "#E8592A" }: { pct: number; color?: string }) {
 }
 
 export default function Dashboard() {
+  const navigate = useNavigate();
+  const [reservesOpen, setReservesOpen] = useState(false);
+  const freeCash = useQuery({ queryKey: ["free-cash"], queryFn: financeApi.freeCash });
   const balance = useQuery({ queryKey: ["balance"], queryFn: financeApi.balance });
   const taxes = useQuery({ queryKey: ["taxes"], queryFn: taxApi.summary });
   const debtors = useQuery({ queryKey: ["debtors"], queryFn: financeApi.debtors });
@@ -75,6 +80,50 @@ export default function Dashboard() {
           {new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })}
         </div>
       </div>
+
+      {/* Свободные деньги — ключевая цифра (остаток − резервы − фонды) */}
+      {(() => {
+        const fc = freeCash.data;
+        if (!fc) return null;
+        const neg = fc.negative;
+        return (
+          <div style={{ padding: "18px 28px", borderBottom: "1px solid #EDEBE6", background: neg ? "#FFF4EE" : "transparent" }}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 6 }}>
+                  СВОБОДНЫЕ ДЕНЬГИ
+                  {neg && <span style={{ color: "#8B3A3A", marginLeft: 8, textTransform: "none", letterSpacing: 0 }}>· тратится больше, чем свободно</span>}
+                </div>
+                <div style={{ fontSize: 30, fontWeight: 700, color: neg ? "#8B3A3A" : "#4A7C59", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
+                  {fmt(fc.free)}
+                </div>
+              </div>
+              <div style={{ fontSize: 12, color: "#6B6355", fontFamily: MONO, fontVariantNumeric: "tabular-nums", textAlign: "right", lineHeight: 1.7 }}>
+                <div>остаток <b style={{ color: "#1A1A1A" }}>{fmt(fc.balance)}</b></div>
+                <div>− резервы <span
+                  onClick={() => fc.reserves.length && setReservesOpen(v => !v)}
+                  style={{ color: fc.reserved_total > 0 ? "#E8592A" : "#A89070", cursor: fc.reserves.length ? "pointer" : "default", borderBottom: fc.reserves.length ? "1px dashed #C8C0B0" : "none" }}
+                >{fmt(fc.reserved_total)}</span></div>
+                <div>− фонды <span style={{ color: fc.funds_total > 0 ? "#E8592A" : "#A89070" }}>{fmt(fc.funds_total)}</span></div>
+              </div>
+            </div>
+            {reservesOpen && fc.reserves.length > 0 && (
+              <div style={{ marginTop: 12, borderTop: "1px solid #EDEBE6", paddingTop: 10 }}>
+                {fc.reserves.map((r: any) => (
+                  <div key={r.order_id}
+                    onClick={() => navigate(`/orders/${r.order_id}`)}
+                    style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", cursor: "pointer", fontSize: 12, borderBottom: "1px solid #F2EFE9" }}
+                    onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")}
+                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
+                    <span style={{ color: "#1A1A1A" }}>{r.title}</span>
+                    <span style={{ color: "#E8592A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(r.amount)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* 4 stat columns */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", borderBottom: "1px solid #EDEBE6" }}>

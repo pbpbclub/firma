@@ -33,6 +33,65 @@ def get_balance():
         conn.close()
 
 
+@router.get("/free-cash")
+def get_free_cash():
+    """Свободные деньги = остаток по счетам − активные резервы заказов − балансы фондов.
+
+    Ключевая цифра ТЗ-1: сколько денег реально мои, а сколько уже отложено (под
+    материалы заказов, налоги, зарплату). Уходит в минус — кассовый разрыв виден сразу."""
+    # Остаток — из finance.db
+    fin = get_finance()
+    try:
+        balance = 0.0
+        for acc in ACCOUNT_NAMES:
+            row = fin.execute(
+                "SELECT balance FROM account_balances WHERE account=? ORDER BY updated_at DESC LIMIT 1",
+                (acc,),
+            ).fetchone()
+            balance += row["balance"] if row else 0.0
+        balance = round(balance, 2)
+    finally:
+        fin.close()
+
+    # Резервы и фонды — из production.db
+    prod = get_production()
+    try:
+        reserves = [
+            {"order_id": r["id"], "number": r["number"], "title": r["title"],
+             "amount": round(r["reserved_amount"], 2)}
+            for r in prod.execute(
+                """SELECT id, number, title, reserved_amount FROM orders
+                   WHERE reserved_amount > 0 AND reserve_released_at IS NULL AND status != 'cancelled'
+                   ORDER BY reserved_amount DESC"""
+            ).fetchall()
+        ]
+        reserved_total = round(sum(x["amount"] for x in reserves), 2)
+
+        funds = [
+            {"name": f["name"], "balance": round(f["balance"] or 0, 2)}
+            for f in prod.execute(
+                """SELECT fu.name,
+                          COALESCE(SUM(CASE WHEN ft.direction='in' THEN ft.amount ELSE -ft.amount END), 0) AS balance
+                   FROM funds fu LEFT JOIN fund_transactions ft ON ft.fund_id = fu.id
+                   GROUP BY fu.id ORDER BY fu.created_at"""
+            ).fetchall()
+        ]
+        funds_total = round(sum(x["balance"] for x in funds), 2)
+    finally:
+        prod.close()
+
+    free = round(balance - reserved_total - funds_total, 2)
+    return {
+        "balance": balance,
+        "reserved_total": reserved_total,
+        "funds_total": funds_total,
+        "free": free,
+        "negative": free < 0,
+        "reserves": reserves,
+        "funds": funds,
+    }
+
+
 def _valid_date(date: str) -> bool:
     try:
         from datetime import datetime

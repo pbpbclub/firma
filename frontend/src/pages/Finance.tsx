@@ -157,6 +157,37 @@ function LinkCreditorModal({ tx, creditorByFinTx, onClose }: {
   );
 }
 
+// ── Подсказка резерва после привязки платежа ─────────────────────────────────
+function ReservePromptBody({ prompt, pending, onReserve, onSkip }: {
+  prompt: { orderId: string; amount: number; title: string };
+  pending: boolean;
+  onReserve: (amount: number) => void;
+  onSkip: () => void;
+}) {
+  const [amt, setAmt] = useState(String(prompt.amount));
+  return (
+    <div style={{ padding: "18px 22px 20px" }}>
+      <div style={{ fontSize: 13, color: "#1A1A1A", lineHeight: 1.5, marginBottom: 4 }}>
+        Платёж привязан{prompt.title ? <> к заказу «{prompt.title}»</> : null}.
+      </div>
+      <div style={{ fontSize: 12, color: "#6B6355", lineHeight: 1.5, marginBottom: 14 }}>
+        Отложить часть под закупку материалов, чтобы не потратить раньше времени?
+        Из сметы — <b style={{ fontFamily: MONO }}>{fmt(prompt.amount)}</b>.
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <input type="number" min="0" value={amt} onChange={e => setAmt(e.target.value)}
+          style={{ width: 150, border: "1px solid #EDEBE6", padding: "8px 10px", fontSize: 13, outline: "none", fontFamily: MONO, textAlign: "right" }} />
+        <button onClick={() => onReserve(parseFloat(amt) || 0)} disabled={pending}
+          style={{ padding: "8px 18px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+          {pending ? "..." : "Зарезервировать"}
+        </button>
+        <button onClick={onSkip}
+          style={{ padding: "8px 14px", border: "1px solid #EDEBE6", background: "none", color: "#A89070", fontSize: 12, cursor: "pointer" }}>Не сейчас</button>
+      </div>
+    </div>
+  );
+}
+
 // ── Модал: привязать входящую транзакцию к заказу ────────────────────────────
 
 function LinkOrderModal({ tx, paymentByFinTx, onClose }: {
@@ -171,21 +202,39 @@ function LinkOrderModal({ tx, paymentByFinTx, onClose }: {
     queryFn: () => ordersApi.suggest(tx.counterparty || tx.purpose || "", tx.amount || 0),
   });
 
+  // Подсказка резерва после привязки платежа: пришли деньги — предложить отложить материалы.
+  const [reservePrompt, setReservePrompt] = useState<{ orderId: string; amount: number; title: string } | null>(null);
+
   const link = useMutation({
-    mutationFn: async ({ orderId, txId }: { orderId: string | null; txId: string }) => {
+    mutationFn: async ({ orderId, txId, title }: { orderId: string | null; txId: string; title?: string }) => {
       if (orderId === null) {
         const cur = paymentByFinTx.get(String(txId));
         if (cur) await ordersApi.deletePayment(cur.order_id, cur.payment_id);
+        return null;
+      }
+      const res = await ordersApi.addPayment(orderId, {
+        amount: tx.amount,
+        paid_at: (tx.date || "").slice(0, 10),
+        note: `ДДС: ${tx.counterparty || tx.purpose || ""}`.trim(),
+        bank_tx_id: String(txId),
+      });
+      return { res, orderId, title };
+    },
+    onSuccess: (data: any) => {
+      qc.invalidateQueries({ queryKey: ["payments-map"] });
+      qc.invalidateQueries({ queryKey: ["free-cash"] });
+      // Если по заказу ещё нет резерва, а смета подсказывает материалы — предложить.
+      if (data?.res && !data.res.reserve_active && (data.res.reserve_suggested || 0) > 0) {
+        setReservePrompt({ orderId: data.orderId, amount: data.res.reserve_suggested, title: data.title || "" });
       } else {
-        await ordersApi.addPayment(orderId, {
-          amount: tx.amount,
-          paid_at: (tx.date || "").slice(0, 10),
-          note: `ДДС: ${tx.counterparty || tx.purpose || ""}`.trim(),
-          bank_tx_id: String(txId),
-        });
+        onClose();
       }
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["payments-map"] }); onClose(); },
+  });
+
+  const reserveMut = useMutation({
+    mutationFn: (amount: number) => ordersApi.reserve(reservePrompt!.orderId, amount),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["free-cash"] }); onClose(); },
   });
 
   const currentPayment = paymentByFinTx.get(String(tx.id));
@@ -198,6 +247,16 @@ function LinkOrderModal({ tx, paymentByFinTx, onClose }: {
   const filtered = search
     ? items.filter((o: any) => ((o.title || "") + " " + (o.customer_name || "")).toLowerCase().includes(search.toLowerCase()))
     : items;
+
+  // После привязки платежа — экран-подсказка резерва вместо списка заказов.
+  if (reservePrompt) {
+    return (
+      <Modal size="md" eyebrow="ЗАРЕЗЕРВИРОВАТЬ ПОД МАТЕРИАЛЫ" onClose={onClose}>
+        <ReservePromptBody prompt={reservePrompt} pending={reserveMut.isPending}
+          onReserve={(a: number) => reserveMut.mutate(a)} onSkip={onClose} />
+      </Modal>
+    );
+  }
 
   return (
     <Modal size="md" eyebrow="ПРИВЯЗАТЬ К ЗАКАЗУ" onClose={onClose}>
@@ -222,7 +281,7 @@ function LinkOrderModal({ tx, paymentByFinTx, onClose }: {
           {isFetching && <Loading compact />}
           {!isFetching && filtered.length === 0 && <EmptyState compact title="Заказы не найдены" />}
           {!isFetching && filtered.map((o: any) => (
-            <div key={o.id} onClick={() => link.mutate({ orderId: o.id, txId: String(tx.id) })}
+            <div key={o.id} onClick={() => link.mutate({ orderId: o.id, txId: String(tx.id), title: o.title })}
               style={{ display: "grid", gridTemplateColumns: "1fr 100px 80px", padding: "9px 20px", borderBottom: "1px solid #F2EFE9", cursor: "pointer", alignItems: "center", gap: 10 }}
               onMouseEnter={e => { e.currentTarget.style.background = "#FAF8F5"; }}
               onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
