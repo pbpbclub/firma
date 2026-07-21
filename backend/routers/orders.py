@@ -906,7 +906,11 @@ def list_obligations(order_id: str):
                 "status": c["status"],
                 "divergence": exec_divergence or sum_divergence,
             })
-        return {"items": out}
+        # Активная смета — чтобы разноска могла предложить «Утвердить смету», когда
+        # обязательств ещё нет (черновик). Гейт сохраняется: creditors создаёт только approve.
+        est = _active_set(conn, oid)
+        active_set = {"id": est["id"], "status": est["status"]} if est else None
+        return {"items": out, "active_set": active_set}
     finally:
         conn.close()
 

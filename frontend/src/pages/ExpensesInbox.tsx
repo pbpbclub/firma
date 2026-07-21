@@ -4,7 +4,7 @@ import { MONO } from "../components/ui/Num";
 import { Loading } from "../components/ui/Loading";
 import { EmptyState } from "../components/ui/EmptyState";
 import { PeriodFilter, AmountFilter } from "../components/TableFilters";
-import { inboxApi, ordersApi, mastersApi, payeeRulesApi } from "../api";
+import { inboxApi, ordersApi, mastersApi, payeeRulesApi, estimatesApi } from "../api";
 import { EXPENSE_CATEGORIES } from "../components/ExpenseModal";
 import { MagnifyingGlass, X, Check } from "@phosphor-icons/react";
 
@@ -32,18 +32,39 @@ function ObligationPicker({ orderId, categoryLabel, value, onPick }: {
   orderId: string; categoryLabel: string; value: string | null;
   onPick: (creditorId: string | null, remaining: number) => void;
 }) {
-  const { data: obls = [], isLoading } = useQuery({
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery({
     queryKey: ["obligations", orderId],
-    queryFn: () => ordersApi.obligations(orderId).then((d: any) => d.items ?? []),
+    queryFn: () => ordersApi.obligations(orderId),
+  });
+  const all: any[] = data?.items ?? [];
+  const activeSet = data?.active_set ?? null;
+  // Утвердить смету прямо из разноски — обязательства по строкам генерятся на approve.
+  const approve = useMutation({
+    mutationFn: () => estimatesApi.updateSet(activeSet.id, { status: "approved" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["obligations", orderId] }),
   });
   if (isLoading) return null;
-  const all = obls as any[];
   // Строки сметы той же категории, что и разноска (Работы/Материалы/…), ещё не закрытые.
   const list = all.filter((o: any) => o.category === categoryLabel && o.status !== "closed");
   if (all.length === 0) {
+    // Смета есть, но не утверждена → предложить утвердить (тогда появятся плановые строки).
+    if (activeSet && activeSet.status !== "approved") {
+      return (
+        <div style={{ marginTop: 8, fontSize: 10, color: "#A89070" }}>
+          Смета не утверждена — плановых строк ещё нет.
+          <button disabled={approve.isPending} onClick={() => approve.mutate()}
+            style={{ marginLeft: 8, fontSize: 10, color: "#E8592A", background: "none",
+                     border: "1px solid #E8592A", padding: "2px 8px",
+                     cursor: approve.isPending ? "default" : "pointer", fontFamily: "inherit" }}>
+            {approve.isPending ? "Утверждаю…" : "Утвердить смету"}
+          </button>
+        </div>
+      );
+    }
     return (
       <div style={{ marginTop: 8, fontSize: 10, color: "#A89070" }}>
-        Утвердите смету, чтобы привязать оплату к плановым строкам.
+        Сметы нет — платёж пойдёт расходом без привязки.
       </div>
     );
   }

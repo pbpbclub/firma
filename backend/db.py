@@ -446,6 +446,35 @@ def ensure_brands_schema():
         conn.close()
 
 
+def ensure_suppliers_schema():
+    """Поставщики материалов — категория вики. Опциональный price_supplier хранит код
+    прайса materials.db ('vrep'/'metplus'), чтобы показывать метку ВРЭП/Металлинвест."""
+    conn = get_production()
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS suppliers (
+                id             TEXT PRIMARY KEY,
+                name           TEXT UNIQUE NOT NULL,
+                full_name      TEXT,
+                inn            TEXT,
+                category       TEXT,
+                phone          TEXT,
+                email          TEXT,
+                contact        TEXT,
+                telegram       TEXT,
+                website        TEXT,
+                price_supplier TEXT,
+                notes          TEXT,
+                status         TEXT,
+                sort_order     INTEGER DEFAULT 0,
+                created_at     TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_business_units_schema():
     import uuid as _uuid
     conn = get_production()

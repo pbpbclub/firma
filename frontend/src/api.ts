@@ -63,6 +63,13 @@ export const brandsApi = {
   delete: (id: string) => api.delete(`/brands/${id}`).then((r) => r.data),
 };
 
+export const suppliersApi = {
+  list: () => api.get("/suppliers").then((r) => r.data),
+  create: (data: Record<string, any>) => api.post("/suppliers", data).then((r) => r.data),
+  update: (id: string, data: Record<string, any>) => api.patch(`/suppliers/${id}`, data).then((r) => r.data),
+  delete: (id: string) => api.delete(`/suppliers/${id}`).then((r) => r.data),
+};
+
 export const businessUnitsApi = {
   list: () => api.get("/business-units").then((r) => r.data),
   create: (data: Record<string, any>) => api.post("/business-units", data).then((r) => r.data),

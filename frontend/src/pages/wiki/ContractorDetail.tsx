@@ -1,24 +1,21 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { MONO } from "./ui/Num";
-import { IconButton } from "./ui/IconButton";
-import { useNavigationGuard, NavigationGuardModal } from "./NavigationGuard";
-import { EditModal, type FieldDef } from "./EditModal";
-import { PayeeRulesSection } from "./PayeeRulesSection";
-import { mastersApi, financeApi } from "../api";
+import { MONO } from "../../components/ui/Num";
+import { IconButton } from "../../components/ui/IconButton";
+import { useNavigationGuard, NavigationGuardModal } from "../../components/NavigationGuard";
+import { EditModal, type FieldDef } from "../../components/EditModal";
+import { PayeeRulesSection } from "../../components/PayeeRulesSection";
+import { mastersApi, financeApi } from "../../api";
 import { PencilSimple, DotsThree, Check } from "@phosphor-icons/react";
-
-function fmt(n: number) {
-  if (!n) return "—";
-  return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) + " ₽";
-}
-function fmtDate(s: string) {
-  if (!s) return "—";
-  return new Date(s).toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
-}
+import { fmt, fmtDate } from "./helpers";
+import { DetailRow as Row } from "./DetailRow";
 
 export const STATUS_COLORS: Record<string, string> = {
   favorite: "#E8592A", stable: "#4A7C59", available: "#A89070", risk: "#8B3A3A",
+};
+
+export const CONTRACTOR_STATUS_LABELS: Record<string, string> = {
+  favorite: "Постоянный", stable: "Стабильный", available: "Доступен", risk: "Риск",
 };
 
 const EVENT_LABELS: Record<string, string> = {
@@ -54,39 +51,37 @@ export const CONTRACTOR_FIELDS: FieldDef[] = [
     ]},
 ];
 
-export function ContractorDetail({ masterId, onClose }: { masterId: string; onClose: () => void }) {
+export function ContractorDetail({ id, onClose }: { id: string; onClose: () => void }) {
   const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [editCreditor, setEditCreditor] = useState<any>(null);
   const blocker = useNavigationGuard(editing || !!editCreditor);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["master", masterId],
-    queryFn: () => mastersApi.get(masterId),
+    queryKey: ["master", id],
+    queryFn: () => mastersApi.get(id),
   });
 
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["master", id] });
+    qc.invalidateQueries({ queryKey: ["masters"] });
+    qc.invalidateQueries({ queryKey: ["wiki", "contractors"] });
+  };
+
   const save = useMutation({
-    mutationFn: (patch: Record<string, any>) => mastersApi.update(masterId, patch),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["master", masterId] });
-      qc.invalidateQueries({ queryKey: ["masters"] });
-      setEditing(false);
-    },
+    mutationFn: (patch: Record<string, any>) => mastersApi.update(id, patch),
+    onSuccess: () => { invalidate(); setEditing(false); },
   });
 
   const del = useMutation({
-    mutationFn: () => mastersApi.delete(masterId),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["masters"] });
-      setEditing(false);
-      onClose();
-    },
+    mutationFn: () => mastersApi.delete(id),
+    onSuccess: () => { invalidate(); setEditing(false); onClose(); },
   });
 
   const saveCreditor = useMutation({
     mutationFn: (patch: any) => financeApi.updateCreditor(editCreditor.id, patch),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["master", masterId] });
+      qc.invalidateQueries({ queryKey: ["master", id] });
       qc.invalidateQueries({ queryKey: ["creditors"] });
       setEditCreditor(null);
     },
@@ -102,11 +97,6 @@ export function ContractorDetail({ masterId, onClose }: { masterId: string; onCl
   const expensesTotal = expenses.reduce((s: number, e: any) => s + (e.amount || 0), 0);
   const totalDebt = data?.total_debt ?? 0;
 
-  const statusLabel: Record<string, string> = {
-    favorite: "Постоянный", stable: "Стабильный", available: "Доступен", risk: "Риск",
-  };
-
-  // Initial values for edit modal include wiki fields
   const editInitial = {
     name:           master.name,
     role:           master.role,
@@ -123,13 +113,6 @@ export function ContractorDetail({ masterId, onClose }: { masterId: string; onCl
     status:         master.status,
   };
 
-  const Row = ({ label, value, mono }: { label: string; value?: string | null; mono?: boolean }) => (
-    <div style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid #F2EFE9" }}>
-      <div style={{ fontSize: 11, color: "#A89070" }}>{label}</div>
-      <div style={{ fontSize: 12, fontWeight: 500, color: value ? "#1A1A1A" : "#C8C0B0", textAlign: "right", maxWidth: 240, fontFamily: mono && value ? MONO : undefined, fontVariantNumeric: mono ? "tabular-nums" : undefined }}>{value || "—"}</div>
-    </div>
-  );
-
   return (
     <>
       {editing && (
@@ -144,13 +127,12 @@ export function ContractorDetail({ masterId, onClose }: { masterId: string; onCl
         />
       )}
 
-      {/* Header */}
       <div style={{ padding: "22px 24px 16px", borderBottom: "1px solid #EDEBE6", display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexShrink: 0 }}>
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
             <div style={{ fontSize: 21, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em", maxWidth: 260 }}>{master.name}</div>
             <span style={{ fontSize: 9, color: STATUS_COLORS[master.status] || "#A89070", border: `1px solid ${STATUS_COLORS[master.status] || "#EDEBE6"}`, padding: "2px 6px", letterSpacing: "0.04em" }}>
-              {statusLabel[master.status] || master.status}
+              {CONTRACTOR_STATUS_LABELS[master.status] || master.status}
             </span>
           </div>
           <div style={{ fontSize: 12, color: "#A89070" }}>{master.role}{master.specialization ? ` · ${master.specialization}` : ""}</div>
@@ -172,14 +154,11 @@ export function ContractorDetail({ masterId, onClose }: { masterId: string; onCl
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", padding: "18px 24px" }}>
-
-        {/* Contacts */}
         <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10 }}>КОНТАКТЫ</div>
         <Row label="Телефон"  value={master.phone} mono />
         <Row label="Telegram" value={master.telegram} />
         <Row label="Email"    value={master.email} />
 
-        {/* Payment */}
         {(wiki.pay_label || wiki.pay_note || wiki.prepay_pct) && (
           <>
             <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10, marginTop: 18 }}>ОПЛАТА</div>
@@ -188,7 +167,6 @@ export function ContractorDetail({ masterId, onClose }: { masterId: string; onCl
           </>
         )}
 
-        {/* Wiki notes */}
         {(master.notes || wiki.wiki_notes) && (
           <>
             <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10, marginTop: 18 }}>ВИКИ</div>
@@ -205,7 +183,6 @@ export function ContractorDetail({ masterId, onClose }: { masterId: string; onCl
           </>
         )}
 
-        {/* Obligations */}
         <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10, marginTop: 18 }}>
           ОБЯЗАТЕЛЬСТВА
           {creditors.filter(c => c.status === "open").length > 0 &&
@@ -242,7 +219,6 @@ export function ContractorDetail({ masterId, onClose }: { masterId: string; onCl
                 )}
               </div>
 
-              {/* Inline creditor editor */}
               {editCreditor?.id === c.id && (
                 <div style={{ padding: "12px 14px", marginBottom: 8, background: "#fff", border: "1px solid #EDEBE6" }}>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
@@ -280,7 +256,6 @@ export function ContractorDetail({ masterId, onClose }: { masterId: string; onCl
           ))
         )}
 
-        {/* Расходы по заказам */}
         {expenses.length > 0 && (
           <>
             <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10, marginTop: 18 }}>
@@ -300,7 +275,6 @@ export function ContractorDetail({ masterId, onClose }: { masterId: string; onCl
           </>
         )}
 
-        {/* История из вики фин-агента */}
         {events.length > 0 && (
           <>
             <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4, marginTop: 18 }}>ИСТОРИЯ</div>
@@ -324,11 +298,10 @@ export function ContractorDetail({ masterId, onClose }: { masterId: string; onCl
           </>
         )}
 
-        <PayeeRulesSection entityType="master" entityId={masterId} />
+        <PayeeRulesSection entityType="master" entityId={id} />
       </div>
 
       <NavigationGuardModal blocker={blocker} />
     </>
   );
 }
-

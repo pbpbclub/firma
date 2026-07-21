@@ -7,14 +7,12 @@ import {
   Package,
   Calculator,
   CurrencyDollar,
-  User,
+  BookOpen,
   SignOut,
   List,
   Vault,
   HandCoins,
-  Buildings,
   Receipt,
-  Wrench,
 } from "@phosphor-icons/react";
 import { getUser, logout } from "../auth";
 
@@ -25,9 +23,7 @@ const nav = [
   { to: "/zenmoney", icon: HandCoins, label: "Личные" },
   { to: "/expenses", icon: Receipt, label: "Разноска" },
   { to: "/debtors", icon: CurrencyDollar, label: "Обязательства" },
-  { to: "/customers", icon: User, label: "Клиенты" },
-  { to: "/contractors", icon: Wrench, label: "Подрядчики" },
-  { to: "/brands", icon: Buildings, label: "Бренды" },
+  { to: "/wiki", icon: BookOpen, label: "Вики" },
   { to: "/catalog", icon: Package, label: "Каталог" },
   { to: "/taxes", icon: Calculator, label: "Налоги" },
   { to: "/funds", icon: Vault, label: "Фонды" },

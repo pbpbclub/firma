@@ -1,4 +1,4 @@
-import { createBrowserRouter, RouterProvider, Navigate, Outlet } from "react-router-dom";
+import { createBrowserRouter, RouterProvider, Navigate, Outlet, useParams } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { getToken } from "./auth";
 import Layout from "./components/Layout";
@@ -8,7 +8,6 @@ import OrdersV2 from "./pages/OrdersV2";
 import Finance from "./pages/Finance";
 import Debtors from "./pages/Debtors";
 import Catalog from "./pages/Catalog";
-import Customers from "./pages/Customers";
 import Taxes from "./pages/Taxes";
 import EstimateEditor from "./pages/EstimateEditor";
 import OrderDetail from "./pages/OrderDetail";
@@ -16,8 +15,7 @@ import Funds from "./pages/Funds";
 import ZenMoney from "./pages/ZenMoney";
 import Admin from "./pages/Admin";
 import ExpensesInbox from "./pages/ExpensesInbox";
-import Contractors from "./pages/Contractors";
-import Brands from "./pages/Brands";
+import Wiki from "./pages/Wiki";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 60_000, retry: 1 } },
@@ -26,6 +24,12 @@ const queryClient = new QueryClient({
 function AuthLayout() {
   if (!getToken()) return <Navigate to="/login" replace />;
   return <Layout><Outlet /></Layout>;
+}
+
+// Редирект старой закладки /customers/:id → /wiki/clients/:id (и т.п.)
+function RedirectWithId({ to }: { to: string }) {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={`/wiki/${to}/${id}`} replace />;
 }
 
 const router = createBrowserRouter([
@@ -39,17 +43,21 @@ const router = createBrowserRouter([
       { path: "/orders/:orderId/estimate", element: <EstimateEditor /> },
       { path: "/finance", element: <Finance /> },
       { path: "/debtors", element: <Debtors /> },
-      { path: "/customers", element: <Customers /> },
-      { path: "/customers/:id", element: <Customers /> },
+      { path: "/wiki", element: <Navigate to="/wiki/clients" replace /> },
+      { path: "/wiki/:category", element: <Wiki /> },
+      { path: "/wiki/:category/:id", element: <Wiki /> },
       { path: "/catalog", element: <Catalog /> },
       { path: "/taxes", element: <Taxes /> },
       { path: "/funds", element: <Funds /> },
-      { path: "/brands", element: <Brands /> },
       { path: "/zenmoney", element: <ZenMoney /> },
       { path: "/expenses", element: <ExpensesInbox /> },
-      { path: "/contractors", element: <Contractors /> },
-      { path: "/contractors/:id", element: <Contractors /> },
       { path: "/admin", element: <Admin /> },
+      // редиректы старых закладок
+      { path: "/customers", element: <Navigate to="/wiki/clients" replace /> },
+      { path: "/customers/:id", element: <RedirectWithId to="clients" /> },
+      { path: "/contractors", element: <Navigate to="/wiki/contractors" replace /> },
+      { path: "/contractors/:id", element: <RedirectWithId to="contractors" /> },
+      { path: "/brands", element: <Navigate to="/wiki/brands" replace /> },
     ],
   },
 ]);
