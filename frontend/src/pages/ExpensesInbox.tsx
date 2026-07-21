@@ -4,7 +4,7 @@ import { MONO } from "../components/ui/Num";
 import { Loading } from "../components/ui/Loading";
 import { EmptyState } from "../components/ui/EmptyState";
 import { PeriodFilter, AmountFilter } from "../components/TableFilters";
-import { inboxApi, ordersApi, mastersApi } from "../api";
+import { inboxApi, ordersApi, mastersApi, financeApi } from "../api";
 import { EXPENSE_CATEGORIES } from "../components/ExpenseModal";
 import { MagnifyingGlass, X, Check } from "@phosphor-icons/react";
 
@@ -23,12 +23,12 @@ const SOURCES = [
 ] as const;
 
 // ── Строка разноски: раскрывается в форму ────────────────────────────────────
+type Alloc = { order_id: string; amount: string; category: string; master_id: string; creditor_id: string | null };
+
 function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
-  const [category, setCategory] = useState(tx.category_hint || "other");
-  const [masterId, setMasterId] = useState(tx.master_id || "");
   const [title, setTitle] = useState(tx.counterparty || tx.purpose || "");
-  // Разноска: заказ → сумма. Одна поездка может лечь на несколько заказов.
-  const [allocs, setAllocs] = useState<{ order_id: string; amount: string }[]>([]);
+  // Каждая строка — свой заказ, сумма, категория, подрядчик и (опц.) обязательство.
+  const [allocs, setAllocs] = useState<Alloc[]>([]);
   const [error, setError] = useState("");
 
   const { data: suggestions = [] } = useQuery({
@@ -38,14 +38,28 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
     queryFn: () => ordersApi.suggest(tx.counterparty || "", 0),
   });
   const { data: masters = [] } = useQuery({ queryKey: ["masters"], queryFn: mastersApi.list });
+  // Открытые обязательства — чтобы предложить закрыть долг подрядчику по заказу.
+  const { data: creditors = [] } = useQuery({ queryKey: ["creditors"], queryFn: () => financeApi.creditors() });
+
+  const masterName = (mid: string) => (masters as any[]).find((m: any) => m.id === mid)?.name;
+  // Найти открытое обязательство заказа с этим подрядчиком (по имени).
+  const findObligation = (orderId: string, mid: string) => {
+    const nm = masterName(mid);
+    if (!nm) return null;
+    return (creditors as any[]).find((c: any) =>
+      c.order_id && String(c.order_id) === String(orderId) && c.name === nm && c.status !== "closed") || null;
+  };
 
   const save = useMutation({
     mutationFn: () => inboxApi.fromTx({
-      source: tx.source, tx_id: tx.id, title: title.trim() || null, category,
-      master_id: masterId || null,
-      supplier: (masters as any[]).find((m: any) => m.id === masterId)?.name ?? tx.counterparty,
+      source: tx.source, tx_id: tx.id, title: title.trim() || null, category: "other",
       expense_date: (tx.date || "").slice(0, 10) || null,
-      allocations: allocs.map(a => ({ order_id: a.order_id, amount: parseFloat(a.amount) || 0 })),
+      allocations: allocs.map(a => ({
+        order_id: a.order_id, amount: parseFloat(a.amount) || 0,
+        category: a.category, master_id: a.master_id || null,
+        supplier: masterName(a.master_id) ?? tx.counterparty,
+        creditor_id: a.creditor_id,
+      })),
     }),
     onSuccess: onDone,
     onError: (e: any) => setError(e?.response?.data?.detail || "Не удалось разнести"),
@@ -53,8 +67,9 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
 
   const addOrder = (orderId: string) => {
     if (allocs.some(a => a.order_id === orderId)) return;
-    setAllocs([...allocs, { order_id: orderId, amount: "" }]);
+    setAllocs([...allocs, { order_id: orderId, amount: "", category: tx.category_hint || "material", master_id: tx.master_id || "", creditor_id: null }]);
   };
+  const patch = (i: number, p: Partial<Alloc>) => setAllocs(allocs.map((x, j) => j === i ? { ...x, ...p } : x));
   const splitEvenly = () => {
     if (!allocs.length) return;
     const each = Math.floor((tx.amount / allocs.length) * 100) / 100;
@@ -72,36 +87,13 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
   return (
     <div style={{ padding: "14px 28px 18px", background: "#FAF8F5", borderBottom: "1px solid #EDEBE6" }}>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 200px", gap: 16, marginBottom: 12 }}>
-        <div>
-          <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>НАЗВАНИЕ РАСХОДА</div>
-          <input value={title} onChange={e => setTitle(e.target.value)}
-            style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "6px 10px", fontSize: 12, outline: "none", background: "#fff" }} />
-        </div>
-        <div>
-          <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>ПОДРЯДЧИК</div>
-          <select value={masterId} onChange={e => setMasterId(e.target.value)}
-            style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "6px 10px", fontSize: 12, outline: "none", background: "#fff", cursor: "pointer" }}>
-            <option value="">— не указан —</option>
-            {(masters as any[]).map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
-          </select>
-        </div>
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>НАЗВАНИЕ РАСХОДА</div>
+        <input value={title} onChange={e => setTitle(e.target.value)}
+          style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "6px 10px", fontSize: 12, outline: "none", background: "#fff" }} />
       </div>
 
-      <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>КАТЕГОРИЯ</div>
-      <div style={{ display: "flex", marginBottom: 14 }}>
-        {EXPENSE_CATEGORIES.map(c => (
-          <button key={c.v} onClick={() => setCategory(c.v)}
-            style={{
-              padding: "4px 12px", fontSize: 11, cursor: "pointer", border: "1px solid",
-              borderColor: category === c.v ? "#1A1A1A" : "#EDEBE6",
-              background: category === c.v ? "#1A1A1A" : "#fff",
-              color: category === c.v ? "#FFFFFF" : "#A89070", marginRight: -1, fontFamily: "inherit",
-            }}>{c.l}</button>
-        ))}
-      </div>
-
-      {/* Выбранные заказы */}
+      {/* Выбранные заказы — у каждого своя категория, подрядчик, обязательство */}
       <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 6 }}>
         РАЗНЕСТИ НА ЗАКАЗЫ
         {allocs.length > 1 && (
@@ -114,20 +106,49 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
 
       {allocs.map((a, i) => {
         const o = ordersById.get(a.order_id);
+        const obl = a.master_id ? findObligation(a.order_id, a.master_id) : null;
         return (
-          <div key={a.order_id} style={{ display: "grid", gridTemplateColumns: "1fr 120px 28px", gap: 8, alignItems: "center", marginBottom: 6 }}>
-            <div style={{ fontSize: 12, color: "#1A1A1A" }}>
-              {o?.title ?? a.order_id}
+          <div key={a.order_id} style={{ background: "#fff", border: "1px solid #EDEBE6", padding: "8px 10px", marginBottom: 8 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 120px 24px", gap: 8, alignItems: "center" }}>
+              <div style={{ fontSize: 12, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {o?.title ?? a.order_id}
+              </div>
+              <input value={a.amount} onChange={e => patch(i, { amount: e.target.value })}
+                placeholder="сумма" type="number"
+                style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "5px 8px", fontSize: 12, outline: "none", textAlign: "right", fontFamily: MONO }} />
+              <button onClick={() => setAllocs(allocs.filter((_, j) => j !== i))}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 0, display: "flex", justifyContent: "center" }}>
+                <X size={12} />
+              </button>
             </div>
-            <input value={a.amount} onChange={e => {
-              const v = e.target.value;
-              setAllocs(allocs.map((x, j) => j === i ? { ...x, amount: v } : x));
-            }} placeholder="сумма" type="number"
-              style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "5px 8px", fontSize: 12, outline: "none", textAlign: "right", fontFamily: MONO, background: "#fff" }} />
-            <button onClick={() => setAllocs(allocs.filter((_, j) => j !== i))}
-              style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 0, display: "flex", justifyContent: "center" }}>
-              <X size={12} />
-            </button>
+            <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
+              {/* Категория — компактные чипы */}
+              <div style={{ display: "flex" }}>
+                {EXPENSE_CATEGORIES.map(c => (
+                  <button key={c.v} onClick={() => patch(i, { category: c.v })}
+                    style={{
+                      padding: "3px 9px", fontSize: 10, cursor: "pointer", border: "1px solid",
+                      borderColor: a.category === c.v ? "#1A1A1A" : "#EDEBE6",
+                      background: a.category === c.v ? "#1A1A1A" : "#fff",
+                      color: a.category === c.v ? "#FFFFFF" : "#A89070", marginRight: -1, fontFamily: "inherit",
+                    }}>{c.l}</button>
+                ))}
+              </div>
+              {/* Подрядчик */}
+              <select value={a.master_id} onChange={e => patch(i, { master_id: e.target.value, creditor_id: null })}
+                style={{ flex: 1, minWidth: 130, border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 11, outline: "none", background: "#fff", cursor: "pointer" }}>
+                <option value="">— подрядчик —</option>
+                {(masters as any[]).map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+            </div>
+            {/* Обязательство — предложить закрыть долг */}
+            {obl && (
+              <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 11, color: "#6B6355", cursor: "pointer" }}>
+                <input type="checkbox" checked={a.creditor_id === obl.id}
+                  onChange={e => patch(i, { creditor_id: e.target.checked ? obl.id : null })} />
+                Закрыть обязательство «{obl.name}» — долг <span style={{ fontFamily: MONO }}>{fmt(obl.debt)}</span>
+              </label>
+            )}
           </div>
         );
       })}

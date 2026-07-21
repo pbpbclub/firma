@@ -156,6 +156,12 @@ def inbox(
 class Allocation(BaseModel):
     order_id: str
     amount: float
+    # Гранулярность по строке: своя категория/подрядчик/поставщик на каждый заказ.
+    # Если не заданы — берём из тела (обратная совместимость со старым форматом).
+    category: Optional[str] = None
+    master_id: Optional[str] = None
+    supplier: Optional[str] = None
+    creditor_id: Optional[str] = None   # какое обязательство гасит эта строка
 
 
 class FromTxIn(BaseModel):
@@ -182,6 +188,9 @@ def create_from_tx(body: FromTxIn):
         raise HTTPException(status_code=400, detail="allocations required")
     if any(a.amount is None or a.amount <= 0 for a in body.allocations):
         raise HTTPException(status_code=400, detail="each allocation amount must be > 0")
+    for a in body.allocations:
+        if a.category and a.category not in EXPENSE_CATEGORIES:
+            raise HTTPException(status_code=400, detail=f"category must be one of {'|'.join(EXPENSE_CATEGORIES)}")
 
     # Транзакция должна существовать и быть ещё не разнесённой
     bank_done, zen_done = _allocated_ids()
@@ -227,26 +236,49 @@ def create_from_tx(body: FromTxIn):
 
     conn = get_production()
     try:
+        col = "finance_tx_id" if body.source == "bank" else "zenmoney_tx_id"
         created = []
         for a in body.allocations:
             o = conn.execute("SELECT id FROM orders WHERE id = ? OR number = ?", (a.order_id, a.order_id)).fetchone()
             if not o:
                 raise HTTPException(status_code=404, detail=f"Заказ не найден: {a.order_id}")
             oid = o["id"]
-            # Тот же платёж мог уже стоять обязательством по этому заказу — связываем,
-            # чтобы факт не задвоился (см. инвариант в orders._plan_fact).
-            cred = None
-            col = "finance_tx_id" if body.source == "bank" else "zenmoney_tx_id"
-            cr = conn.execute(f"SELECT id FROM creditors WHERE order_id = ? AND {col} = ?", (oid, body.tx_id)).fetchone()
-            if cr:
-                cred = cr["id"]
+            # Per-row поля с откатом на тело (обратная совместимость)
+            row_cat = a.category or body.category
+            row_master = a.master_id or body.master_id
+            row_supplier = a.supplier or supplier
+
+            # Гашение обязательства. Явный creditor_id из строки, иначе авто-поиск
+            # открытого обязательства этого заказа с тем же подрядчиком (по имени)
+            # или уже привязанного к этой транзакции.
+            cred = a.creditor_id
+            if cred:
+                # Строка гасит конкретное обязательство — двигаем paid и линкуем tx.
+                c = conn.execute("SELECT id, total, paid FROM creditors WHERE id = ? AND order_id = ?", (cred, oid)).fetchone()
+                if c:
+                    new_paid = round((c["paid"] or 0) + a.amount, 2)
+                    conn.execute(
+                        f"""UPDATE creditors
+                            SET paid = ?, {col} = COALESCE({col}, ?),
+                                status = CASE WHEN ? >= total THEN 'closed' ELSE status END
+                            WHERE id = ?""",
+                        (new_paid, body.tx_id, new_paid, cred)
+                    )
+                else:
+                    cred = None  # чужое/несуществующее обязательство — не гасим
+            if not cred:
+                # Связать с обязательством, уже привязанным к этой транзакции (только линк).
+                cr = conn.execute(f"SELECT id FROM creditors WHERE order_id = ? AND {col} = ?", (oid, body.tx_id)).fetchone()
+                if cr:
+                    cred = cr["id"]
+
             eid = str(uuid4())
             conn.execute(
                 """INSERT INTO expenses (id, order_id, title, amount, category, supplier, master_id,
                                          expense_date, source, creditor_id, finance_tx_id, zenmoney_tx_id,
                                          group_id, created_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), ?, ?, ?, ?, ?, datetime('now'))""",
-                (eid, oid, title, a.amount, body.category, supplier, body.master_id,
+                (eid, oid, title, a.amount, row_cat, row_supplier, row_master,
                  exp_date, src, cred, fin_id, zen_id, group_id)
             )
             created.append(eid)
