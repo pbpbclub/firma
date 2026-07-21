@@ -110,9 +110,17 @@ export default function OrderDetail() {
     enabled: !!id,
   });
 
+  // План/факт по строкам сметы (обязательства): кто планировался vs кто исполнил.
+  const { data: obligationsData } = useQuery({
+    queryKey: ["order-obligations", id],
+    queryFn: () => ordersApi.obligations(id!),
+    enabled: !!id,
+  });
+
   // Факт меняет план-факт и маржу → инвалидируем и карточку, и списки.
   const invalidateFact = () => {
     qc.invalidateQueries({ queryKey: ["order-expenses", id] });
+    qc.invalidateQueries({ queryKey: ["order-obligations", id] });
     qc.invalidateQueries({ queryKey: ["order-detail", id] });
     qc.invalidateQueries({ queryKey: ["orders-v2"] });
     qc.invalidateQueries({ queryKey: ["orders-plan-fact-summary"] });
@@ -543,6 +551,50 @@ export default function OrderDetail() {
           {order?.plan_fact?.has_estimate && (
             <div style={{ paddingTop: 24, borderTop: "1px solid #EDEBE6", marginBottom: 32 }}>
               <PlanFactBlock planFact={order.plan_fact} />
+            </div>
+          )}
+
+          {/* План/факт по строкам сметы — кто планировался vs кто исполнил */}
+          {!!obligationsData?.items?.length && (
+            <div style={{ paddingTop: 24, borderTop: "1px solid #EDEBE6", marginBottom: 32 }}>
+              <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 14 }}>
+                ПЛАН / ФАКТ ПО РАБОТАМ
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: "0 20px", fontSize: 9, color: "#A89070", letterSpacing: "0.05em", paddingBottom: 6, borderBottom: "1px solid #EDEBE6" }}>
+                <div>СТРОКА · ИСПОЛНИТЕЛЬ</div>
+                <div style={{ textAlign: "right" }}>ПЛАН</div>
+                <div style={{ textAlign: "right" }}>ФАКТ</div>
+              </div>
+              {obligationsData.items.map((o: any) => {
+                const actual = (o.actual_executors || []).join(", ");
+                const paidColor = o.status === "closed" ? "#4A7C59" : o.paid > 0 ? "#1A1A1A" : "#C8C0B0";
+                return (
+                  <div key={o.creditor_id} style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: "0 20px", padding: "9px 0", borderBottom: "1px solid #F2EFE9", alignItems: "baseline" }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 13, color: "#1A1A1A" }}>
+                        {o.title}
+                        {o.divergence && (
+                          <span title="Расхождение план/факт" style={{ marginLeft: 8, fontSize: 9, color: "#E8592A", letterSpacing: "0.05em", verticalAlign: "middle" }}>⚠ РАСХОЖДЕНИЕ</span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>
+                        план: {o.planned_executor || "—"}
+                        <span style={{ color: "#C8C0B0" }}>  ·  </span>
+                        факт: <span style={{ color: actual ? (o.divergence ? "#E8592A" : "#4A7C59") : "#C8C0B0" }}>{actual || "—"}</span>
+                      </div>
+                    </div>
+                    <div style={{ textAlign: "right", fontSize: 13, fontFamily: MONO, fontVariantNumeric: "tabular-nums", color: "#6B6355" }}>
+                      {fmt(o.planned_amount)}
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: 13, fontFamily: MONO, fontVariantNumeric: "tabular-nums", color: paidColor }}>{fmt(o.paid)}</div>
+                      {o.remaining > 0 && o.paid > 0 && (
+                        <div style={{ fontSize: 10, color: "#A89070", fontFamily: MONO }}>ост. {fmt(o.remaining)}</div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
 

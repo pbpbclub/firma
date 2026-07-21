@@ -837,6 +837,80 @@ def list_expenses(order_id: str):
         conn.close()
 
 
+@router.get("/{order_id}/obligations")
+def list_obligations(order_id: str):
+    """Плановые строки заказа (обязательства) с фактом: план vs факт по сумме и исполнителю.
+
+    Единица — обязательство (creditors) со ссылкой на строку сметы (estimate_line_id).
+    План: строка сметы (title, категория, плановый исполнитель, amount_plan).
+    Факт: expenses, привязанные к обязательству (creditor_id) → paid + фактические исполнители.
+    """
+    conn = get_production()
+    try:
+        oid = _resolve_order(conn, order_id)
+        creds = [dict(r) for r in conn.execute(
+            "SELECT * FROM creditors WHERE order_id = ? ORDER BY created_at", (oid,)
+        ).fetchall()]
+
+        # Факт по обязательствам: expenses.creditor_id → сумма + фактические исполнители.
+        fact = {}  # creditor_id -> {"paid": x, "executors": {name}}
+        for e in conn.execute(
+            """SELECT ex.creditor_id AS cid, ex.amount AS amount, ex.master_id AS mid, m.name AS mname
+                 FROM expenses ex LEFT JOIN masters m ON m.id = ex.master_id
+                WHERE ex.order_id = ? AND ex.creditor_id IS NOT NULL""", (oid,)
+        ).fetchall():
+            f = fact.setdefault(e["cid"], {"paid": 0.0, "executors": []})
+            f["paid"] += e["amount"] or 0
+            nm = e["mname"]
+            if nm and nm not in f["executors"]:
+                f["executors"].append(nm)
+
+        out = []
+        for c in creds:
+            line = None
+            if c["estimate_line_id"]:
+                line = conn.execute(
+                    "SELECT title, type, master_id, contractor_name FROM estimate_lines WHERE id = ?",
+                    (c["estimate_line_id"],)
+                ).fetchone()
+            # Плановый исполнитель: строка (master_id→имя / contractor_name), иначе имя обязательства.
+            planned_executor = None
+            category = "Прочее"
+            if line:
+                category = _bucket(line["type"])
+                if line["master_id"]:
+                    m = conn.execute("SELECT name FROM masters WHERE id = ?", (line["master_id"],)).fetchone()
+                    planned_executor = m["name"] if m else None
+                planned_executor = planned_executor or (line["contractor_name"] or None)
+            title = (line["title"] if line and line["title"] else None) or c["name"]
+
+            f = fact.get(c["id"], {"paid": 0.0, "executors": []})
+            paid = round(f["paid"], 2)
+            plan = round(c["amount_plan"] or c["total"] or 0, 2)
+            actual = f["executors"]
+            # Расхождение: другой/незапланированный исполнитель, либо переплата.
+            exec_divergence = bool(actual) and (
+                planned_executor is None or any(a != planned_executor for a in actual)
+            )
+            sum_divergence = paid > plan + 0.01
+            out.append({
+                "creditor_id": c["id"],
+                "line_id": c["estimate_line_id"],
+                "title": title,
+                "category": category,
+                "planned_amount": plan,
+                "paid": paid,
+                "remaining": round(max(plan - paid, 0), 2),
+                "planned_executor": planned_executor,
+                "actual_executors": actual,
+                "status": c["status"],
+                "divergence": exec_divergence or sum_divergence,
+            })
+        return {"items": out}
+    finally:
+        conn.close()
+
+
 @router.post("/{order_id}/expenses", status_code=201)
 def add_expense(order_id: str, body: ExpenseIn):
     _validate_expense(body)

@@ -43,6 +43,7 @@ export const ordersApi = {
   suggest: (counterparty: string, amount: number) =>
     api.get("/orders/suggest", { params: { counterparty, amount } }).then((r) => r.data),
   paymentsMap: () => api.get("/orders/payments-map").then((r) => r.data),
+  obligations: (id: string) => api.get(`/orders/${id}/obligations`).then((r) => r.data),
 };
 
 export const customersApi = {

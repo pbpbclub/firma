@@ -4,7 +4,7 @@ import { MONO } from "../components/ui/Num";
 import { Loading } from "../components/ui/Loading";
 import { EmptyState } from "../components/ui/EmptyState";
 import { PeriodFilter, AmountFilter } from "../components/TableFilters";
-import { inboxApi, ordersApi, mastersApi, financeApi, payeeRulesApi } from "../api";
+import { inboxApi, ordersApi, mastersApi, payeeRulesApi } from "../api";
 import { EXPENSE_CATEGORIES } from "../components/ExpenseModal";
 import { MagnifyingGlass, X, Check } from "@phosphor-icons/react";
 
@@ -25,6 +25,55 @@ const SOURCES = [
 // ── Строка разноски: раскрывается в форму ────────────────────────────────────
 type Alloc = { order_id: string; amount: string; category: string; master_id: string; creditor_id: string | null };
 
+// Пикер плановой строки сметы: платёж привязывается к конкретному обязательству
+// (напр. «Порошковая покраска · осталось 40 000»), а не «вообще к подрядчику».
+// Обязательства появляются только после утверждения сметы.
+function ObligationPicker({ orderId, categoryLabel, value, onPick }: {
+  orderId: string; categoryLabel: string; value: string | null;
+  onPick: (creditorId: string | null, remaining: number) => void;
+}) {
+  const { data: obls = [], isLoading } = useQuery({
+    queryKey: ["obligations", orderId],
+    queryFn: () => ordersApi.obligations(orderId).then((d: any) => d.items ?? []),
+  });
+  if (isLoading) return null;
+  const all = obls as any[];
+  // Строки сметы той же категории, что и разноска (Работы/Материалы/…), ещё не закрытые.
+  const list = all.filter((o: any) => o.category === categoryLabel && o.status !== "closed");
+  if (all.length === 0) {
+    return (
+      <div style={{ marginTop: 8, fontSize: 10, color: "#A89070" }}>
+        Утвердите смету, чтобы привязать оплату к плановым строкам.
+      </div>
+    );
+  }
+  if (list.length === 0) {
+    return (
+      <div style={{ marginTop: 8, fontSize: 10, color: "#A89070" }}>
+        Нет плановых строк категории «{categoryLabel}» — платёж пойдёт расходом без привязки.
+      </div>
+    );
+  }
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>ПЛАНОВАЯ СТРОКА СМЕТЫ</div>
+      <select value={value ?? ""}
+        onChange={e => {
+          const o = list.find((x: any) => x.creditor_id === e.target.value);
+          onPick(o ? o.creditor_id : null, o ? o.remaining : 0);
+        }}
+        style={{ width: "100%", boxSizing: "border-box", border: "1px solid " + (value ? "#E8592A" : "#EDEBE6"), padding: "5px 8px", fontSize: 11, outline: "none", background: "#fff", cursor: "pointer" }}>
+        <option value="">— не привязывать —</option>
+        {list.map((o: any) => (
+          <option key={o.creditor_id} value={o.creditor_id}>
+            {o.title} · осталось {fmt(o.remaining)}{o.planned_executor ? ` · план: ${o.planned_executor}` : ""}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
   const [title, setTitle] = useState(tx.counterparty || tx.purpose || "");
   // Каждая строка — свой заказ, сумма, категория, подрядчик и (опц.) обязательство.
@@ -43,18 +92,8 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
     queryFn: () => ordersApi.suggest(tx.counterparty || "", 0),
   });
   const { data: masters = [] } = useQuery({ queryKey: ["masters"], queryFn: mastersApi.list });
-  // Открытые обязательства — чтобы предложить закрыть долг подрядчику по заказу.
-  // /finance/creditors отдаёт {items, ...} — берём items.
-  const { data: creditors = [] } = useQuery({ queryKey: ["creditors"], queryFn: () => financeApi.creditors().then((d: any) => d.items ?? []) });
 
   const masterName = (mid: string) => (masters as any[]).find((m: any) => m.id === mid)?.name;
-  // Найти открытое обязательство заказа с этим подрядчиком (по имени).
-  const findObligation = (orderId: string, mid: string) => {
-    const nm = masterName(mid);
-    if (!nm) return null;
-    return (creditors as any[]).find((c: any) =>
-      c.order_id && String(c.order_id) === String(orderId) && c.name === nm && c.status !== "closed") || null;
-  };
 
   const save = useMutation({
     mutationFn: async () => {
@@ -148,7 +187,7 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
 
       {allocs.map((a, i) => {
         const o = ordersById.get(a.order_id);
-        const obl = a.master_id ? findObligation(a.order_id, a.master_id) : null;
+        const catLabel = EXPENSE_CATEGORIES.find(c => c.v === a.category)?.l ?? "Прочее";
         return (
           <div key={a.order_id} style={{ background: "#fff", border: "1px solid #EDEBE6", padding: "8px 10px", marginBottom: 8 }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 120px 24px", gap: 8, alignItems: "center" }}>
@@ -167,7 +206,7 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
               {/* Категория — компактные чипы */}
               <div style={{ display: "flex" }}>
                 {EXPENSE_CATEGORIES.map(c => (
-                  <button key={c.v} onClick={() => patch(i, { category: c.v })}
+                  <button key={c.v} onClick={() => patch(i, { category: c.v, creditor_id: null })}
                     style={{
                       padding: "3px 9px", fontSize: 10, cursor: "pointer", border: "1px solid",
                       borderColor: a.category === c.v ? "#1A1A1A" : "#EDEBE6",
@@ -177,20 +216,23 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
                 ))}
               </div>
               {/* Подрядчик */}
-              <select value={a.master_id} onChange={e => patch(i, { master_id: e.target.value, creditor_id: null })}
+              <select value={a.master_id} onChange={e => patch(i, { master_id: e.target.value })}
                 style={{ flex: 1, minWidth: 130, border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 11, outline: "none", background: "#fff", cursor: "pointer" }}>
                 <option value="">— подрядчик —</option>
                 {(masters as any[]).map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
               </select>
             </div>
-            {/* Обязательство — предложить закрыть долг */}
-            {obl && (
-              <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 11, color: "#6B6355", cursor: "pointer" }}>
-                <input type="checkbox" checked={a.creditor_id === obl.id}
-                  onChange={e => patch(i, { creditor_id: e.target.checked ? obl.id : null })} />
-                Закрыть обязательство «{obl.name}» — долг <span style={{ fontFamily: MONO }}>{fmt(obl.debt)}</span>
-              </label>
-            )}
+            {/* Плановая строка сметы — привязка платежа к конкретному обязательству */}
+            <ObligationPicker
+              orderId={a.order_id}
+              categoryLabel={catLabel}
+              value={a.creditor_id}
+              onPick={(cid, remaining) => patch(i, {
+                creditor_id: cid,
+                // Пустую сумму подставляем из остатка по строке; заполненную не трогаем.
+                amount: cid && !a.amount ? String(remaining) : a.amount,
+              })}
+            />
           </div>
         );
       })}

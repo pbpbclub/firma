@@ -234,6 +234,9 @@ def update_set(set_id: str, body: SetUpdate):
                 (_now(), updated["order_id"], set_id)
             )
             _sync_order_from_set(conn, set_id)
+            # Обязательства по строкам — чтобы разноска сразу могла привязывать оплату
+            # к плановым позициям. Идемпотентно (дедуп по estimate_line_id).
+            _gen_obligations(conn, updated)
             conn.commit()
         return dict(conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (set_id,)).fetchone())
     finally:
@@ -693,6 +696,71 @@ def _find_or_create_master(conn, name: str) -> str:
     return mid
 
 
+def _gen_obligations(conn, es) -> dict:
+    """Сгенерировать обязательства по строкам утверждённой сметы. Идемпотентно
+    (дедуп по estimate_line_id / estimate_item_id). Переиспользуется автогенерацией
+    при approve и ручным эндпоинтом."""
+    order_id = es["order_id"]
+    items = conn.execute(
+        "SELECT * FROM estimate_items WHERE set_id = ? ORDER BY sort_order", (es["id"],)
+    ).fetchall()
+    created = 0
+    skipped = 0
+    for item in items:
+        lines = conn.execute(
+            "SELECT * FROM estimate_lines WHERE item_id = ? ORDER BY sort_order", (item["id"],)
+        ).fetchall()
+
+        if lines:
+            for line in lines:
+                existing = conn.execute(
+                    "SELECT id FROM creditors WHERE estimate_line_id = ?", (line["id"],)
+                ).fetchone()
+                if existing:
+                    skipped += 1
+                    continue
+                master_id = line["master_id"] if line["master_id"] else None
+                contractor = line["contractor_name"] or ""
+                if not master_id and contractor:
+                    master_id = _find_or_create_master(conn, contractor)
+                if not contractor and master_id:
+                    m = conn.execute("SELECT name FROM masters WHERE id = ?", (master_id,)).fetchone()
+                    contractor = m["name"] if m else ""
+                type_label = _LINE_TYPE_RU.get(line["type"] or "other", "Прочее")
+                name = contractor or f"{type_label}: {line['title'] or 'Без названия'}"
+                description = f"{item['title'] or ''} — {line['title'] or type_label}".strip(" —")
+                amount = round(line["line_total"] or 0, 2)
+                cid = str(uuid.uuid4())
+                conn.execute(
+                    """INSERT INTO creditors
+                       (id, name, total, paid, description, order_id,
+                        estimate_item_id, estimate_line_id, amount_plan, status)
+                       VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, 'open')""",
+                    (cid, name, amount, description, order_id, item["id"], line["id"], amount),
+                )
+                created += 1
+        else:
+            existing = conn.execute(
+                "SELECT id FROM creditors WHERE estimate_item_id = ? AND estimate_line_id IS NULL",
+                (item["id"],)
+            ).fetchone()
+            if existing:
+                skipped += 1
+                continue
+            amount = round(item["cost_total"] or 0, 2)
+            cid = str(uuid.uuid4())
+            conn.execute(
+                """INSERT INTO creditors
+                   (id, name, total, paid, description, order_id,
+                    estimate_item_id, amount_plan, status)
+                   VALUES (?, ?, ?, 0, ?, ?, ?, ?, 'open')""",
+                (cid, item["title"] or "Без названия", amount,
+                 f"Смета: {es['title'] or es['id']}", order_id, item["id"], amount),
+            )
+            created += 1
+    return {"created": created, "skipped": skipped}
+
+
 @router.post("/sets/{set_id}/create-obligations")
 def create_obligations(set_id: str):
     conn = get_production()
@@ -702,75 +770,9 @@ def create_obligations(set_id: str):
             raise HTTPException(status_code=404, detail="Set not found")
         if es["status"] != "approved":
             raise HTTPException(status_code=400, detail="Set must be approved")
-        order_id = es["order_id"]
-        items = conn.execute(
-            "SELECT * FROM estimate_items WHERE set_id = ? ORDER BY sort_order", (set_id,)
-        ).fetchall()
-        created = 0
-        skipped = 0
-        for item in items:
-            lines = conn.execute(
-                "SELECT * FROM estimate_lines WHERE item_id = ? ORDER BY sort_order", (item["id"],)
-            ).fetchall()
-
-            if lines:
-                # Per-line obligations
-                for line in lines:
-                    existing = conn.execute(
-                        "SELECT id FROM creditors WHERE estimate_line_id = ?", (line["id"],)
-                    ).fetchone()
-                    if existing:
-                        skipped += 1
-                        continue
-
-                    # Resolve contractor
-                    master_id = line["master_id"] if line["master_id"] else None
-                    contractor = line["contractor_name"] or ""
-                    if not master_id and contractor:
-                        master_id = _find_or_create_master(conn, contractor)
-                    if not contractor and master_id:
-                        m = conn.execute("SELECT name FROM masters WHERE id = ?", (master_id,)).fetchone()
-                        contractor = m["name"] if m else ""
-
-                    type_label = _LINE_TYPE_RU.get(line["type"] or "other", "Прочее")
-                    name = contractor or f"{type_label}: {line['title'] or 'Без названия'}"
-                    description = f"{item['title'] or ''} — {line['title'] or type_label}".strip(" —")
-                    amount = round(line["line_total"] or 0, 2)
-
-                    cid = str(uuid.uuid4())
-                    conn.execute(
-                        """INSERT INTO creditors
-                           (id, name, total, paid, description, order_id,
-                            estimate_item_id, estimate_line_id, amount_plan,
-                            status)
-                           VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, 'open')""",
-                        (cid, name, amount, description, order_id,
-                         item["id"], line["id"], amount),
-                    )
-                    created += 1
-            else:
-                # No lines: fall back to item-level obligation
-                existing = conn.execute(
-                    "SELECT id FROM creditors WHERE estimate_item_id = ? AND estimate_line_id IS NULL",
-                    (item["id"],)
-                ).fetchone()
-                if existing:
-                    skipped += 1
-                    continue
-                amount = round(item["cost_total"] or 0, 2)
-                cid = str(uuid.uuid4())
-                conn.execute(
-                    """INSERT INTO creditors
-                       (id, name, total, paid, description, order_id,
-                        estimate_item_id, amount_plan, status)
-                       VALUES (?, ?, ?, 0, ?, ?, ?, ?, 'open')""",
-                    (cid, item["title"] or "Без названия", amount,
-                     f"Смета: {es['title'] or set_id}", order_id, item["id"], amount),
-                )
-                created += 1
-
+        res = _gen_obligations(conn, es)
         conn.commit()
-        return {"created": created, "skipped": skipped}
+        return res
     finally:
         conn.close()
 
