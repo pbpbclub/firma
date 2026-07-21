@@ -555,3 +555,25 @@ def ensure_payee_rules_schema():
         conn.commit()
     finally:
         conn.close()
+
+
+def ensure_inbox_dismissed_schema():
+    """Скрытые из инбокса транзакции (переводы между своими счетами, возвраты).
+
+    finance.db веб только читает, флаг хранить негде — поэтому таблица здесь.
+    source: 'bank-in' — инбокс поступлений (routers/payments.py); списания
+    скрытия не используют (у них «разнесено» выводится из expenses/creditors)."""
+    conn = get_production()
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS inbox_dismissed (
+                tx_id      TEXT NOT NULL,
+                source     TEXT NOT NULL,
+                reason     TEXT,
+                created_at TEXT DEFAULT (datetime('now')),
+                PRIMARY KEY (tx_id, source)
+            )
+        """)
+        conn.commit()
+    finally:
+        conn.close()

@@ -4,6 +4,7 @@ from typing import Optional, List
 from uuid import uuid4
 from db import get_production
 from auth import get_current_user
+from routers.estimates import set_totals
 
 router = APIRouter()
 
@@ -79,7 +80,8 @@ def list_orders(
                 **dict(r),
                 "status_label": STATUS_LABELS.get(r["status"], r["status"]),
                 "priority_label": PRIORITY_LABELS.get(r["priority"], r["priority"]),
-                "debt": round((r["price_plan"] or 0) - (r["paid_total"] or 0), 2),
+                # Долг — от той же выручки, что и лестница (для draft-смет это сет, не поле заказа).
+                "debt": round((m["revenue"] or 0) - (r["paid_total"] or 0), 2),
                 # margin остаётся валовой (значение прежнее) — рядом полная лестница
                 "margin": m["gross_profit"],
                 "gross_profit": m["gross_profit"],
@@ -88,6 +90,7 @@ def list_orders(
                 "net_profit": m["net_profit"],
                 "payment_type": m["payment_type"],
                 "has_estimate": m["has_estimate"],
+                "plan_source": m["plan_source"],
             })
         return out
     finally:
@@ -200,6 +203,19 @@ def _margin(conn, oid: str, price_plan, cost_plan, est=None) -> dict:
     is_bank = bool(est and est["payment_type"] == "bank")
     revenue = round(price_plan or 0, 2)
     cost = round(cost_plan or 0, 2)
+    plan_source = "manual"
+    if est:
+        plan_source = "approved" if est["status"] == "approved" else "draft"
+        if plan_source == "draft":
+            # orders.price_plan/cost_plan синкаются ТОЛЬКО при approve. Пока активен
+            # черновик, считать по полям заказа нельзя: выручка была бы из устаревшего
+            # поля, а себестоимость — из живых строк черновика, и маржа врала бы
+            # «минусом на пустом месте». Берём обе суммы из самого сета.
+            t = set_totals(conn, est["id"])
+            if t["price"] > 0:   # у смет финагента sale_price бывает 0 — ручной план не затираем
+                revenue = t["price"]
+            if t["cost"] > 0:
+                cost = t["cost"]
     gross = round(revenue - cost, 2)
     # УСН платится с того, что прошло через счёт → только безнал.
     tax = round(revenue * TAX_PCT / 100, 2) if is_bank else 0.0
@@ -212,6 +228,9 @@ def _margin(conn, oid: str, price_plan, cost_plan, est=None) -> dict:
         "net_profit": round(gross - tax, 2),
         "payment_type": (est["payment_type"] if est else None) or "cash",
         "has_estimate": est is not None,
+        # Откуда план: approved-смета / draft-смета / вручную (сметы нет).
+        # UI обязан помечать draft — эти числа ещё не согласованы с клиентом.
+        "plan_source": plan_source,
     }
 
 
@@ -251,23 +270,44 @@ def _plan_fact(conn, oid: str, cost_plan: float, paid_total: float, price_plan: 
     # оно НЕ покрыто расходом — иначе тот же платёж считался бы дважды (как expense
     # и как creditors.paid). Расход знает о покрытии через creditor_id либо через
     # совпадение id транзакции банка/ZenMoney.
-    cred_paid = conn.execute(
-        """SELECT COALESCE(SUM(c.paid), 0) FROM creditors c
+    # Категория факта — из плановой строки/позиции, породившей обязательство
+    # (обязательство, оплаченное напрямую, раньше целиком падало в «Прочее»
+    # и ломало разбивку). Без привязки к смете — по-прежнему «Прочее».
+    cred_rows = conn.execute(
+        """SELECT COALESCE(el.type, ei.category, 'other') AS cat, COALESCE(SUM(c.paid), 0) AS s
+           FROM creditors c
+           LEFT JOIN estimate_lines el ON el.id = c.estimate_line_id
+           LEFT JOIN estimate_items ei ON ei.id = c.estimate_item_id
            WHERE c.order_id = ?
              AND NOT EXISTS (
                SELECT 1 FROM expenses e WHERE e.order_id = c.order_id AND (
                     e.creditor_id = c.id
                  OR (e.finance_tx_id  IS NOT NULL AND e.finance_tx_id  = c.finance_tx_id)
-                 OR (e.zenmoney_tx_id IS NOT NULL AND e.zenmoney_tx_id = c.zenmoney_tx_id)))""",
+                 OR (e.zenmoney_tx_id IS NOT NULL AND e.zenmoney_tx_id = c.zenmoney_tx_id)))
+           GROUP BY COALESCE(el.type, ei.category, 'other')""",
         (oid,)
-    ).fetchone()[0] or 0
-    fact_by["Прочее"] += cred_paid  # обязательства без явной категории — в «Прочее»
+    ).fetchall()
+    for r in cred_rows:
+        fact_by[_bucket(r["cat"])] += r["s"] or 0
 
     plan_detail_sum = round(sum(plan_by.values()), 2)
-    # Если у сметы нет строк детализации — плановая себестоимость лежит в cost_plan «без разбивки»
-    plan_total = plan_detail_sum if plan_detail_sum > 0 else round(cost_plan or 0, 2)
-    if plan_detail_sum == 0 and (cost_plan or 0) > 0:
-        plan_by["Прочее"] += round(cost_plan or 0, 2)
+    # Фолбэки плана: строки → позиции сета (сметы финагента без строк) → cost_plan заказа.
+    items_plan = 0.0
+    if plan_detail_sum == 0 and est:
+        for r in conn.execute(
+            "SELECT category AS c, COALESCE(SUM(cost_total), 0) AS s FROM estimate_items WHERE set_id = ? GROUP BY category",
+            (est["id"],)
+        ):
+            plan_by[_bucket(r["c"])] += r["s"] or 0
+        items_plan = round(sum(plan_by.values()), 2)
+    if plan_detail_sum > 0:
+        plan_total = plan_detail_sum
+    elif items_plan > 0:
+        plan_total = items_plan
+    else:
+        plan_total = round(cost_plan or 0, 2)
+        if plan_total > 0:
+            plan_by["Прочее"] += plan_total
 
     categories = []
     for b in _CAT_BUCKETS:
@@ -293,6 +333,7 @@ def _plan_fact(conn, oid: str, cost_plan: float, paid_total: float, price_plan: 
 
     return {
         "has_estimate": est is not None,
+        "plan_source": m["plan_source"],
         "detailed": plan_detail_sum > 0,
         # Внесена ли хоть одна фактическая трата и какая доля плана закрыта фактом.
         # UI обязан смотреть сюда, прежде чем выдавать факт за полную картину.
@@ -338,8 +379,10 @@ def plan_fact_summary():
                 "title": r["title"],
                 "status": r["status"],
                 "status_label": STATUS_LABELS.get(r["status"], r["status"]),
-                "price_plan": r["price_plan"] or 0,
+                # Выручка из план-факта: для draft-смет это сет, а не устаревшее поле заказа.
+                "price_plan": pf["revenue"],
                 "paid_total": r["paid_total"] or 0,
+                "plan_source": pf["plan_source"],
                 "cost_plan": pf["cost_plan"],
                 "cost_fact": pf["cost_fact"],
                 "cost_delta": pf["cost_delta"],
@@ -407,7 +450,8 @@ def get_order(order_id: str):
             "status_label": STATUS_LABELS.get(order["status"], order["status"]),
             "priority_label": PRIORITY_LABELS.get(order["priority"], order["priority"]),
             "paid_total": paid_total,
-            "debt": round(price_plan - paid_total, 2),
+            # Долг — от той же выручки, что и лестница (для draft-смет это сет, не поле заказа).
+            "debt": round((m["revenue"] or 0) - paid_total, 2),
             # margin остаётся валовой (значение прежнее) — рядом полная лестница
             "margin": m["gross_profit"],
             "gross_profit": m["gross_profit"],
@@ -416,6 +460,7 @@ def get_order(order_id: str):
             "net_profit": m["net_profit"],
             "payment_type": m["payment_type"],
             "has_estimate": m["has_estimate"],
+            "plan_source": m["plan_source"],
             # Резерв под материалы (ТЗ-1 задача 1). reserved_amount/reserve_released_at
             # льются через **order; сюда — производные для UI.
             "reserve_suggested": _reserve_suggested(pf, order.get("cost_plan") or 0),
@@ -672,6 +717,11 @@ class PaymentCreate(BaseModel):
 
 @router.post("/{order_id}/payments")
 def add_payment(order_id: str, body: PaymentCreate):
+    # Нулевой/отрицательный платёж молча испортил бы paid_total и долг.
+    if body.amount is None or body.amount <= 0:
+        raise HTTPException(status_code=400, detail="amount must be > 0")
+    if not (body.paid_at or "").strip():
+        raise HTTPException(status_code=400, detail="paid_at required")
     conn = get_production()
     try:
         r = conn.execute("SELECT * FROM orders WHERE id = ? OR number = ?", (order_id, order_id)).fetchone()
@@ -785,8 +835,7 @@ def _resolve_order(conn, order_id: str):
 def _validate_expense(body: ExpenseIn):
     if not (body.title or "").strip():
         raise HTTPException(status_code=400, detail="title required")
-    # У payments валидации суммы нет, но тащить этот пробел в новый код не будем:
-    # нулевой/отрицательный расход молча испортит факт и маржу.
+    # Нулевой/отрицательный расход молча испортит факт и маржу.
     if body.amount is None or body.amount <= 0:
         raise HTTPException(status_code=400, detail="amount must be > 0")
     if body.category not in EXPENSE_CATEGORIES:

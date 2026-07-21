@@ -55,11 +55,16 @@ def _touch_set(conn, item_id: str):
     )
 
 
-def _sync_order_from_set(conn, set_id: str):
-    """Recalculate order price_plan/cost_plan from all items in this set."""
-    es = conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
+def set_totals(conn, set_id: str) -> dict:
+    """Себестоимость и цена для клиента по сету (с банковской надбавкой при безнале).
+
+    Единственная формула этих сумм: её используют и синк заказа при approve,
+    и orders._margin для draft-смет, и очередь ревью. Не дублировать выражением."""
+    es = conn.execute(
+        "SELECT payment_type, bank_pct FROM estimate_sets WHERE id = ?", (set_id,)
+    ).fetchone()
     if not es:
-        return
+        return {"cost": 0.0, "price": 0.0}
     items = conn.execute(
         "SELECT cost_total, sale_price, bank_pct FROM estimate_items WHERE set_id = ?",
         (set_id,)
@@ -73,9 +78,18 @@ def _sync_order_from_set(conn, set_id: str):
         )
     else:
         total_price = sum((it["sale_price"] or 0) for it in items)
+    return {"cost": round(total_cost, 2), "price": round(total_price, 2)}
+
+
+def _sync_order_from_set(conn, set_id: str):
+    """Recalculate order price_plan/cost_plan from all items in this set."""
+    es = conn.execute("SELECT order_id FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
+    if not es:
+        return
+    t = set_totals(conn, set_id)
     conn.execute(
         "UPDATE orders SET price_plan = ?, cost_plan = ?, updated_at = datetime('now') WHERE id = ?",
-        (total_price, total_cost, es["order_id"])
+        (t["price"], t["cost"], es["order_id"])
     )
 
 
@@ -89,6 +103,40 @@ def _sync_order_if_approved(conn, item_id: str):
     ).fetchone()
     if row and row["status"] == "approved":
         _sync_order_from_set(conn, row["id"])
+
+
+def _approve_set(conn, set_id: str) -> dict:
+    """Довести утверждение сметы до конца: supersede прочих сетов, синк плана заказа,
+    обязательства. Ожидает, что status='approved' уже проставлен. Единственная точка
+    «сделать смету актуальной» — её зовут и PUT /sets/{id} (редактор), и
+    POST /sets/{id}/approve (массовое ревью, финагент). Идемпотентна.
+
+    Возвращает diff для ревью: цены заказа до/после, сколько обязательств создано."""
+    es = conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
+    before = conn.execute(
+        "SELECT price_plan, cost_plan FROM orders WHERE id = ?", (es["order_id"],)
+    ).fetchone()
+    superseded = conn.execute(
+        "UPDATE estimate_sets SET status = 'superseded', updated_at = ? WHERE order_id = ? AND id != ? AND status != 'superseded'",
+        (_now(), es["order_id"], set_id)
+    ).rowcount
+    _sync_order_from_set(conn, set_id)
+    # Обязательства по строкам — чтобы разноска сразу могла привязывать оплату
+    # к плановым позициям. Идемпотентно (дедуп по estimate_line_id).
+    obligations = _gen_obligations(conn, es)
+    after = conn.execute(
+        "SELECT price_plan, cost_plan FROM orders WHERE id = ?", (es["order_id"],)
+    ).fetchone()
+    return {
+        "set_id": set_id,
+        "order_id": es["order_id"],
+        "price_before": (before["price_plan"] or 0) if before else 0,
+        "price_after": (after["price_plan"] or 0) if after else 0,
+        "cost_before": (before["cost_plan"] or 0) if before else 0,
+        "cost_after": (after["cost_plan"] or 0) if after else 0,
+        "obligations": obligations,
+        "superseded": superseded,
+    }
 
 
 def _assert_set_editable(conn, set_id: str):
@@ -228,17 +276,101 @@ def update_set(set_id: str, body: SetUpdate):
         conn.commit()
         updated = conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
         if updated["status"] == "approved":
-            # Одна активная смета на заказ: остальные сеты уходят в superseded.
-            conn.execute(
-                "UPDATE estimate_sets SET status = 'superseded', updated_at = ? WHERE order_id = ? AND id != ? AND status != 'superseded'",
-                (_now(), updated["order_id"], set_id)
-            )
-            _sync_order_from_set(conn, set_id)
-            # Обязательства по строкам — чтобы разноска сразу могла привязывать оплату
-            # к плановым позициям. Идемпотентно (дедуп по estimate_line_id).
-            _gen_obligations(conn, updated)
+            # Одна активная смета на заказ: supersede прочих + синк заказа + обязательства.
+            _approve_set(conn, set_id)
             conn.commit()
         return dict(conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (set_id,)).fetchone())
+    finally:
+        conn.close()
+
+
+class ApproveIn(BaseModel):
+    force: bool = False
+
+
+@router.post("/sets/{set_id}/approve")
+def approve_set(set_id: str, body: Optional[ApproveIn] = None):
+    """Пометить смету актуальной. Для уже утверждённой — идемпотентно
+    (догенерит недостающие обязательства, вернёт no-op diff)."""
+    force = bool(body and body.force)
+    conn = get_production()
+    try:
+        es = conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
+        if not es:
+            raise HTTPException(status_code=404, detail="Set not found")
+        already = es["status"] == "approved"
+        if not already:
+            t = set_totals(conn, set_id)
+            # Сметы финагента бывают без продажных цен — approve обнулил бы цену заказа.
+            if t["price"] <= 0 and not force:
+                raise HTTPException(
+                    status_code=409,
+                    detail="В смете нет продажных цен — после утверждения цена заказа станет 0 ₽. Если так и надо, повтори с force=true.",
+                )
+            conn.execute(
+                "UPDATE estimate_sets SET status = 'approved', updated_at = ? WHERE id = ?",
+                (_now(), set_id)
+            )
+        diff = _approve_set(conn, set_id)
+        conn.commit()
+        diff["already_approved"] = already
+        return diff
+    finally:
+        conn.close()
+
+
+@router.get("/review-queue")
+def review_queue():
+    """Очередь смет к утверждению: draft-сеты живых заказов, у которых нет более
+    свежего approved. Для ревью — дельта «план заказа сейчас → станет после approve»
+    и признаки рисков: без строк (обязательства лягут крупно, по позициям),
+    без продажных цен (approve обнулит цену заказа)."""
+    conn = get_production()
+    try:
+        rows = conn.execute(
+            """SELECT es.id, es.title, es.created_at, es.payment_type, es.bank_pct,
+                      es.order_id, o.number AS order_number, o.title AS order_title,
+                      o.status AS order_status, o.price_plan AS order_price_plan,
+                      o.cost_plan AS order_cost_plan, c.name AS customer_name
+               FROM estimate_sets es
+               JOIN orders o ON o.id = es.order_id
+               LEFT JOIN customers c ON c.id = o.customer_id
+               WHERE es.status = 'draft' AND o.archived = 0 AND o.status != 'cancelled'
+                 AND NOT EXISTS (
+                   SELECT 1 FROM estimate_sets a
+                   WHERE a.order_id = es.order_id AND a.status = 'approved'
+                     AND a.created_at > es.created_at)
+               ORDER BY o.created_at DESC, es.created_at DESC"""
+        ).fetchall()
+        out = []
+        for r in rows:
+            t = set_totals(conn, r["id"])
+            counts = conn.execute(
+                """SELECT COUNT(DISTINCT ei.id) AS items, COUNT(el.id) AS lines
+                   FROM estimate_items ei LEFT JOIN estimate_lines el ON el.item_id = ei.id
+                   WHERE ei.set_id = ?""", (r["id"],)
+            ).fetchone()
+            out.append({
+                "set_id": r["id"],
+                "set_title": r["title"],
+                "set_created_at": r["created_at"],
+                "payment_type": r["payment_type"],
+                "bank_pct": r["bank_pct"],
+                "order_id": r["order_id"],
+                "order_number": r["order_number"],
+                "order_title": r["order_title"],
+                "order_status": r["order_status"],
+                "customer_name": r["customer_name"],
+                "items_count": counts["items"] or 0,
+                "lines_count": counts["lines"] or 0,
+                "set_cost": t["cost"],
+                "set_price": t["price"],
+                "price_plan_now": r["order_price_plan"] or 0,
+                "cost_plan_now": r["order_cost_plan"] or 0,
+                "price_delta": round(t["price"] - (r["order_price_plan"] or 0), 2),
+                "cost_delta": round(t["cost"] - (r["order_cost_plan"] or 0), 2),
+            })
+        return {"sets": out}
     finally:
         conn.close()
 

@@ -298,10 +298,23 @@ def finance_by_brand():
                GROUP BY o.brand""").fetchall():
             slot(r["brand"])["income"] += r["s"] or 0
 
-        # расход: обязательства → заказ → бренд
+        # расход: факт заказа = expenses + НЕпокрытые ими обязательства.
+        # Раньше считались только creditors.paid — ручные/разнесённые расходы
+        # без обязательства в брендовый P&L не попадали вовсе.
+        # Дедуп тот же, что в orders._plan_fact (инвариант «одна оплата = один факт»).
+        for r in conn.execute(
+            """SELECT o.brand AS brand, COALESCE(SUM(e.amount),0) AS s
+               FROM expenses e JOIN orders o ON o.id = e.order_id
+               GROUP BY o.brand""").fetchall():
+            slot(r["brand"])["expense"] += r["s"] or 0
         for r in conn.execute(
             """SELECT o.brand AS brand, COALESCE(SUM(c.paid),0) AS s
                FROM creditors c JOIN orders o ON o.id = c.order_id
+               WHERE NOT EXISTS (
+                 SELECT 1 FROM expenses e WHERE e.order_id = c.order_id AND (
+                      e.creditor_id = c.id
+                   OR (e.finance_tx_id  IS NOT NULL AND e.finance_tx_id  = c.finance_tx_id)
+                   OR (e.zenmoney_tx_id IS NOT NULL AND e.zenmoney_tx_id = c.zenmoney_tx_id)))
                GROUP BY o.brand""").fetchall():
             slot(r["brand"])["expense"] += r["s"] or 0
 
