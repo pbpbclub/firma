@@ -13,6 +13,27 @@ PAY_SCHEME_LABELS = {
 }
 
 
+def _paid_total(creditor_rows, expense_rows) -> float:
+    """Выплачено подрядчику = Σ расходов + Σ обязательств, НЕ покрытых расходом.
+
+    Инвариант тот же, что в orders._plan_fact: одна оплата = один факт. Расход,
+    оплативший обязательство (проставлен creditor_id, либо совпадает id транзакции
+    банка/ZenMoney), — тот же платёж; без исключения он задваивал бы «Выплачено».
+    Матчинг по creditor_id/tx глобально идентифицирует один платёж, поэтому
+    кросс-заказный случай (обязательства по имени, расходы по master_id) корректен."""
+    covered_ids = {e["creditor_id"] for e in expense_rows if e["creditor_id"]}
+    covered_fin = {e["finance_tx_id"] for e in expense_rows if e["finance_tx_id"]}
+    covered_zen = {e["zenmoney_tx_id"] for e in expense_rows if e["zenmoney_tx_id"]}
+    exp_sum = sum(e["amount"] or 0 for e in expense_rows)
+    cred_sum = sum(
+        c["paid"] or 0 for c in creditor_rows
+        if c["id"] not in covered_ids
+        and not (c["finance_tx_id"] and c["finance_tx_id"] in covered_fin)
+        and not (c["zenmoney_tx_id"] and c["zenmoney_tx_id"] in covered_zen)
+    )
+    return round(exp_sum + cred_sum, 2)
+
+
 def _pay_label(r: dict) -> Optional[str]:
     scheme, rate, note = r.get("pay_scheme"), r.get("pay_rate"), r.get("pay_note") or ""
     if scheme == "percent" and rate:
@@ -111,23 +132,27 @@ def list_masters():
 
         # Агрегаты пакетно: по одному запросу на источник, не по запросу на мастера
         # (code_rules: N+1 в списочных эндпоинтах запрещён).
-        debt_by_name, paid_by_name = {}, {}
+        # Долг дедупа не требует — считаем сразу агрегатом.
+        debt_by_name = {}
         for r in conn.execute(
             """SELECT name,
-                      COALESCE(SUM(CASE WHEN status = 'open' THEN total - paid ELSE 0 END), 0) AS debt,
-                      COALESCE(SUM(paid), 0) AS paid
+                      COALESCE(SUM(CASE WHEN status = 'open' THEN total - paid ELSE 0 END), 0) AS debt
                FROM creditors GROUP BY name"""):
             debt_by_name[(r["name"] or "").strip()] = round(r["debt"] or 0, 2)
-            paid_by_name[(r["name"] or "").strip()] = round(r["paid"] or 0, 2)
 
-        # Расходы: точная связь по master_id, для старых строк — fallback по supplier.
-        exp_by_master, exp_by_supplier = {}, {}
-        for r in conn.execute(
-            "SELECT master_id, COALESCE(SUM(amount),0) AS s FROM expenses WHERE master_id IS NOT NULL AND master_id != '' GROUP BY master_id"):
-            exp_by_master[str(r["master_id"])] = round(r["s"] or 0, 2)
-        for r in conn.execute(
-            "SELECT supplier, COALESCE(SUM(amount),0) AS s FROM expenses WHERE (master_id IS NULL OR master_id = '') AND supplier IS NOT NULL AND supplier != '' GROUP BY supplier"):
-            exp_by_supplier[(r["supplier"] or "").strip()] = round(r["s"] or 0, 2)
+        # «Выплачено» дедупится (см. _paid_total) → нужны строки, а не суммы.
+        # Обязательства группируем по имени, расходы — по master_id и по supplier.
+        cred_by_name: dict = {}
+        for r in conn.execute("SELECT id, name, paid, finance_tx_id, zenmoney_tx_id FROM creditors"):
+            cred_by_name.setdefault((r["name"] or "").strip(), []).append(dict(r))
+        exp_by_master: dict = {}
+        exp_by_supplier: dict = {}
+        for r in conn.execute("SELECT master_id, supplier, amount, creditor_id, finance_tx_id, zenmoney_tx_id FROM expenses"):
+            e = dict(r)
+            if e["master_id"]:
+                exp_by_master.setdefault(str(e["master_id"]), []).append(e)
+            elif e["supplier"]:
+                exp_by_supplier.setdefault((e["supplier"] or "").strip(), []).append(e)
 
         wt_by_master: dict = {}
         try:
@@ -143,14 +168,15 @@ def list_masters():
             name = (m["name"] or "").strip()
             w = wiki_by_id.get(str(m["id"])) or wiki_by_name.get(name) or {}
             wf = _wiki_fields(w) if w else {}
-            # «Выплачено» = оплаченные обязательства + фактические расходы.
+            # «Выплачено» = расходы + непокрытые обязательства (дедуп, см. _paid_total).
             # contractor_events сюда НЕ входят: одна выплата бывает и там, и там.
-            paid = paid_by_name.get(name, 0) + exp_by_master.get(str(m["id"]), 0) + exp_by_supplier.get(name, 0)
+            exp_rows = exp_by_master.get(str(m["id"]), []) + exp_by_supplier.get(name, [])
+            paid_total = _paid_total(cred_by_name.get(name, []), exp_rows)
             result.append({
                 **m,
                 "work_type_ids": wt_by_master.get(str(m["id"]), []),
                 "debt": debt_by_name.get(name, 0),
-                "paid_total": round(paid, 2),
+                "paid_total": paid_total,
                 "pay_label": wf.get("pay_label"),
                 "pay_scheme": wf.get("pay_scheme"),
                 "wiki_status": wf.get("wiki_status"),
@@ -226,11 +252,14 @@ def create_master(body: MasterCreate):
     try:
         ac = get_analytics()
         try:
+            # Привязку заполняем ТОЛЬКО когда она пустая — не воруем существующую
+            # связь, если контрагент с этим именем уже привязан к другому мастеру.
             ac.execute(
                 """INSERT INTO contractors (name, type, specialization, mes_master_id, created_at, updated_at)
                    VALUES (?, 'contractor', ?, ?, datetime('now'), datetime('now'))
-                   ON CONFLICT(name) DO UPDATE SET mes_master_id = excluded.mes_master_id,
-                                                   updated_at = datetime('now')""",
+                   ON CONFLICT(name) DO UPDATE SET
+                        mes_master_id = COALESCE(NULLIF(contractors.mes_master_id, ''), excluded.mes_master_id),
+                        updated_at = datetime('now')""",
                 (name, body.specialization, mid)
             )
             ac.commit()
@@ -258,8 +287,10 @@ def get_master(master_id: str):
             c["debt"] = round(c["total"] - c["paid"], 2)
 
         # Расходы по заказам: точная связь по master_id + старые строки по supplier.
+        # tx-поля и creditor_id нужны для дедупа «Выплачено» (см. _paid_total).
         expenses = [dict(r) for r in conn.execute(
             """SELECT e.id, e.title, e.amount, e.category, e.expense_date, e.supplier, e.group_id,
+                      e.creditor_id, e.finance_tx_id, e.zenmoney_tx_id,
                       o.number AS order_number, o.title AS order_title, o.id AS order_id
                FROM expenses e LEFT JOIN orders o ON o.id = e.order_id
                WHERE e.master_id = ? OR (COALESCE(e.master_id,'') = '' AND e.supplier = ?)
@@ -289,7 +320,7 @@ def get_master(master_id: str):
         except Exception:
             events = []
 
-    paid_total = round(sum(c["paid"] or 0 for c in creditors) + sum(e["amount"] or 0 for e in expenses), 2)
+    paid_total = _paid_total(creditors, expenses)
 
     return {
         "master": master,

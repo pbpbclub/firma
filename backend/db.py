@@ -40,10 +40,16 @@ def get_analytics_ro():
     с «unable to open database file». immutable=1 читает файл напрямую,
     минуя WAL: для справочника подрядчиков этого достаточно, но свежие
     незачекпойнченные записи фин-агента могут быть не видны."""
+    conn = None
     try:
         conn = sqlite3.connect(f"file:{ANALYTICS_DB}?mode=ro", uri=True)
         conn.execute("SELECT 1 FROM sqlite_master LIMIT 1")
     except sqlite3.OperationalError:
+        if conn is not None:
+            try:
+                conn.close()  # иначе первый хэндл течёт на каждом заблокированном WAL
+            except Exception:
+                pass
         conn = sqlite3.connect(f"file:{ANALYTICS_DB}?immutable=1", uri=True)
     conn.row_factory = sqlite3.Row
     return conn
