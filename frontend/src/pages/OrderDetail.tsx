@@ -1,63 +1,47 @@
+// Карточка заказа. Ось: сводка деньгами → ПЛАН (смета, резерв) → ФАКТ (расходы,
+// платежи, исполнители) → ИТОГ (план-факт и лестница прибыли). Ось видна всегда:
+// без сметы — CTA создать, с черновиком — плашка «утверди».
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { MONO } from "../components/ui/Num";
 import { ConfirmModal } from "../components/ui/Modal";
 import { Loading } from "../components/ui/Loading";
+import { Button } from "../components/ui/Button";
+import { fmtMoney, fmtDate } from "../components/ui/format";
+import { ESTIMATE_STATUS } from "../components/domain";
 import { ordersApi, customersApi, estimatesApi, expensesApi } from "../api";
-import { ArrowLeft, Plus, CaretRight, Trash, LinkSimple, PencilSimple } from "@phosphor-icons/react";
+import { ArrowLeft, Plus, CaretRight, Trash, LinkSimple, PencilSimple, Warning } from "@phosphor-icons/react";
 import { ExpenseModal, EXPENSE_CATEGORIES } from "../components/ExpenseModal";
 import { ProfitLadder, PlanFactBlock } from "../components/OrderFinance";
+import { OrderSummaryStrip } from "../components/order/OrderSummaryStrip";
+import { OrderParams } from "../components/order/OrderParams";
+import type { OrderFormState } from "../components/order/OrderParams";
 import { useNavigationGuard, NavigationGuardModal } from "../components/NavigationGuard";
 
-const ALL_STATUSES = [
-  { value: "draft",         label: "Черновик",       color: "#A89070" },
-  { value: "estimate",      label: "Смета",          color: "#E8592A" },
-  { value: "project",       label: "Проект",         color: "#E8592A" },
-  { value: "in_production", label: "В производстве", color: "#1A1A1A" },
-  { value: "completed",     label: "Завершён",       color: "#4A7C59" },
-  { value: "cancelled",     label: "Отменён",        color: "#8B3A3A" },
-];
-
-const BRANDS = [
-  { value: "MeRA",    color: "#2E6DA4" },
-  { value: "pbpb",    color: "#7B4F9E" },
-  { value: "Транзит", color: "#3D8C6B" },
-];
-
-const ESTIMATE_STATUS: Record<string, string> = { approved: "Согласована", draft: "Черновик" };
-
-function fmt(n: number | null | undefined) {
-  if (!n) return "—";
-  return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) + " ₽";
+// Заголовок стадии оси: ПЛАН → ФАКТ → ИТОГ.
+function StageHeader({ n, title, hint }: { n: string; title: string; hint?: string }) {
+  return (
+    <div style={{ display: "flex", alignItems: "baseline", gap: 10, paddingTop: 20, marginTop: 36, borderTop: "2px solid #1A1A1A" }}>
+      <span style={{ fontSize: 11, fontWeight: 700, color: "#E8592A", fontFamily: MONO }}>{n}</span>
+      <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: "0.08em", color: "#1A1A1A" }}>{title}</span>
+      {hint && <span style={{ fontSize: 10, color: "#A89070" }}>{hint}</span>}
+    </div>
+  );
 }
 
-function fmtDate(s: string) {
-  if (!s) return "—";
-  return new Date(s).toLocaleDateString("ru-RU", { day: "numeric", month: "short", year: "numeric" });
-}
-
-interface FormState {
-  title: string;
-  status: string;
-  brand: string;
-  priority: string;
-  deadline: string;
-  customer_id: string;
-  price_plan: string;
-  cost_plan: string;
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>{children}</div>;
 }
 
 export default function OrderDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const [form, setForm] = useState<FormState | null>(null);
+  const [form, setForm] = useState<OrderFormState | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const blocker = useNavigationGuard(isDirty);
-  const [newCustomerName, setNewCustomerName] = useState("");
-  const [creatingCustomer, setCreatingCustomer] = useState(false);
 
   const { data: order, isLoading } = useQuery({
     queryKey: ["order-detail", id],
@@ -138,6 +122,19 @@ export default function OrderDetail() {
     onSuccess: () => { invalidateFact(); setDelExpense(null); },
   });
 
+  // ── Утверждение сметы (актуализация) ───────────────────────────────────
+  const [approveError, setApproveError] = useState("");
+  const approveSet = useMutation({
+    mutationFn: (setId: string) => estimatesApi.approveSet(setId),
+    onSuccess: () => {
+      setApproveError("");
+      invalidateFact();
+      qc.invalidateQueries({ queryKey: ["order-estimates", id] });
+      qc.invalidateQueries({ queryKey: ["estimates-review-queue"] });
+    },
+    onError: (e: any) => setApproveError(e?.response?.data?.detail || "Не удалось утвердить смету"),
+  });
+
   // ── Резерв под материалы ───────────────────────────────────────────────
   const [reserveEdit, setReserveEdit] = useState<string | null>(null);
   const invalidateReserve = () => {
@@ -181,11 +178,13 @@ export default function OrderDetail() {
     });
   };
 
-  const field = (f: Partial<FormState>) => { setForm(prev => prev ? { ...prev, ...f } : prev); setIsDirty(true); };
+  const field = (f: Partial<OrderFormState>) => { setForm(prev => prev ? { ...prev, ...f } : prev); setIsDirty(true); };
 
-  const statusColor = ALL_STATUSES.find(s => s.value === form?.status)?.color || "#1A1A1A";
-  const brandColor = BRANDS.find(b => b.value === form?.brand)?.color || "#A89070";
   const paidTotal = order?.payments?.reduce((s: number, p: any) => s + p.amount, 0) ?? 0;
+  // Активный черновик (план считается по нему): последний не-superseded draft.
+  const activeDraft = order?.plan_source === "draft"
+    ? [...(estimates as any[])].reverse().find((s: any) => s.status === "draft")
+    : null;
 
   if (isLoading || !form) {
     return <Loading />;
@@ -223,13 +222,9 @@ export default function OrderDetail() {
           >
             <Trash size={14} />
           </button>
-          <button
-            onClick={handleSave}
-            disabled={saveMutation.isPending}
-            style={{ padding: "7px 22px", background: "#E8592A", color: "#fff", border: "none", fontSize: 12, fontWeight: 600, cursor: saveMutation.isPending ? "default" : "pointer", opacity: saveMutation.isPending ? 0.7 : 1, fontFamily: "inherit" }}
-          >
+          <Button variant="primary" onClick={handleSave} disabled={saveMutation.isPending} style={{ fontSize: 12 }}>
             {saveMutation.isPending ? "Сохраняем..." : "Сохранить"}
-          </button>
+          </Button>
         </div>
 
         {/* Delete confirmation modal */}
@@ -257,7 +252,7 @@ export default function OrderDetail() {
           <ConfirmModal
             message={delExpense.group_id
               ? `Удалить расход «${delExpense.title}»? Он входит в разноску на несколько заказов — удалится вся группа.`
-              : `Удалить расход «${delExpense.title}» на ${fmt(delExpense.amount)}? Факт и маржа пересчитаются.`}
+              : `Удалить расход «${delExpense.title}» на ${fmtMoney(delExpense.amount)}? Факт и маржа пересчитаются.`}
             confirmLabel={removeExpense.isPending ? "Удаляем..." : "Удалить"}
             onConfirm={() => removeExpense.mutate(delExpense)}
             onCancel={() => setDelExpense(null)}
@@ -279,155 +274,42 @@ export default function OrderDetail() {
             onBlur={e => (e.currentTarget.style.borderBottomColor = "transparent")}
           />
 
-          {/* Quick selectors */}
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 28, paddingBottom: 24, borderBottom: "1px solid #EDEBE6" }}>
-            <div>
-              <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>СТАТУС</div>
-              <select
-                value={form.status}
-                onChange={e => field({ status: e.target.value })}
-                style={{ border: "1px solid #EDEBE6", padding: "6px 10px", fontSize: 12, fontWeight: 600, outline: "none", background: "#fff", color: statusColor, cursor: "pointer", fontFamily: "inherit" }}
-              >
-                {ALL_STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-              </select>
-            </div>
-            <div>
-              <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>БРЕНД</div>
-              <select
-                value={form.brand}
-                onChange={e => field({ brand: e.target.value })}
-                style={{ border: `1px solid ${form.brand ? brandColor : "#EDEBE6"}`, padding: "6px 10px", fontSize: 12, fontWeight: 600, outline: "none", background: "#fff", color: form.brand ? brandColor : "#A89070", cursor: "pointer", fontFamily: "inherit" }}
-              >
-                <option value="">— без бренда —</option>
-                {BRANDS.map(b => <option key={b.value} value={b.value}>{b.value}</option>)}
-              </select>
-            </div>
-            <div>
-              <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>ПРИОРИТЕТ</div>
-              <select
-                value={form.priority}
-                onChange={e => field({ priority: e.target.value })}
-                style={{ border: "1px solid #EDEBE6", padding: "6px 10px", fontSize: 12, outline: "none", background: "#fff", cursor: "pointer", fontFamily: "inherit" }}
-              >
-                <option value="low">Низкий</option>
-                <option value="normal">Обычный</option>
-                <option value="high">Высокий</option>
-                <option value="urgent">Срочный</option>
-              </select>
-            </div>
-          </div>
+          {/* Сводка деньгами — карточка открывается финансовой картиной */}
+          {order && <OrderSummaryStrip order={order} paidTotal={paidTotal} />}
 
-          {/* Fields grid */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px 28px", marginBottom: 32 }}>
-            <div style={{ gridColumn: "1 / -1" }}>
-              <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>КЛИЕНТ</div>
-              <select
-                value={form.customer_id === "__new__" ? "__new__" : form.customer_id}
-                onChange={e => {
-                  if (e.target.value === "__new__") {
-                    field({ customer_id: "__new__" });
-                    setNewCustomerName("");
-                  } else {
-                    field({ customer_id: e.target.value });
-                    setNewCustomerName("");
-                  }
-                }}
-                style={{ width: "100%", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none", background: "#fff", fontFamily: "inherit" }}
-              >
-                <option value="">— не выбран —</option>
-                {(customers as any[]).map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                <option value="__new__">+ Создать нового клиента</option>
-              </select>
-              {form.customer_id === "__new__" && (
-                <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                  <input
-                    autoFocus
-                    placeholder="Имя клиента"
-                    value={newCustomerName}
-                    onChange={e => setNewCustomerName(e.target.value)}
-                    onKeyDown={async e => {
-                      if (e.key === "Escape") { field({ customer_id: "" }); setNewCustomerName(""); }
-                      if (e.key === "Enter" && newCustomerName.trim()) {
-                        setCreatingCustomer(true);
-                        try {
-                          const c = await customersApi.create({ name: newCustomerName.trim() });
-                          qc.invalidateQueries({ queryKey: ["customers"] });
-                          field({ customer_id: String(c.id) });
-                          setNewCustomerName("");
-                        } finally { setCreatingCustomer(false); }
-                      }
-                    }}
-                    style={{ flex: 1, border: "1px solid #E8592A", padding: "6px 10px", fontSize: 13, outline: "none", fontFamily: "inherit" }}
-                  />
-                  <button
-                    disabled={creatingCustomer || !newCustomerName.trim()}
-                    onClick={async () => {
-                      if (!newCustomerName.trim()) return;
-                      setCreatingCustomer(true);
-                      try {
-                        const c = await customersApi.create({ name: newCustomerName.trim() });
-                        qc.invalidateQueries({ queryKey: ["customers"] });
-                        field({ customer_id: String(c.id) });
-                        setNewCustomerName("");
-                      } finally { setCreatingCustomer(false); }
-                    }}
-                    style={{ padding: "6px 14px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600, opacity: creatingCustomer || !newCustomerName.trim() ? 0.5 : 1, fontFamily: "inherit" }}
-                  >
-                    {creatingCustomer ? "..." : "Создать"}
-                  </button>
-                </div>
-              )}
-            </div>
-            {/* Плановые суммы — из сметы, read-only: _sync_order_from_set перезапишет
-                любую ручную правку при утверждении сметы. Правятся в редакторе сметы. */}
-            <div>
-              <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>СТОИМОСТЬ (план)</div>
-              <div style={{ padding: "7px 10px", fontSize: 13, fontFamily: MONO, fontVariantNumeric: "tabular-nums", color: "#1A1A1A", background: "#FAF8F5" }}>
-                {fmt(order?.price_plan)} <span style={{ fontSize: 9, color: "#A89070", fontFamily: "inherit" }}>из сметы</span>
-              </div>
-            </div>
-            <div>
-              <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>СЕБЕСТОИМОСТЬ (план)</div>
-              <div style={{ padding: "7px 10px", fontSize: 13, fontFamily: MONO, fontVariantNumeric: "tabular-nums", color: "#1A1A1A", background: "#FAF8F5" }}>
-                {fmt(order?.cost_plan)} <span style={{ fontSize: 9, color: "#A89070", fontFamily: "inherit" }}>из сметы</span>
-              </div>
-            </div>
-            <div>
-              <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>ДЕДЛАЙН</div>
-              <input
-                type="date"
-                value={form.deadline}
-                onChange={e => field({ deadline: e.target.value })}
-                style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none", fontFamily: "inherit" }}
-              />
-            </div>
-          </div>
+          {/* Параметры (статус/бренд/клиент/дедлайн) — под катом */}
+          <OrderParams order={order} form={form} field={field} customers={customers as any[]} />
 
-          {/* Estimates */}
-          <div style={{ paddingTop: 24, borderTop: "1px solid #EDEBE6", marginBottom: 32 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-              <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>СМЕТЫ</div>
-              <button
-                onClick={() => addEstimateMutation.mutate()}
-                disabled={addEstimateMutation.isPending}
-                style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 12px", border: "1px solid #EDEBE6", background: "none", fontSize: 11, cursor: "pointer", color: "#1A1A1A", fontFamily: "inherit" }}
-              >
+          {/* ═══ СТАДИЯ 1: ПЛАН ═══ */}
+          <StageHeader n="01" title="ПЛАН" hint="смета и обещания клиенту" />
+
+          {/* Сметы */}
+          <div style={{ paddingTop: 18, marginBottom: 8 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <SectionLabel>СМЕТЫ</SectionLabel>
+              <Button size="sm" onClick={() => addEstimateMutation.mutate()} disabled={addEstimateMutation.isPending} style={{ fontSize: 11 }}>
                 <Plus size={11} /> Новая смета
-              </button>
+              </Button>
             </div>
+            {approveError && (
+              <div style={{ fontSize: 11, color: "#8B3A3A", marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+                <Warning size={12} /> {approveError}
+              </div>
+            )}
             {(estimates as any[]).length === 0 ? (
               <div style={{ fontSize: 12, color: "#C8C0B0", padding: "8px 0" }}>Сметы не добавлены</div>
             ) : (
               (estimates as any[]).map((s: any, i: number) => {
                 // Эндпоинт отдаёт сметы с позициями, но без агрегата по сете —
                 // суммируем из items. Клиентская цена для безнала = sale × (1+bank%),
-                // та же формула, что в _sync_order_from_set и редакторе сметы.
+                // та же формула, что set_totals на бэке и редактор сметы.
                 const items = s.items ?? [];
                 const isBank = s.payment_type === "bank";
                 const bpct = s.bank_pct ?? 13;
                 const cost = items.reduce((a: number, it: any) => a + (it.cost_total || 0), 0);
                 const sale = items.reduce((a: number, it: any) => a + (isBank ? Math.round((it.sale_price || 0) * (1 + (it.bank_pct ?? bpct) / 100)) : (it.sale_price || 0)), 0);
                 const delta = sale - cost;
+                const st = ESTIMATE_STATUS[s.status];
                 const metric = (label: string, value: string, color: string) => (
                   <div style={{ textAlign: "right", minWidth: 76 }}>
                     <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.04em" }}>{label}</div>
@@ -438,7 +320,7 @@ export default function OrderDetail() {
                 <div
                   key={s.id}
                   onClick={() => navigate(`/orders/${id}/estimate?set=${s.id}`)}
-                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, padding: "12px 10px", borderBottom: "1px solid #F2EFE9", cursor: "pointer" }}
+                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, padding: "12px 10px", borderBottom: "1px solid #F2EFE9", cursor: "pointer", opacity: s.status === "superseded" ? 0.55 : 1 }}
                   onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")}
                   onMouseLeave={e => (e.currentTarget.style.background = "")}
                 >
@@ -446,13 +328,20 @@ export default function OrderDetail() {
                     <span style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>
                       {s.name || `Смета ${i + 1}`}
                     </span>
-                    <span style={{ fontSize: 10, color: s.status === "approved" ? "#4A7C59" : "#A89070", fontWeight: 500 }}>
-                      {ESTIMATE_STATUS[s.status] ?? s.status}
+                    <span style={{ fontSize: 10, color: st?.color ?? "#A89070", fontWeight: 500 }}>
+                      {st?.label ?? s.status}
                     </span>
+                    {s.status === "draft" && (
+                      <Button size="sm" variant="primary" disabled={approveSet.isPending}
+                        onClick={e => { e.stopPropagation(); approveSet.mutate(s.id); }}
+                        style={{ fontSize: 10, padding: "3px 10px" }}>
+                        {approveSet.isPending ? "..." : "Утвердить"}
+                      </Button>
+                    )}
                   </div>
-                  {metric("СЕБЕСТ.", fmt(cost), "#6B6355")}
-                  {metric("ПРОДАЖА", fmt(sale), "#1A1A1A")}
-                  {metric("Δ", delta === 0 ? "—" : (delta > 0 ? "+" : "") + fmt(delta), delta >= 0 ? "#4A7C59" : "#8B3A3A")}
+                  {metric("СЕБЕСТ.", fmtMoney(cost), "#6B6355")}
+                  {metric("ПРОДАЖА", fmtMoney(sale), "#1A1A1A")}
+                  {metric("Δ", delta === 0 ? "—" : (delta > 0 ? "+" : "") + fmtMoney(delta), delta >= 0 ? "#4A7C59" : "#8B3A3A")}
                   <CaretRight size={13} style={{ color: "#C8C0B0", flexShrink: 0 }} />
                 </div>
                 );
@@ -460,23 +349,10 @@ export default function OrderDetail() {
             )}
           </div>
 
-          {/* Финансы — та же лестница, что в панели списка (считает бэк) */}
-          <div style={{ paddingTop: 24, borderTop: "1px solid #EDEBE6", marginBottom: 32 }}>
-            <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 14 }}>ФИНАНСЫ</div>
-            {order && <ProfitLadder order={order} paidTotal={paidTotal} />}
-            {order?.price_plan > 0 && (
-              <div style={{ marginTop: 14 }}>
-                <div style={{ height: 2, background: "#F2EFE9" }}>
-                  <div style={{ height: 2, background: "#E8592A", width: `${Math.min(100, (paidTotal / order.price_plan) * 100)}%` }} />
-                </div>
-              </div>
-            )}
-          </div>
-
           {/* Резерв под материалы */}
           {order && (
-            <div style={{ paddingTop: 24, borderTop: "1px solid #EDEBE6", marginBottom: 32 }}>
-              <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 14 }}>РЕЗЕРВ ПОД МАТЕРИАЛЫ</div>
+            <div style={{ paddingTop: 18, marginBottom: 8 }}>
+              <div style={{ marginBottom: 12 }}><SectionLabel>РЕЗЕРВ ПОД МАТЕРИАЛЫ</SectionLabel></div>
               {(() => {
                 const active = order.reserve_active;
                 const released = order.reserved_amount > 0 && order.reserve_released_at;
@@ -488,12 +364,10 @@ export default function OrderDetail() {
                       <input type="number" min="0" value={reserveEdit} autoFocus
                         onChange={e => setReserveEdit(e.target.value)}
                         style={{ width: 140, border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none", fontFamily: MONO, textAlign: "right" }} />
-                      <button onClick={() => setReserve.mutate(parseFloat(reserveEdit) || 0)} disabled={setReserve.isPending}
-                        style={{ padding: "7px 16px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                      <Button variant="primary" size="sm" onClick={() => setReserve.mutate(parseFloat(reserveEdit) || 0)} disabled={setReserve.isPending} style={{ fontSize: 12, padding: "7px 16px" }}>
                         {setReserve.isPending ? "..." : "Отложить"}
-                      </button>
-                      <button onClick={() => setReserveEdit(null)}
-                        style={{ padding: "7px 12px", border: "1px solid #EDEBE6", background: "none", color: "#A89070", fontSize: 12, cursor: "pointer" }}>Отмена</button>
+                      </Button>
+                      <Button size="sm" onClick={() => setReserveEdit(null)} style={{ fontSize: 12, color: "#A89070" }}>Отмена</Button>
                     </div>
                   );
                 }
@@ -502,7 +376,7 @@ export default function OrderDetail() {
                   return (
                     <div>
                       <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                        <span style={{ fontSize: 15, fontWeight: 700, color: "#E8592A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(order.reserved_amount)}</span>
+                        <span style={{ fontSize: 15, fontWeight: 700, color: "#E8592A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmtMoney(order.reserved_amount)}</span>
                         <span style={{ fontSize: 11, color: "#A89070" }}>отложено под закупку — тратить нельзя</span>
                       </div>
                       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
@@ -510,8 +384,7 @@ export default function OrderDetail() {
                           style={{ padding: "6px 14px", border: "1px solid #4A7C59", background: "none", color: "#4A7C59", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
                           {releaseReserve.isPending ? "..." : "Материалы закуплены — снять резерв"}
                         </button>
-                        <button onClick={() => setReserveEdit(String(order.reserved_amount))}
-                          style={{ padding: "6px 12px", border: "1px solid #EDEBE6", background: "none", color: "#6B6355", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>Изменить</button>
+                        <Button size="sm" onClick={() => setReserveEdit(String(order.reserved_amount))} style={{ fontSize: 12, color: "#6B6355" }}>Изменить</Button>
                       </div>
                     </div>
                   );
@@ -521,10 +394,9 @@ export default function OrderDetail() {
                   return (
                     <div>
                       <div style={{ fontSize: 12, color: "#A89070" }}>
-                        Резерв снят (закупка проведена) · было {fmt(order.reserved_amount)}
+                        Резерв снят (закупка проведена) · было {fmtMoney(order.reserved_amount)}
                       </div>
-                      <button onClick={() => setReserveEdit(String(suggested))}
-                        style={{ marginTop: 10, padding: "6px 14px", border: "1px solid #EDEBE6", background: "none", color: "#6B6355", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>Зарезервировать снова</button>
+                      <Button size="sm" onClick={() => setReserveEdit(String(suggested))} style={{ marginTop: 10, fontSize: 12, color: "#6B6355" }}>Зарезервировать снова</Button>
                     </div>
                   );
                 }
@@ -534,95 +406,40 @@ export default function OrderDetail() {
                   <div>
                     <div style={{ fontSize: 12, color: "#6B6355" }}>
                       {suggested > 0
-                        ? <>Себестоимость материалов по смете <b style={{ fontFamily: MONO, color: "#1A1A1A" }}>{fmt(suggested)}</b> — отложить под закупку?</>
+                        ? <>Себестоимость материалов по смете <b style={{ fontFamily: MONO, color: "#1A1A1A" }}>{fmtMoney(suggested)}</b> — отложить под закупку?</>
                         : <>Резерв под материалы не задан.</>}
                     </div>
-                    <button onClick={() => setReserveEdit(String(suggested || ""))}
-                      style={{ marginTop: 12, padding: "7px 16px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                    <Button variant="primary" size="sm" onClick={() => setReserveEdit(String(suggested || ""))} style={{ marginTop: 12, fontSize: 12, padding: "7px 16px" }}>
                       Зарезервировать
-                    </button>
+                    </Button>
                   </div>
                 );
               })()}
             </div>
           )}
 
-          {/* План-Факт */}
-          {order?.plan_fact?.has_estimate && (
-            <div style={{ paddingTop: 24, borderTop: "1px solid #EDEBE6", marginBottom: 32 }}>
-              <PlanFactBlock planFact={order.plan_fact} />
-            </div>
-          )}
-
-          {/* План/факт по строкам сметы — кто планировался vs кто исполнил */}
-          {!!obligationsData?.items?.length && (
-            <div style={{ paddingTop: 24, borderTop: "1px solid #EDEBE6", marginBottom: 32 }}>
-              <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 14 }}>
-                ПЛАН / ФАКТ ПО РАБОТАМ
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: "0 20px", fontSize: 9, color: "#A89070", letterSpacing: "0.05em", paddingBottom: 6, borderBottom: "1px solid #EDEBE6" }}>
-                <div>СТРОКА · ИСПОЛНИТЕЛЬ</div>
-                <div style={{ textAlign: "right" }}>ПЛАН</div>
-                <div style={{ textAlign: "right" }}>ФАКТ</div>
-              </div>
-              {obligationsData.items.map((o: any) => {
-                const actual = (o.actual_executors || []).join(", ");
-                const paidColor = o.status === "closed" ? "#4A7C59" : o.paid > 0 ? "#1A1A1A" : "#C8C0B0";
-                return (
-                  <div key={o.creditor_id} style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: "0 20px", padding: "9px 0", borderBottom: "1px solid #F2EFE9", alignItems: "baseline" }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 13, color: "#1A1A1A" }}>
-                        {o.title}
-                        {o.divergence && (
-                          <span title="Расхождение план/факт" style={{ marginLeft: 8, fontSize: 9, color: "#E8592A", letterSpacing: "0.05em", verticalAlign: "middle" }}>⚠ РАСХОЖДЕНИЕ</span>
-                        )}
-                      </div>
-                      <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>
-                        план: {o.planned_executor || "—"}
-                        <span style={{ color: "#C8C0B0" }}>  ·  </span>
-                        факт: <span style={{ color: actual ? (o.divergence ? "#E8592A" : "#4A7C59") : "#C8C0B0" }}>{actual || "—"}</span>
-                      </div>
-                    </div>
-                    <div style={{ textAlign: "right", fontSize: 13, fontFamily: MONO, fontVariantNumeric: "tabular-nums", color: "#6B6355" }}>
-                      {fmt(o.planned_amount)}
-                    </div>
-                    <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 13, fontFamily: MONO, fontVariantNumeric: "tabular-nums", color: paidColor }}>{fmt(o.paid)}</div>
-                      {o.remaining > 0 && o.paid > 0 && (
-                        <div style={{ fontSize: 10, color: "#A89070", fontFamily: MONO }}>ост. {fmt(o.remaining)}</div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+          {/* ═══ СТАДИЯ 2: ФАКТ ═══ */}
+          <StageHeader n="02" title="ФАКТ" hint="реальные деньги: траты и оплаты" />
 
           {/* Расходы (факт) */}
-          <div style={{ paddingTop: 24, borderTop: "1px solid #EDEBE6", marginBottom: 32 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-              <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>
+          <div style={{ paddingTop: 18, marginBottom: 8 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <SectionLabel>
                 РАСХОДЫ (ФАКТ)
                 {expensesData?.total > 0 && (
                   <span style={{ color: "#1A1A1A", marginLeft: 8, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
-                    {fmt(expensesData.total)}
+                    {fmtMoney(expensesData.total)}
                   </span>
                 )}
-              </div>
-              <button
-                onClick={() => setExpenseModal({ open: true })}
-                style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "1px solid #EDEBE6",
-                         padding: "4px 10px", fontSize: 11, color: "#6B6355", cursor: "pointer", fontFamily: "inherit" }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = "#E8592A"; e.currentTarget.style.color = "#E8592A"; }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = "#EDEBE6"; e.currentTarget.style.color = "#6B6355"; }}
-              >
+              </SectionLabel>
+              <Button size="sm" onClick={() => setExpenseModal({ open: true })} style={{ fontSize: 11, color: "#6B6355" }}>
                 <Plus size={11} /> Добавить расход
-              </button>
+              </Button>
             </div>
 
             {!expensesData?.items?.length ? (
               <div style={{ fontSize: 12, color: "#C8C0B0" }}>
-                Трат не внесено — маржа считается по плану
+                Трат не внесено — маржа считается по плану. Списания банка разносятся в «Разноске».
               </div>
             ) : (
               <>
@@ -648,7 +465,7 @@ export default function OrderDetail() {
                       </div>
                       <div style={{ fontSize: 10, color: "#6B6355" }}>{cat?.l ?? e.category}</div>
                       <div style={{ fontSize: 13, fontWeight: 600, color: "#8B3A3A", textAlign: "right",
-                                    fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(e.amount)}</div>
+                                    fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmtMoney(e.amount)}</div>
                       <div style={{ display: "flex", gap: 2, justifyContent: "flex-end" }}>
                         <button onClick={() => setExpenseModal({ open: true, item: e })}
                           style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 3, display: "flex" }}
@@ -669,7 +486,7 @@ export default function OrderDetail() {
                 {Object.keys(expensesData.by_category || {}).length > 1 && (
                   <div style={{ display: "flex", gap: 14, marginTop: 10, fontSize: 10, color: "#A89070" }}>
                     {Object.entries(expensesData.by_category).map(([k, v]: any) => (
-                      <span key={k}>{k}: <span style={{ color: "#1A1A1A", fontFamily: MONO }}>{fmt(v)}</span></span>
+                      <span key={k}>{k}: <span style={{ color: "#1A1A1A", fontFamily: MONO }}>{fmtMoney(v)}</span></span>
                     ))}
                   </div>
                 )}
@@ -677,21 +494,111 @@ export default function OrderDetail() {
             )}
           </div>
 
-          {/* Payments */}
-          {order?.payments?.length > 0 && (
-            <div style={{ paddingTop: 24, borderTop: "1px solid #EDEBE6" }}>
-              <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 14 }}>ПЛАТЕЖИ</div>
-              {order.payments.map((p: any, i: number) => (
+          {/* План/факт по строкам сметы — кто планировался vs кто исполнил */}
+          {!!obligationsData?.items?.length && (
+            <div style={{ paddingTop: 18, marginBottom: 8 }}>
+              <div style={{ marginBottom: 12 }}><SectionLabel>ПЛАН / ФАКТ ПО РАБОТАМ</SectionLabel></div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: "0 20px", fontSize: 9, color: "#A89070", letterSpacing: "0.05em", paddingBottom: 6, borderBottom: "1px solid #EDEBE6" }}>
+                <div>СТРОКА · ИСПОЛНИТЕЛЬ</div>
+                <div style={{ textAlign: "right" }}>ПЛАН</div>
+                <div style={{ textAlign: "right" }}>ФАКТ</div>
+              </div>
+              {obligationsData.items.map((o: any) => {
+                const actual = (o.actual_executors || []).join(", ");
+                const paidColor = o.status === "closed" ? "#4A7C59" : o.paid > 0 ? "#1A1A1A" : "#C8C0B0";
+                return (
+                  <div key={o.creditor_id} style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: "0 20px", padding: "9px 0", borderBottom: "1px solid #F2EFE9", alignItems: "baseline" }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 13, color: "#1A1A1A" }}>
+                        {o.title}
+                        {o.divergence && (
+                          <span title="Расхождение план/факт" style={{ marginLeft: 8, fontSize: 9, color: "#E8592A", letterSpacing: "0.05em", verticalAlign: "middle" }}>⚠ РАСХОЖДЕНИЕ</span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>
+                        план: {o.planned_executor || "—"}
+                        <span style={{ color: "#C8C0B0" }}>  ·  </span>
+                        факт: <span style={{ color: actual ? (o.divergence ? "#E8592A" : "#4A7C59") : "#C8C0B0" }}>{actual || "—"}</span>
+                      </div>
+                    </div>
+                    <div style={{ textAlign: "right", fontSize: 13, fontFamily: MONO, fontVariantNumeric: "tabular-nums", color: "#6B6355" }}>
+                      {fmtMoney(o.planned_amount)}
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: 13, fontFamily: MONO, fontVariantNumeric: "tabular-nums", color: paidColor }}>{fmtMoney(o.paid)}</div>
+                      {o.remaining > 0 && o.paid > 0 && (
+                        <div style={{ fontSize: 10, color: "#A89070", fontFamily: MONO }}>ост. {fmtMoney(o.remaining)}</div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Платежи клиента */}
+          <div style={{ paddingTop: 18, marginBottom: 8 }}>
+            <div style={{ marginBottom: 12 }}><SectionLabel>ПЛАТЕЖИ КЛИЕНТА</SectionLabel></div>
+            {!order?.payments?.length ? (
+              <div style={{ fontSize: 12, color: "#C8C0B0" }}>
+                Платежей нет. Входящие платежи банка разносятся во вкладке «Поступления» Разноски.
+              </div>
+            ) : (
+              order.payments.map((p: any, i: number) => (
                 <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "10px 0", borderBottom: "1px solid #F2EFE9" }}>
                   <div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(p.amount)}</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#4A7C59", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
+                      +{fmtMoney(p.amount)}
+                      {p.bank_tx_id && <LinkSimple size={10} style={{ color: "#4A7C59", marginLeft: 5 }} />}
+                    </div>
                     {p.note && <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>{p.note}</div>}
                   </div>
                   <div style={{ fontSize: 11, color: "#A89070", fontFamily: MONO }}>{fmtDate(p.paid_at)}</div>
                 </div>
-              ))}
-            </div>
-          )}
+              ))
+            )}
+          </div>
+
+          {/* ═══ СТАДИЯ 3: ИТОГ ═══ */}
+          <StageHeader n="03" title="ИТОГ" hint="финансовая картинка заказа" />
+
+          <div style={{ paddingTop: 18 }}>
+            {!order?.plan_fact?.has_estimate ? (
+              <div style={{ padding: "18px 0" }}>
+                <div style={{ fontSize: 12, color: "#6B6355", marginBottom: 12 }}>
+                  Итога пока нет: без сметы не с чем сравнивать факт. Создай смету — появится
+                  план-факт и лестница прибыли.
+                </div>
+                <Button variant="primary" size="sm" onClick={() => addEstimateMutation.mutate()} disabled={addEstimateMutation.isPending}>
+                  <Plus size={11} /> Создать смету
+                </Button>
+              </div>
+            ) : (
+              <>
+                {order?.plan_source === "draft" && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+                    background: "#FAF8F5", border: "1px solid #EDEBE6", padding: "10px 14px", marginBottom: 18 }}>
+                    <Warning size={13} style={{ color: "#E8592A", flexShrink: 0 }} />
+                    <span style={{ fontSize: 11, color: "#6B6355", flex: 1, minWidth: 200 }}>
+                      План считается по <b>неутверждённой</b> смете — числа ещё не согласованы с клиентом.
+                    </span>
+                    {activeDraft && (
+                      <Button size="sm" variant="primary" disabled={approveSet.isPending}
+                        onClick={() => approveSet.mutate(activeDraft.id)} style={{ fontSize: 11 }}>
+                        {approveSet.isPending ? "..." : "Утвердить смету"}
+                      </Button>
+                    )}
+                  </div>
+                )}
+                {/* Сначала обоснование (план-факт по категориям), затем итог (лестница) */}
+                <PlanFactBlock planFact={order.plan_fact} />
+                <div style={{ marginTop: 24, paddingTop: 18, borderTop: "1px solid #EDEBE6" }}>
+                  <div style={{ marginBottom: 12 }}><SectionLabel>ЛЕСТНИЦА ПРИБЫЛИ</SectionLabel></div>
+                  <ProfitLadder order={order} paidTotal={paidTotal} />
+                </div>
+              </>
+            )}
+          </div>
 
         </div>
       </div>

@@ -205,6 +205,20 @@ export const estimatesApi = {
   syncToCatalog: (itemId: string)           => api.post(`/estimates/items/${itemId}/to-catalog`).then(r => r.data),
   createObligations: (setId: string)        => api.post(`/estimates/sets/${setId}/create-obligations`).then(r => r.data),
   deleteObligations: (setId: string)        => api.delete(`/estimates/sets/${setId}/obligations`).then(r => r.data),
+  approveSet:  (setId: string, force = false) => api.post(`/estimates/sets/${setId}/approve`, { force }).then(r => r.data),
+  reviewQueue: ()                           => api.get("/estimates/review-queue").then(r => r.data),
+};
+
+// Разноска входящих платежей банка на заказы (инбокс поступлений).
+export const paymentsApi = {
+  inbox: (params?: Record<string, string | number | boolean>) =>
+    api.get("/payments/inbox", { params }).then((r) => r.data),
+  fromTx: (data: { tx_id: string; allocations: { order_id: string; amount: number; note?: string | null }[] }) =>
+    api.post("/payments/from-tx", data).then((r) => r.data),
+  dismiss: (txId: string, reason?: string) =>
+    api.post(`/payments/inbox/${txId}/dismiss`, { reason: reason || null }).then((r) => r.data),
+  undismiss: (txId: string) =>
+    api.delete(`/payments/inbox/${txId}/dismiss`).then((r) => r.data),
 };
 
 export const mastersApi = {

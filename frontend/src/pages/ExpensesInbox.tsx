@@ -4,9 +4,10 @@ import { MONO } from "../components/ui/Num";
 import { Loading } from "../components/ui/Loading";
 import { EmptyState } from "../components/ui/EmptyState";
 import { PeriodFilter, AmountFilter } from "../components/TableFilters";
-import { inboxApi, ordersApi, mastersApi, payeeRulesApi, estimatesApi } from "../api";
+import { inboxApi, ordersApi, mastersApi, payeeRulesApi, estimatesApi, paymentsApi } from "../api";
 import { EXPENSE_CATEGORIES } from "../components/ExpenseModal";
-import { MagnifyingGlass, X, Check } from "@phosphor-icons/react";
+import { Modal } from "../components/ui/Modal";
+import { MagnifyingGlass, X, Check, ArrowCounterClockwise } from "@phosphor-icons/react";
 
 function fmt(n: number | null | undefined) {
   if (!n) return "—";
@@ -20,6 +21,7 @@ function fmtDate(s: string) {
 const SOURCES = [
   { id: "bank", label: "ДДС (банк)" },
   { id: "zen",  label: "Личные" },
+  { id: "in",   label: "Поступления" },
 ] as const;
 
 // ── Строка разноски: раскрывается в форму ────────────────────────────────────
@@ -319,18 +321,162 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
   );
 }
 
+// ── Строка разноски ПОСТУПЛЕНИЯ: входящий платёж банка → payments по заказам ──
+const DISMISS_REASONS = ["Перевод между своими", "Возврат", "Не по заказам"];
+
+function PaymentAllocRow({ tx, onDone, onReservePrompt }: {
+  tx: any; onDone: () => void;
+  onReservePrompt: (p: { order_id: string; amount: number }) => void;
+}) {
+  const [allocs, setAllocs] = useState<{ order_id: string; amount: string }[]>([]);
+  const [error, setError] = useState("");
+  const [hideMode, setHideMode] = useState(false);
+
+  // Для поступлений сумма — сильный сигнал: скорим против цены заказа (долга).
+  const { data: suggestions = [] } = useQuery({
+    queryKey: ["order-suggest-in", tx.counterparty, tx.amount],
+    queryFn: () => ordersApi.suggest(tx.counterparty || "", tx.amount || 0),
+  });
+  const ordersById = new Map((suggestions as any[]).map((o: any) => [o.id, o]));
+
+  const save = useMutation({
+    mutationFn: () => paymentsApi.fromTx({
+      tx_id: tx.id,
+      allocations: allocs.map(a => ({ order_id: a.order_id, amount: parseFloat(a.amount) || 0 })),
+    }),
+    onSuccess: (res: any) => {
+      onDone();
+      // Деньги пришли → предложить отложить под материалы (подсказку считает бэкенд).
+      if (res?.order_id && res?.reserve_suggested > 0 && !res?.reserve_active) {
+        onReservePrompt({ order_id: res.order_id, amount: res.reserve_suggested });
+      }
+    },
+    onError: (e: any) => setError(e?.response?.data?.detail || "Не удалось разнести"),
+  });
+
+  const dismiss = useMutation({
+    mutationFn: (reason: string) => paymentsApi.dismiss(tx.id, reason),
+    onSuccess: onDone,
+  });
+
+  const addOrder = (orderId: string) => {
+    if (allocs.some(a => a.order_id === orderId)) return;
+    // Первый заказ получает всю сумму платежа — частый случай «один платёж = один заказ».
+    setAllocs([...allocs, { order_id: orderId, amount: allocs.length === 0 ? String(tx.amount) : "" }]);
+  };
+  const patch = (i: number, amount: string) => setAllocs(allocs.map((x, j) => (j === i ? { ...x, amount } : x)));
+
+  const sum = allocs.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+  const diff = Math.round((tx.amount - sum) * 100) / 100;
+  const ready = allocs.length > 0 && Math.abs(diff) < 0.01;
+
+  return (
+    <div style={{ padding: "14px 28px 18px", background: "#FAF8F5", borderBottom: "1px solid #EDEBE6" }}>
+      <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 6 }}>
+        ПЛАТЁЖ ПО ЗАКАЗАМ
+      </div>
+
+      {allocs.map((a, i) => {
+        const o = ordersById.get(a.order_id);
+        return (
+          <div key={a.order_id} style={{ background: "#fff", border: "1px solid #EDEBE6", padding: "8px 10px", marginBottom: 8,
+            display: "grid", gridTemplateColumns: "1fr 120px 24px", gap: 8, alignItems: "center" }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {o?.title ?? a.order_id}
+              </div>
+              {o && (
+                <div style={{ fontSize: 10, color: "#A89070", marginTop: 1 }}>
+                  {o.customer_name ? `${o.customer_name} · ` : ""}долг <span style={{ fontFamily: MONO }}>{fmt(o.debt)}</span>
+                </div>
+              )}
+            </div>
+            <input value={a.amount} onChange={e => patch(i, e.target.value)} placeholder="сумма" type="number"
+              style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "5px 8px", fontSize: 12, outline: "none", textAlign: "right", fontFamily: MONO }} />
+            <button onClick={() => setAllocs(allocs.filter((_, j) => j !== i))}
+              style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 0, display: "flex", justifyContent: "center" }}>
+              <X size={12} />
+            </button>
+          </div>
+        );
+      })}
+
+      {/* Подсказки заказов (скоринг по контрагенту и сумме против долга) */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4, marginBottom: 12 }}>
+        {(suggestions as any[]).filter((o: any) => !allocs.some(a => a.order_id === o.id)).slice(0, 6).map((o: any) => (
+          <button key={o.id} onClick={() => addOrder(o.id)}
+            style={{ fontSize: 11, padding: "3px 9px", border: "1px solid #EDEBE6", background: "#fff", cursor: "pointer", color: "#6B6355", fontFamily: "inherit" }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = "#E8592A"; e.currentTarget.style.color = "#E8592A"; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = "#EDEBE6"; e.currentTarget.style.color = "#6B6355"; }}>
+            + {o.title}{o.debt > 0 ? ` · долг ${fmt(o.debt)}` : ""}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #EDEBE6", paddingTop: 10, gap: 12, flexWrap: "wrap" }}>
+        {/* Скрыть: не по заказам (перевод между своими, возврат) */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {hideMode ? (
+            <>
+              <span style={{ fontSize: 10, color: "#A89070" }}>Скрыть:</span>
+              {DISMISS_REASONS.map(r => (
+                <button key={r} disabled={dismiss.isPending} onClick={() => dismiss.mutate(r)}
+                  style={{ fontSize: 10, padding: "3px 8px", border: "1px solid #EDEBE6", background: "#fff", cursor: "pointer", color: "#6B6355", fontFamily: "inherit" }}>
+                  {r}
+                </button>
+              ))}
+              <button onClick={() => setHideMode(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}>
+                <X size={11} />
+              </button>
+            </>
+          ) : (
+            <button onClick={() => setHideMode(true)}
+              style={{ fontSize: 10, color: "#A89070", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
+              Это не по заказам — скрыть
+            </button>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <div style={{ fontSize: 11, color: Math.abs(diff) < 0.01 && allocs.length ? "#4A7C59" : "#8B3A3A", fontFamily: MONO }}>
+            {allocs.length === 0 ? <span style={{ color: "#A89070" }}>выберите заказ</span> :
+              Math.abs(diff) < 0.01 ? `✓ разнесено ${fmt(sum)}` :
+              diff > 0 ? `осталось ${fmt(diff)} из ${fmt(tx.amount)}` :
+                         `больше платежа на ${fmt(Math.abs(diff))}`}
+          </div>
+          {error && <span style={{ fontSize: 11, color: "#8B3A3A" }}>{error}</span>}
+          <button disabled={!ready || save.isPending} onClick={() => { setError(""); save.mutate(); }}
+            style={{
+              padding: "6px 16px", border: "none", fontSize: 12, fontWeight: 600,
+              background: ready ? "#E8592A" : "#EDEBE6", color: ready ? "#fff" : "#A89070",
+              cursor: ready && !save.isPending ? "pointer" : "default", fontFamily: "inherit",
+              display: "flex", alignItems: "center", gap: 5,
+            }}>
+            <Check size={12} /> {save.isPending ? "Разносим..." : "Разнести"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Страница ─────────────────────────────────────────────────────────────────
 export default function ExpensesInbox() {
   const qc = useQueryClient();
-  const [source, setSource] = useState<"bank" | "zen">("bank");
+  const [source, setSource] = useState<"bank" | "zen" | "in">("bank");
   const [search, setSearch] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [amtMin, setAmtMin] = useState("");
   const [amtMax, setAmtMax] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
+  const [showDismissed, setShowDismissed] = useState(false);
+  // Разнесли платёж одним заказом → предложить отложить резерв под материалы.
+  const [reservePrompt, setReservePrompt] = useState<{ order_id: string; amount: number } | null>(null);
 
-  const params: Record<string, string | number> = { source, limit: 100 };
+  const isIncoming = source === "in";
+  const params: Record<string, string | number> = { limit: 100 };
+  if (!isIncoming) params.source = source;
+  if (isIncoming && showDismissed) params.show_dismissed = "true";
   if (search) params.search = search;
   if (from) params.date_from = from;
   if (to) params.date_to = to;
@@ -338,8 +484,8 @@ export default function ExpensesInbox() {
   if (amtMax) params.amount_max = amtMax;
 
   const { data, isLoading } = useQuery({
-    queryKey: ["expenses-inbox", source, search, from, to, amtMin, amtMax],
-    queryFn: () => inboxApi.list(params),
+    queryKey: ["expenses-inbox", source, search, from, to, amtMin, amtMax, showDismissed],
+    queryFn: () => (isIncoming ? paymentsApi.inbox(params) : inboxApi.list(params)),
   });
 
   const items: any[] = data?.items ?? [];
@@ -349,7 +495,18 @@ export default function ExpensesInbox() {
     qc.invalidateQueries({ queryKey: ["expenses-inbox"] });
     qc.invalidateQueries({ queryKey: ["orders-v2"] });
     qc.invalidateQueries({ queryKey: ["orders-plan-fact-summary"] });
+    qc.invalidateQueries({ queryKey: ["order-detail"] });
   };
+
+  const undismiss = useMutation({
+    mutationFn: (txId: string) => paymentsApi.undismiss(txId),
+    onSuccess: onDone,
+  });
+
+  const setReserve = useMutation({
+    mutationFn: (p: { order_id: string; amount: number }) => ordersApi.reserve(p.order_id, p.amount),
+    onSuccess: () => { setReservePrompt(null); onDone(); },
+  });
 
   const clearFilters = () => { setSearch(""); setFrom(""); setTo(""); setAmtMin(""); setAmtMax(""); };
   const hasFilters = !!(search || from || to || amtMin || amtMax);
@@ -391,6 +548,12 @@ export default function ExpensesInbox() {
           {source === "zen" && !from && (
             <span style={{ fontSize: 10, color: "#C8C0B0" }}>показаны последние 90 дней — расширь период</span>
           )}
+          {isIncoming && (
+            <label style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer", fontSize: 10, color: "#A89070" }}>
+              <input type="checkbox" checked={showDismissed} onChange={e => setShowDismissed(e.target.checked)} />
+              показать скрытые
+            </label>
+          )}
         </div>
         <button onClick={hasFilters ? clearFilters : undefined}
           style={{ fontSize: 10, color: hasFilters ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: hasFilters ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
@@ -408,7 +571,11 @@ export default function ExpensesInbox() {
       {/* Список */}
       <div style={{ flex: 1, overflow: "auto" }}>
         {isLoading ? <Loading compact /> :
-         items.length === 0 ? <EmptyState compact title="Всё разнесено" hint="Списаний без привязки к заказам не осталось" /> :
+         items.length === 0 ? (
+          isIncoming
+            ? <EmptyState compact title="Все поступления разнесены" hint="Входящих платежей без привязки к заказам не осталось" />
+            : <EmptyState compact title="Всё разнесено" hint="Списаний без привязки к заказам не осталось" />
+         ) :
          items.map((t: any) => (
           <div key={t.id}>
             <div onClick={() => setOpenId(openId === t.id ? null : t.id)}
@@ -416,6 +583,7 @@ export default function ExpensesInbox() {
                 display: "grid", gridTemplateColumns: "80px 1fr 130px", gap: 12, padding: "11px 28px",
                 borderBottom: "1px solid #F7F5F1", cursor: "pointer", alignItems: "center",
                 background: openId === t.id ? "#FFF8F5" : "transparent",
+                opacity: t.dismissed_reason ? 0.55 : 1,
               }}
               onMouseEnter={e => { if (openId !== t.id) e.currentTarget.style.background = "#FAF8F5"; }}
               onMouseLeave={e => { if (openId !== t.id) e.currentTarget.style.background = "transparent"; }}>
@@ -426,6 +594,9 @@ export default function ExpensesInbox() {
                   {t.payee_hint && t.payee_hint !== t.counterparty && (
                     <span style={{ color: "#4A7C59", fontSize: 10, marginLeft: 6 }}>→ {t.payee_hint}</span>
                   )}
+                  {t.dismissed_reason && (
+                    <span style={{ color: "#A89070", fontSize: 10, marginLeft: 6 }}>· скрыто: {t.dismissed_reason}</span>
+                  )}
                 </div>
                 {(t.purpose || t.zen_tag) && (
                   <div style={{ fontSize: 10, color: "#A89070", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -433,14 +604,43 @@ export default function ExpensesInbox() {
                   </div>
                 )}
               </div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: "#8B3A3A", textAlign: "right", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
-                −{fmt(t.amount)}
+              <div style={{ fontSize: 13, fontWeight: 600, color: isIncoming ? "#4A7C59" : "#8B3A3A", textAlign: "right", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
+                {isIncoming ? "+" : "−"}{fmt(t.amount)}
               </div>
             </div>
-            {openId === t.id && <AllocRow tx={t} onDone={onDone} />}
+            {openId === t.id && (
+              t.dismissed_reason ? (
+                <div style={{ padding: "12px 28px", background: "#FAF8F5", borderBottom: "1px solid #EDEBE6",
+                  display: "flex", alignItems: "center", gap: 12, fontSize: 11, color: "#6B6355" }}>
+                  Скрыто из инбокса: {t.dismissed_reason}
+                  <button disabled={undismiss.isPending} onClick={() => undismiss.mutate(t.id)}
+                    style={{ fontSize: 11, color: "#E8592A", background: "none", border: "1px solid #E8592A",
+                      padding: "3px 10px", cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 4 }}>
+                    <ArrowCounterClockwise size={11} /> Вернуть в инбокс
+                  </button>
+                </div>
+              ) : isIncoming ? (
+                <PaymentAllocRow tx={t} onDone={onDone} onReservePrompt={setReservePrompt} />
+              ) : (
+                <AllocRow tx={t} onDone={onDone} />
+              )
+            )}
           </div>
         ))}
       </div>
+
+      {/* Деньги пришли → предложение резерва под материалы */}
+      {reservePrompt && (
+        <Modal size="sm" eyebrow="РЕЗЕРВ ПОД МАТЕРИАЛЫ" onClose={() => setReservePrompt(null)}
+          onCancel={() => setReservePrompt(null)}
+          onSave={() => setReserve.mutate(reservePrompt)}
+          saveLabel={setReserve.isPending ? "Откладываем..." : "Отложить"}>
+          <div style={{ padding: "18px 24px", fontSize: 13, lineHeight: 1.5, color: "#1A1A1A" }}>
+            Платёж разнесён. Отложить <span style={{ fontFamily: MONO, fontWeight: 600 }}>{fmt(reservePrompt.amount)}</span>{" "}
+            под материалы по смете этого заказа, чтобы деньги не разошлись?
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

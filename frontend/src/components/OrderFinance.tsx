@@ -15,8 +15,10 @@ export function ProfitLadder({ order, paidTotal }: { order: any; paidTotal: numb
   const tax = order.tax ?? 0;
   const net = order.net_profit ?? gross;
   const isBank = order.payment_type === "bank";
+  // Выручка из план-факта: для draft-смет бэк берёт её из сета, а поле заказа устарело.
+  const revenue = order.plan_fact?.revenue ?? order.price_plan;
   const items = [
-    { label: "Стоимость", value: fmt(order.price_plan), color: "#1A1A1A" },
+    { label: "Стоимость", value: fmt(revenue), color: "#1A1A1A" },
     { label: "Оплачено",  value: fmt(paidTotal),        color: "#4A7C59" },
     { label: "Долг",      value: order.debt > 0 ? fmt(order.debt) : "Оплачено", color: order.debt > 0 ? "#E8592A" : "#4A7C59" },
     { label: "Валовая",   value: fmt(gross),            color: "#1A1A1A" },

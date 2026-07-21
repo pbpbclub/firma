@@ -5,10 +5,11 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { MONO } from "../components/ui/Num";
 import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { useNavigate } from "react-router-dom";
-import { ordersApi, customersApi, brandsApi } from "../api";
+import { ordersApi, customersApi, brandsApi, estimatesApi } from "../api";
 import { MagnifyingGlass, DotsThree, Plus, Files, CaretRight, Archive, ArrowCounterClockwise, CaretDown, X, Trash, UserCircle } from "@phosphor-icons/react";
 import { ColumnFilter, AmountFilter } from "../components/TableFilters";
 import { ProfitLadder, PlanFactBlock } from "../components/OrderFinance";
+import { EstimateReviewQueue } from "../components/EstimateReviewQueue";
 
 const BRANDS: { value: string; color: string }[] = [
   { value: "MeRA",    color: "#2E6DA4" },
@@ -547,12 +548,20 @@ export default function OrdersV2() {
   const [amountMax, setAmountMax] = useState("");
   const [showNewOrder, setShowNewOrder] = useState(false);
   const [summaryMode, setSummaryMode] = useState(false);
+  const [reviewMode, setReviewMode] = useState(false);
 
   const { data: summary } = useQuery({
     queryKey: ["orders-plan-fact-summary"],
     queryFn: () => ordersApi.planFactSummary(),
     enabled: summaryMode,
   });
+
+  // Всегда включён: счётчик в ярлыке вкладки должен быть виден без захода в неё.
+  const { data: reviewQueue } = useQuery({
+    queryKey: ["estimates-review-queue"],
+    queryFn: estimatesApi.reviewQueue,
+  });
+  const reviewCount = reviewQueue?.sets?.length ?? 0;
 
   const { data = [], isLoading } = useQuery({
     queryKey: ["orders-v2", status, search, archiveMode],
@@ -694,7 +703,7 @@ export default function OrdersV2() {
 
           {/* Status tabs */}
           <div style={{ display: "flex", gap: 24, borderBottom: "1px solid #EDEBE6" }}>
-            {!archiveMode && !summaryMode && STATUSES.map((s) => (
+            {!archiveMode && !summaryMode && !reviewMode && STATUSES.map((s) => (
               <button
                 key={s.value}
                 onClick={() => { setStatus(s.value); setPage(0); }}
@@ -712,7 +721,22 @@ export default function OrdersV2() {
               </button>
             ))}
             <button
-              onClick={() => { setSummaryMode(!summaryMode); setArchiveMode(false); setStatus(summaryMode ? "in_production" : ""); setPage(0); setSelected(null); }}
+              onClick={() => { setReviewMode(!reviewMode); setSummaryMode(false); setArchiveMode(false); setStatus(reviewMode ? "in_production" : ""); setPage(0); setSelected(null); }}
+              style={{
+                fontSize: 13, padding: "0 0 12px",
+                border: "none", background: "none", cursor: "pointer",
+                color: reviewMode ? "#1A1A1A" : reviewCount > 0 ? "#E8592A" : "#A89070",
+                fontWeight: reviewMode || reviewCount > 0 ? 600 : 400,
+                borderBottom: reviewMode ? "2px solid #E8592A" : "2px solid transparent",
+                marginBottom: -1,
+                marginLeft: (archiveMode || summaryMode || reviewMode) ? 0 : "auto",
+                transition: "all 0.15s",
+              }}
+            >
+              К утверждению{reviewCount > 0 ? ` (${reviewCount})` : ""}
+            </button>
+            <button
+              onClick={() => { setSummaryMode(!summaryMode); setArchiveMode(false); setReviewMode(false); setStatus(summaryMode ? "in_production" : ""); setPage(0); setSelected(null); }}
               style={{
                 fontSize: 13, padding: "0 0 12px",
                 border: "none", background: "none", cursor: "pointer",
@@ -720,14 +744,13 @@ export default function OrdersV2() {
                 fontWeight: summaryMode ? 600 : 400,
                 borderBottom: summaryMode ? "2px solid #E8592A" : "2px solid transparent",
                 marginBottom: -1,
-                marginLeft: (archiveMode || summaryMode) ? 0 : "auto",
                 transition: "all 0.15s",
               }}
             >
               Сводка П/Ф
             </button>
             <button
-              onClick={() => { setArchiveMode(!archiveMode); setSummaryMode(false); setStatus(""); setPage(0); setSelected(null); }}
+              onClick={() => { setArchiveMode(!archiveMode); setSummaryMode(false); setReviewMode(false); setStatus(""); setPage(0); setSelected(null); }}
               style={{
                 fontSize: 13, padding: "0 0 12px",
                 border: "none", background: "none", cursor: "pointer",
@@ -735,7 +758,6 @@ export default function OrdersV2() {
                 fontWeight: archiveMode ? 600 : 400,
                 borderBottom: archiveMode ? "2px solid #A89070" : "2px solid transparent",
                 marginBottom: -1,
-                marginLeft: summaryMode ? 0 : (archiveMode ? 0 : "auto"),
                 transition: "all 0.15s",
                 display: "flex", alignItems: "center", gap: 5,
               }}
@@ -746,7 +768,9 @@ export default function OrdersV2() {
           </div>
         </div>
 
-        {summaryMode ? (
+        {reviewMode ? (
+          <EstimateReviewQueue />
+        ) : summaryMode ? (
           <div style={{ flex: 1, overflow: "auto", padding: "8px 28px 24px" }}>
             {!summary ? (
               <Loading compact />
