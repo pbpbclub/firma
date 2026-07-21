@@ -248,11 +248,18 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
               orderId={a.order_id}
               categoryLabel={catLabel}
               value={a.creditor_id}
-              onPick={(cid, remaining) => patch(i, {
-                creditor_id: cid,
-                // Пустую сумму подставляем из остатка по строке; заполненную не трогаем.
-                amount: cid && !a.amount ? String(remaining) : a.amount,
-              })}
+              onPick={(cid, remaining) => {
+                // Разносим ПЛАТЁЖ, а не план. В пустую сумму кладём неразнесённую часть
+                // платежа, но не больше остатка по плановой строке. Введённую вручную не трогаем.
+                let amount = a.amount;
+                if (cid && !a.amount) {
+                  const other = allocs.reduce((s, x, j) => j === i ? s : s + (parseFloat(x.amount) || 0), 0);
+                  const txLeft = Math.max(0, tx.amount - other);
+                  const def = Math.min(remaining, txLeft);
+                  if (def > 0) amount = String(def);
+                }
+                patch(i, { creditor_id: cid, amount });
+              }}
             />
           </div>
         );
@@ -274,7 +281,9 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #EDEBE6", paddingTop: 10 }}>
         <div style={{ fontSize: 11, color: Math.abs(diff) < 0.01 ? "#4A7C59" : "#8B3A3A", fontFamily: MONO }}>
           {allocs.length === 0 ? <span style={{ color: "#A89070" }}>выберите заказ</span> :
-            Math.abs(diff) < 0.01 ? `✓ сходится: ${fmt(sum)}` : `разница ${fmt(Math.abs(diff))} ${diff > 0 ? "не разнесено" : "перебор"}`}
+            Math.abs(diff) < 0.01 ? `✓ разнесено ${fmt(sum)} — сходится с платежом` :
+            diff > 0 ? `осталось разнести ${fmt(diff)} из платежа ${fmt(tx.amount)}` :
+                       `разнесено ${fmt(sum)} — больше платежа ${fmt(tx.amount)} на ${fmt(Math.abs(diff))}`}
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {error && <span style={{ fontSize: 11, color: "#8B3A3A" }}>{error}</span>}
