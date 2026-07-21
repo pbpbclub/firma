@@ -297,6 +297,10 @@ def get_master(master_id: str):
                ORDER BY e.expense_date DESC""",
             (master_id, master["name"])
         ).fetchall()]
+
+        # Карта номер→название: события вики хранят только order_number (текст),
+        # а показываем заказ по названию. 23 заказа — дёшево одним запросом.
+        num2title = {r["number"]: r["title"] for r in conn.execute("SELECT number, title FROM orders")}
     finally:
         conn.close()
 
@@ -319,6 +323,9 @@ def get_master(master_id: str):
                 ac.close()
         except Exception:
             events = []
+    # Название заказа к событию (фронт показывает title, не номер)
+    for ev in events:
+        ev["order_title"] = num2title.get(ev.get("order_number"))
 
     paid_total = _paid_total(creditors, expenses)
 

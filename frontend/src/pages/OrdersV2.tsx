@@ -784,7 +784,7 @@ export default function OrdersV2() {
                     >
                       <div>
                         <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A", fontFamily: "inherit" }}>{o.title}</div>
-                        <div style={{ fontSize: 9, color: "#A89070", marginTop: 2 }}>{o.number} · {o.status_label}{!o.detailed && " · план без разбивки"}</div>
+                        <div style={{ fontSize: 9, color: "#A89070", marginTop: 2 }}>{o.status_label}{!o.detailed && " · план без разбивки"}</div>
                       </div>
                       <span style={{ textAlign: "right", fontSize: 12, color: "#6B6355" }}>{fmt(o.cost_plan)}</span>
                       <span style={{ textAlign: "right", fontSize: 12, color: o.overspent ? "#8B3A3A" : "#1A1A1A", fontWeight: o.overspent ? 700 : 400 }}>{fmt(o.cost_fact)}</span>

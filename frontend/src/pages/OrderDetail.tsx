@@ -183,7 +183,9 @@ export default function OrderDetail() {
             <ArrowLeft size={13} /> Заказы
           </button>
           <div style={{ width: 1, height: 14, background: "#EDEBE6" }} />
-          <span style={{ fontSize: 11, color: "#A89070", fontFamily: MONO }}>{order?.number}</span>
+          {/* Название ведёт; номер — тусклый хвост для инженерии */}
+          <span style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A" }}>{order?.title}</span>
+          <span style={{ fontSize: 10, color: "#C8C0B0", fontFamily: MONO }}>{order?.number}</span>
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           {saveMutation.isError && <span style={{ fontSize: 11, color: "#8B3A3A" }}>Ошибка сохранения</span>}
@@ -209,7 +211,7 @@ export default function OrderDetail() {
         {/* Delete confirmation modal */}
         {confirmDelete && (
           <ConfirmModal
-            message={`Удалить заказ «${order?.title ?? ""}» (${order?.number ?? ""})? Это действие необратимо — сметы и платежи будут удалены навсегда.`}
+            message={`Удалить заказ «${order?.title ?? ""}»? Это действие необратимо — сметы и платежи будут удалены навсегда.`}
             confirmLabel={deleteMutation.isPending ? "Удаляем..." : "Удалить"}
             onConfirm={() => deleteMutation.mutate()}
             onCancel={() => setConfirmDelete(false)}

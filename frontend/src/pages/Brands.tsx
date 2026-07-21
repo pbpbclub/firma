@@ -159,7 +159,6 @@ function BrandModal({ brand, onClose }: { brand: any; onClose: () => void }) {
                       style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderBottom: "1px solid #F2EFE9", cursor: "pointer" }}
                       onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")}
                       onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
-                      <span style={{ fontSize: 10, color: "#A89070", minWidth: 56 }}>{o.number}</span>
                       <span style={{ flex: 1, fontSize: 12, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.title}</span>
                       <span style={{ fontSize: 12, fontWeight: 600, color: "#1A1A1A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(o.price_plan || 0)}</span>
                     </div>

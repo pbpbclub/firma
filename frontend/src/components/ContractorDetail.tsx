@@ -292,7 +292,7 @@ export function ContractorDetail({ masterId, onClose }: { masterId: string; onCl
                 <div style={{ fontSize: 10, color: "#A89070", fontFamily: MONO }}>{fmtDate(e.expense_date)}</div>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 12, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.title}</div>
-                  {e.order_number && <div style={{ fontSize: 10, color: "#A89070", marginTop: 1 }}>{e.order_number} · {e.order_title}</div>}
+                  {e.order_title && <div style={{ fontSize: 10, color: "#A89070", marginTop: 1 }}>{e.order_title}</div>}
                 </div>
                 <div style={{ fontSize: 12, fontWeight: 600, color: "#8B3A3A", textAlign: "right", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(e.amount)}</div>
               </div>
@@ -313,7 +313,7 @@ export function ContractorDetail({ masterId, onClose }: { masterId: string; onCl
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 11, color: "#1A1A1A", lineHeight: 1.45 }}>{ev.description || "—"}</div>
                   <div style={{ fontSize: 9, color: "#A89070", marginTop: 2 }}>
-                    {EVENT_LABELS[ev.event_type] || ev.event_type}{ev.order_number ? ` · ${ev.order_number}` : ""}
+                    {EVENT_LABELS[ev.event_type] || ev.event_type}{ev.order_title ? ` · ${ev.order_title}` : ""}
                   </div>
                 </div>
                 <div style={{ fontSize: 11, color: "#6B6355", textAlign: "right", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>

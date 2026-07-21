@@ -113,7 +113,7 @@ function CostHistorySection({ data, onOpenOrder }: { data: any; onOpenOrder: (or
                 onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
               >
                 <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  <span style={_num}>{h.order_number}</span> · {h.title}
+                  {h.title}
                 </div>
                 <div style={{ ..._num, textAlign: "right" }}>{h.qty}</div>
                 <div style={{ textAlign: "right", fontSize: 10, color: "#6B6355" }}>{_STATUS_RU[h.status] || h.status}</div>

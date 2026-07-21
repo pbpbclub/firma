@@ -118,7 +118,6 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
           <div key={a.order_id} style={{ display: "grid", gridTemplateColumns: "1fr 120px 28px", gap: 8, alignItems: "center", marginBottom: 6 }}>
             <div style={{ fontSize: 12, color: "#1A1A1A" }}>
               {o?.title ?? a.order_id}
-              <span style={{ fontSize: 10, color: "#A89070", marginLeft: 6 }}>{o?.number}</span>
             </div>
             <input value={a.amount} onChange={e => {
               const v = e.target.value;
@@ -140,7 +139,7 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
             style={{ fontSize: 11, padding: "3px 9px", border: "1px solid #EDEBE6", background: "#fff", cursor: "pointer", color: "#6B6355", fontFamily: "inherit" }}
             onMouseEnter={e => { e.currentTarget.style.borderColor = "#E8592A"; e.currentTarget.style.color = "#E8592A"; }}
             onMouseLeave={e => { e.currentTarget.style.borderColor = "#EDEBE6"; e.currentTarget.style.color = "#6B6355"; }}>
-            + {o.title} <span style={{ color: "#C8C0B0" }}>{o.number}</span>
+            + {o.title}
           </button>
         ))}
       </div>

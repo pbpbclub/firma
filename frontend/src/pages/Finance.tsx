@@ -209,7 +209,7 @@ function LinkOrderModal({ tx, paymentByFinTx, onClose }: {
           <div style={{ padding: "8px 20px", background: "#F2FDF5", borderBottom: "1px solid #D0EDD8", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ fontSize: 11, color: "#4A7C59" }}>
               <LinkSimple size={11} style={{ marginRight: 4 }} />
-              Привязано: <strong>{currentPayment.order_title} ({currentPayment.order_number})</strong>
+              Привязано: <strong>{currentPayment.order_title}</strong>
             </div>
             <button onClick={() => link.mutate({ orderId: null, txId: String(tx.id) })} style={{ fontSize: 11, color: "#8B3A3A", background: "none", border: "none", cursor: "pointer", padding: 0 }}>Отвязать</button>
           </div>
@@ -231,7 +231,6 @@ function LinkOrderModal({ tx, paymentByFinTx, onClose }: {
                 <div style={{ fontSize: 12, fontWeight: 500, color: "#1A1A1A" }}>{o.title}</div>
                 {o.customer_name && <div style={{ fontSize: 10, color: "#A89070", marginTop: 1 }}>{o.customer_name}</div>}
               </div>
-              <div style={{ fontSize: 11, color: "#E8592A", textAlign: "right" }}>{o.number}</div>
               <div style={{ fontSize: 11, color: "#A89070", textAlign: "right" }}>{fmtAmt(o.price_plan || 0)}</div>
             </div>
           ))}
@@ -474,7 +473,7 @@ export default function Finance() {
                   )}
                   {t.direction === "in" && paymentByFinTx.has(String(t.id)) && (
                     <div style={{ fontSize: 10, color: "#4A7C59", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {paymentByFinTx.get(String(t.id))?.number}
+                      {paymentByFinTx.get(String(t.id))?.title}
                     </div>
                   )}
                 </div>
