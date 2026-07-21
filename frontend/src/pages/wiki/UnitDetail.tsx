@@ -2,9 +2,11 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { MONO } from "../../components/ui/Num";
 import { Modal } from "../../components/ui/Modal";
+import { IconButton } from "../../components/ui/IconButton";
 import { businessUnitsApi } from "../../api";
-import { Plus, Trash } from "@phosphor-icons/react";
+import { Plus, Trash, PencilSimple, X } from "@phosphor-icons/react";
 import { fmt } from "./helpers";
+import { DetailRow as Row } from "./DetailRow";
 
 const ACCOUNT_SOURCES = [
   { v: "bank", l: "Банк (р/с)" },
@@ -12,6 +14,71 @@ const ACCOUNT_SOURCES = [
   { v: "cash", l: "Наличные" },
   { v: "manual", l: "Вручную" },
 ];
+
+// Панель юрлица (единый вид). Правка (со счётами) — через UnitModal по карандашу.
+export function UnitDetail({ row, onClose }: { row: any; onClose: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const u = row;
+  if (!u) return null;
+  const accounts: any[] = u.accounts ?? [];
+
+  return (
+    <>
+      {editing && <UnitModal row={u} onClose={() => setEditing(false)} />}
+
+      <div style={{ padding: "22px 24px 16px", borderBottom: "1px solid #EDEBE6", display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexShrink: 0 }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+            <div style={{ fontSize: 21, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em", maxWidth: 260 }}>{u.name}</div>
+            {u.kind && <span style={{ fontSize: 9, color: "#A89070", border: "1px solid #EDEBE6", padding: "2px 6px", letterSpacing: "0.04em" }}>{u.kind}</span>}
+          </div>
+          <div style={{ marginTop: 6, fontSize: 13, fontWeight: 700, color: u.balance_total >= 0 ? "#1A1A1A" : "#8B3A3A" }}>
+            Баланс: <span style={{ fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(u.balance_total || 0)}</span>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          <IconButton icon={PencilSimple} title="Редактировать" size={28} iconSize={16} color="#C8C0B0" onClick={() => setEditing(true)} />
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 6 }}
+            onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
+            onMouseLeave={e => (e.currentTarget.style.color = "#C8C0B0")}>
+            <X size={16} />
+          </button>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, overflowY: "auto", padding: "18px 24px" }}>
+        <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10 }}>РЕКВИЗИТЫ</div>
+        <Row label="Тип"            value={u.kind} />
+        <Row label="ИНН"            value={u.inn} mono />
+        <Row label="Полное название" value={u.full_name} />
+
+        <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10, marginTop: 20 }}>
+          СЧЕТА{accounts.length > 0 && <span style={{ color: "#C8C0B0", fontWeight: 400 }}> · {accounts.length}</span>}
+        </div>
+        {accounts.length === 0 ? (
+          <div style={{ fontSize: 12, color: "#C8C0B0" }}>Счетов нет</div>
+        ) : accounts.map((a: any) => (
+          <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 0", borderBottom: "1px solid #F2EFE9" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, color: "#1A1A1A" }}>{a.name}</div>
+              <div style={{ fontSize: 10, color: "#A89070" }}>
+                {ACCOUNT_SOURCES.find(s => s.v === a.source)?.l || a.source}{a.number ? ` · ${a.number}` : ""}
+              </div>
+            </div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(a.balance || 0)}</div>
+          </div>
+        ))}
+
+        {u.notes && (
+          <>
+            <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10, marginTop: 20 }}>ЗАМЕТКИ</div>
+            <div style={{ padding: "10px 12px", background: "#FAF8F5", fontSize: 12, color: "#1A1A1A", lineHeight: 1.7, borderLeft: "3px solid #EDEBE6" }}>{u.notes}</div>
+          </>
+        )}
+      </div>
+    </>
+  );
+}
 
 // Юрлицо/бизнес-единица редактируется модалкой (row={} — создание). Первый UI для юрлиц.
 export function UnitModal({ row, onClose }: { row: any; onClose: () => void }) {

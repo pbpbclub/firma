@@ -7,8 +7,8 @@ import { fmt } from "./helpers";
 import { ClientDetail, CLIENT_FIELDS } from "./ClientDetail";
 import { ContractorDetail, CONTRACTOR_FIELDS, STATUS_COLORS, CONTRACTOR_STATUS_LABELS } from "./ContractorDetail";
 import { SupplierDetail, SUPPLIER_FIELDS, PRICE_SUPPLIER_LABELS } from "./SupplierDetail";
-import { BrandModal } from "./BrandDetail";
-import { UnitModal } from "./UnitDetail";
+import { BrandDetail, BrandModal } from "./BrandDetail";
+import { UnitDetail, UnitModal } from "./UnitDetail";
 
 export type WikiColumn = {
   key: string;
@@ -33,11 +33,11 @@ export type WikiCategory = {
   columns: WikiColumn[];
   // Левая 32px-колонка: круг с инициалами или цветная точка (бренды). Нет → без аватара.
   avatar?: { kind: "initials" | "colorDot"; debtTint?: boolean };
-  // Панельная карточка (клиенты/подрядчики/поставщики):
-  Detail?: ComponentType<any>;
+  // Панельная карточка — у ВСЕХ категорий (единая навигация).
+  Detail: ComponentType<any>;
+  // Создание: либо форма EditModal по полям, либо своя модалка (бренды/юрлица — палитра/счета).
   createFields?: FieldDef[];
-  // Модалка (бренды/юрлица) — вместо панели:
-  Modal?: ComponentType<{ row: any; onClose: () => void }>;
+  createModal?: ComponentType<{ row: any; onClose: () => void }>;
 };
 
 // ── категории ─────────────────────────────────────────────────────────────
@@ -103,7 +103,8 @@ const brands: WikiCategory = {
     create: brandsApi.create, serverSearch: false,
   },
   searchFields: ["name", "description"],
-  Modal: BrandModal,
+  Detail: BrandDetail,
+  createModal: BrandModal,
   avatar: { kind: "colorDot" },
   columns: [
     { key: "name", label: "НАЗВАНИЕ", width: "1.4fr", filter: true, render: (r) => <span style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A", fontFamily: MONO }}>{r.name}</span> },
@@ -117,7 +118,9 @@ const units: WikiCategory = {
   key: "units", label: "Юрлица", singular: "юрлицо", icon: Buildings,
   adapter: { list: () => businessUnitsApi.list(), create: businessUnitsApi.create, serverSearch: false },
   searchFields: ["name", "inn"],
-  Modal: UnitModal,
+  Detail: UnitDetail,
+  createModal: UnitModal,
+  avatar: { kind: "initials" },
   columns: [
     { key: "name", label: "НАЗВАНИЕ", width: "1.4fr", filter: true, render: (r) => <span style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A" }}>{r.name}</span> },
     { key: "kind", label: "ТИП", width: "90px", filter: true, render: (r) => <span style={{ fontSize: 12, color: "#6B6355" }}>{r.kind || "—"}</span> },

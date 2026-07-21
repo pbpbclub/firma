@@ -24,11 +24,10 @@ function WikiCategoryView({ cat, id, navigate }: { cat: WikiCategory; id?: strin
   const [searchOpen, setSearchOpen] = useState(false);
   const [page, setPage] = useState(0);
   const [filters, setFilters] = useState<Record<string, string>>({});
-  const [creating, setCreating] = useState(false);
-  const [modalRow, setModalRow] = useState<any>(null); // для категорий-модалок (бренды/юрлица)
+  const [creating, setCreating] = useState(false);        // создание через EditModal (поля)
+  const [creatingModal, setCreatingModal] = useState(false); // создание через свою модалку (бренды/юрлица)
 
-  const isPanel = !!cat.Detail;
-  const rightOpen = isPanel && !!id;
+  const rightOpen = !!id;   // панель у всех категорий
 
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ["wiki", cat.key, cat.adapter.serverSearch ? search : ""],
@@ -99,20 +98,16 @@ function WikiCategoryView({ cat, id, navigate }: { cat: WikiCategory; id?: strin
   }
 
   const onRowClick = (row: any) => {
-    if (isPanel) {
-      navigate(id === row.id ? `/wiki/${cat.key}` : `/wiki/${cat.key}/${row.id}`);
-    } else {
-      setModalRow(row);
-    }
+    navigate(id === row.id ? `/wiki/${cat.key}` : `/wiki/${cat.key}/${row.id}`);
   };
 
   const onAddClick = () => {
-    if (isPanel) setCreating(true);
-    else setModalRow({});
+    if (cat.createModal) setCreatingModal(true);
+    else setCreating(true);
   };
 
   const DetailComp = cat.Detail as any;
-  const ModalComp = cat.Modal as any;
+  const CreateModalComp = cat.createModal as any;
 
   return (
     <div style={{ display: "flex", height: "100%", minHeight: 0 }}>
@@ -121,7 +116,6 @@ function WikiCategoryView({ cat, id, navigate }: { cat: WikiCategory; id?: strin
         flex: rightOpen ? "0 0 50%" : "1 1 0",
         display: "flex", flexDirection: "column", minWidth: 0,
         borderRight: rightOpen ? "1px solid #EDEBE6" : "none",
-        transition: "flex 0.2s ease",
       }}>
         <div style={{ padding: "24px 28px 0" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
@@ -247,14 +241,14 @@ function WikiCategoryView({ cat, id, navigate }: { cat: WikiCategory; id?: strin
         </div>
       </div>
 
-      {/* Правая панель (клиенты/подрядчики/поставщики) */}
+      {/* Правая панель — у всех категорий (единая навигация) */}
       {rightOpen && DetailComp && (
-        <div style={{ flex: "0 0 50%", display: "flex", flexDirection: "column", animation: "slideIn 0.18s ease", minWidth: 0 }}>
+        <div key={id} style={{ flex: "0 0 50%", display: "flex", flexDirection: "column", animation: "wikiFade 0.12s ease-out", minWidth: 0 }}>
           <DetailComp id={id} row={selectedRow} onClose={() => navigate(`/wiki/${cat.key}`)} onDeleted={() => navigate(`/wiki/${cat.key}`)} />
         </div>
       )}
 
-      {/* Создание для панельных категорий */}
+      {/* Создание: форма по полям (клиенты/подрядчики/поставщики) */}
       {creating && cat.createFields && (
         <EditModal
           title={`Новый: ${cat.singular}`}
@@ -266,12 +260,12 @@ function WikiCategoryView({ cat, id, navigate }: { cat: WikiCategory; id?: strin
         />
       )}
 
-      {/* Модалка для брендов/юрлиц */}
-      {modalRow && ModalComp && (
-        <ModalComp row={modalRow} onClose={() => setModalRow(null)} />
+      {/* Создание: своя модалка (бренды/юрлица) */}
+      {creatingModal && CreateModalComp && (
+        <CreateModalComp row={{}} onClose={() => setCreatingModal(false)} />
       )}
 
-      <style>{`@keyframes slideIn { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: translateX(0); } }`}</style>
+      <style>{`@keyframes wikiFade { from { opacity: 0 } to { opacity: 1 } }`}</style>
     </div>
   );
 }
