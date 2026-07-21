@@ -28,8 +28,8 @@ type Alloc = { order_id: string; amount: string; category: string; master_id: st
 // Пикер плановой строки сметы: платёж привязывается к конкретному обязательству
 // (напр. «Порошковая покраска · осталось 40 000»), а не «вообще к подрядчику».
 // Обязательства появляются только после утверждения сметы.
-function ObligationPicker({ orderId, categoryLabel, value, onPick }: {
-  orderId: string; categoryLabel: string; value: string | null;
+function ObligationPicker({ orderId, categoryLabel, value, amount, onPick }: {
+  orderId: string; categoryLabel: string; value: string | null; amount: string;
   onPick: (creditorId: string | null, remaining: number) => void;
 }) {
   const qc = useQueryClient();
@@ -91,6 +91,22 @@ function ObligationPicker({ orderId, categoryLabel, value, onPick }: {
           </option>
         ))}
       </select>
+      {(() => {
+        const picked = value ? list.find((x: any) => x.creditor_id === value) : null;
+        if (!picked) return null;
+        const after = Math.round((picked.remaining - (parseFloat(amount) || 0)) * 100) / 100;
+        return (
+          <div style={{ fontSize: 10, color: "#A89070", marginTop: 5 }}>
+            по плану осталось <span style={{ fontFamily: MONO, color: "#6B6355" }}>{fmt(picked.remaining)}</span>
+            {" → после этой оплаты "}
+            {after > 0
+              ? <span style={{ fontFamily: MONO, color: "#6B6355" }}>осталось оплатить {fmt(after)}</span>
+              : after < 0
+                ? <span style={{ fontFamily: MONO, color: "#8B3A3A" }}>переплата {fmt(-after)}</span>
+                : <span style={{ fontFamily: MONO, color: "#4A7C59" }}>план закрыт</span>}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -248,6 +264,7 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
               orderId={a.order_id}
               categoryLabel={catLabel}
               value={a.creditor_id}
+              amount={a.amount}
               onPick={(cid, remaining) => {
                 // Разносим ПЛАТЁЖ, а не план. В пустую сумму кладём неразнесённую часть
                 // платежа, но не больше остатка по плановой строке. Введённую вручную не трогаем.
