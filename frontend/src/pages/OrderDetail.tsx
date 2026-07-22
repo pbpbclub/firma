@@ -195,7 +195,7 @@ export default function OrderDetail() {
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
 
       {/* Top bar */}
-      <div style={{ padding: "16px 32px", borderBottom: "1px solid #EDEBE6", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div style={{ padding: "16px 28px", borderBottom: "1px solid #EDEBE6", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <button
             onClick={() => navigate("/orders")}
@@ -262,14 +262,14 @@ export default function OrderDetail() {
 
       {/* Scrollable body */}
       <div style={{ flex: 1, overflow: "auto" }}>
-        <div style={{ maxWidth: 760, padding: "28px 32px 48px" }}>
+        <div style={{ maxWidth: 760, padding: "28px 28px 48px" }}>
 
           {/* Editable title */}
           <input
             value={form.title}
             onChange={e => field({ title: e.target.value })}
             onKeyDown={e => e.key === "Enter" && handleSave()}
-            style={{ fontSize: 28, fontWeight: 700, letterSpacing: "-0.03em", color: "#1A1A1A", border: "none", borderBottom: "2px solid transparent", outline: "none", background: "transparent", width: "100%", padding: "0 0 4px", fontFamily: "inherit", marginBottom: 20, boxSizing: "border-box" }}
+            style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.03em", color: "#1A1A1A", border: "none", borderBottom: "2px solid transparent", outline: "none", background: "transparent", width: "100%", padding: "0 0 4px", fontFamily: "inherit", marginBottom: 20, boxSizing: "border-box" }}
             onFocus={e => (e.currentTarget.style.borderBottomColor = "#EDEBE6")}
             onBlur={e => (e.currentTarget.style.borderBottomColor = "transparent")}
           />

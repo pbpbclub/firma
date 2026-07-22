@@ -729,7 +729,7 @@ function PasswordSection() {
 
 export default function Admin() {
   return (
-    <div style={{ padding: "40px 48px", maxWidth: 720, fontFamily: "inherit" }}>
+    <div style={{ padding: "24px 28px", maxWidth: 720, fontFamily: "inherit" }}>
       <div style={{ marginBottom: 36 }}>
         <div style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.03em", color: "#1A1A1A" }}>
           Настройки

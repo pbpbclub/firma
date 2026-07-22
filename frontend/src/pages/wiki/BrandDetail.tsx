@@ -3,11 +3,11 @@ import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MONO } from "../../components/ui/Num";
 import { Modal } from "../../components/ui/Modal";
-import { IconButton } from "../../components/ui/IconButton";
 import { brandsApi, ordersApi } from "../../api";
-import { Trash, PencilSimple, X } from "@phosphor-icons/react";
+import { Trash } from "@phosphor-icons/react";
 import { fmt } from "./helpers";
 import { DetailRow as Row } from "./DetailRow";
+import { DetailShell, DetailSection, NoteBlock } from "./DetailShell";
 
 const RAL_PALETTE = [
   { name: "vinyl",        ral: "RAL 9005", hex: "#0A0A0A" },
@@ -51,60 +51,31 @@ export function BrandDetail({ row, onClose }: { row: any; onClose: () => void })
     <>
       {editing && <BrandModal row={b} onClose={() => setEditing(false)} />}
 
-      <div style={{ padding: "22px 24px 16px", borderBottom: "1px solid #EDEBE6", display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexShrink: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ width: 14, height: 14, borderRadius: "50%", background: b.color || "#A89070", flexShrink: 0, border: (b.color || "").toLowerCase() === "#f4f4f4" ? "1px solid #EDEBE6" : "none" }} />
-          <div style={{ fontSize: 21, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em", fontFamily: MONO }}>{b.name}</div>
-        </div>
-        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-          <IconButton icon={PencilSimple} title="Редактировать" size={28} iconSize={16} color="#C8C0B0" onClick={() => setEditing(true)} />
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 6 }}
-            onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
-            onMouseLeave={e => (e.currentTarget.style.color = "#C8C0B0")}>
-            <X size={16} />
-          </button>
-        </div>
-      </div>
-
-      <div style={{ flex: 1, overflowY: "auto", padding: "18px 24px" }}>
-        {fin && (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10, marginBottom: 20 }}>
-            {[
-              { l: "Доход",   v: fmt(fin.income), c: "#4A7C59" },
-              { l: "Прибыль", v: fmt(fin.profit), c: fin.profit < 0 ? "#8B3A3A" : "#1A1A1A" },
-            ].map(s => (
-              <div key={s.l} style={{ background: "#FAF8F5", padding: "9px 11px" }}>
-                <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 3 }}>{s.l.toUpperCase()}</div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: s.c, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{s.v}</div>
-              </div>
-            ))}
-          </div>
-        )}
-
+      <DetailShell
+        title={b.name}
+        avatar={{ kind: "colorDot", color: b.color || "#A89070" }}
+        metrics={fin ? [
+          { label: "Доход",   value: fmt(fin.income), color: "#4A7C59" },
+          { label: "Прибыль", value: fmt(fin.profit), color: fin.profit < 0 ? "#8B3A3A" : "#1A1A1A" },
+        ] : undefined}
+        onEdit={() => setEditing(true)}
+        onClose={onClose}
+      >
         {(b.positioning || b.description) && (
-          <>
-            <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10 }}>ПРОФИЛЬ</div>
+          <DetailSection label="ПРОФИЛЬ" first>
             {b.positioning && <Row label="Позиционирование" value={b.positioning} />}
-            {b.description && (
-              <div style={{ marginTop: 8, padding: "10px 12px", background: "#FAF8F5", fontSize: 12, color: "#1A1A1A", lineHeight: 1.7, borderLeft: "3px solid #EDEBE6" }}>
-                {b.description}
-              </div>
-            )}
-          </>
+            {b.description && <NoteBlock>{b.description}</NoteBlock>}
+          </DetailSection>
         )}
 
         {b.notes && (
-          <>
-            <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10, marginTop: 20 }}>ЗАМЕТКИ</div>
-            <div style={{ padding: "10px 12px", background: "#FAF8F5", fontSize: 12, color: "#1A1A1A", lineHeight: 1.7, borderLeft: "3px solid #EDEBE6" }}>{b.notes}</div>
-          </>
+          <DetailSection label="ЗАМЕТКИ">
+            <NoteBlock>{b.notes}</NoteBlock>
+          </DetailSection>
         )}
 
         {(brandOrders as any[]).length > 0 && (
-          <div style={{ marginTop: 20 }}>
-            <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10 }}>
-              ЗАКАЗЫ <span style={{ color: "#C8C0B0", fontWeight: 400 }}>· {(brandOrders as any[]).length}</span>
-            </div>
+          <DetailSection label="ЗАКАЗЫ" extra={`· ${(brandOrders as any[]).length}`}>
             {(brandOrders as any[]).map((o: any) => (
               <div key={o.id}
                 onClick={() => navigate(`/orders/${o.id}/estimate`)}
@@ -115,9 +86,9 @@ export function BrandDetail({ row, onClose }: { row: any; onClose: () => void })
                 <span style={{ fontSize: 12, fontWeight: 600, color: "#1A1A1A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(o.price_plan || 0)}</span>
               </div>
             ))}
-          </div>
+          </DetailSection>
         )}
-      </div>
+      </DetailShell>
     </>
   );
 }

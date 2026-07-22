@@ -1,14 +1,14 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { MONO } from "../../components/ui/Num";
-import { IconButton } from "../../components/ui/IconButton";
 import { useNavigationGuard, NavigationGuardModal } from "../../components/NavigationGuard";
 import { EditModal, type FieldDef } from "../../components/EditModal";
 import { PayeeRulesSection } from "../../components/PayeeRulesSection";
 import { mastersApi, financeApi } from "../../api";
-import { PencilSimple, DotsThree, Check } from "@phosphor-icons/react";
+import { Check } from "@phosphor-icons/react";
 import { fmt, fmtDate } from "./helpers";
 import { DetailRow as Row } from "./DetailRow";
+import { DetailShell, DetailSection, NoteBlock, type DetailMetric } from "./DetailShell";
 
 export const STATUS_COLORS: Record<string, string> = {
   favorite: "#E8592A", stable: "#4A7C59", available: "#A89070", risk: "#8B3A3A",
@@ -127,68 +127,46 @@ export function ContractorDetail({ id, onClose }: { id: string; onClose: () => v
         />
       )}
 
-      <div style={{ padding: "22px 24px 16px", borderBottom: "1px solid #EDEBE6", display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexShrink: 0 }}>
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
-            <div style={{ fontSize: 21, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em", maxWidth: 260 }}>{master.name}</div>
-            <span style={{ fontSize: 9, color: STATUS_COLORS[master.status] || "#A89070", border: `1px solid ${STATUS_COLORS[master.status] || "#EDEBE6"}`, padding: "2px 6px", letterSpacing: "0.04em" }}>
-              {CONTRACTOR_STATUS_LABELS[master.status] || master.status}
-            </span>
-          </div>
-          <div style={{ fontSize: 12, color: "#A89070" }}>{master.role}{master.specialization ? ` · ${master.specialization}` : ""}</div>
-          {data?.paid_total > 0 && (
-            <div style={{ marginTop: 6, fontSize: 12, color: "#4A7C59" }}>Выплачено: <span style={{ fontFamily: MONO, fontVariantNumeric: "tabular-nums", fontWeight: 700 }}>{fmt(data.paid_total)}</span></div>
-          )}
-          {totalDebt > 0 && (
-            <div style={{ marginTop: 6, fontSize: 13, fontWeight: 700, color: "#8B3A3A" }}>Долг: <span style={{ fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(totalDebt)}</span></div>
-          )}
-        </div>
-        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-          <IconButton icon={PencilSimple} title="Редактировать" size={28} iconSize={16} color="#C8C0B0" onClick={() => setEditing(true)} />
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 6 }}
-            onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
-            onMouseLeave={e => (e.currentTarget.style.color = "#C8C0B0")}>
-            <DotsThree size={20} />
-          </button>
-        </div>
-      </div>
-
-      <div style={{ flex: 1, overflowY: "auto", padding: "18px 24px" }}>
-        <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10 }}>КОНТАКТЫ</div>
-        <Row label="Телефон"  value={master.phone} mono />
-        <Row label="Telegram" value={master.telegram} />
-        <Row label="Email"    value={master.email} />
+      <DetailShell
+        title={master.name}
+        subtitle={`${master.role || ""}${master.specialization ? ` · ${master.specialization}` : ""}`}
+        avatar={{ kind: "initials", name: master.name, tint: totalDebt > 0 ? "#FFF0EC" : undefined }}
+        status={master.status ? { label: CONTRACTOR_STATUS_LABELS[master.status] || master.status, color: STATUS_COLORS[master.status] } : null}
+        metrics={((): DetailMetric[] | undefined => {
+          const m: DetailMetric[] = [];
+          if (data?.paid_total > 0) m.push({ label: "Выплачено", value: fmt(data.paid_total), color: "#4A7C59" });
+          if (totalDebt > 0) m.push({ label: "Долг", value: fmt(totalDebt), color: "#8B3A3A" });
+          return m.length ? m : undefined;
+        })()}
+        onEdit={() => setEditing(true)}
+        onClose={onClose}
+      >
+        <DetailSection label="КОНТАКТЫ" first>
+          <Row label="Телефон"  value={master.phone} mono />
+          <Row label="Telegram" value={master.telegram} />
+          <Row label="Email"    value={master.email} />
+        </DetailSection>
 
         {(wiki.pay_label || wiki.pay_note || wiki.prepay_pct) && (
-          <>
-            <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10, marginTop: 18 }}>ОПЛАТА</div>
+          <DetailSection label="ОПЛАТА">
             {wiki.pay_label && <Row label="Схема" value={wiki.pay_label} />}
             {wiki.prepay_pct > 0 && <Row label="Предоплата" value={`${wiki.prepay_pct}%`} mono />}
-          </>
+          </DetailSection>
         )}
 
         {(master.notes || wiki.wiki_notes) && (
-          <>
-            <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10, marginTop: 18 }}>ВИКИ</div>
-            {(wiki.wiki_notes || master.notes) && (
-              <div style={{ padding: "10px 12px", background: "#FAF8F5", fontSize: 12, color: "#1A1A1A", lineHeight: 1.7, borderLeft: "3px solid #EDEBE6" }}>
-                {wiki.wiki_notes || master.notes}
-              </div>
-            )}
+          <DetailSection label="ВИКИ">
+            {(wiki.wiki_notes || master.notes) && <NoteBlock>{wiki.wiki_notes || master.notes}</NoteBlock>}
             {wiki.wiki_notes && master.notes && wiki.wiki_notes !== master.notes && (
               <div style={{ padding: "10px 12px", background: "#FFF8F5", fontSize: 12, color: "#6B6355", lineHeight: 1.7, borderLeft: "3px solid #FAD0C0", marginTop: 6 }}>
                 {master.notes}
               </div>
             )}
-          </>
+          </DetailSection>
         )}
 
-        <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10, marginTop: 18 }}>
-          ОБЯЗАТЕЛЬСТВА
-          {creditors.filter(c => c.status === "open").length > 0 &&
-            <span style={{ color: "#8B3A3A", marginLeft: 6 }}>· {creditors.filter(c => c.status === "open").length} открытых</span>}
-        </div>
-
+        <DetailSection label="ОБЯЗАТЕЛЬСТВА" extra={creditors.filter(c => c.status === "open").length > 0
+          ? <span style={{ color: "#8B3A3A" }}>· {creditors.filter(c => c.status === "open").length} открытых</span> : undefined}>
         {creditors.length === 0 ? (
           <div style={{ fontSize: 12, color: "#C8C0B0" }}>Нет зафиксированных долгов</div>
         ) : (
@@ -255,13 +233,10 @@ export function ContractorDetail({ id, onClose }: { id: string; onClose: () => v
             </div>
           ))
         )}
+        </DetailSection>
 
         {expenses.length > 0 && (
-          <>
-            <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10, marginTop: 18 }}>
-              РАСХОДЫ ПО ЗАКАЗАМ
-              <span style={{ color: "#1A1A1A", marginLeft: 6, fontFamily: MONO }}>{fmt(expensesTotal)}</span>
-            </div>
+          <DetailSection label="РАСХОДЫ ПО ЗАКАЗАМ" extra={<span style={{ color: "#1A1A1A", fontFamily: MONO }}>{fmt(expensesTotal)}</span>}>
             {expenses.map((e: any) => (
               <div key={e.id} style={{ display: "grid", gridTemplateColumns: "70px 1fr 90px", gap: 8, alignItems: "center", padding: "7px 0", borderBottom: "1px solid #F2EFE9" }}>
                 <div style={{ fontSize: 10, color: "#A89070", fontFamily: MONO }}>{fmtDate(e.expense_date)}</div>
@@ -272,13 +247,12 @@ export function ContractorDetail({ id, onClose }: { id: string; onClose: () => v
                 <div style={{ fontSize: 12, fontWeight: 600, color: "#8B3A3A", textAlign: "right", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(e.amount)}</div>
               </div>
             ))}
-          </>
+          </DetailSection>
         )}
 
         {events.length > 0 && (
-          <>
-            <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4, marginTop: 18 }}>ИСТОРИЯ</div>
-            <div style={{ fontSize: 10, color: "#C8C0B0", marginBottom: 10, lineHeight: 1.5 }}>
+          <DetailSection label="ИСТОРИЯ">
+            <div style={{ fontSize: 10, color: "#C8C0B0", marginBottom: 10, marginTop: -2, lineHeight: 1.5 }}>
               Из вики фин-агента. Не суммируется с расходами: одна выплата бывает записана и там, и там.
             </div>
             {events.map((ev: any) => (
@@ -295,11 +269,11 @@ export function ContractorDetail({ id, onClose }: { id: string; onClose: () => v
                 </div>
               </div>
             ))}
-          </>
+          </DetailSection>
         )}
 
         <PayeeRulesSection entityType="master" entityId={id} />
-      </div>
+      </DetailShell>
 
       <NavigationGuardModal blocker={blocker} />
     </>

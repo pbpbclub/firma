@@ -1,12 +1,11 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { IconButton } from "../../components/ui/IconButton";
 import { useNavigationGuard, NavigationGuardModal } from "../../components/NavigationGuard";
 import { EditModal, type FieldDef } from "../../components/EditModal";
 import { PayeeRulesSection } from "../../components/PayeeRulesSection";
 import { suppliersApi } from "../../api";
-import { PencilSimple, X } from "@phosphor-icons/react";
 import { DetailRow as Row } from "./DetailRow";
+import { DetailShell, DetailSection, NoteBlock } from "./DetailShell";
 
 // Код прайса materials.db → метка (справочно; join не строим).
 export const PRICE_SUPPLIER_LABELS: Record<string, string> = {
@@ -63,48 +62,32 @@ export function SupplierDetail({ row, onClose, onDeleted }: { row: any; onClose:
         />
       )}
 
-      <div style={{ padding: "22px 24px 16px", borderBottom: "1px solid #EDEBE6", display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexShrink: 0 }}>
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
-            <div style={{ fontSize: 21, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em", maxWidth: 270 }}>{s.name}</div>
-            {s.price_supplier && PRICE_SUPPLIER_LABELS[s.price_supplier] && (
-              <span style={{ fontSize: 9, color: "#E8592A", border: "1px solid #E8592A", padding: "2px 6px", letterSpacing: "0.04em" }}>
-                прайс: {PRICE_SUPPLIER_LABELS[s.price_supplier]}
-              </span>
-            )}
-          </div>
-          {s.category && <div style={{ fontSize: 11, color: "#A89070" }}>{s.category}</div>}
-        </div>
-        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-          <IconButton icon={PencilSimple} title="Редактировать" size={28} iconSize={16} color="#C8C0B0" onClick={() => setEditing(true)} />
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 6 }}
-            onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
-            onMouseLeave={e => (e.currentTarget.style.color = "#C8C0B0")}>
-            <X size={16} />
-          </button>
-        </div>
-      </div>
-
-      <div style={{ flex: 1, overflowY: "auto", padding: "18px 24px" }}>
-        <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10 }}>КОНТАКТЫ</div>
-        <Row label="ИНН"             value={s.inn} mono />
-        <Row label="Телефон"         value={s.phone} mono />
-        <Row label="Email"           value={s.email} />
-        <Row label="Контактное лицо" value={s.contact} />
-        <Row label="Telegram"        value={s.telegram} />
-        <Row label="Сайт"            value={s.website} />
+      <DetailShell
+        title={s.name}
+        subtitle={s.category}
+        avatar={{ kind: "initials", name: s.name }}
+        status={s.price_supplier && PRICE_SUPPLIER_LABELS[s.price_supplier]
+          ? { label: `прайс: ${PRICE_SUPPLIER_LABELS[s.price_supplier]}`, color: "#E8592A" } : null}
+        onEdit={() => setEditing(true)}
+        onClose={onClose}
+      >
+        <DetailSection label="КОНТАКТЫ" first>
+          <Row label="ИНН"             value={s.inn} mono />
+          <Row label="Телефон"         value={s.phone} mono />
+          <Row label="Email"           value={s.email} />
+          <Row label="Контактное лицо" value={s.contact} />
+          <Row label="Telegram"        value={s.telegram} />
+          <Row label="Сайт"            value={s.website} />
+        </DetailSection>
 
         {s.notes && (
-          <>
-            <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10, marginTop: 20 }}>ЗАМЕТКИ</div>
-            <div style={{ padding: "10px 12px", background: "#FAF8F5", fontSize: 12, color: "#1A1A1A", lineHeight: 1.7, borderLeft: "3px solid #EDEBE6" }}>
-              {s.notes}
-            </div>
-          </>
+          <DetailSection label="ЗАМЕТКИ">
+            <NoteBlock>{s.notes}</NoteBlock>
+          </DetailSection>
         )}
 
         <PayeeRulesSection entityType="supplier" entityId={s.id} />
-      </div>
+      </DetailShell>
 
       <NavigationGuardModal blocker={blocker} />
     </>

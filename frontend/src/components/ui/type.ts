@@ -17,15 +17,19 @@ export const T = {
     fontFamily: MONO, fontVariantNumeric: "tabular-nums",
     fontSize: 30, fontWeight: 700, letterSpacing: "-0.02em", lineHeight: 1.05,
   } as CSSProperties,
-  // Заголовок страницы (Onest)
+  // Заголовок страницы (Onest) — единственный размер H1
   pageTitle: {
     fontSize: 26, fontWeight: 700, letterSpacing: "-0.03em", color: "#1A1A1A",
+  } as CSSProperties,
+  // Заголовок карточки-детали (правая панель Вики и т.п.)
+  detailTitle: {
+    fontSize: 20, fontWeight: 700, letterSpacing: "-0.02em", color: "#1A1A1A",
   } as CSSProperties,
   // Заголовок секции/карточки
   title: {
     fontSize: 15, fontWeight: 700, letterSpacing: "-0.01em", color: "#1A1A1A",
   } as CSSProperties,
-  // CAPS-метка раздела
+  // CAPS-метка раздела/секции
   sectionLabel: {
     fontSize: 11, fontWeight: 600, color: "#A89070", letterSpacing: "0.08em", textTransform: "uppercase",
   } as CSSProperties,
@@ -42,4 +46,31 @@ export const T = {
   numBig: {
     fontFamily: MONO, fontVariantNumeric: "tabular-nums", fontSize: 15, fontWeight: 700,
   } as CSSProperties,
+  // Метрика в детали/плитке: метка CAPS 10 + значение 14/700
+  metricLabel: {
+    fontSize: 10, fontWeight: 600, color: "#A89070", letterSpacing: "0.06em", textTransform: "uppercase",
+  } as CSSProperties,
+  metricValue: {
+    fontFamily: MONO, fontVariantNumeric: "tabular-nums", fontSize: 14, fontWeight: 700,
+  } as CSSProperties,
+} as const;
+
+// ─── Шкала отступов ───────────────────────────────────────────────────────────
+// Единые расстояния. Раньше горизонталь контента гуляла 28/24/32/48, паддинг
+// строк 10/11/12/13 — здесь один источник, применяем при касании файла.
+export const SP = {
+  pageX: 28,          // горизонтальный паддинг контента (везде)
+  panelX: 24,         // горизонталь панели-детали/модалки
+  rowY: 11,           // вертикаль строки таблицы
+  section: 20,        // отступ между секциями
+  stack: 12,          // gap в вертикальных стопках полей
+} as const;
+
+// Готовые паддинги (строкой для CSS)
+export const PAD = {
+  pageHeader: `24px ${SP.pageX}px 0`,        // шапка страницы
+  row: `${SP.rowY}px ${SP.pageX}px`,          // строка таблицы
+  colHeader: `8px ${SP.pageX}px`,             // ряд заголовков колонок
+  filterBar: `10px ${SP.pageX}px`,            // ряд счётчика/сброса
+  panel: `18px ${SP.panelX}px`,               // тело панели/секции детали
 } as const;

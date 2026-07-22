@@ -8,6 +8,7 @@ import { EditModal } from "../components/EditModal";
 import { MagnifyingGlass, Plus, CaretRight, X } from "@phosphor-icons/react";
 import { WIKI_CATEGORIES, findCategory, type WikiCategory } from "./wiki/registry";
 import { initials, PAGE_SIZE } from "./wiki/helpers";
+import { T } from "../components/ui/type";
 
 export default function Wiki() {
   const navigate = useNavigate();
@@ -170,7 +171,7 @@ function WikiCategoryView({ cat, id, navigate }: { cat: WikiCategory; id?: strin
                 {c.filter ? (
                   <ColumnFilter label={c.label} options={uniqueValues(c.key)} value={filters[c.key] || ""} onChange={(v) => { setFilters(f => ({ ...f, [c.key]: v })); setPage(0); }} />
                 ) : (
-                  <span style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>{c.label}</span>
+                  <span style={T.colLabel}>{c.label}</span>
                 )}
               </div>
             ))}
@@ -209,7 +210,7 @@ function WikiCategoryView({ cat, id, navigate }: { cat: WikiCategory; id?: strin
                 )}
 
                 {rightOpen ? (
-                  <div style={{ fontSize: 12, fontWeight: 500, color: active ? "#fff" : "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: active ? "#fff" : "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {item.name}
                   </div>
                 ) : (
@@ -217,7 +218,7 @@ function WikiCategoryView({ cat, id, navigate }: { cat: WikiCategory; id?: strin
                     <div key={c.key} style={{ textAlign: c.align, minWidth: 0, color: active ? "#fff" : undefined }}>
                       {c.render
                         ? c.render(item)
-                        : <span style={{ fontSize: 12, fontWeight: 500, color: active ? "#fff" : "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{item[c.key] ?? "—"}</span>}
+                        : <span style={{ fontSize: 13, fontWeight: 500, color: active ? "#fff" : "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{item[c.key] ?? "—"}</span>}
                     </div>
                   ))
                 )}

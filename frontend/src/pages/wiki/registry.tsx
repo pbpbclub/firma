@@ -2,8 +2,22 @@ import type { ComponentType, ReactNode } from "react";
 import { User, Wrench, Truck, Palette, Buildings } from "@phosphor-icons/react";
 import { customersApi, mastersApi, suppliersApi, brandsApi, businessUnitsApi, financeApi } from "../../api";
 import { MONO } from "../../components/ui/Num";
+import { T } from "../../components/ui/type";
 import type { FieldDef } from "../../components/EditModal";
 import { fmt } from "./helpers";
+
+// ── Общие ячейки колонок (единые размеры вместо ручных 12/13/14) ──────────────
+const ell = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" } as const;
+// Имя строки — всегда 13/500 (Onest).
+const nameCell = (name?: string) => <span style={{ ...T.body, fontWeight: 500, ...ell }}>{name || "—"}</span>;
+// Денежная ячейка — всегда T.num (Space Grotesk 13, tabular). tone — цвет, bold — 700.
+const numCell = (v: number, tone = "#1A1A1A", opts?: { bold?: boolean; dashZero?: boolean }) =>
+  <span style={{ ...T.num, fontWeight: opts?.bold ? 700 : 400, color: opts?.dashZero && !v ? "#C8C0B0" : tone }}>
+    {opts?.dashZero && !v ? "—" : fmt(v)}
+  </span>;
+// Второстепенный текст в ячейке (специализация/описание/тип).
+const subCell = (text?: string, color = "#6B6355") =>
+  <span style={{ fontSize: 11, color, ...ell, paddingRight: 12 }}>{text || "—"}</span>;
 import { ClientDetail, CLIENT_FIELDS } from "./ClientDetail";
 import { ContractorDetail, CONTRACTOR_FIELDS, STATUS_COLORS, CONTRACTOR_STATUS_LABELS } from "./ContractorDetail";
 import { SupplierDetail, SUPPLIER_FIELDS, PRICE_SUPPLIER_LABELS } from "./SupplierDetail";
@@ -64,15 +78,15 @@ const contractors: WikiCategory = {
   columns: [
     { key: "name", label: "ИМЯ", width: "1.6fr", render: (r) => (
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</div>
-        {r.status && <div style={{ fontSize: 9, color: STATUS_COLORS[r.status] || "#A89070", marginTop: 1 }}>{CONTRACTOR_STATUS_LABELS[r.status] || r.status}</div>}
+        {nameCell(r.name)}
+        {r.status && <div style={{ fontSize: 10, color: STATUS_COLORS[r.status] || "#A89070", marginTop: 1 }}>{CONTRACTOR_STATUS_LABELS[r.status] || r.status}</div>}
       </div>
     ) },
-    { key: "specialization", label: "СПЕЦИАЛИЗАЦИЯ", width: "1.2fr", render: (r) => <span style={{ fontSize: 11, color: "#6B6355" }}>{r.specialization || "—"}</span> },
-    { key: "role", label: "РОЛЬ", width: "120px", filter: true, render: (r) => <span style={{ fontSize: 11, color: "#A89070" }}>{r.role || "—"}</span> },
-    { key: "pay_label", label: "СХЕМА", width: "110px", render: (r) => <span style={{ fontSize: 10, color: r.pay_label ? "#1A1A1A" : "#C8C0B0" }}>{r.pay_label || "—"}</span> },
-    { key: "paid_total", label: "ВЫПЛАЧЕНО", width: "110px", align: "right", render: (r) => <span style={{ fontSize: 12, color: r.paid_total > 0 ? "#4A7C59" : "#C8C0B0", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{r.paid_total > 0 ? fmt(r.paid_total) : "—"}</span> },
-    { key: "debt", label: "ДОЛГ", width: "90px", align: "right", render: (r) => <span style={{ fontSize: 12, fontWeight: 600, color: r.debt > 0 ? "#8B3A3A" : "#C8C0B0", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{r.debt > 0 ? fmt(r.debt) : "—"}</span> },
+    { key: "specialization", label: "СПЕЦИАЛИЗАЦИЯ", width: "1.2fr", render: (r) => subCell(r.specialization) },
+    { key: "role", label: "РОЛЬ", width: "120px", filter: true, render: (r) => subCell(r.role, "#A89070") },
+    { key: "pay_label", label: "СХЕМА", width: "110px", render: (r) => <span style={{ fontSize: 11, color: r.pay_label ? "#1A1A1A" : "#C8C0B0", ...ell }}>{r.pay_label || "—"}</span> },
+    { key: "paid_total", label: "ВЫПЛАЧЕНО", width: "110px", align: "right", render: (r) => numCell(r.paid_total, "#4A7C59", { dashZero: true }) },
+    { key: "debt", label: "ДОЛГ", width: "90px", align: "right", render: (r) => numCell(r.debt, "#8B3A3A", { bold: true, dashZero: true }) },
   ],
 };
 
@@ -107,10 +121,10 @@ const brands: WikiCategory = {
   createModal: BrandModal,
   avatar: { kind: "colorDot" },
   columns: [
-    { key: "name", label: "НАЗВАНИЕ", width: "1.4fr", filter: true, render: (r) => <span style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A", fontFamily: MONO }}>{r.name}</span> },
-    { key: "description", label: "ОПИСАНИЕ", width: "2fr", render: (r) => <span style={{ fontSize: 12, color: "#6B6355", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block", paddingRight: 16 }}>{r.description || "—"}</span> },
-    { key: "_income", label: "ДОХОД", width: "120px", align: "right", render: (r) => <span style={{ fontSize: 13, fontWeight: 600, color: "#4A7C59", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{r._fin ? fmt(r._fin.income) : "—"}</span> },
-    { key: "_profit", label: "ПРИБЫЛЬ", width: "120px", align: "right", render: (r) => <span style={{ fontSize: 13, fontWeight: 700, color: r._fin && r._fin.profit < 0 ? "#8B3A3A" : "#1A1A1A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{r._fin ? fmt(r._fin.profit) : "—"}</span> },
+    { key: "name", label: "НАЗВАНИЕ", width: "1.4fr", filter: true, render: (r) => nameCell(r.name) },
+    { key: "description", label: "ОПИСАНИЕ", width: "2fr", render: (r) => subCell(r.description) },
+    { key: "_income", label: "ДОХОД", width: "120px", align: "right", render: (r) => r._fin ? numCell(r._fin.income, "#4A7C59") : subCell("—", "#C8C0B0") },
+    { key: "_profit", label: "ПРИБЫЛЬ", width: "120px", align: "right", render: (r) => r._fin ? numCell(r._fin.profit, r._fin.profit < 0 ? "#8B3A3A" : "#1A1A1A", { bold: true }) : subCell("—", "#C8C0B0") },
   ],
 };
 
@@ -122,9 +136,9 @@ const units: WikiCategory = {
   createModal: UnitModal,
   avatar: { kind: "initials" },
   columns: [
-    { key: "name", label: "НАЗВАНИЕ", width: "1.4fr", filter: true, render: (r) => <span style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A" }}>{r.name}</span> },
-    { key: "kind", label: "ТИП", width: "90px", filter: true, render: (r) => <span style={{ fontSize: 12, color: "#6B6355" }}>{r.kind || "—"}</span> },
-    { key: "inn", label: "ИНН", width: "130px", render: (r) => <span style={{ fontSize: 12, color: "#A89070", fontFamily: MONO }}>{r.inn || "—"}</span> },
+    { key: "name", label: "НАЗВАНИЕ", width: "1.4fr", filter: true, render: (r) => nameCell(r.name) },
+    { key: "kind", label: "ТИП", width: "90px", filter: true, render: (r) => subCell(r.kind) },
+    { key: "inn", label: "ИНН", width: "130px", render: (r) => <span style={{ ...T.num, color: "#A89070" }}>{r.inn || "—"}</span> },
     { key: "accounts", label: "СЧЕТА", width: "1.6fr", render: (r) => (
       <span style={{ fontSize: 11, color: "#6B6355" }}>
         {(r.accounts || []).length === 0 ? "—" : (r.accounts || []).map((a: any) => (
@@ -132,7 +146,7 @@ const units: WikiCategory = {
         ))}
       </span>
     ) },
-    { key: "balance_total", label: "БАЛАНС", width: "120px", align: "right", render: (r) => <span style={{ fontSize: 14, fontWeight: 700, color: r.balance_total >= 0 ? "#1A1A1A" : "#8B3A3A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(r.balance_total || 0)}</span> },
+    { key: "balance_total", label: "БАЛАНС", width: "120px", align: "right", render: (r) => numCell(r.balance_total || 0, r.balance_total >= 0 ? "#1A1A1A" : "#8B3A3A", { bold: true }) },
   ],
 };
 
