@@ -1,8 +1,8 @@
-// Вторая гарнитура — JetBrains Mono — только для чисел/денег/латиницы/дат/бейджей.
-// Моноширинные цифры (tabular-nums) выстраивают колонки сумм ровным столбиком.
-// Интерфейсный текст и кириллица остаются на system-ui.
-
-export const MONO = "'JetBrains Mono', ui-monospace, monospace";
+// Числовая гарнитура бренда — Space Grotesk (как на pbpb.club). Ставится на ячейки
+// с суммами/датами; tabular-nums выстраивает колонки ровным столбиком. Кириллица
+// внутри такой ячейки падает в Onest (следующий в стеке). Имя MONO сохранено, чтобы
+// сотни существующих `fontFamily: MONO` продолжали значить «числовая гарнитура».
+export const MONO = "'Space Grotesk', 'Onest', system-ui, sans-serif";
 
 export const numStyle: React.CSSProperties = {
   fontFamily: MONO,

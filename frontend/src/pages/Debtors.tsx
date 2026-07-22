@@ -9,8 +9,16 @@ import { ColumnFilter } from "../components/TableFilters";
 import { Modal } from "../components/ui/Modal";
 import { MONO } from "../components/ui/Num";
 import { IconButton } from "../components/ui/IconButton";
+import { T, POLARITY } from "../components/ui/type";
+import { DeadlinePill } from "../components/ui/Pill";
+import { Button } from "../components/ui/Button";
 
 const SANS = "inherit";
+
+// Полярность вкладки: деньги входят (in) / выходят (out) — задаёт цвет зоны.
+const TAB_POLARITY: Record<string, keyof typeof POLARITY> = {
+  debtors: "in", unallocated: "in", creditors: "out", fixed: "out",
+};
 
 function Checkbox({ checked, indeterminate = false, onChange }: {
   checked: boolean; indeterminate?: boolean; onChange: () => void;
@@ -436,7 +444,7 @@ function DebtorsTab() {
                 {d.paid_bank > 0 && <Bank size={11} style={{ color: "#4A7C59" }} />}
               </div>
               <div style={{ fontSize: 13, fontWeight: 700, color: "#E8592A" }}>{fmt(d.debt)}</div>
-              <div style={{ fontSize: 12, color: deadlineColor(d.deadline) }}>{fmtDate(d.deadline)}</div>
+              <div><DeadlinePill date={d.deadline} /></div>
               <div style={{ display: "flex", justifyContent: "center" }}>
                 <IconButton icon={LinkSimple} title="Связать с транзакцией" size={24} iconSize={13}
                   color={d.finance_tx_id ? "#4A7C59" : "#C8C0B0"}
@@ -448,8 +456,8 @@ function DebtorsTab() {
 
           <div style={{
             display: "grid", gridTemplateColumns: debtorCols,
-            padding: "10px 28px", borderTop: "1px solid #EDEBE6",
-            alignItems: "center", background: "#FAF8F5",
+            padding: "10px 28px", borderTop: `2px solid ${POLARITY.in.rail}`,
+            alignItems: "center", background: POLARITY.in.tint,
             fontFamily: MONO, fontVariantNumeric: "tabular-nums",
           }}>
             <div />
@@ -878,7 +886,7 @@ function CreditorsTab() {
               <div style={{ fontSize: 13, fontWeight: 700, color: c.debt > 0 ? "#8B3A3A" : "#4A7C59" }}>
                 {c.debt > 0 ? fmt(c.debt) : "Закрыт"}
               </div>
-              <div style={{ fontSize: 12, color: deadlineColor(c.due_date) }}>{fmtDate(c.due_date)}</div>
+              <div><DeadlinePill date={c.due_date} /></div>
               <div style={{ display: "flex", justifyContent: "center" }}>
                 <IconButton icon={LinkSimple} title="Связать с транзакцией" size={24} iconSize={13}
                   color={(c.finance_tx_id || c.zenmoney_tx_id) ? "#4A7C59" : "#C8C0B0"}
@@ -890,8 +898,8 @@ function CreditorsTab() {
 
           <div style={{
             display: "grid", gridTemplateColumns: creditorCols,
-            padding: "10px 28px", borderTop: "1px solid #EDEBE6",
-            alignItems: "center", background: "#FAF8F5",
+            padding: "10px 28px", borderTop: `2px solid ${POLARITY.out.rail}`,
+            alignItems: "center", background: POLARITY.out.tint,
             fontFamily: MONO, fontVariantNumeric: "tabular-nums",
           }}>
             <div />
@@ -1125,8 +1133,8 @@ function FixedTab() {
 
           <div style={{
             display: "grid", gridTemplateColumns: fixedCols,
-            padding: "10px 28px", borderTop: "1px solid #EDEBE6",
-            alignItems: "center", background: "#FAF8F5",
+            padding: "10px 28px", borderTop: `2px solid ${POLARITY.out.rail}`,
+            alignItems: "center", background: POLARITY.out.tint,
             fontFamily: MONO, fontVariantNumeric: "tabular-nums",
           }}>
             <div style={{ fontSize: 11, color: "#A89070", fontFamily: SANS }}>ИТОГО В МЕСЯЦ</div>
@@ -1172,38 +1180,66 @@ export default function Debtors() {
 
       {/* Header */}
       <div style={{ padding: "24px 28px 0", borderBottom: "1px solid #EDEBE6", flexShrink: 0 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
-          <div style={{ fontSize: 26, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em" }}>Обязательства</div>
-          <div style={{ display: "flex", gap: 28 }}>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 3 }}>ЖДЁМ ОТ КЛИЕНТОВ</div>
-              <div style={{ fontSize: 18, fontWeight: 700, color: "#4A7C59", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(receivable)}</div>
+        <div style={{ ...T.pageTitle, marginBottom: 16 }}>Обязательства</div>
+
+        {/* Сигнатура «весы обязательств»: входящий поток · чистая позиция · исходящий */}
+        <div style={{
+          display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "stretch",
+          border: "1px solid #EDEBE6", marginBottom: 20,
+        }}>
+          {/* Нам должны — деньги входят */}
+          <div style={{ borderLeft: `3px solid ${POLARITY.in.rail}`, background: POLARITY.in.tint, padding: "14px 18px" }}>
+            <div style={{ ...T.sectionLabel, color: POLARITY.in.color, display: "flex", alignItems: "center", gap: 6 }}>
+              Нам должны <span style={{ fontSize: 13 }}>→</span>
             </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 3 }}>МЫ ДОЛЖНЫ</div>
-              <div style={{ fontSize: 18, fontWeight: 700, color: "#8B3A3A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(payable)}</div>
+            <div style={{ ...T.hero, color: POLARITY.in.color, marginTop: 6 }}>{fmt(receivable)}</div>
+          </div>
+
+          {/* Чистая позиция */}
+          {(() => {
+            const net = receivable - payable;
+            const c = net >= 0 ? POLARITY.in.color : POLARITY.out.color;
+            return (
+              <div style={{ padding: "14px 24px", textAlign: "center", borderLeft: "1px solid #EDEBE6", borderRight: "1px solid #EDEBE6", display: "flex", flexDirection: "column", justifyContent: "center", minWidth: 160 }}>
+                <div style={{ ...T.colLabel }}>Чистая позиция</div>
+                <div style={{ ...T.num, fontSize: 20, fontWeight: 700, color: c, marginTop: 6 }}>
+                  {net >= 0 ? "+" : "−"}{fmt(Math.abs(net))}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Мы должны — деньги выходят */}
+          <div style={{ borderRight: `3px solid ${POLARITY.out.rail}`, background: POLARITY.out.tint, padding: "14px 18px", textAlign: "right" }}>
+            <div style={{ ...T.sectionLabel, color: POLARITY.out.color, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
+              <span style={{ fontSize: 13 }}>←</span> Мы должны
             </div>
+            <div style={{ ...T.hero, color: POLARITY.out.color, marginTop: 6 }}>{fmt(payable)}</div>
           </div>
         </div>
 
-        {/* Tabs */}
+        {/* Tabs — активная тонируется в свой полярный цвет */}
         <div style={{ display: "flex", gap: 24 }}>
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id as any)}
-              style={{
-                fontSize: 13, padding: "0 0 12px",
-                border: "none", background: "none", cursor: "pointer",
-                color: tab === t.id ? "#1A1A1A" : "#A89070",
-                fontWeight: tab === t.id ? 600 : 400,
-                borderBottom: tab === t.id ? "2px solid #E8592A" : "2px solid transparent",
-                marginBottom: -1,
-              }}
-            >
-              {t.label}
-            </button>
-          ))}
+          {TABS.map((t) => {
+            const pol = POLARITY[TAB_POLARITY[t.id]];
+            const active = tab === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id as any)}
+                style={{
+                  fontSize: 13, padding: "0 0 12px",
+                  border: "none", background: "none", cursor: "pointer",
+                  color: active ? pol.color : "#A89070",
+                  fontWeight: active ? 700 : 400,
+                  borderBottom: active ? `2px solid ${pol.rail}` : "2px solid transparent",
+                  marginBottom: -1, transition: "color 0.15s",
+                }}
+              >
+                {t.label}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -1214,30 +1250,19 @@ export default function Debtors() {
 
       {/* Toolbar */}
       <div style={{ padding: "12px 28px", borderBottom: "1px solid #EDEBE6", display: "flex", justifyContent: "flex-end", flexShrink: 0 }}>
-        {tab === "debtors" && (
-          <button onClick={() => navigate("/orders")}
-            style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
-            <Plus size={13} weight="bold" /> Добавить
-          </button>
-        )}
-        {tab === "creditors" && (
-          <button onClick={() => setAddCreditorOpen(true)}
-            style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
-            <Plus size={13} weight="bold" /> Добавить
-          </button>
-        )}
-        {tab === "fixed" && (
-          <button onClick={() => setAddFixedOpen(true)}
-            style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
-            <Plus size={13} weight="bold" /> Добавить
-          </button>
-        )}
-        {tab === "unallocated" && (
-          <button onClick={() => setAddReceivableOpen(true)}
-            style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
-            <Plus size={13} weight="bold" /> Добавить
-          </button>
-        )}
+        {(() => {
+          const onAdd = {
+            debtors: () => navigate("/orders"),
+            creditors: () => setAddCreditorOpen(true),
+            fixed: () => setAddFixedOpen(true),
+            unallocated: () => setAddReceivableOpen(true),
+          }[tab];
+          return (
+            <Button variant="primary" size="sm" onClick={onAdd}>
+              <Plus size={13} weight="bold" /> Добавить
+            </Button>
+          );
+        })()}
       </div>
 
       {/* Content */}

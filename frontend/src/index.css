@@ -2,44 +2,57 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Самохостинг JetBrains Mono (без внешнего CDN). */
-@font-face {
-  font-family: 'JetBrains Mono';
-  font-style: normal; font-weight: 400; font-display: swap;
-  src: url('/fonts/jetbrains-mono-400.ttf') format('truetype');
-}
-@font-face {
-  font-family: 'JetBrains Mono';
-  font-style: normal; font-weight: 500; font-display: swap;
-  src: url('/fonts/jetbrains-mono-500.ttf') format('truetype');
-}
+/* ─── Типографика бренда pbpb.club (self-host, без внешнего CDN) ───────────────
+   Числа — Space Grotesk (фирменный шрифт сайта, характерные цифры).
+   Текст/кириллица — Onest (гротеск-компаньон; у Space Grotesk кириллицы нет).
+   Механика: BrandNum = Space Grotesk, ограниченный unicode-range только цифрами/
+   валютой/разделителями, стоит ПЕРВЫМ в стеке body → цифры автоматически идут
+   Space Grotesk, буквы падают в Onest. Так вся смена шрифта — одной строкой стека. */
 
-/* «JBMNum» — та же гарнитура, но ограничена unicode-range только цифрами,
-   разделителями, валютой и №/#/%. Ставится первой в глобальном стеке, поэтому
-   ВСЕ числа во всём приложении рендерятся моноширинно автоматически, а буквы
-   (кириллица/латиница) падают в system-ui. */
+/* Space Grotesk (латиница + цифры) */
+@font-face { font-family: 'Space Grotesk'; font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/space-grotesk-400.woff2') format('woff2'); }
+@font-face { font-family: 'Space Grotesk'; font-style: normal; font-weight: 500; font-display: swap; src: url('/fonts/space-grotesk-500.woff2') format('woff2'); }
+@font-face { font-family: 'Space Grotesk'; font-style: normal; font-weight: 700; font-display: swap; src: url('/fonts/space-grotesk-700.woff2') format('woff2'); }
+
+/* Onest (кириллица + латиница) */
+@font-face { font-family: 'Onest'; font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/onest-400-cyrillic.woff2') format('woff2'); unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+@font-face { font-family: 'Onest'; font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/onest-400-latin.woff2') format('woff2'); }
+@font-face { font-family: 'Onest'; font-style: normal; font-weight: 500; font-display: swap; src: url('/fonts/onest-500-cyrillic.woff2') format('woff2'); unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+@font-face { font-family: 'Onest'; font-style: normal; font-weight: 500; font-display: swap; src: url('/fonts/onest-500-latin.woff2') format('woff2'); }
+@font-face { font-family: 'Onest'; font-style: normal; font-weight: 600; font-display: swap; src: url('/fonts/onest-600-cyrillic.woff2') format('woff2'); unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+@font-face { font-family: 'Onest'; font-style: normal; font-weight: 600; font-display: swap; src: url('/fonts/onest-600-latin.woff2') format('woff2'); }
+@font-face { font-family: 'Onest'; font-style: normal; font-weight: 700; font-display: swap; src: url('/fonts/onest-700-cyrillic.woff2') format('woff2'); unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+@font-face { font-family: 'Onest'; font-style: normal; font-weight: 700; font-display: swap; src: url('/fonts/onest-700-latin.woff2') format('woff2'); }
+
+/* BrandNum — Space Grotesk, но только цифры/₽/%/№/разделители. Первым в стеке. */
 @font-face {
-  font-family: 'JBMNum';
-  font-style: normal; font-weight: 400; font-display: swap;
-  src: url('/fonts/jetbrains-mono-400.ttf') format('truetype');
+  font-family: 'BrandNum'; font-style: normal; font-weight: 400; font-display: swap;
+  src: url('/fonts/space-grotesk-400.woff2') format('woff2');
   unicode-range: U+0030-0039, U+0025, U+0023, U+0024, U+002B, U+002C, U+002D, U+002E, U+002F, U+003A, U+20BD, U+2116, U+2212, U+00A0, U+202F, U+2009;
 }
 @font-face {
-  font-family: 'JBMNum';
-  font-style: normal; font-weight: 500; font-display: swap;
-  src: url('/fonts/jetbrains-mono-500.ttf') format('truetype');
+  font-family: 'BrandNum'; font-style: normal; font-weight: 500; font-display: swap;
+  src: url('/fonts/space-grotesk-500.woff2') format('woff2');
+  unicode-range: U+0030-0039, U+0025, U+0023, U+0024, U+002B, U+002C, U+002D, U+002E, U+002F, U+003A, U+20BD, U+2116, U+2212, U+00A0, U+202F, U+2009;
+}
+@font-face {
+  font-family: 'BrandNum'; font-style: normal; font-weight: 700; font-display: swap;
+  src: url('/fonts/space-grotesk-700.woff2') format('woff2');
   unicode-range: U+0030-0039, U+0025, U+0023, U+0024, U+002B, U+002C, U+002D, U+002E, U+002F, U+003A, U+20BD, U+2116, U+2212, U+00A0, U+202F, U+2009;
 }
 
 @layer base {
   body {
     @apply bg-gray-50 text-gray-900 antialiased;
-    font-family: 'JetBrains Mono', system-ui, -apple-system, sans-serif;
+    /* Цифры → Space Grotesk (BrandNum), буквы → Onest. tnum: суммы стоят столбиком. */
+    font-family: 'BrandNum', 'Onest', system-ui, -apple-system, sans-serif;
+    font-variant-numeric: tabular-nums;
     margin: 0;
   }
   /* Контролы по умолчанию не наследуют шрифт — заставляем. */
   input, textarea, select, button {
     font-family: inherit;
+    font-variant-numeric: tabular-nums;
   }
   #root {
     min-height: 100svh;

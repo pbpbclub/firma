@@ -3,6 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { financeApi, taxApi, ordersApi } from "../api";
 import { MONO } from "../components/ui/Num";
+import { DeadlinePill } from "../components/ui/Pill";
+import { POLARITY } from "../components/ui/type";
 
 function fmt(n: number) {
   if (!n && n !== 0) return "—";
@@ -218,10 +220,14 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Debtors */}
+      {/* Debtors — деньги, которые нам должны (зелёная полярность) */}
       {(debtors.data?.items?.length ?? 0) > 0 && (
-        <div style={section}>
-          <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em", marginBottom: 16 }}>ДОЛЖНИКИ</div>
+        <div style={{ ...section, borderLeft: `3px solid ${POLARITY.in.rail}`, cursor: "pointer" }}
+          onClick={() => navigate("/debtors")}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 16 }}>
+            <div style={{ fontSize: 11, color: POLARITY.in.color, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase" }}>Нам должны</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: POLARITY.in.color, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(debtTotal)}</div>
+          </div>
           {debtors.data.items.slice(0, 4).map((d: any, i: number) => (
             <div key={i} style={{
               display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -232,13 +238,9 @@ export default function Dashboard() {
                 <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>{d.customer_name}</div>
                 <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>{d.title}</div>
               </div>
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#E8592A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(d.debt)}</div>
-                {d.deadline && (
-                  <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>
-                    до {new Date(d.deadline).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}
-                  </div>
-                )}
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <DeadlinePill date={d.deadline} />
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#E8592A", fontFamily: MONO, fontVariantNumeric: "tabular-nums", minWidth: 92, textAlign: "right" }}>{fmt(d.debt)}</div>
               </div>
             </div>
           ))}
