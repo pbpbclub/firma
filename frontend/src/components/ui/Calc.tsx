@@ -60,7 +60,7 @@ export function CalcSection({ label, addLabel, onAdd, children, readOnly }: {
   );
 }
 
-function MaterialTitle({ value, materialsFetch, onType, onPick }: {
+export function MaterialTitle({ value, materialsFetch, onType, onPick }: {
   value: string;
   materialsFetch: (q?: string) => Promise<any[]>;
   onType: (v: string) => void;

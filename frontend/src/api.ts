@@ -207,6 +207,32 @@ export const estimatesApi = {
   deleteObligations: (setId: string)        => api.delete(`/estimates/sets/${setId}/obligations`).then(r => r.data),
   approveSet:  (setId: string, force = false) => api.post(`/estimates/sets/${setId}/approve`, { force }).then(r => r.data),
   reviewQueue: ()                           => api.get("/estimates/review-queue").then(r => r.data),
+  costCheck:   (setId: string)              => api.get(`/estimates/sets/${setId}/cost-check`).then(r => r.data),
+  costFill:    (setId: string, opts?: { expand_items?: boolean; refresh_materials?: boolean; only?: string[] }) =>
+    api.post(`/estimates/sets/${setId}/cost-fill`, opts ?? {}).then(r => r.data),
+};
+
+// Справочники costing-движка: ставки работ, выученные цены, правила сопоставления.
+export const workRatesApi = {
+  list:   () => api.get("/work-rates").then(r => r.data),
+  create: (data: { work_type_id?: string; work_type_name?: string; master_id?: string | null; scheme: string; rate: number; unit?: string | null; note?: string | null }) =>
+    api.post("/work-rates", data).then(r => r.data),
+  delete: (id: string) => api.delete(`/work-rates/${id}`).then(r => r.data),
+  bootstrap: () => api.post("/work-rates/bootstrap").then(r => r.data),
+};
+
+export const priceBookApi = {
+  list:   (search?: string) => api.get("/price-book", { params: search ? { search } : {} }).then(r => r.data),
+  create: (data: { title: string; price: number; unit?: string | null; match_type?: string; note?: string | null }) =>
+    api.post("/price-book", data).then(r => r.data),
+  delete: (id: number) => api.delete(`/price-book/${id}`).then(r => r.data),
+};
+
+export const costingRulesApi = {
+  list:   (kind?: string) => api.get("/costing-rules", { params: kind ? { kind } : {} }).then(r => r.data),
+  create: (data: { pattern: string; kind: string; target_id: string; match_type?: string }) =>
+    api.post("/costing-rules", data).then(r => r.data),
+  delete: (id: number) => api.delete(`/costing-rules/${id}`).then(r => r.data),
 };
 
 // Разноска входящих платежей банка на заказы (инбокс поступлений).

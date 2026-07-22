@@ -4,6 +4,7 @@ from typing import Optional, List
 from pydantic import BaseModel
 from db import get_production, get_materials
 from routers.materials import cheapest_price
+from routers.rates import find_work_rate, upsert_work_rate, upsert_price_book
 import uuid, subprocess, glob, os
 from datetime import datetime
 
@@ -124,6 +125,27 @@ def _approve_set(conn, set_id: str) -> dict:
     # Обязательства по строкам — чтобы разноска сразу могла привязывать оплату
     # к плановым позициям. Идемпотентно (дедуп по estimate_line_id).
     obligations = _gen_obligations(conn, es)
+    # Обучение себестоимости: approve = «Юра подтвердил цифры» — лучший момент
+    # зафиксировать знания. Материал без кода с ценой → price_book (цены вне
+    # прайсов: фанера/ткань/крепёж); связка работа×мастер с ценой → work_rates.
+    # Существующие записи не перетираем (ручное главнее выученного).
+    learned = {"prices": 0, "rates": 0}
+    for ln in conn.execute(
+        """SELECT el.* FROM estimate_lines el JOIN estimate_items ei ON ei.id = el.item_id
+           WHERE ei.set_id = ?""", (set_id,)
+    ).fetchall():
+        if (ln["type"] == "material" and not ln["material_code"]
+                and (ln["unit_price"] or 0) > 0 and (ln["title"] or "").strip()):
+            if upsert_price_book(conn, ln["title"].strip(), ln["unit_price"], ln["unit"],
+                                 "exact", "learned", note="из утверждённой сметы",
+                                 overwrite=False) == "created":
+                learned["prices"] += 1
+        if (ln["type"] in ("labor", "service") and ln["work_type_id"] and ln["master_id"]
+                and (ln["unit_price"] or 0) > 0):
+            if upsert_work_rate(conn, ln["work_type_id"], ln["master_id"], "per_unit",
+                                ln["unit_price"], ln["unit"], "из утверждённой сметы",
+                                "learned", overwrite=False) == "created":
+                learned["rates"] += 1
     after = conn.execute(
         "SELECT price_plan, cost_plan FROM orders WHERE id = ?", (es["order_id"],)
     ).fetchone()
@@ -136,6 +158,7 @@ def _approve_set(conn, set_id: str) -> dict:
         "cost_after": (after["cost_plan"] or 0) if after else 0,
         "obligations": obligations,
         "superseded": superseded,
+        "learned": learned,
     }
 
 
@@ -346,7 +369,8 @@ def review_queue():
         for r in rows:
             t = set_totals(conn, r["id"])
             counts = conn.execute(
-                """SELECT COUNT(DISTINCT ei.id) AS items, COUNT(el.id) AS lines
+                """SELECT COUNT(DISTINCT ei.id) AS items, COUNT(el.id) AS lines,
+                          SUM(CASE WHEN el.id IS NOT NULL AND IFNULL(el.unit_price, 0) <= 0 THEN 1 ELSE 0 END) AS lines_no_price
                    FROM estimate_items ei LEFT JOIN estimate_lines el ON el.item_id = ei.id
                    WHERE ei.set_id = ?""", (r["id"],)
             ).fetchone()
@@ -363,6 +387,7 @@ def review_queue():
                 "customer_name": r["customer_name"],
                 "items_count": counts["items"] or 0,
                 "lines_count": counts["lines"] or 0,
+                "lines_no_price": counts["lines_no_price"] or 0,
                 "set_cost": t["cost"],
                 "set_price": t["price"],
                 "price_plan_now": r["order_price_plan"] or 0,
@@ -629,11 +654,15 @@ def sync_item_to_catalog(item_id: str):
             "SELECT * FROM estimate_lines WHERE item_id = ? ORDER BY sort_order", (item_id,)
         ).fetchall()
         for i, line in enumerate(lines):
+            # Привязки (номенклатура/вид работ/исполнитель) едут в каталог —
+            # чтобы разворот обратно в смету тянул живые цены и ставки.
             conn.execute(
-                """INSERT INTO catalog_item_lines (id, item_id, type, title, qty, unit, unit_price, line_total, sort_order)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO catalog_item_lines (id, item_id, type, title, qty, unit, unit_price, line_total,
+                                                   sort_order, material_code, work_type_id, master_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (str(uuid.uuid4()), catalog_id, line["type"], line["title"],
-                 line["qty"], line["unit"], line["unit_price"], line["line_total"], i)
+                 line["qty"], line["unit"], line["unit_price"], line["line_total"], i,
+                 line["material_code"], line["work_type_id"], line["master_id"])
             )
         conn.commit()
         return {"catalog_item_id": catalog_id}
@@ -716,12 +745,19 @@ def update_line(line_id: str, body: LineUpdate):
             list(fields.values()) + [line_id]
         )
         # Auto-link master ↔ work_type
-        final = conn.execute("SELECT master_id, work_type_id FROM estimate_lines WHERE id = ?", (line_id,)).fetchone()
+        final = conn.execute("SELECT * FROM estimate_lines WHERE id = ?", (line_id,)).fetchone()
         if final["master_id"] and final["work_type_id"]:
             conn.execute(
                 "INSERT OR IGNORE INTO master_work_types (master_id, work_type_id) VALUES (?, ?)",
                 (final["master_id"], final["work_type_id"])
             )
+        # Обучение ставке: Юра руками вбил цену работы с известной парой вид×мастер —
+        # если такой ставки ещё нет, запоминаем (ручное в work_rates не перетираем).
+        if (final["type"] in ("labor", "service") and final["master_id"] and final["work_type_id"]
+                and (final["unit_price"] or 0) > 0):
+            upsert_work_rate(conn, final["work_type_id"], final["master_id"], "per_unit",
+                             final["unit_price"], final["unit"], "из строки сметы", "learned",
+                             overwrite=False)
         _recalc_item(conn, row["item_id"])
         _touch_set(conn, row["item_id"])
         _sync_order_if_approved(conn, row["item_id"])
@@ -785,11 +821,28 @@ def from_catalog(body: FromCatalog):
         )
         for i, cl in enumerate(cat_lines):
             line_id = str(uuid.uuid4())
-            line_total = round(cl["qty"] * cl["unit_price"], 2)
+            # Живые цены вместо статичных из каталога: материал — по коду из прайса
+            # (с заморозкой поставщика/даты), работа — по ставке вид×исполнитель.
+            # percent-ставки здесь не считаем (продажная цена позиции ещё 0) —
+            # их доводит cost-fill. Статичная unit_price каталога — фолбэк.
+            unit_price = cl["unit_price"] or 0
+            price_supplier = price_date = None
+            if cl["material_code"]:
+                best = _lookup_cheapest(cl["material_code"])
+                if best and best.get("price"):
+                    unit_price, price_supplier, price_date = best["price"], best["supplier"], best["price_date"]
+            if cl["type"] in ("labor", "service") and cl["work_type_id"]:
+                rate = find_work_rate(conn, cl["work_type_id"], cl["master_id"])
+                if rate and rate["scheme"] != "percent":
+                    unit_price = round(rate["rate"], 2)
+            line_total = round((cl["qty"] or 0) * unit_price, 2)
             conn.execute(
-                """INSERT INTO estimate_lines (id, item_id, type, title, qty, unit, unit_price, line_total, sort_order, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (line_id, item_id, cl["type"], cl["title"], cl["qty"], cl["unit"], cl["unit_price"], line_total, i, _now())
+                """INSERT INTO estimate_lines (id, item_id, type, title, qty, unit, unit_price, line_total,
+                                               sort_order, material_code, price_supplier, price_date,
+                                               work_type_id, master_id, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (line_id, item_id, cl["type"], cl["title"], cl["qty"], cl["unit"], unit_price, line_total, i,
+                 cl["material_code"], price_supplier, price_date, cl["work_type_id"], cl["master_id"], _now())
             )
         _recalc_item(conn, item_id)
         # New item from catalog: set initial sale_price = cost × markup

@@ -173,6 +173,11 @@ export function EstimateReviewQueue() {
                     <Warning size={11} /> без строк
                   </span>
                 )}
+                {(s.lines_no_price || 0) > 0 && (
+                  <span title="Строки без цены — открой смету и нажми «Заполнить себестоимость»" style={{ color: "#8B3A3A", display: "inline-flex", alignItems: "center", gap: 2 }}>
+                    <Warning size={11} /> {s.lines_no_price} строк без цены
+                  </span>
+                )}
               </div>
             </div>
             <span style={{ textAlign: "right", fontSize: 12, color: "#6B6355", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>

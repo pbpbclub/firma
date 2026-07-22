@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { UploadSimple, CheckCircle, WarningCircle, X, Plus, ArrowsClockwise } from "@phosphor-icons/react";
 import { adminApi, authApi, zenmoneyApi, payeeRulesApi, mastersApi, customersApi } from "../api";
 import { ConfirmModal } from "../components/ui/Modal";
+import { CostingRefsSection } from "../components/CostingRefsSection";
 
 function fmt(n: number | null | undefined) {
   if (n == null) return "—";
@@ -739,6 +740,7 @@ export default function Admin() {
       <ImportsSection />
       <ZenMoneySyncSection />
       <PayeeRulesSection />
+      <CostingRefsSection />
       <SystemSection />
       <UsersSection />
       <PasswordSection />

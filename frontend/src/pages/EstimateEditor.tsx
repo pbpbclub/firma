@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { EmptyState } from "../components/ui/EmptyState";
 import { ordersApi, estimatesApi, catalogApi, mastersApi, workTypesApi, materialsApi } from "../api";
 import { useNavigationGuard, NavigationGuardModal } from "../components/NavigationGuard";
+import { CostingBlock } from "../components/CostingBlock";
 import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { CalcHeader, CalcSection, CalcRow, CalcFooter } from "../components/ui/Calc";
 import { BrandSelect, EditableText } from "../components/ui/Selects";
@@ -825,6 +826,15 @@ export default function EstimateEditor() {
                 </div>
               ))}
             </div>
+          )}
+
+          {/* ─ Себестоимость: заполнить из каталога/прайсов/ставок или спросить ─ */}
+          {activeSet && (
+            <CostingBlock
+              setId={activeSet.id}
+              editable={activeSet.status !== "approved"}
+              onChanged={() => refetch()}
+            />
           )}
 
           {/* ─ Table: horizontally scrollable, vertically flex ───────────── */}

@@ -557,6 +557,114 @@ def ensure_payee_rules_schema():
         conn.close()
 
 
+def ensure_work_rates_schema():
+    """Справочник ставок работ: вид работ × исполнитель → цена.
+
+    master_id IS NULL — дефолтная ставка вида работ. Схемы (те же, что в вики
+    подрядчиков analytics.contractors): fixed ₽/изделие, per_unit ₽/ед, hourly ₽/ч,
+    percent — % от клиентской цены позиции (в строку кладётся вычисленное).
+    source: manual | wiki (bootstrap из analytics) | learned (из ручного ввода
+    в смете) | history (из creditors)."""
+    conn = get_production()
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS work_rates (
+                id           TEXT PRIMARY KEY,
+                work_type_id TEXT NOT NULL,
+                master_id    TEXT,
+                scheme       TEXT NOT NULL DEFAULT 'per_unit',
+                rate         REAL NOT NULL,
+                unit         TEXT,
+                note         TEXT,
+                source       TEXT DEFAULT 'manual',
+                created_at   TEXT DEFAULT (datetime('now')),
+                updated_at   TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_work_rates
+            ON work_rates(work_type_id, IFNULL(master_id, ''))
+        """)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_price_book_schema():
+    """Выученные цены материалов ВНЕ прайсов materials.db (фанера, ткань, крепёж...).
+
+    materials.db покрывает только металл; всё остальное система спрашивает у Юры
+    один раз и запоминает здесь. pattern — нормализованное название (casefold,
+    схлопнутые пробелы), как payee_rules."""
+    conn = get_production()
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS price_book (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                pattern      TEXT NOT NULL,
+                match_type   TEXT NOT NULL DEFAULT 'exact',
+                title        TEXT,
+                unit         TEXT,
+                price        REAL NOT NULL,
+                source       TEXT DEFAULT 'manual',
+                note         TEXT,
+                times_used   INTEGER DEFAULT 0,
+                last_used_at TEXT,
+                created_at   TEXT DEFAULT (datetime('now')),
+                updated_at   TEXT DEFAULT (datetime('now')),
+                UNIQUE(pattern, match_type)
+            )
+        """)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_costing_rules_schema():
+    """Правила сопоставления для себестоимости (клон идеи payee_rules):
+    kind='material' → target_id = код номенклатуры materials.db,
+    kind='catalog'  → target_id = catalog_items.id (позиция сметы → рецептура),
+    kind='work'     → target_id = work_types.id."""
+    conn = get_production()
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS costing_rules (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                pattern    TEXT NOT NULL,
+                match_type TEXT NOT NULL DEFAULT 'exact',
+                kind       TEXT NOT NULL,
+                target_id  TEXT NOT NULL,
+                source     TEXT DEFAULT 'learned',
+                created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now')),
+                UNIQUE(pattern, kind)
+            )
+        """)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_catalog_lines_costing_schema():
+    """Привязка строк рецептур каталога к номенклатуре и видам работ —
+    чтобы разворот в смету (from-catalog / cost-fill) тянул живые цены,
+    а to-catalog не терял связи."""
+    conn = get_production()
+    try:
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(catalog_item_lines)").fetchall()}
+        cols = {
+            "material_code": "TEXT",   # код номенклатуры materials.db
+            "work_type_id": "TEXT",    # вид работ (labor/service)
+            "master_id": "TEXT",       # плановый исполнитель
+        }
+        for col, decl in cols.items():
+            if col not in existing:
+                conn.execute(f"ALTER TABLE catalog_item_lines ADD COLUMN {col} {decl}")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_inbox_dismissed_schema():
     """Скрытые из инбокса транзакции (переводы между своими счетами, возвраты).
 

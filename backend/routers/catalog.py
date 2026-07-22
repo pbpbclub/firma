@@ -7,6 +7,8 @@ from datetime import datetime
 
 router = APIRouter()
 
+BOM_LINE_TYPES = ("material", "labor", "service", "delivery")
+
 
 def _ensure_tables(conn):
     conn.executescript("""
@@ -43,7 +45,10 @@ class LineIn(BaseModel):
     qty: float = 1
     unit: str = "шт"
     unit_price: float = 0
-    material_id: Optional[str] = None
+    material_id: Optional[str] = None      # legacy MES, не используется
+    material_code: Optional[str] = None    # код номенклатуры materials.db (живые цены)
+    work_type_id: Optional[str] = None
+    master_id: Optional[str] = None
     sort_order: int = 0
 
 
@@ -238,10 +243,12 @@ def create_item(body: ItemIn):
         )
         for i, line in enumerate(body.lines):
             conn.execute(
-                """INSERT INTO catalog_item_lines (id, item_id, type, title, qty, unit, unit_price, line_total, material_id, sort_order)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO catalog_item_lines (id, item_id, type, title, qty, unit, unit_price, line_total,
+                                                   material_id, material_code, work_type_id, master_id, sort_order)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (str(uuid.uuid4()), item_id, line.type, line.title, line.qty, line.unit,
-                 line.unit_price, line.qty * line.unit_price, line.material_id, i)
+                 line.unit_price, line.qty * line.unit_price,
+                 line.material_id, line.material_code, line.work_type_id, line.master_id, i)
             )
         conn.commit()
         item = conn.execute("SELECT * FROM catalog_items WHERE id = ?", (item_id,)).fetchone()
@@ -272,10 +279,12 @@ def update_item(item_id: str, body: ItemIn):
         conn.execute("DELETE FROM catalog_item_lines WHERE item_id = ?", (item_id,))
         for i, line in enumerate(body.lines):
             conn.execute(
-                """INSERT INTO catalog_item_lines (id, item_id, type, title, qty, unit, unit_price, line_total, material_id, sort_order)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO catalog_item_lines (id, item_id, type, title, qty, unit, unit_price, line_total,
+                                                   material_id, material_code, work_type_id, master_id, sort_order)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (str(uuid.uuid4()), item_id, line.type, line.title, line.qty, line.unit,
-                 line.unit_price, line.qty * line.unit_price, line.material_id, i)
+                 line.unit_price, line.qty * line.unit_price,
+                 line.material_id, line.material_code, line.work_type_id, line.master_id, i)
             )
         conn.commit()
         item = conn.execute("SELECT * FROM catalog_items WHERE id = ?", (item_id,)).fetchone()
@@ -283,6 +292,158 @@ def update_item(item_id: str, body: ItemIn):
         result = dict(item)
         result["lines"] = [dict(l) for l in lines]
         return result
+    finally:
+        conn.close()
+
+
+# ─── BOM из Blender (контракт: docs/bom-contract.md) ─────────────────────────
+
+class BomLine(BaseModel):
+    type: str = "material"                 # material | labor | service | delivery
+    material_code: Optional[str] = None    # код номенклатуры materials.db (надёжный путь)
+    title: Optional[str] = None            # или свободное название — приёмник матчит сам
+    work_type: Optional[str] = None        # имя вида работ (labor/service)
+    qty: float = 1
+    unit: str = "шт"
+    unit_price: Optional[float] = None     # явная цена (обычно не шлётся — снапшот считаем сами)
+
+
+class BomIn(BaseModel):
+    source: str = "blender"
+    version: int = 1
+    product: dict                          # {title, category?, brand?, catalog_item_id?, markup_pct?}
+    mode: str = "upsert"                   # upsert (по catalog_item_id/названию) | create
+    lines: List[BomLine]
+
+
+@router.post("/import-bom")
+def import_bom(body: BomIn):
+    """Ведомость материалов из Blender → карточка себестоимости каталога.
+
+    Материалы резолвятся в номенклатуру (код как есть / выученное правило / точное
+    название), цены — снапшот живых прайсов и ставок на момент импорта. Нерезолвнутые
+    строки НЕ блокируют импорт: они лягут без кода и всплывут в cost-check как
+    «нужен ввод» при развороте в смету."""
+    from db import get_materials
+    from routers.estimates import _lookup_cheapest
+    from routers.costing import _match_material_code
+    from routers.rates import resolve_work_type, find_work_rate, find_price_book, norm_title
+
+    def _material_title(code: str):
+        try:
+            mconn = get_materials()
+            try:
+                r = mconn.execute("SELECT title FROM catalog WHERE code = ?", (code,)).fetchone()
+                return r["title"] if r else None
+            finally:
+                mconn.close()
+        except Exception:
+            return None
+
+    title = ((body.product or {}).get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="product.title required")
+    if not body.lines:
+        raise HTTPException(status_code=400, detail="lines required")
+    for l in body.lines:
+        if l.type not in BOM_LINE_TYPES:
+            raise HTTPException(status_code=400, detail=f"line.type must be one of {'|'.join(BOM_LINE_TYPES)}")
+        if not l.material_code and not (l.title or l.work_type):
+            raise HTTPException(status_code=400, detail="line needs material_code, title or work_type")
+
+    conn = get_production()
+    try:
+        _ensure_tables(conn)
+        now = datetime.utcnow().isoformat()
+
+        # Целевая карточка: id → точное название (upsert) → новая
+        cat = None
+        if (body.product or {}).get("catalog_item_id"):
+            cat = conn.execute("SELECT * FROM catalog_items WHERE id = ?", (body.product["catalog_item_id"],)).fetchone()
+        if not cat and body.mode == "upsert":
+            for r in conn.execute("SELECT * FROM catalog_items").fetchall():
+                if norm_title(r["title"]) == norm_title(title):
+                    cat = r
+                    break
+        created = cat is None
+        markup_pct = (body.product or {}).get("markup_pct") or (cat["markup_pct"] if cat else 30) or 30
+        if created:
+            item_id = str(uuid.uuid4())
+            conn.execute(
+                """INSERT INTO catalog_items (id, title, category, brand, markup_pct, cost_total, sale_price, notes, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, 0, 0, ?, ?, ?)""",
+                (item_id, title, (body.product or {}).get("category"), (body.product or {}).get("brand"),
+                 markup_pct, f"BOM из {body.source}", now, now),
+            )
+        else:
+            item_id = cat["id"]
+            conn.execute("DELETE FROM catalog_item_lines WHERE item_id = ?", (item_id,))
+
+        matched, unmatched = 0, []
+        for i, l in enumerate(body.lines):
+            line_title = (l.title or l.work_type or "").strip()
+            code, wt_id, master_id = None, None, None
+            unit_price = l.unit_price or 0
+
+            if l.type == "material":
+                code = l.material_code
+                if not code and line_title:
+                    code, _via = _match_material_code(conn, line_title)
+                if code:
+                    line_title = line_title or _material_title(code) or code
+                    best = _lookup_cheapest(code)
+                    if best and best.get("price"):
+                        unit_price = unit_price or best["price"]
+                        matched += 1
+                    else:
+                        unmatched.append({"title": line_title or code,
+                                          "ask": f"Код «{code}» без цены в прайсах — почём «{line_title or code}», ₽/{l.unit}?"})
+                else:
+                    pb = find_price_book(conn, line_title)
+                    if pb:
+                        unit_price = unit_price or pb["price"]
+                        matched += 1
+                    elif not unit_price:
+                        unmatched.append({"title": line_title,
+                                          "ask": f"Материал «{line_title}» не найден в номенклатуре — какой это код или цена, ₽/{l.unit}?"})
+            elif l.type in ("labor", "service"):
+                wt = resolve_work_type(conn, None, l.work_type or line_title, create=True)
+                if wt:
+                    wt_id = wt["id"]
+                    line_title = line_title or wt["name"]
+                    rate = find_work_rate(conn, wt_id, None)
+                    if rate and rate["scheme"] != "percent":
+                        unit_price = unit_price or round(rate["rate"], 2)
+                        matched += 1
+                    elif not unit_price:
+                        unmatched.append({"title": line_title,
+                                          "ask": f"Ставка за «{wt['name']}»: сколько ₽/{l.unit}?"})
+
+            conn.execute(
+                """INSERT INTO catalog_item_lines (id, item_id, type, title, qty, unit, unit_price, line_total,
+                                                   material_code, work_type_id, master_id, sort_order)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (str(uuid.uuid4()), item_id, l.type, line_title or "Без названия", l.qty, l.unit,
+                 unit_price, round((l.qty or 0) * unit_price, 2), code, wt_id, master_id, i),
+            )
+
+        cost_total = conn.execute(
+            "SELECT COALESCE(SUM(line_total), 0) FROM catalog_item_lines WHERE item_id = ?", (item_id,)
+        ).fetchone()[0]
+        conn.execute(
+            "UPDATE catalog_items SET cost_total = ?, sale_price = ?, updated_at = ? WHERE id = ?",
+            (round(cost_total, 2), round(cost_total * (1 + markup_pct / 100), 2), now, item_id),
+        )
+        conn.commit()
+        return {
+            "catalog_item_id": item_id,
+            "created": created,
+            "title": title,
+            "lines_total": len(body.lines),
+            "matched": matched,
+            "unmatched": unmatched,
+            "cost_total": round(cost_total, 2),
+        }
     finally:
         conn.close()
 
