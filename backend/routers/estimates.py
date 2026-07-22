@@ -56,6 +56,21 @@ def _touch_set(conn, item_id: str):
     )
 
 
+def totals_from_items(items, payment_type, bank_pct) -> dict:
+    """Формула себестоимости/цены по уже загруженным позициям сета. Чистая (без БД) —
+    чтобы очередь ревью считала пачкой, а set_totals не дублировал выражение."""
+    total_cost = sum((it["cost_total"] or 0) for it in items)
+    set_bank_pct = bank_pct or 13
+    if payment_type == "bank":
+        total_price = sum(
+            round((it["sale_price"] or 0) * (1 + (it["bank_pct"] or set_bank_pct) / 100))
+            for it in items
+        )
+    else:
+        total_price = sum((it["sale_price"] or 0) for it in items)
+    return {"cost": round(total_cost, 2), "price": round(total_price, 2)}
+
+
 def set_totals(conn, set_id: str) -> dict:
     """Себестоимость и цена для клиента по сету (с банковской надбавкой при безнале).
 
@@ -70,16 +85,7 @@ def set_totals(conn, set_id: str) -> dict:
         "SELECT cost_total, sale_price, bank_pct FROM estimate_items WHERE set_id = ?",
         (set_id,)
     ).fetchall()
-    total_cost = sum((it["cost_total"] or 0) for it in items)
-    set_bank_pct = es["bank_pct"] or 13
-    if es["payment_type"] == "bank":
-        total_price = sum(
-            round((it["sale_price"] or 0) * (1 + (it["bank_pct"] or set_bank_pct) / 100))
-            for it in items
-        )
-    else:
-        total_price = sum((it["sale_price"] or 0) for it in items)
-    return {"cost": round(total_cost, 2), "price": round(total_price, 2)}
+    return totals_from_items(items, es["payment_type"], es["bank_pct"])
 
 
 def _sync_order_from_set(conn, set_id: str):
@@ -365,15 +371,33 @@ def review_queue():
                      AND a.created_at > es.created_at)
                ORDER BY o.created_at DESC, es.created_at DESC"""
         ).fetchall()
+
+        # Пачкой вместо 2N+1: все позиции и счётчики строк для сетов очереди — двумя
+        # запросами, дальше только раскладка в Python (читающий эндпоинт в БД не пишет).
+        set_ids = [r["id"] for r in rows]
+        items_by_set: dict = {sid: [] for sid in set_ids}
+        counts_by_set: dict = {sid: {"items": 0, "lines": 0, "lines_no_price": 0} for sid in set_ids}
+        if set_ids:
+            ph = ",".join("?" * len(set_ids))
+            for it in conn.execute(
+                f"SELECT set_id, cost_total, sale_price, bank_pct FROM estimate_items WHERE set_id IN ({ph})",
+                set_ids,
+            ):
+                items_by_set[it["set_id"]].append(it)
+            for c in conn.execute(
+                f"""SELECT ei.set_id AS set_id,
+                           COUNT(DISTINCT ei.id) AS items, COUNT(el.id) AS lines,
+                           SUM(CASE WHEN el.id IS NOT NULL AND IFNULL(el.unit_price, 0) <= 0 THEN 1 ELSE 0 END) AS lines_no_price
+                    FROM estimate_items ei LEFT JOIN estimate_lines el ON el.item_id = ei.id
+                    WHERE ei.set_id IN ({ph}) GROUP BY ei.set_id""",
+                set_ids,
+            ):
+                counts_by_set[c["set_id"]] = {"items": c["items"], "lines": c["lines"], "lines_no_price": c["lines_no_price"]}
+
         out = []
         for r in rows:
-            t = set_totals(conn, r["id"])
-            counts = conn.execute(
-                """SELECT COUNT(DISTINCT ei.id) AS items, COUNT(el.id) AS lines,
-                          SUM(CASE WHEN el.id IS NOT NULL AND IFNULL(el.unit_price, 0) <= 0 THEN 1 ELSE 0 END) AS lines_no_price
-                   FROM estimate_items ei LEFT JOIN estimate_lines el ON el.item_id = ei.id
-                   WHERE ei.set_id = ?""", (r["id"],)
-            ).fetchone()
+            t = totals_from_items(items_by_set[r["id"]], r["payment_type"], r["bank_pct"])
+            counts = counts_by_set[r["id"]]
             out.append({
                 "set_id": r["id"],
                 "set_title": r["title"],

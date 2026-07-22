@@ -715,31 +715,52 @@ class PaymentCreate(BaseModel):
     bank_tx_id: Optional[str] = None
 
 
+def _create_payment(conn, order_row, amount, paid_at, note=None, *, source, bank_tx_id=None) -> dict:
+    """Единая точка вставки платежа: валидация + INSERT + возврат строки.
+
+    Оба входа (ручной add_payment, разноска поступлений payments.from_tx) обязаны
+    идти через неё — иначе правка правил создания (валидация, аудит, лимиты) доедет
+    только до одного места. НЕ коммитит и НЕ открывает соединение: разноска пишет
+    несколько платежей одной транзакцией на общем conn (см. payments.py)."""
+    if amount is None or amount <= 0:
+        raise HTTPException(status_code=400, detail="amount must be > 0")
+    if not (str(paid_at or "").strip()):
+        raise HTTPException(status_code=400, detail="paid_at required")
+    pid = str(uuid4())
+    conn.execute(
+        """INSERT INTO payments (id, order_id, amount, paid_at, note, bank_tx_id, source, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+        (pid, order_row["id"], round(amount, 2), paid_at, note, bank_tx_id, source),
+    )
+    return dict(conn.execute("SELECT * FROM payments WHERE id = ?", (pid,)).fetchone())
+
+
+def _reserve_hint(conn, order_row) -> dict:
+    """Подсказка резерва под материалы после платежа. paid_total — фактический
+    (все платежи заказа), а не 0: prompt «отложить материалы» опирается на реальную
+    оплату, иначе cash_collected_vs_cost в plan_fact считался бы по пустой оплате."""
+    paid_total = conn.execute(
+        "SELECT COALESCE(SUM(amount), 0) FROM payments WHERE order_id = ?", (order_row["id"],)
+    ).fetchone()[0] or 0
+    pf = _plan_fact(conn, order_row["id"], order_row["cost_plan"] or 0, paid_total, order_row["price_plan"] or 0)
+    return {
+        "reserve_suggested": _reserve_suggested(pf, order_row["cost_plan"] or 0),
+        "reserve_active": bool((order_row["reserved_amount"] or 0) > 0 and not order_row["reserve_released_at"]),
+    }
+
+
 @router.post("/{order_id}/payments")
 def add_payment(order_id: str, body: PaymentCreate):
-    # Нулевой/отрицательный платёж молча испортил бы paid_total и долг.
-    if body.amount is None or body.amount <= 0:
-        raise HTTPException(status_code=400, detail="amount must be > 0")
-    if not (body.paid_at or "").strip():
-        raise HTTPException(status_code=400, detail="paid_at required")
     conn = get_production()
     try:
         r = conn.execute("SELECT * FROM orders WHERE id = ? OR number = ?", (order_id, order_id)).fetchone()
         if not r:
             raise HTTPException(status_code=404, detail="Not found")
-        pid = str(uuid4())
-        conn.execute(
-            """INSERT INTO payments (id, order_id, amount, paid_at, note, bank_tx_id, source, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, 'manual', datetime('now'))""",
-            (pid, r["id"], body.amount, body.paid_at, body.note, body.bank_tx_id)
-        )
+        payment = _create_payment(conn, r, body.amount, body.paid_at, body.note,
+                                  source="manual", bank_tx_id=body.bank_tx_id)
         conn.commit()
-        payment = dict(conn.execute("SELECT * FROM payments WHERE id = ?", (pid,)).fetchone())
-        # Подсказка резерва: пришли деньги — предложить отложить материалы из сметы.
-        pf = _plan_fact(conn, r["id"], r["cost_plan"] or 0, 0, r["price_plan"] or 0)
+        payment.update(_reserve_hint(conn, r))
         payment["order_id"] = r["id"]
-        payment["reserve_suggested"] = _reserve_suggested(pf, r["cost_plan"] or 0)
-        payment["reserve_active"] = bool((r["reserved_amount"] or 0) > 0 and not r["reserve_released_at"])
         return payment
     finally:
         conn.close()

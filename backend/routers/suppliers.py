@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from db import get_production
+import sqlite3
 import uuid
 
 router = APIRouter()
@@ -79,11 +80,32 @@ def update_supplier(supplier_id: str, body: SupplierUpdate):
         existing = conn.execute("SELECT * FROM suppliers WHERE id = ?", (supplier_id,)).fetchone()
         if not existing:
             raise HTTPException(status_code=404, detail="Not found")
-        fields = {k: v for k, v in body.model_dump().items() if v is not None}
+        # exclude_unset: различаем «поле не прислали» и «прислали null для очистки».
+        # Отсев None молча ронял бы очистку телефона/ИНН/заметки (запрос 200, значение старое).
+        fields = body.model_dump(exclude_unset=True)
+        if "name" in fields:
+            name = (fields["name"] or "").strip()
+            if not name:
+                raise HTTPException(status_code=400, detail="name не может быть пустым")
+            fields["name"] = name
+            dup = conn.execute(
+                "SELECT id FROM suppliers WHERE name = ? COLLATE NOCASE AND id != ?",
+                (name, supplier_id),
+            ).fetchone()
+            if dup:
+                raise HTTPException(status_code=409, detail="Поставщик с таким названием уже есть")
+        # Пустые строки в необязательных полях → NULL (не хранить "").
+        for k in list(fields):
+            if k != "name" and isinstance(fields[k], str) and not fields[k].strip():
+                fields[k] = None
         if fields:
             set_clause = ", ".join(f"{k} = ?" for k in fields)
-            conn.execute(f"UPDATE suppliers SET {set_clause} WHERE id = ?", list(fields.values()) + [supplier_id])
-            conn.commit()
+            try:
+                conn.execute(f"UPDATE suppliers SET {set_clause} WHERE id = ?", list(fields.values()) + [supplier_id])
+                conn.commit()
+            except sqlite3.IntegrityError:
+                # страховка на гонку с UNIQUE(name): отдаём 409, а не 500
+                raise HTTPException(status_code=409, detail="Поставщик с таким названием уже есть")
         return dict(conn.execute("SELECT * FROM suppliers WHERE id = ?", (supplier_id,)).fetchone())
     finally:
         conn.close()

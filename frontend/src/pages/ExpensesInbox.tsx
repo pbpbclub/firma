@@ -489,6 +489,10 @@ export default function ExpensesInbox() {
   });
 
   const items: any[] = data?.items ?? [];
+  // degraded: набор «уже разнесённых» неполон (сбой БД) — разноска отключена, иначе
+  // риск двойного платежа. truncated: показаны не все неразнесённые — уточни фильтры.
+  const degraded = isIncoming && !!data?.degraded;
+  const truncated = !!data?.truncated;
 
   const onDone = () => {
     setOpenId(null);
@@ -542,11 +546,14 @@ export default function ExpensesInbox() {
       {/* Панель фильтров */}
       <div style={{ padding: "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
         <div style={{ display: "flex", gap: 16, alignItems: "center", fontSize: 11, color: "#6B6355" }}>
-          <span>{items.length} неразнесённых</span>
+          <span>{items.length}{truncated ? "+" : ""} неразнесённых</span>
           <PeriodFilter label="ПЕРИОД" from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} />
           <AmountFilter label="СУММА" min={amtMin} max={amtMax} onChange={(mn, mx) => { setAmtMin(mn); setAmtMax(mx); }} />
           {source === "zen" && !from && (
             <span style={{ fontSize: 10, color: "#C8C0B0" }}>показаны последние 90 дней — расширь период</span>
+          )}
+          {truncated && (
+            <span style={{ fontSize: 10, color: "#8B3A3A" }}>показаны первые {items.length} — уточни период/фильтры</span>
           )}
           {isIncoming && (
             <label style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer", fontSize: 10, color: "#A89070" }}>
@@ -560,6 +567,14 @@ export default function ExpensesInbox() {
           <X size={10} /> Сбросить
         </button>
       </div>
+
+      {/* Деградация: проверка «разнесено ли» неполна — разноску отключаем */}
+      {degraded && (
+        <div style={{ margin: "8px 28px 0", padding: "9px 12px", background: "#FDECEA", borderLeft: "3px solid #8B3A3A", fontSize: 11, color: "#8B3A3A" }}>
+          ⚠ Не удалось полностью проверить, какие поступления уже разнесены (сбой доступа к базе).
+          Разноска временно отключена, чтобы не провести платёж дважды. Обнови страницу через минуту.
+        </div>
+      )}
 
       {/* Заголовки */}
       <div style={{ display: "grid", gridTemplateColumns: "80px 1fr 130px", gap: 12, padding: "8px 28px", borderBottom: "1px solid #F7F5F1" }}>
@@ -578,12 +593,12 @@ export default function ExpensesInbox() {
          ) :
          items.map((t: any) => (
           <div key={t.id}>
-            <div onClick={() => setOpenId(openId === t.id ? null : t.id)}
+            <div onClick={() => { if (!(isIncoming && degraded)) setOpenId(openId === t.id ? null : t.id); }}
               style={{
                 display: "grid", gridTemplateColumns: "80px 1fr 130px", gap: 12, padding: "11px 28px",
-                borderBottom: "1px solid #F7F5F1", cursor: "pointer", alignItems: "center",
+                borderBottom: "1px solid #F7F5F1", cursor: (isIncoming && degraded) ? "default" : "pointer", alignItems: "center",
                 background: openId === t.id ? "#FFF8F5" : "transparent",
-                opacity: t.dismissed_reason ? 0.55 : 1,
+                opacity: t.dismissed_reason ? 0.55 : (isIncoming && degraded ? 0.6 : 1),
               }}
               onMouseEnter={e => { if (openId !== t.id) e.currentTarget.style.background = "#FAF8F5"; }}
               onMouseLeave={e => { if (openId !== t.id) e.currentTarget.style.background = "transparent"; }}>

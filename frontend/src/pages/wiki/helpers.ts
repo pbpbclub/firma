@@ -12,7 +12,9 @@ export function initials(name: string | undefined) {
 }
 
 export function fmt(n: number | null | undefined) {
-  if (!n) return "—";
+  // «0 ₽» (закрытый долг, нулевой расход) и «нет данных» — разные факты: проверяем
+  // на null/undefined/NaN, не на falsy, иначе реальный ноль превращается в «—».
+  if (n === null || n === undefined || Number.isNaN(n)) return "—";
   return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) + " ₽";
 }
 

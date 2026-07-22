@@ -6,30 +6,45 @@
 Скрытые вручную (перевод между своими счетами, возврат) — production.inbox_dismissed.
 Разные файлы БД, ATTACH в проекте не используется → анти-джойн делаем в Python.
 """
+import sqlite3
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional, List
-from uuid import uuid4
 
 from db import get_production, get_finance
-from routers.orders import _plan_fact, _reserve_suggested
+from routers.orders import _create_payment, _reserve_hint
 
 router = APIRouter()
 
 DISMISS_SOURCE = "bank-in"
 
 
-def _allocated_in_ids() -> set:
-    """id входящих транзакций, уже привязанных к платежам/заказам/дебиторке."""
+def _is_missing_schema(exc: sqlite3.OperationalError) -> bool:
+    """Отсутствие колонки/таблицы на старой схеме — ожидаемо, не деградация."""
+    return "no such column" in str(exc).lower() or "no such table" in str(exc).lower()
+
+
+def _allocated_in_ids() -> tuple[set, bool]:
+    """id входящих транзакций, уже привязанных к платежам/заказам/дебиторке.
+
+    Возвращает (used, degraded). degraded=True — набор «занятых» НЕПОЛОН из-за сбоя
+    (недоступна БД, залочен файл): считать транзакцию неразнесённой по такому набору
+    нельзя — иначе уже проведённое поступление разнесётся повторно. Отсутствие
+    колонки/таблицы (старая схема) деградацией НЕ считается."""
     used = set()
+    degraded = False
     conn = get_production()
     try:
         for col, tbl in (("bank_tx_id", "payments"), ("finance_tx_id", "orders")):
             try:
                 for r in conn.execute(f"SELECT DISTINCT {col} FROM {tbl} WHERE {col} IS NOT NULL AND {col} != ''"):
                     used.add(str(r[0]))
-            except Exception:
-                pass  # колонки может не быть на старой схеме
+            except sqlite3.OperationalError as e:
+                if not _is_missing_schema(e):
+                    degraded = True
+    except Exception:
+        degraded = True
     finally:
         conn.close()
     try:
@@ -37,11 +52,14 @@ def _allocated_in_ids() -> set:
         try:
             for r in fin.execute("SELECT DISTINCT finance_tx_id FROM receivables WHERE finance_tx_id IS NOT NULL AND finance_tx_id != ''"):
                 used.add(str(r[0]))
+        except sqlite3.OperationalError as e:
+            if not _is_missing_schema(e):
+                degraded = True
         finally:
             fin.close()
     except Exception:
-        pass
-    return used
+        degraded = True  # finance.db недоступен целиком — набор неполон
+    return used, degraded
 
 
 def _dismissed_map() -> dict:
@@ -69,41 +87,57 @@ def inbox(
     limit: int = Query(100, le=500),
 ):
     """Неразнесённые поступления банка."""
-    used = _allocated_in_ids()
+    used, degraded = _allocated_in_ids()
     dismissed = _dismissed_map()
     out = []
+    truncated = False
     fin = get_finance()
     try:
-        sql = "SELECT * FROM transactions WHERE direction = 'in'"
+        where = "WHERE direction = 'in'"
         params: list = []
         if date_from:
-            sql += " AND date >= ?"; params.append(date_from)
+            where += " AND date >= ?"; params.append(date_from)
         if date_to:
-            sql += " AND date <= ?"; params.append(date_to)
+            where += " AND date <= ?"; params.append(date_to)
         if amount_min is not None:
-            sql += " AND amount >= ?"; params.append(amount_min)
+            where += " AND amount >= ?"; params.append(amount_min)
         if amount_max is not None:
-            sql += " AND amount <= ?"; params.append(amount_max)
+            where += " AND amount <= ?"; params.append(amount_max)
         if search:
-            sql += " AND (counterparty LIKE ? OR purpose LIKE ?)"; params += [f"%{search}%"] * 2
-        sql += " ORDER BY date DESC, id DESC LIMIT ?"
-        params.append(limit * 3)  # запас: часть отсеется как разнесённая/скрытая
-        for r in fin.execute(sql, params).fetchall():
-            tid = str(r["id"])
-            if tid in used:
-                continue
-            if tid in dismissed and not show_dismissed:
-                continue
-            out.append({
-                "id": tid, "source": "bank", "date": r["date"], "amount": r["amount"],
-                "counterparty": r["counterparty"], "purpose": r["purpose"], "bank": r["bank"],
-                "dismissed_reason": dismissed.get(tid),
-            })
-            if len(out) >= limit:
-                break
+            where += " AND (counterparty LIKE ? OR purpose LIKE ?)"; params += [f"%{search}%"] * 2
+
+        # Разнесённые/скрытые отсеиваются в Python (три файла БД) → читаем страницами,
+        # пока не набрали limit или не кончились строки. «Запас limit*N» терял бы
+        # старые неразнесённые, когда разнесённых большинство.
+        CHUNK = 300
+        offset = 0
+        done = False
+        while not done and len(out) < limit:
+            page = fin.execute(
+                f"SELECT * FROM transactions {where} ORDER BY date DESC, id DESC LIMIT ? OFFSET ?",
+                params + [CHUNK, offset],
+            ).fetchall()
+            if len(page) < CHUNK:
+                done = True  # последняя страница
+            offset += CHUNK
+            for r in page:
+                tid = str(r["id"])
+                if tid in used:
+                    continue
+                if tid in dismissed and not show_dismissed:
+                    continue
+                out.append({
+                    "id": tid, "source": "bank", "date": r["date"], "amount": r["amount"],
+                    "counterparty": r["counterparty"], "purpose": r["purpose"], "bank": r["bank"],
+                    "dismissed_reason": dismissed.get(tid),
+                })
+                if len(out) >= limit:
+                    # набрали лимит, а строки в БД ещё есть → усечение
+                    truncated = not (done and r is page[-1])
+                    break
     finally:
         fin.close()
-    return {"items": out, "count": len(out)}
+    return {"items": out, "count": len(out), "truncated": truncated, "degraded": degraded}
 
 
 class PayAllocation(BaseModel):
@@ -139,7 +173,15 @@ def payments_from_tx(body: PayFromTxIn):
         raise HTTPException(status_code=404, detail="Transaction not found")
     if tx["direction"] != "in":
         raise HTTPException(status_code=400, detail="Транзакция не входящая")
-    if str(body.tx_id) in _allocated_in_ids():
+    used, degraded = _allocated_in_ids()
+    if degraded:
+        # Набор «уже разнесённых» неполон — не можем гарантировать, что транзакция
+        # не проведена. Отказываем, а не рискуем дублем. Лучше повтор, чем два платежа.
+        raise HTTPException(
+            status_code=503,
+            detail="Не удалось проверить, не разнесена ли транзакция — повторите позже",
+        )
+    if str(body.tx_id) in used:
         raise HTTPException(status_code=409, detail="Транзакция уже привязана к платежу")
 
     total = round(sum(a.amount for a in body.allocations), 2)
@@ -158,30 +200,25 @@ def payments_from_tx(body: PayFromTxIn):
             ).fetchone()
             if not o:
                 raise HTTPException(status_code=404, detail=f"Заказ {a.order_id} не найден")
-            pid = str(uuid4())
-            conn.execute(
-                """INSERT INTO payments (id, order_id, amount, paid_at, note, bank_tx_id, source, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, 'bank', datetime('now'))""",
-                (pid, o["id"], round(a.amount, 2), tx["date"],
-                 a.note or tx["purpose"] or tx["counterparty"], str(body.tx_id)),
-            )
-            created.append({"payment_id": pid, "order_id": o["id"], "order_row": o, "amount": round(a.amount, 2)})
+            # Единая точка создания платежа (валидация + INSERT): та же, что у ручного
+            # add_payment. Все N платежей разноски пишутся одной транзакцией на общем conn.
+            note = a.note or tx["purpose"] or tx["counterparty"]
+            _create_payment(conn, o, a.amount, tx["date"], note, source="bank", bank_tx_id=str(body.tx_id))
+            created.append({"order_id": o["id"], "order_row": o, "amount": round(a.amount, 2)})
         conn.execute(
             "DELETE FROM inbox_dismissed WHERE tx_id = ? AND source = ?",
             (str(body.tx_id), DISMISS_SOURCE),
         )
         conn.commit()
 
-        # Подсказка резерва (как в orders.add_payment): пришли деньги по одному
-        # заказу — предложить отложить материалы из сметы.
+        # Подсказка резерва: пришли деньги по одному заказу — предложить отложить
+        # материалы из сметы (paid_total фактический — считает _reserve_hint).
         result = {"ok": True, "payments": [
-            {k: v for k, v in c.items() if k != "order_row"} for c in created
+            {"order_id": c["order_id"], "amount": c["amount"]} for c in created
         ]}
         if len(created) == 1:
             o = created[0]["order_row"]
-            pf = _plan_fact(conn, o["id"], o["cost_plan"] or 0, 0, o["price_plan"] or 0)
-            result["reserve_suggested"] = _reserve_suggested(pf, o["cost_plan"] or 0)
-            result["reserve_active"] = bool((o["reserved_amount"] or 0) > 0 and not o["reserve_released_at"])
+            result.update(_reserve_hint(conn, o))
             result["order_id"] = o["id"]
         return result
     finally:

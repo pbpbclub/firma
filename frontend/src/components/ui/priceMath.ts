@@ -13,14 +13,15 @@ export function markupToPct(markup: number | null | undefined): number {
   return Math.round(((markup ?? 1) - 1) * 100);
 }
 
-// Денежное форматирование (ru-RU, ₽). «—» для нуля/пустого.
+// Денежное форматирование (ru-RU, ₽). «—» только для null/undefined/NaN.
+// Реальный 0 показываем как «0 ₽»: закрытый долг ≠ отсутствие данных.
 export function fmtMoney(n: number | null | undefined): string {
-  if (!n) return "—";
+  if (n === null || n === undefined || Number.isNaN(n)) return "—";
   return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) + " ₽";
 }
 
 // Число без валюты (для строк «Итого»).
 export function fmtNum(n: number | null | undefined): string {
-  if (!n) return "—";
+  if (n === null || n === undefined || Number.isNaN(n)) return "—";
   return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n);
 }
