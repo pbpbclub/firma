@@ -22,10 +22,11 @@ const subCell = (text?: string, color = "#6B6355") =>
 // наследовало браузерные 16px («гигантские» телефоны/ИНН).
 const numText = (text?: string) =>
   <span style={{ ...T.num, ...ell }}>{text || "—"}</span>;
-// Статус-бейдж (клиент/подрядчик) — цветная рамка, кегль как у меток.
-const statusCell = (label?: string, colors?: Record<string, string>) =>
+// Статус-бейдж (клиент/подрядчик) — цветная рамка, кегль как у меток. Цвет передаём
+// напрямую: у разных сущностей карты цветов ключуются по-своему (raw vs метка).
+const statusCell = (label?: string, color?: string) =>
   label
-    ? <span style={{ fontSize: 11, fontWeight: 600, color: colors?.[label] || "#A89070", border: `1px solid ${colors?.[label] || "#EDEBE6"}`, padding: "2px 7px", letterSpacing: "0.02em", whiteSpace: "nowrap" }}>{label}</span>
+    ? <span style={{ fontSize: 11, fontWeight: 600, color: color || "#A89070", border: `1px solid ${color || "#EDEBE6"}`, padding: "2px 7px", letterSpacing: "0.02em", whiteSpace: "nowrap" }}>{label}</span>
     : <span style={{ color: "#C8C0B0" }}>—</span>;
 import { ClientDetail, CLIENT_FIELDS, CUSTOMER_STATUS_COLORS, customerStatusLabel } from "./ClientDetail";
 import { ContractorDetail, CONTRACTOR_FIELDS, STATUS_COLORS, CONTRACTOR_STATUS_LABELS } from "./ContractorDetail";
@@ -74,7 +75,7 @@ const clients: WikiCategory = {
     { key: "name",   label: "КЛИЕНТ",  width: "2fr", filter: true },
     { key: "phone",  label: "ТЕЛЕФОН", width: "150px", render: (r) => numText(r.phone) },
     { key: "inn",    label: "ИНН",     width: "150px", render: (r) => numText(r.inn) },
-    { key: "status", label: "СТАТУС",  width: "120px", filter: true, render: (r) => statusCell(customerStatusLabel(r.status) || undefined, CUSTOMER_STATUS_COLORS) },
+    { key: "status", label: "СТАТУС",  width: "120px", filter: true, render: (r) => statusCell(customerStatusLabel(r.status) || undefined, CUSTOMER_STATUS_COLORS[customerStatusLabel(r.status)]) },
   ],
 };
 
@@ -86,12 +87,8 @@ const contractors: WikiCategory = {
   createFields: CONTRACTOR_FIELDS,
   avatar: { kind: "initials", debtTint: true },
   columns: [
-    { key: "name", label: "ИМЯ", width: "1.6fr", render: (r) => (
-      <div style={{ minWidth: 0 }}>
-        {nameCell(r.name)}
-        {r.status && <div style={{ fontSize: 11, color: STATUS_COLORS[r.status] || "#A89070", marginTop: 1 }}>{CONTRACTOR_STATUS_LABELS[r.status] || r.status}</div>}
-      </div>
-    ) },
+    { key: "name", label: "ИМЯ", width: "1.6fr", render: (r) => nameCell(r.name) },
+    { key: "status", label: "СТАТУС", width: "120px", filter: true, render: (r) => statusCell(r.status ? (CONTRACTOR_STATUS_LABELS[r.status] || r.status) : undefined, STATUS_COLORS[r.status]) },
     { key: "specialization", label: "СПЕЦИАЛИЗАЦИЯ", width: "1.2fr", render: (r) => subCell(r.specialization) },
     { key: "role", label: "РОЛЬ", width: "120px", filter: true, render: (r) => subCell(r.role, "#A89070") },
     { key: "pay_label", label: "СХЕМА", width: "110px", render: (r) => <span style={{ ...T.body, color: r.pay_label ? "#1A1A1A" : "#C8C0B0", ...ell }}>{r.pay_label || "—"}</span> },
