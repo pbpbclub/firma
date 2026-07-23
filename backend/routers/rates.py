@@ -61,14 +61,20 @@ class WorkRateIn(BaseModel):
     unit: Optional[str] = None
     note: Optional[str] = None
     source: str = "manual"
-    variable: bool = False   # ставка-ориентир: fill не подставляет, check просит подтвердить
+    variable: Optional[bool] = None   # ставка-ориентир: fill не подставляет, check просит
+                                      # подтвердить. None = не передан → у существующей
+                                      # ставки флаг сохраняется (финагентский rate-set его не шлёт)
 
 
 def upsert_work_rate(conn, work_type_id: str, master_id: Optional[str], scheme: str,
                      rate: float, unit: Optional[str], note: Optional[str], source: str,
-                     overwrite: bool = True, variable: bool = False) -> str:
+                     overwrite: bool = True, variable: Optional[bool] = None) -> str:
     """Единая точка записи ставки. overwrite=False — не трогать существующую
-    (для bootstrap/learned: ручное всегда главнее автоматического)."""
+    (для bootstrap/learned: ручное всегда главнее автоматического).
+
+    variable=None — «флаг не передан»: в UPDATE колонка не участвует, иначе любой
+    вызывающий, который о флаге не знает (rate-set финагента, learned, bootstrap),
+    молча снял бы «ориентир» и cost-fill начал бы подставлять цену без вопроса."""
     existing = conn.execute(
         "SELECT id, source FROM work_rates WHERE work_type_id = ? AND IFNULL(master_id,'') = IFNULL(?, '')",
         (work_type_id, master_id),
@@ -76,10 +82,15 @@ def upsert_work_rate(conn, work_type_id: str, master_id: Optional[str], scheme: 
     if existing:
         if not overwrite:
             return "skipped"
+        sets = ["scheme=?", "rate=?", "unit=?", "note=?", "source=?"]
+        params: list = [scheme, rate, unit, note, source]
+        if variable is not None:
+            sets.append("variable=?")
+            params.append(1 if variable else 0)
+        params.append(existing["id"])
         conn.execute(
-            """UPDATE work_rates SET scheme=?, rate=?, unit=?, note=?, source=?, variable=?, updated_at=datetime('now')
-               WHERE id=?""",
-            (scheme, rate, unit, note, source, 1 if variable else 0, existing["id"]),
+            f"UPDATE work_rates SET {', '.join(sets)}, updated_at=datetime('now') WHERE id=?",
+            params,
         )
         return "updated"
     conn.execute(

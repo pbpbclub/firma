@@ -62,11 +62,15 @@ class ItemIn(BaseModel):
     lines: List[LineIn] = []
 
 
-def _resolve_price(body: ItemIn, cost_total: float) -> tuple[float, float]:
+def _resolve_price(body: ItemIn, cost_total: float, anchor: Optional[float] = None) -> tuple[float, float]:
     """(sale_price, markup_pct): ручная цена хранится как введена (без дрейфа
-    округления), markup_pct тогда производный (дробный). Иначе — цена из наценки."""
-    if body.sale_price is not None and body.sale_price > 0:
-        sale = body.sale_price
+    округления), markup_pct тогда производный (дробный). Иначе — цена из наценки.
+
+    anchor — якорная цена, подставленная вызывающим вместо body.sale_price
+    (PUT восстанавливает её из существующей записи, если клиент поле не прислал)."""
+    manual = body.sale_price if anchor is None else anchor
+    if manual is not None and manual > 0:
+        sale = manual
         pct = round((sale / cost_total - 1) * 100, 1) if cost_total > 0 else body.markup_pct
         return sale, pct
     return cost_total * (1 + body.markup_pct / 100), body.markup_pct
@@ -276,11 +280,15 @@ def update_item(item_id: str, body: ItemIn):
     conn = get_production()
     try:
         _ensure_tables(conn)
-        existing = conn.execute("SELECT id FROM catalog_items WHERE id = ?", (item_id,)).fetchone()
+        existing = conn.execute("SELECT id, sale_price FROM catalog_items WHERE id = ?", (item_id,)).fetchone()
         if not existing:
             raise HTTPException(status_code=404, detail="Not found")
         cost_total = sum(l.qty * l.unit_price for l in body.lines)
-        sale_price, markup_pct = _resolve_price(body, cost_total)
+        # Якорь = цена: поле не прислали вовсе → держим сохранённую ручную цену.
+        # Иначе полнотельный PUT пересчитал бы её из markup_pct, округлённого до 0.1,
+        # и цена дрейфовала бы при каждом сохранении. Явный null — «цена производная».
+        anchor = None if "sale_price" in body.model_fields_set else existing["sale_price"]
+        sale_price, markup_pct = _resolve_price(body, cost_total, anchor)
         now = datetime.utcnow().isoformat()
         conn.execute(
             """UPDATE catalog_items SET title=?, category=?, brand=?, markup_pct=?, cost_total=?, sale_price=?, notes=?, updated_at=?

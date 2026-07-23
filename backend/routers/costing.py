@@ -248,9 +248,11 @@ def _cost_report(conn, set_id: str) -> dict:
                          "title": line["title"], "ask": res.get("ask"),
                          "unit": line["unit"], "qty": line["qty"], "line_type": res["type"]}
                 # Контекст для форм ответа в вебе/у финагента
+                # is not None, а не truthiness: prefill_rate=0 — валидный ориентир,
+                # форма должна показать ноль, а не пустое поле
                 for k in ("work_type_id", "work_type_name", "master_id", "master_name",
                           "prefill_scheme", "prefill_rate", "variable"):
-                    if res.get(k):
+                    if res.get(k) is not None:
                         entry[k] = res[k]
                 missing.append(entry)
 
