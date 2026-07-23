@@ -18,7 +18,16 @@ const numCell = (v: number, tone = "#1A1A1A", opts?: { bold?: boolean; dashZero?
 // Текст-значение в ячейке (специализация/описание/тип) — тот же кегль 13, что имя.
 const subCell = (text?: string, color = "#6B6355") =>
   <span style={{ ...T.body, color, ...ell, paddingRight: 12 }}>{text || "—"}</span>;
-import { ClientDetail, CLIENT_FIELDS } from "./ClientDetail";
+// Моно-значение (телефон/ИНН) — 13, tabular, без переноса. Без явного размера раньше
+// наследовало браузерные 16px («гигантские» телефоны/ИНН).
+const numText = (text?: string) =>
+  <span style={{ ...T.num, ...ell }}>{text || "—"}</span>;
+// Статус-бейдж (клиент/подрядчик) — цветная рамка, кегль как у меток.
+const statusCell = (label?: string, colors?: Record<string, string>) =>
+  label
+    ? <span style={{ fontSize: 11, fontWeight: 600, color: colors?.[label] || "#A89070", border: `1px solid ${colors?.[label] || "#EDEBE6"}`, padding: "2px 7px", letterSpacing: "0.02em", whiteSpace: "nowrap" }}>{label}</span>
+    : <span style={{ color: "#C8C0B0" }}>—</span>;
+import { ClientDetail, CLIENT_FIELDS, CUSTOMER_STATUS_COLORS, customerStatusLabel } from "./ClientDetail";
 import { ContractorDetail, CONTRACTOR_FIELDS, STATUS_COLORS, CONTRACTOR_STATUS_LABELS } from "./ContractorDetail";
 import { SupplierDetail, SUPPLIER_FIELDS, PRICE_SUPPLIER_LABELS } from "./SupplierDetail";
 import { BrandDetail, BrandModal } from "./BrandDetail";
@@ -62,9 +71,10 @@ const clients: WikiCategory = {
   createFields: CLIENT_FIELDS,
   avatar: { kind: "initials" },
   columns: [
-    { key: "name",  label: "КЛИЕНТ",  width: "2fr", filter: true },
-    { key: "phone", label: "ТЕЛЕФОН", width: "130px", render: (r) => <span style={{ fontFamily: MONO }}>{r.phone || "—"}</span> },
-    { key: "inn",   label: "ИНН",     width: "150px", render: (r) => <span style={{ fontFamily: MONO }}>{r.inn || "—"}</span> },
+    { key: "name",   label: "КЛИЕНТ",  width: "2fr", filter: true },
+    { key: "phone",  label: "ТЕЛЕФОН", width: "150px", render: (r) => numText(r.phone) },
+    { key: "inn",    label: "ИНН",     width: "150px", render: (r) => numText(r.inn) },
+    { key: "status", label: "СТАТУС",  width: "120px", filter: true, render: (r) => statusCell(customerStatusLabel(r.status) || undefined, CUSTOMER_STATUS_COLORS) },
   ],
 };
 
@@ -100,7 +110,7 @@ const suppliers: WikiCategory = {
   columns: [
     { key: "name", label: "ПОСТАВЩИК", width: "2fr", filter: true },
     { key: "category", label: "КАТЕГОРИЯ", width: "150px", render: (r) => subCell(r.category) },
-    { key: "phone", label: "ТЕЛЕФОН", width: "130px", render: (r) => <span style={{ fontFamily: MONO }}>{r.phone || "—"}</span> },
+    { key: "phone", label: "ТЕЛЕФОН", width: "150px", render: (r) => numText(r.phone) },
     { key: "price_supplier", label: "ПРАЙС", width: "110px", render: (r) => <span style={{ ...T.body, color: r.price_supplier ? "#E8592A" : "#C8C0B0", ...ell }}>{PRICE_SUPPLIER_LABELS[r.price_supplier] || "—"}</span> },
   ],
 };

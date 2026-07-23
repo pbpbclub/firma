@@ -9,9 +9,15 @@ import { fmt } from "./helpers";
 import { DetailRow as Row } from "./DetailRow";
 import { DetailShell, DetailSection, NoteBlock } from "./DetailShell";
 
-const CUSTOMER_STATUS_COLORS: Record<string, string> = {
-  "VIP": "#E8592A", "Постоянный": "#4A7C59", "Разовый": "#A89070", "Холодный": "#6B6355",
+// Цвета — по ОТОБРАЖАЕМОЙ метке (см. LABELS ниже).
+export const CUSTOMER_STATUS_COLORS: Record<string, string> = {
+  "Активный": "#4A7C59", "VIP": "#E8592A", "Постоянный": "#4A7C59", "Разовый": "#A89070", "Холодный": "#6B6355",
 };
+// Нормализация «сырого» значения статуса в метку (в данных встречается legacy 'active').
+export const CUSTOMER_STATUS_LABELS: Record<string, string> = {
+  active: "Активный",
+};
+export const customerStatusLabel = (s?: string) => (s ? (CUSTOMER_STATUS_LABELS[s] ?? s) : "");
 
 const ORDER_STATUS_LABELS: Record<string, string> = {
   draft: "Черновик", estimate: "Смета", project: "Проект",
@@ -99,7 +105,7 @@ export function ClientDetail({ id, onClose }: { id: string; onClose: () => void 
         title={customer.name}
         subtitle={customer.full_name}
         avatar={{ kind: "initials", name: customer.name }}
-        status={customer.status ? { label: customer.status, color: CUSTOMER_STATUS_COLORS[customer.status] } : null}
+        status={customer.status ? { label: customerStatusLabel(customer.status), color: CUSTOMER_STATUS_COLORS[customerStatusLabel(customer.status)] } : null}
         metrics={summary ? [
           { label: "Заказов",  value: String(data?.orders?.length ?? 0) },
           { label: "Получено", value: fmt(summary.income), color: "#4A7C59" },

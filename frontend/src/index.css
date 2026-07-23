@@ -47,6 +47,9 @@
     /* Цифры → Space Grotesk (BrandNum), буквы → Onest. tnum: суммы стоят столбиком. */
     font-family: 'BrandNum', 'Onest', system-ui, -apple-system, sans-serif;
     font-variant-numeric: tabular-nums;
+    /* Базовый кегль контента = 13. Без этого текст без явного размера наследовал
+       браузерные 16px (телефоны/ИНН в Вики были «гигантскими»). */
+    font-size: 13px;
     margin: 0;
   }
   /* Контролы по умолчанию не наследуют шрифт — заставляем. */
