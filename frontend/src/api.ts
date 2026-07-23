@@ -215,7 +215,7 @@ export const estimatesApi = {
 // Справочники costing-движка: ставки работ, выученные цены, правила сопоставления.
 export const workRatesApi = {
   list:   () => api.get("/work-rates").then(r => r.data),
-  create: (data: { work_type_id?: string; work_type_name?: string; master_id?: string | null; scheme: string; rate: number; unit?: string | null; note?: string | null }) =>
+  create: (data: { work_type_id?: string; work_type_name?: string; master_id?: string | null; scheme: string; rate: number; unit?: string | null; note?: string | null; variable?: boolean }) =>
     api.post("/work-rates", data).then(r => r.data),
   delete: (id: string) => api.delete(`/work-rates/${id}`).then(r => r.data),
   bootstrap: () => api.post("/work-rates/bootstrap").then(r => r.data),

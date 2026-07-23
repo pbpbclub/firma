@@ -161,6 +161,21 @@ def _resolve_line(conn, line, item, set_row) -> dict:
                            master_id=line["master_id"],
                            master_name=master["name"] if master else None)
             return out
+        # «Переменная» ставка-ориентир: молча НЕ подставляем (нет proposal → fill
+        # пропустит), просим подтвердить цену в каждой смете с prefill ориентиром.
+        if not has_price and (rate["variable"] if "variable" in rate.keys() else 0):
+            wt = conn.execute("SELECT name FROM work_types WHERE id = ?", (wt_id,)).fetchone()
+            master = conn.execute("SELECT name FROM masters WHERE id = ?", (line["master_id"],)).fetchone() if line["master_id"] else None
+            who = f" у {master['name']}" if master else ""
+            unit_lbl = {"per_unit": "₽/ед", "hourly": "₽/ч", "fixed": "₽ за изделие", "percent": "%"}.get(rate["scheme"], "₽")
+            out.update(status="missing", reason="variable_rate",
+                       ask=f"Работа «{wt['name'] if wt else line['title']}»{who}: ориентир {rate['rate']:g} {unit_lbl} — подтверди цену для этой сметы",
+                       work_type_id=wt_id,
+                       work_type_name=wt["name"] if wt else None,
+                       master_id=line["master_id"],
+                       master_name=master["name"] if master else None,
+                       prefill_scheme=rate["scheme"], prefill_rate=rate["rate"], variable=True)
+            return out
         if not has_price:
             out.update(status="proposed",
                        source="percent" if rate["scheme"] == "percent" else "work_rate",
@@ -233,7 +248,8 @@ def _cost_report(conn, set_id: str) -> dict:
                          "title": line["title"], "ask": res.get("ask"),
                          "unit": line["unit"], "qty": line["qty"], "line_type": res["type"]}
                 # Контекст для форм ответа в вебе/у финагента
-                for k in ("work_type_id", "work_type_name", "master_id", "master_name"):
+                for k in ("work_type_id", "work_type_name", "master_id", "master_name",
+                          "prefill_scheme", "prefill_rate", "variable"):
                     if res.get(k):
                         entry[k] = res[k]
                 missing.append(entry)

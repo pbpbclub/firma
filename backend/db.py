@@ -611,6 +611,12 @@ def ensure_work_rates_schema():
             CREATE UNIQUE INDEX IF NOT EXISTS ux_work_rates
             ON work_rates(work_type_id, IFNULL(master_id, ''))
         """)
+        # variable=1 — «переменная» ставка-ориентир (себестоимость каждый раз разная):
+        # cost-fill её НЕ подставляет молча, cost-check просит подтвердить цену
+        # в каждой смете (prefill ориентиром). Решение Юры 23.07.2026.
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(work_rates)").fetchall()}
+        if existing and "variable" not in existing:
+            conn.execute("ALTER TABLE work_rates ADD COLUMN variable INTEGER DEFAULT 0")
         conn.commit()
     finally:
         conn.close()

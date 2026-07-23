@@ -264,6 +264,7 @@ class LineUpdate(BaseModel):
     material_code: Optional[str] = None
     price_supplier: Optional[str] = None
     price_date: Optional[str] = None
+    no_learn: Optional[bool] = None   # true → не писать learned-ставку (цена «только в эту смету»)
 
 
 class FromCatalog(BaseModel):
@@ -760,6 +761,7 @@ def update_line(line_id: str, body: LineUpdate):
             raise HTTPException(status_code=404, detail="Not found")
         _assert_item_editable(conn, row["item_id"])
         fields = {k: v for k, v in body.model_dump().items() if v is not None}
+        no_learn = bool(fields.pop("no_learn", False))   # не колонка — только флаг поведения
         # If work_type chosen, sync title to its name
         if "work_type_id" in fields:
             wt = conn.execute("SELECT name FROM work_types WHERE id = ?", (fields["work_type_id"],)).fetchone()
@@ -790,7 +792,9 @@ def update_line(line_id: str, body: LineUpdate):
             )
         # Обучение ставке: Юра руками вбил цену работы с известной парой вид×мастер —
         # если такой ставки ещё нет, запоминаем (ручное в work_rates не перетираем).
-        if (final["type"] in ("labor", "service") and final["master_id"] and final["work_type_id"]
+        # no_learn=true (форма «только в эту смету») — обучение подавлено.
+        if (not no_learn
+                and final["type"] in ("labor", "service") and final["master_id"] and final["work_type_id"]
                 and (final["unit_price"] or 0) > 0):
             upsert_work_rate(conn, final["work_type_id"], final["master_id"], "per_unit",
                              final["unit_price"], final["unit"], "из строки сметы", "learned",

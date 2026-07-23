@@ -61,11 +61,12 @@ class WorkRateIn(BaseModel):
     unit: Optional[str] = None
     note: Optional[str] = None
     source: str = "manual"
+    variable: bool = False   # ставка-ориентир: fill не подставляет, check просит подтвердить
 
 
 def upsert_work_rate(conn, work_type_id: str, master_id: Optional[str], scheme: str,
                      rate: float, unit: Optional[str], note: Optional[str], source: str,
-                     overwrite: bool = True) -> str:
+                     overwrite: bool = True, variable: bool = False) -> str:
     """Единая точка записи ставки. overwrite=False — не трогать существующую
     (для bootstrap/learned: ручное всегда главнее автоматического)."""
     existing = conn.execute(
@@ -76,15 +77,15 @@ def upsert_work_rate(conn, work_type_id: str, master_id: Optional[str], scheme: 
         if not overwrite:
             return "skipped"
         conn.execute(
-            """UPDATE work_rates SET scheme=?, rate=?, unit=?, note=?, source=?, updated_at=datetime('now')
+            """UPDATE work_rates SET scheme=?, rate=?, unit=?, note=?, source=?, variable=?, updated_at=datetime('now')
                WHERE id=?""",
-            (scheme, rate, unit, note, source, existing["id"]),
+            (scheme, rate, unit, note, source, 1 if variable else 0, existing["id"]),
         )
         return "updated"
     conn.execute(
-        """INSERT INTO work_rates (id, work_type_id, master_id, scheme, rate, unit, note, source)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (str(uuid.uuid4()), work_type_id, master_id, scheme, rate, unit, note, source),
+        """INSERT INTO work_rates (id, work_type_id, master_id, scheme, rate, unit, note, source, variable)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (str(uuid.uuid4()), work_type_id, master_id, scheme, rate, unit, note, source, 1 if variable else 0),
     )
     return "created"
 
@@ -141,7 +142,8 @@ def create_work_rate(body: WorkRateIn):
         if (body.master_id or body.master_name) and not master:
             raise HTTPException(status_code=404, detail=f"Мастер не найден: {body.master_id or body.master_name}")
         upsert_work_rate(conn, wt["id"], master["id"] if master else None,
-                         body.scheme, body.rate, body.unit, body.note, body.source)
+                         body.scheme, body.rate, body.unit, body.note, body.source,
+                         variable=body.variable)
         conn.commit()
         row = conn.execute(
             "SELECT * FROM work_rates WHERE work_type_id = ? AND IFNULL(master_id,'') = IFNULL(?, '')",

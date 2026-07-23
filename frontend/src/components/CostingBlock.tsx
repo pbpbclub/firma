@@ -76,40 +76,80 @@ function MissingMaterialForm({ m, onDone }: { m: any; onDone: () => void }) {
   );
 }
 
+// Форма ставки работ. Режимы (решение Юры 23.07.2026 — «себестоимость работ бывает
+// всегда разная»):
+//  • «запомнить» снята → цена уходит только в ЭТУ смету (updateLine + no_learn),
+//    справочник не трогается — следующая смета снова спросит;
+//  • «запомнить» + «спрашивать всегда» → ставка-ориентир (variable): хранится в
+//    справочнике, но fill её не подставляет молча — каждая смета просит подтвердить
+//    (kind=variable_rate, prefill ориентиром);
+//  • «запомнить» без «спрашивать всегда» → жёсткий дефолт, как раньше.
 function MissingRateForm({ m, onDone }: { m: any; onDone: () => void }) {
-  const [scheme, setScheme] = useState("per_unit");
-  const [rate, setRate] = useState("");
+  const isVariableAsk = m.kind === "variable_rate";
+  const [scheme, setScheme] = useState(m.prefill_scheme || "per_unit");
+  const [rate, setRate] = useState(m.prefill_rate != null ? String(m.prefill_rate) : "");
+  const [remember, setRemember] = useState(!isVariableAsk);  // ориентир не перетираем случайно
+  const [variable, setVariable] = useState(isVariableAsk);
   const [busy, setBusy] = useState(false);
+
+  // variable имеет смысл только для ₽-схем (percent/fixed считаются от цены/изделия)
+  const variableAllowed = scheme === "per_unit" || scheme === "hourly";
 
   const save = async () => {
     const r = parseFloat(rate);
     if (!r || r <= 0) return;
     setBusy(true);
     try {
-      // Ставка в справочник (запоминается всегда — в этом смысл), затем цена в строку.
-      await workRatesApi.create({
-        work_type_id: m.work_type_id || undefined,
-        work_type_name: m.work_type_id ? undefined : (m.title || undefined),
-        master_id: m.master_id || undefined,
-        scheme, rate: r, unit: scheme === "hourly" ? "ч" : "шт",
-      });
+      if (remember) {
+        const isVar = variable && variableAllowed;
+        await workRatesApi.create({
+          work_type_id: m.work_type_id || undefined,
+          work_type_name: m.work_type_id ? undefined : (m.title || undefined),
+          master_id: m.master_id || undefined,
+          scheme, rate: r, unit: scheme === "hourly" ? "ч" : "шт",
+          variable: isVar,
+        });
+        // Переменную ставку fill не подставит — цену текущей строки пишем сразу.
+        if (isVar) await estimatesApi.updateLine(m.id, { unit_price: r, no_learn: true });
+      } else {
+        // Только в эту смету: цена в строку, без справочника и без learned-обучения.
+        await estimatesApi.updateLine(m.id, { unit_price: r, no_learn: true });
+      }
       onDone();
     } finally { setBusy(false); }
   };
 
   return (
     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
-      <select value={scheme} onChange={e => setScheme(e.target.value)}
-        style={{ border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 11, outline: "none", background: "#fff", cursor: "pointer", fontFamily: "inherit" }}>
-        {Object.entries(SCHEME_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-      </select>
-      <input type="number" value={rate} onChange={e => setRate(e.target.value)} placeholder={scheme === "percent" ? "%" : "₽"}
+      {remember ? (
+        <select value={scheme} onChange={e => setScheme(e.target.value)}
+          style={{ border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 11, outline: "none", background: "#fff", cursor: "pointer", fontFamily: "inherit" }}>
+          {Object.entries(SCHEME_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+      ) : (
+        <span style={{ fontSize: 11, color: "#6B6355" }}>₽/ед</span>
+      )}
+      <input type="number" value={rate} onChange={e => setRate(e.target.value)} placeholder={remember && scheme === "percent" ? "%" : "₽"}
         style={{ width: 90, border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 12, outline: "none", textAlign: "right", fontFamily: MONO }} />
       <Button size="sm" variant="primary" disabled={busy || !parseFloat(rate)} onClick={save} style={{ fontSize: 11, padding: "4px 10px" }}>
-        {busy ? "..." : "Сохранить ставку"}
+        {busy ? "..." : remember ? "Сохранить ставку" : "В смету"}
       </Button>
+      <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "#6B6355", cursor: "pointer" }}>
+        <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} />
+        запомнить
+      </label>
+      {remember && variableAllowed && (
+        <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "#6B6355", cursor: "pointer" }}
+          title="Себестоимость этой работы каждый раз разная: ставка хранится как ориентир, но каждая смета попросит подтвердить цену">
+          <input type="checkbox" checked={variable} onChange={e => setVariable(e.target.checked)} />
+          спрашивать всегда
+        </label>
+      )}
       <span style={{ fontSize: 10, color: "#A89070" }}>
-        {m.master_name ? `для ${m.master_name}` : "дефолт вида работ"} · запомнится в справочнике
+        {!remember
+          ? "только в эту смету"
+          : (m.master_name ? `для ${m.master_name}` : "дефолт вида работ")
+            + (variable && variableAllowed ? " · ориентир, спросит в каждой смете" : " · запомнится в справочнике")}
       </span>
     </div>
   );
@@ -219,7 +259,7 @@ export function CostingBlock({ setId, editable, onChanged }: {
                   {editable && m.scope === "line" && (m.kind === "no_material_match" || m.kind === "no_price") && (
                     <MissingMaterialForm m={m} onDone={afterChange} />
                   )}
-                  {editable && m.scope === "line" && (m.kind === "no_rate" || m.kind === "no_work_type") && (
+                  {editable && m.scope === "line" && (m.kind === "no_rate" || m.kind === "no_work_type" || m.kind === "variable_rate") && (
                     <MissingRateForm m={m} onDone={() => fill.mutate({})} />
                   )}
                 </div>
