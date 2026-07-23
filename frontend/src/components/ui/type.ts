@@ -33,9 +33,9 @@ export const T = {
   sectionLabel: {
     fontSize: 11, fontWeight: 600, color: "#A89070", letterSpacing: "0.08em", textTransform: "uppercase",
   } as CSSProperties,
-  // Метка колонки таблицы
+  // Метка колонки таблицы (одна CAPS-ступень с sectionLabel — 11, чтобы не «прыгало»)
   colLabel: {
-    fontSize: 10, fontWeight: 600, color: "#A89070", letterSpacing: "0.06em", textTransform: "uppercase",
+    fontSize: 11, fontWeight: 600, color: "#A89070", letterSpacing: "0.06em", textTransform: "uppercase",
   } as CSSProperties,
   body: { fontSize: 13, color: "#1A1A1A" } as CSSProperties,
   bodyMuted: { fontSize: 11, color: "#A89070" } as CSSProperties,
@@ -46,9 +46,9 @@ export const T = {
   numBig: {
     fontFamily: MONO, fontVariantNumeric: "tabular-nums", fontSize: 15, fontWeight: 700,
   } as CSSProperties,
-  // Метрика в детали/плитке: метка CAPS 10 + значение 14/700
+  // Метрика в детали/плитке: метка CAPS 11 + значение 14/700
   metricLabel: {
-    fontSize: 10, fontWeight: 600, color: "#A89070", letterSpacing: "0.06em", textTransform: "uppercase",
+    fontSize: 11, fontWeight: 600, color: "#A89070", letterSpacing: "0.06em", textTransform: "uppercase",
   } as CSSProperties,
   metricValue: {
     fontFamily: MONO, fontVariantNumeric: "tabular-nums", fontSize: 14, fontWeight: 700,

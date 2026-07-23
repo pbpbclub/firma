@@ -47,9 +47,9 @@ export function DetailShell({
               <div style={{ ...T.detailTitle, maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</div>
               {status && (
                 <span style={{
-                  fontSize: 9, fontWeight: 600, color: status.color || "#A89070",
-                  border: `1px solid ${status.color || "#EDEBE6"}`, padding: "2px 6px",
-                  letterSpacing: "0.04em", flexShrink: 0, whiteSpace: "nowrap",
+                  fontSize: 11, fontWeight: 600, color: status.color || "#A89070",
+                  border: `1px solid ${status.color || "#EDEBE6"}`, padding: "2px 7px",
+                  letterSpacing: "0.02em", flexShrink: 0, whiteSpace: "nowrap",
                 }}>{status.label}</span>
               )}
             </div>
@@ -101,7 +101,7 @@ export function DetailSection({ label, extra, children, first }: {
 // Заметка-блок — единый вид (тонированная подложка + рельс).
 export function NoteBlock({ children }: { children: ReactNode }) {
   return (
-    <div style={{ marginTop: 8, padding: "10px 12px", background: "#FAF8F5", fontSize: 12, color: "#1A1A1A", lineHeight: 1.7, borderLeft: "3px solid #EDEBE6" }}>
+    <div style={{ marginTop: 8, padding: "10px 12px", background: "#FAF8F5", fontSize: 13, color: "#1A1A1A", lineHeight: 1.7, borderLeft: "3px solid #EDEBE6" }}>
       {children}
     </div>
   );

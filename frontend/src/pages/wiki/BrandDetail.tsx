@@ -82,8 +82,8 @@ export function BrandDetail({ row, onClose }: { row: any; onClose: () => void })
                 style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: "1px solid #F2EFE9", cursor: "pointer" }}
                 onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")}
                 onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
-                <span style={{ flex: 1, fontSize: 12, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.title}</span>
-                <span style={{ fontSize: 12, fontWeight: 600, color: "#1A1A1A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(o.price_plan || 0)}</span>
+                <span style={{ flex: 1, fontSize: 13, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.title}</span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(o.price_plan || 0)}</span>
               </div>
             ))}
           </DetailSection>

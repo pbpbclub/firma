@@ -42,12 +42,12 @@ export function UnitDetail({ row, onClose }: { row: any; onClose: () => void }) 
 
         <DetailSection label="СЧЕТА" extra={accounts.length > 0 ? `· ${accounts.length}` : undefined}>
           {accounts.length === 0 ? (
-            <div style={{ fontSize: 12, color: "#C8C0B0" }}>Счетов нет</div>
+            <div style={{ fontSize: 13, color: "#C8C0B0" }}>Счетов нет</div>
           ) : accounts.map((a: any) => (
             <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 0", borderBottom: "1px solid #F2EFE9" }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12, color: "#1A1A1A" }}>{a.name}</div>
-                <div style={{ fontSize: 10, color: "#A89070" }}>
+                <div style={{ fontSize: 13, color: "#1A1A1A" }}>{a.name}</div>
+                <div style={{ fontSize: 11, color: "#A89070" }}>
                   {ACCOUNT_SOURCES.find(s => s.v === a.source)?.l || a.source}{a.number ? ` · ${a.number}` : ""}
                 </div>
               </div>

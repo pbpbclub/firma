@@ -15,9 +15,9 @@ const numCell = (v: number, tone = "#1A1A1A", opts?: { bold?: boolean; dashZero?
   <span style={{ ...T.num, fontWeight: opts?.bold ? 700 : 400, color: opts?.dashZero && !v ? "#C8C0B0" : tone }}>
     {opts?.dashZero && !v ? "—" : fmt(v)}
   </span>;
-// Второстепенный текст в ячейке (специализация/описание/тип).
+// Текст-значение в ячейке (специализация/описание/тип) — тот же кегль 13, что имя.
 const subCell = (text?: string, color = "#6B6355") =>
-  <span style={{ fontSize: 11, color, ...ell, paddingRight: 12 }}>{text || "—"}</span>;
+  <span style={{ ...T.body, color, ...ell, paddingRight: 12 }}>{text || "—"}</span>;
 import { ClientDetail, CLIENT_FIELDS } from "./ClientDetail";
 import { ContractorDetail, CONTRACTOR_FIELDS, STATUS_COLORS, CONTRACTOR_STATUS_LABELS } from "./ContractorDetail";
 import { SupplierDetail, SUPPLIER_FIELDS, PRICE_SUPPLIER_LABELS } from "./SupplierDetail";
@@ -79,12 +79,12 @@ const contractors: WikiCategory = {
     { key: "name", label: "ИМЯ", width: "1.6fr", render: (r) => (
       <div style={{ minWidth: 0 }}>
         {nameCell(r.name)}
-        {r.status && <div style={{ fontSize: 10, color: STATUS_COLORS[r.status] || "#A89070", marginTop: 1 }}>{CONTRACTOR_STATUS_LABELS[r.status] || r.status}</div>}
+        {r.status && <div style={{ fontSize: 11, color: STATUS_COLORS[r.status] || "#A89070", marginTop: 1 }}>{CONTRACTOR_STATUS_LABELS[r.status] || r.status}</div>}
       </div>
     ) },
     { key: "specialization", label: "СПЕЦИАЛИЗАЦИЯ", width: "1.2fr", render: (r) => subCell(r.specialization) },
     { key: "role", label: "РОЛЬ", width: "120px", filter: true, render: (r) => subCell(r.role, "#A89070") },
-    { key: "pay_label", label: "СХЕМА", width: "110px", render: (r) => <span style={{ fontSize: 11, color: r.pay_label ? "#1A1A1A" : "#C8C0B0", ...ell }}>{r.pay_label || "—"}</span> },
+    { key: "pay_label", label: "СХЕМА", width: "110px", render: (r) => <span style={{ ...T.body, color: r.pay_label ? "#1A1A1A" : "#C8C0B0", ...ell }}>{r.pay_label || "—"}</span> },
     { key: "paid_total", label: "ВЫПЛАЧЕНО", width: "110px", align: "right", render: (r) => numCell(r.paid_total, "#4A7C59", { dashZero: true }) },
     { key: "debt", label: "ДОЛГ", width: "90px", align: "right", render: (r) => numCell(r.debt, "#8B3A3A", { bold: true, dashZero: true }) },
   ],
@@ -99,9 +99,9 @@ const suppliers: WikiCategory = {
   avatar: { kind: "initials" },
   columns: [
     { key: "name", label: "ПОСТАВЩИК", width: "2fr", filter: true },
-    { key: "category", label: "КАТЕГОРИЯ", width: "150px", render: (r) => <span style={{ fontSize: 11, color: "#6B6355" }}>{r.category || "—"}</span> },
+    { key: "category", label: "КАТЕГОРИЯ", width: "150px", render: (r) => subCell(r.category) },
     { key: "phone", label: "ТЕЛЕФОН", width: "130px", render: (r) => <span style={{ fontFamily: MONO }}>{r.phone || "—"}</span> },
-    { key: "price_supplier", label: "ПРАЙС", width: "110px", render: (r) => <span style={{ fontSize: 10, color: r.price_supplier ? "#E8592A" : "#C8C0B0" }}>{PRICE_SUPPLIER_LABELS[r.price_supplier] || "—"}</span> },
+    { key: "price_supplier", label: "ПРАЙС", width: "110px", render: (r) => <span style={{ ...T.body, color: r.price_supplier ? "#E8592A" : "#C8C0B0", ...ell }}>{PRICE_SUPPLIER_LABELS[r.price_supplier] || "—"}</span> },
   ],
 };
 
@@ -140,7 +140,7 @@ const units: WikiCategory = {
     { key: "kind", label: "ТИП", width: "90px", filter: true, render: (r) => subCell(r.kind) },
     { key: "inn", label: "ИНН", width: "130px", render: (r) => <span style={{ ...T.num, color: "#A89070" }}>{r.inn || "—"}</span> },
     { key: "accounts", label: "СЧЕТА", width: "1.6fr", render: (r) => (
-      <span style={{ fontSize: 11, color: "#6B6355" }}>
+      <span style={{ ...T.body, color: "#6B6355" }}>
         {(r.accounts || []).length === 0 ? "—" : (r.accounts || []).map((a: any) => (
           <span key={a.id} style={{ display: "inline-block", marginRight: 10 }}>{a.name} <span style={{ color: "#A89070", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(a.balance || 0)}</span></span>
         ))}

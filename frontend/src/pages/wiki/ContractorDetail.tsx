@@ -158,7 +158,7 @@ export function ContractorDetail({ id, onClose }: { id: string; onClose: () => v
           <DetailSection label="ВИКИ">
             {(wiki.wiki_notes || master.notes) && <NoteBlock>{wiki.wiki_notes || master.notes}</NoteBlock>}
             {wiki.wiki_notes && master.notes && wiki.wiki_notes !== master.notes && (
-              <div style={{ padding: "10px 12px", background: "#FFF8F5", fontSize: 12, color: "#6B6355", lineHeight: 1.7, borderLeft: "3px solid #FAD0C0", marginTop: 6 }}>
+              <div style={{ padding: "10px 12px", background: "#FFF8F5", fontSize: 13, color: "#6B6355", lineHeight: 1.7, borderLeft: "3px solid #FAD0C0", marginTop: 6 }}>
                 {master.notes}
               </div>
             )}
@@ -168,7 +168,7 @@ export function ContractorDetail({ id, onClose }: { id: string; onClose: () => v
         <DetailSection label="ОБЯЗАТЕЛЬСТВА" extra={creditors.filter(c => c.status === "open").length > 0
           ? <span style={{ color: "#8B3A3A" }}>· {creditors.filter(c => c.status === "open").length} открытых</span> : undefined}>
         {creditors.length === 0 ? (
-          <div style={{ fontSize: 12, color: "#C8C0B0" }}>Нет зафиксированных долгов</div>
+          <div style={{ fontSize: 13, color: "#C8C0B0" }}>Нет зафиксированных долгов</div>
         ) : (
           creditors.map((c: any) => (
             <div key={c.id}>
@@ -183,13 +183,13 @@ export function ContractorDetail({ id, onClose }: { id: string; onClose: () => v
                 onMouseLeave={e => (e.currentTarget.style.background = c.status === "open" ? "#FFF8F5" : "#FAF8F5")}
               >
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <div style={{ fontSize: 11, color: "#6B6355", flex: 1, paddingRight: 8 }}>{c.description || "—"}</div>
+                  <div style={{ fontSize: 13, color: "#6B6355", flex: 1, paddingRight: 8 }}>{c.description || "—"}</div>
                   <div style={{ fontSize: 13, fontWeight: 700, color: c.status === "open" ? "#8B3A3A" : "#A89070", flexShrink: 0, fontFamily: c.status === "open" ? MONO : undefined, fontVariantNumeric: "tabular-nums" }}>
-                    {c.status === "open" ? fmt(c.debt) : <span style={{ fontSize: 10 }}>Закрыт</span>}
+                    {c.status === "open" ? fmt(c.debt) : <span style={{ fontSize: 11 }}>Закрыт</span>}
                   </div>
                 </div>
                 {(c.paid > 0 || c.due_date) && (
-                  <div style={{ fontSize: 10, color: "#A89070", marginTop: 3 }}>
+                  <div style={{ fontSize: 11, color: "#A89070", marginTop: 3 }}>
                     {c.paid > 0 && `оплачено ${fmt(c.paid)} из ${fmt(c.total)}`}
                     {c.paid > 0 && c.due_date && " · "}
                     {c.due_date && `до ${fmtDate(c.due_date)}`}
@@ -201,12 +201,12 @@ export function ContractorDetail({ id, onClose }: { id: string; onClose: () => v
                 <div style={{ padding: "12px 14px", marginBottom: 8, background: "#fff", border: "1px solid #EDEBE6" }}>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
                     <div>
-                      <div style={{ fontSize: 9, color: "#A89070", marginBottom: 3 }}>СУММА ₽</div>
+                      <div style={{ fontSize: 11, color: "#A89070", marginBottom: 3 }}>СУММА ₽</div>
                       <input type="number" defaultValue={c.total} id={`ec-total-${c.id}`}
                         style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "5px 8px", fontSize: 12, outline: "none" }} />
                     </div>
                     <div>
-                      <div style={{ fontSize: 9, color: "#A89070", marginBottom: 3 }}>ОПЛАЧЕНО ₽</div>
+                      <div style={{ fontSize: 11, color: "#A89070", marginBottom: 3 }}>ОПЛАЧЕНО ₽</div>
                       <input type="number" defaultValue={c.paid} id={`ec-paid-${c.id}`}
                         style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "5px 8px", fontSize: 12, outline: "none" }} />
                     </div>
@@ -239,12 +239,12 @@ export function ContractorDetail({ id, onClose }: { id: string; onClose: () => v
           <DetailSection label="РАСХОДЫ ПО ЗАКАЗАМ" extra={<span style={{ color: "#1A1A1A", fontFamily: MONO }}>{fmt(expensesTotal)}</span>}>
             {expenses.map((e: any) => (
               <div key={e.id} style={{ display: "grid", gridTemplateColumns: "70px 1fr 90px", gap: 8, alignItems: "center", padding: "7px 0", borderBottom: "1px solid #F2EFE9" }}>
-                <div style={{ fontSize: 10, color: "#A89070", fontFamily: MONO }}>{fmtDate(e.expense_date)}</div>
+                <div style={{ fontSize: 11, color: "#A89070", fontFamily: MONO }}>{fmtDate(e.expense_date)}</div>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 12, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.title}</div>
-                  {e.order_title && <div style={{ fontSize: 10, color: "#A89070", marginTop: 1 }}>{e.order_title}</div>}
+                  <div style={{ fontSize: 13, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.title}</div>
+                  {e.order_title && <div style={{ fontSize: 11, color: "#A89070", marginTop: 1 }}>{e.order_title}</div>}
                 </div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#8B3A3A", textAlign: "right", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(e.amount)}</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#8B3A3A", textAlign: "right", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(e.amount)}</div>
               </div>
             ))}
           </DetailSection>
@@ -252,19 +252,19 @@ export function ContractorDetail({ id, onClose }: { id: string; onClose: () => v
 
         {events.length > 0 && (
           <DetailSection label="ИСТОРИЯ">
-            <div style={{ fontSize: 10, color: "#C8C0B0", marginBottom: 10, marginTop: -2, lineHeight: 1.5 }}>
+            <div style={{ fontSize: 11, color: "#C8C0B0", marginBottom: 10, marginTop: -2, lineHeight: 1.5 }}>
               Из вики фин-агента. Не суммируется с расходами: одна выплата бывает записана и там, и там.
             </div>
             {events.map((ev: any) => (
               <div key={ev.id} style={{ display: "grid", gridTemplateColumns: "70px 1fr 90px", gap: 8, alignItems: "start", padding: "7px 0", borderBottom: "1px solid #F2EFE9" }}>
-                <div style={{ fontSize: 10, color: "#A89070", fontFamily: MONO }}>{fmtDate(ev.happened_at)}</div>
+                <div style={{ fontSize: 11, color: "#A89070", fontFamily: MONO }}>{fmtDate(ev.happened_at)}</div>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 11, color: "#1A1A1A", lineHeight: 1.45 }}>{ev.description || "—"}</div>
-                  <div style={{ fontSize: 9, color: "#A89070", marginTop: 2 }}>
+                  <div style={{ fontSize: 13, color: "#1A1A1A", lineHeight: 1.45 }}>{ev.description || "—"}</div>
+                  <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>
                     {EVENT_LABELS[ev.event_type] || ev.event_type}{ev.order_title ? ` · ${ev.order_title}` : ""}
                   </div>
                 </div>
-                <div style={{ fontSize: 11, color: "#6B6355", textAlign: "right", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
+                <div style={{ fontSize: 13, color: "#6B6355", textAlign: "right", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
                   {ev.amount ? fmt(ev.amount) : "—"}
                 </div>
               </div>

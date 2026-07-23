@@ -133,10 +133,10 @@ export function ClientDetail({ id, onClose }: { id: string; onClose: () => void 
             {data.orders.map((o: any) => (
               <div key={o.id} style={{ padding: "9px 0", borderBottom: "1px solid #F2EFE9" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: "#1A1A1A" }}>{o.title || o.number || "—"}</div>
-                  <div style={{ fontSize: 10, color: "#A89070" }}>{ORDER_STATUS_LABELS[o.status] || o.status}</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A" }}>{o.title || o.number || "—"}</div>
+                  <div style={{ fontSize: 11, color: "#A89070" }}>{ORDER_STATUS_LABELS[o.status] || o.status}</div>
                 </div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#6B6355" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#6B6355" }}>
                   <span style={{ fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(o.price_plan)}</span>
                   <span style={{ color: o.debt > 0 ? "#E8592A" : "#4A7C59", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{o.debt > 0 ? `долг ${fmt(o.debt)}` : "оплачен"}</span>
                 </div>
