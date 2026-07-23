@@ -27,6 +27,13 @@ const RAL_PALETTE = [
   { name: "salmon",       ral: "RAL 3022", hex: "#D56D56" },
 ];
 
+// Логотипы брендов (статика из public/brands, те же файлы, что финагент вставляет
+// в счета/КП). Ключ — точное brands.name. Нет в карте → без логотипа (Транзит).
+const BRAND_LOGOS: Record<string, string> = {
+  "MeRA": "/brands/mera.png",
+  "pbpb": "/brands/pbpb.png",
+};
+
 const FIELDS: { key: string; label: string; type?: string }[] = [
   { key: "name", label: "Название" },
   { key: "description", label: "Описание", type: "textarea" },
@@ -47,6 +54,8 @@ export function BrandDetail({ row, onClose }: { row: any; onClose: () => void })
   });
   if (!b) return null;
 
+  const logo = BRAND_LOGOS[b.name];
+
   return (
     <>
       {editing && <BrandModal row={b} onClose={() => setEditing(false)} />}
@@ -54,6 +63,11 @@ export function BrandDetail({ row, onClose }: { row: any; onClose: () => void })
       <DetailShell
         title={b.name}
         avatar={{ kind: "colorDot", color: b.color || "#A89070" }}
+        hero={logo ? (
+          <div style={{ background: "#FAF8F5", padding: "22px 16px", display: "flex", justifyContent: "center" }}>
+            <img src={logo} alt={b.name} style={{ maxHeight: 72, maxWidth: "80%", objectFit: "contain", display: "block" }} />
+          </div>
+        ) : undefined}
         metrics={fin ? [
           { label: "Доход",   value: fmt(fin.income), color: "#4A7C59" },
           { label: "Прибыль", value: fmt(fin.profit), color: fin.profit < 0 ? "#8B3A3A" : "#1A1A1A" },

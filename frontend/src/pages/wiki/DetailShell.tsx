@@ -17,12 +17,13 @@ type Avatar =
   | null;
 
 export function DetailShell({
-  title, subtitle, status, avatar = null, metrics, onEdit, onClose, children,
+  title, subtitle, status, avatar = null, hero, metrics, onEdit, onClose, children,
 }: {
   title: string;
   subtitle?: string | null;
   status?: { label: string; color?: string } | null;
   avatar?: Avatar;
+  hero?: ReactNode;              // визуальная шапка тела (логотип бренда) — перед метриками
   metrics?: DetailMetric[];
   onEdit?: () => void;
   onClose: () => void;
@@ -68,6 +69,7 @@ export function DetailShell({
 
       {/* Тело */}
       <div style={{ flex: 1, overflowY: "auto", padding: PAD.panel }}>
+        {hero && <div style={{ marginBottom: 20 }}>{hero}</div>}
         {metrics && metrics.length > 0 && (
           <div style={{ display: "grid", gridTemplateColumns: `repeat(${metrics.length}, 1fr)`, gap: 10, marginBottom: 20 }}>
             {metrics.map((m, i) => (

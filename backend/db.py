@@ -446,6 +446,32 @@ def ensure_brands_schema():
         conn.close()
 
 
+def normalize_catalog_brands():
+    """Канонизация регистра бренда позиций каталога к brands.name.
+
+    В данных встречались варианты по регистру ('PBPB' vs канонический 'pbpb'):
+    Catalog.tsx группирует по сырому тексту → один бренд задваивался в фильтре и
+    красился не тем цветом. Приводим любой регистрозависимый вариант к точному
+    имени из таблицы brands. Идемпотентно (после прогона совпадающие исключены);
+    страхует и будущие BOM-импорты. Требует, чтобы brands уже был засеян
+    (вызывать ПОСЛЕ ensure_brands_schema)."""
+    conn = get_production()
+    try:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        if "catalog_items" not in tables or "brands" not in tables:
+            return
+        conn.execute("""
+            UPDATE catalog_items
+               SET brand = (SELECT b.name FROM brands b WHERE lower(b.name) = lower(catalog_items.brand))
+             WHERE brand IS NOT NULL
+               AND brand NOT IN (SELECT name FROM brands)
+               AND EXISTS (SELECT 1 FROM brands b WHERE lower(b.name) = lower(catalog_items.brand))
+        """)
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_suppliers_schema():
     """Поставщики материалов — категория вики. Опциональный price_supplier хранит код
     прайса materials.db ('vrep'/'metplus'), чтобы показывать метку ВРЭП/Металлинвест."""
