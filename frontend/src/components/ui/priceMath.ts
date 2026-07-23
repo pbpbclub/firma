@@ -9,8 +9,12 @@ export function pctToMarkup(pct: number): number {
   return Math.round((1 + (pct || 0) / 100) * 1000) / 1000;
 }
 
-export function markupToPct(markup: number | null | undefined): number {
-  return Math.round(((markup ?? 1) - 1) * 100);
+// digits — точность в знаках после запятой. По умолчанию целые % (обратная
+// совместимость); футеры калькуляторов показывают 1 знак, чтобы наценка,
+// производная от ручной цены (якорь = цена), не врала из-за округления.
+export function markupToPct(markup: number | null | undefined, digits = 0): number {
+  const k = Math.pow(10, digits);
+  return Math.round(((markup ?? 1) - 1) * 100 * k) / k;
 }
 
 // Денежное форматирование (ru-RU, ₽). «—» только для null/undefined/NaN.

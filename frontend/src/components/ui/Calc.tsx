@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, X } from "@phosphor-icons/react";
 import { UnitSelect, WorkTypeSelect, ContractorSelect, EditableText } from "./Selects";
@@ -199,19 +199,54 @@ export function CalcRow({
 }
 
 // ── Футер цены: Себестоимость → Наценка% (×mult) → Цена клиенту ────────────────
-// withQuantity=false (каталог, per-1): одна колонка, наценка редактируется (onPctChange).
-// withQuantity=true  (смета): «за шт» + «итого ×N», наценка read-only (P0: цена в смете отложена).
-export function CalcFooter({ cost, pct, onPctChange, withQuantity, quantity = 1 }: {
+// withQuantity=false (каталог, per-1): одна колонка. withQuantity=true (смета): «за шт» + «итого ×N».
+// Двусторонний ввод: onPctChange — коэффициент → цена; onPriceChange — цена (за шт) → наценка.
+// Якорь = цена (решение Юры 23.07.2026): при изменении себестоимости цена клиенту держится,
+// коэффициент подстраивается. При cost=0 наценка заблокирована (нечего умножать), цена — свободно.
+export function CalcFooter({ cost, pct, price, onPctChange, onPriceChange, withQuantity, quantity = 1 }: {
   cost: number;
   pct: number;
+  price?: number | null;   // зафиксированная цена (за шт): показывается точно, без дрейфа от округлённого %
   onPctChange?: (pct: number) => void;
+  onPriceChange?: (pricePerUnit: number) => void;
   withQuantity?: boolean;
   quantity?: number;
 }) {
-  const mult = pctToMarkup(pct);
-  const amt = cost * pct / 100;
-  const price = cost + amt;
+  // Локальные драфты: живой пересчёт цифр при наборе, но коммит наверх (API) —
+  // только по blur/Enter. editingPrice/editingPct — какое поле сейчас «ведёт».
+  const [pctDraft, setPctDraft] = useState(String(pct));
+  const [priceDraft, setPriceDraft] = useState("");
+  const [editingPrice, setEditingPrice] = useState(false);
+  const [editingPct, setEditingPct] = useState(false);
+  useEffect(() => { setPctDraft(String(pct)); }, [pct]);
+
   const q = withQuantity ? (quantity || 1) : 1;
+  const pctDisabled = !!onPctChange && cost <= 0;
+
+  // Ведущее значение: набор цены → наценка производная; набор наценки → цена производная;
+  // покой → приоритет у зафиксированной цены (якорь = цена), иначе цена из наценки.
+  const priceVal = editingPrice
+    ? (parseFloat(priceDraft) || 0)
+    : editingPct
+      ? cost * (1 + (parseFloat(pctDraft) || 0) / 100)
+      : (price != null && price > 0 ? price : cost * (1 + (parseFloat(pctDraft) || 0) / 100));
+  const priceLeads = editingPrice || (!editingPct && price != null && price > 0);
+  const pctVal = priceLeads && cost > 0
+    ? Math.round((priceVal / cost - 1) * 1000) / 10
+    : (parseFloat(pctDraft) || 0);
+  const mult = pctToMarkup(pctVal);
+  const amt = priceVal - cost;
+
+  const commitPct = () => { setEditingPct(false); onPctChange?.(parseFloat(pctDraft) || 0); };
+  const commitPrice = () => {
+    setEditingPrice(false);
+    const v = parseFloat(priceDraft);
+    if (!Number.isNaN(v) && v >= 0) onPriceChange?.(v);
+    setPriceDraft("");
+  };
+  const onEnterBlur = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+  };
 
   const colLabel: React.CSSProperties = { ...labelStyle, textAlign: "right" };
   const rowLabel: React.CSSProperties = { fontSize: 12, color: "#A89070" };
@@ -239,16 +274,22 @@ export function CalcFooter({ cost, pct, onPctChange, withQuantity, quantity = 1 
         <div style={{ ...rowLabel, display: "flex", alignItems: "center", gap: 6 }}>
           <span>Наценка</span>
           {onPctChange ? (
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}
+              title={pctDisabled ? "Себестоимость пуста — наценке нечего умножать. Задай состав или цену." : undefined}>
               <input
-                type="number" min="0" max="1000" value={pct}
-                onChange={e => onPctChange(parseFloat(e.target.value) || 0)}
-                style={{ width: 52, border: "1px solid #EDEBE6", background: "transparent", fontSize: 12, color: "#1A1A1A", outline: "none", padding: "3px 6px", textAlign: "right", fontFamily: MONO }}
+                type="number" min="0" max="1000"
+                value={editingPct ? pctDraft : pctVal}
+                disabled={pctDisabled || editingPrice}
+                onFocus={() => { setEditingPct(true); setPctDraft(String(pctVal)); }}
+                onChange={e => setPctDraft(e.target.value)}
+                onBlur={commitPct}
+                onKeyDown={onEnterBlur}
+                style={{ width: 64, border: "1px solid #EDEBE6", background: "transparent", fontSize: 12, color: pctDisabled ? "#C8C0B0" : "#1A1A1A", outline: "none", padding: "3px 6px", textAlign: "right", fontFamily: MONO, opacity: pctDisabled ? 0.6 : 1 }}
               />
               <span style={{ fontSize: 11 }}>%</span>
             </span>
           ) : (
-            <span style={{ color: "#1A1A1A", fontWeight: 600 }}>{pct}%</span>
+            <span style={{ color: "#1A1A1A", fontWeight: 600 }}>{pctVal}%</span>
           )}
           <span style={{ fontSize: 10, color: "#C8C0B0" }}>·×{mult}</span>
         </div>
@@ -256,11 +297,34 @@ export function CalcFooter({ cost, pct, onPctChange, withQuantity, quantity = 1 
         <div style={numCell}>+{fmtNum(amt * q)}</div>
       </div>
 
-      {/* Цена клиенту */}
+      {/* Цена клиенту: с onPriceChange «за шт» (или единственная ячейка) — инпут */}
       <div style={{ display: "grid", gridTemplateColumns: grid, gap: 8, alignItems: "center", borderTop: "1px solid #EDEBE6", marginTop: 6, paddingTop: 10 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1A1A" }}>Цена клиенту</div>
-        {withQuantity && <div style={{ ...numCell, fontSize: 13, fontWeight: 700, color: "#6B6355" }}>{fmtMoney(price)}</div>}
-        <div style={{ ...numCell, fontSize: 15, fontWeight: 700, color: "#E8592A" }}>{fmtMoney(price * q)}</div>
+        <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1A1A" }}>
+          Цена клиенту
+          {onPriceChange && <span style={{ fontSize: 10, fontWeight: 400, color: "#C8C0B0", marginLeft: 6 }}>{withQuantity ? "ввод — за шт" : "можно ввести"}</span>}
+        </div>
+        {onPriceChange ? (
+          <>
+            <div style={{ textAlign: "right" }}>
+              <input
+                type="number" min="0"
+                value={editingPrice ? priceDraft : (Math.round(priceVal * 100) / 100 || "")}
+                placeholder="0"
+                onFocus={() => { setEditingPrice(true); setPriceDraft(priceVal > 0 ? String(Math.round(priceVal * 100) / 100) : ""); }}
+                onChange={e => setPriceDraft(e.target.value)}
+                onBlur={commitPrice}
+                onKeyDown={onEnterBlur}
+                style={{ width: 96, border: "1px solid #E8592A", background: "transparent", fontSize: withQuantity ? 13 : 15, fontWeight: 700, color: "#E8592A", outline: "none", padding: "4px 8px", textAlign: "right", fontFamily: MONO }}
+              />
+            </div>
+            {withQuantity && <div style={{ ...numCell, fontSize: 15, fontWeight: 700, color: "#E8592A" }}>{fmtMoney(priceVal * q)}</div>}
+          </>
+        ) : (
+          <>
+            {withQuantity && <div style={{ ...numCell, fontSize: 13, fontWeight: 700, color: "#6B6355" }}>{fmtMoney(priceVal)}</div>}
+            <div style={{ ...numCell, fontSize: 15, fontWeight: 700, color: "#E8592A" }}>{fmtMoney(priceVal * q)}</div>
+          </>
+        )}
       </div>
     </div>
   );

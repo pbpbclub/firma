@@ -25,23 +25,36 @@ def _lookup_cheapest(code: str):
         mconn.close()
 
 def _recalc_item(conn, item_id: str):
-    """Recalculate cost_total from lines. Does NOT touch sale_price."""
+    """Recalculate cost_total from lines. Does NOT touch sale_price.
+
+    Якорь = цена (решение Юры 23.07.2026): если цена клиенту уже задана
+    (sale_price > 0), при пересчёте себестоимости она держится, а markup
+    подстраивается (= sale/cost) и показывает фактическую маржу. Это же
+    размыкает контур percent-ставок costing (цена → %-работа → cost):
+    после cost-fill хранимый markup больше не врёт."""
     line_cost = conn.execute(
         "SELECT COALESCE(SUM(line_total), 0) FROM estimate_lines WHERE item_id = ?",
         (item_id,)
     ).fetchone()[0]
     row = conn.execute(
-        "SELECT quantity, cost_total FROM estimate_items WHERE id = ?", (item_id,)
+        "SELECT quantity, cost_total, sale_price FROM estimate_items WHERE id = ?", (item_id,)
     ).fetchone()
     quantity = row["quantity"] or 1
     if line_cost > 0:
         cost_total = round(line_cost * quantity, 2)
     else:
         cost_total = row["cost_total"] or 0
-    conn.execute(
-        "UPDATE estimate_items SET cost_total = ? WHERE id = ?",
-        (cost_total, item_id)
-    )
+    sale_price = row["sale_price"] or 0
+    if sale_price > 0 and cost_total > 0:
+        conn.execute(
+            "UPDATE estimate_items SET cost_total = ?, markup = ? WHERE id = ?",
+            (cost_total, round(sale_price / cost_total, 3), item_id)
+        )
+    else:
+        conn.execute(
+            "UPDATE estimate_items SET cost_total = ? WHERE id = ?",
+            (cost_total, item_id)
+        )
 
 
 def _now():

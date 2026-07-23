@@ -293,7 +293,27 @@ function ItemModal({ item, onClose, onRefetch, initialReadOnly }: {
         </CalcSection>
       </div>
 
-      <CalcFooter cost={perUnitCost} pct={markupToPct(item.markup)} withQuantity quantity={item.quantity ?? 1} />
+      {/* Двусторонний ввод: коэффициент → цена, цена (за шт) → коэффициент.
+          Якорь = цена: при изменении состава цена держится, markup подстроит сервер. */}
+      <CalcFooter
+        cost={perUnitCost}
+        pct={markupToPct(item.markup, 1)}
+        price={item.sale_price > 0 ? item.sale_price / (item.quantity || 1) : null}
+        withQuantity
+        quantity={item.quantity ?? 1}
+        onPctChange={readOnly ? undefined : (pct) => {
+          const markup = pctToMarkup(pct);
+          const payload: any = { markup };
+          if (perUnitCost > 0) payload.sale_price = round2(perUnitCost * (item.quantity || 1) * markup);
+          save(() => estimatesApi.updateItem(item.id, payload));
+        }}
+        onPriceChange={readOnly ? undefined : (priceUnit) => {
+          const qty = item.quantity || 1;
+          const payload: any = { sale_price: round2(priceUnit * qty) };
+          if (perUnitCost > 0) payload.markup = Math.round((priceUnit / perUnitCost) * 1000) / 1000;
+          save(() => estimatesApi.updateItem(item.id, payload));
+        }}
+      />
     </Modal>
   );
 }

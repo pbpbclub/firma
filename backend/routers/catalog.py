@@ -57,8 +57,19 @@ class ItemIn(BaseModel):
     category: Optional[str] = None
     brand: Optional[str] = None
     markup_pct: float = 30
+    sale_price: Optional[float] = None   # ручная цена (якорь = цена); None → cost × (1+markup%)
     notes: Optional[str] = None
     lines: List[LineIn] = []
+
+
+def _resolve_price(body: ItemIn, cost_total: float) -> tuple[float, float]:
+    """(sale_price, markup_pct): ручная цена хранится как введена (без дрейфа
+    округления), markup_pct тогда производный (дробный). Иначе — цена из наценки."""
+    if body.sale_price is not None and body.sale_price > 0:
+        sale = body.sale_price
+        pct = round((sale / cost_total - 1) * 100, 1) if cost_total > 0 else body.markup_pct
+        return sale, pct
+    return cost_total * (1 + body.markup_pct / 100), body.markup_pct
 
 
 @router.get("")
@@ -234,12 +245,12 @@ def create_item(body: ItemIn):
         _ensure_tables(conn)
         item_id = str(uuid.uuid4())
         cost_total = sum(l.qty * l.unit_price for l in body.lines)
-        sale_price = cost_total * (1 + body.markup_pct / 100)
+        sale_price, markup_pct = _resolve_price(body, cost_total)
         now = datetime.utcnow().isoformat()
         conn.execute(
             """INSERT INTO catalog_items (id, title, category, brand, markup_pct, cost_total, sale_price, notes, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (item_id, body.title, body.category, body.brand, body.markup_pct, cost_total, sale_price, body.notes, now, now)
+            (item_id, body.title, body.category, body.brand, markup_pct, cost_total, sale_price, body.notes, now, now)
         )
         for i, line in enumerate(body.lines):
             conn.execute(
@@ -269,12 +280,12 @@ def update_item(item_id: str, body: ItemIn):
         if not existing:
             raise HTTPException(status_code=404, detail="Not found")
         cost_total = sum(l.qty * l.unit_price for l in body.lines)
-        sale_price = cost_total * (1 + body.markup_pct / 100)
+        sale_price, markup_pct = _resolve_price(body, cost_total)
         now = datetime.utcnow().isoformat()
         conn.execute(
             """UPDATE catalog_items SET title=?, category=?, brand=?, markup_pct=?, cost_total=?, sale_price=?, notes=?, updated_at=?
                WHERE id=?""",
-            (body.title, body.category, body.brand, body.markup_pct, cost_total, sale_price, body.notes, now, item_id)
+            (body.title, body.category, body.brand, markup_pct, cost_total, sale_price, body.notes, now, item_id)
         )
         conn.execute("DELETE FROM catalog_item_lines WHERE item_id = ?", (item_id,))
         for i, line in enumerate(body.lines):

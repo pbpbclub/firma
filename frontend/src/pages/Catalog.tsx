@@ -208,6 +208,9 @@ function CalculatorModal({
   const [category, setCategory] = useState(item?.category ?? "");
   const [brand, setBrand] = useState<string | null>(item?.brand ?? null);
   const [markupPct, setMarkupPct] = useState(item?.markup_pct ?? 30);
+  // Зафиксированная цена (якорь = цена): начинаем с сохранённой — показывается точно,
+  // без дрейфа от округлённого %. Правка наценки сбрасывает в null → цена производная.
+  const [salePrice, setSalePrice] = useState<number | null>(item?.sale_price ?? null);
   const [notes, setNotes] = useState(item?.notes ?? "");
   const [lines, setLines] = useState<Line[]>(() =>
     item?.lines?.map((l) => ({ _key: newKey(), type: l.type as LineType, title: l.title, qty: l.qty, unit: l.unit, unit_price: l.unit_price, material_id: l.material_id })) ?? []
@@ -229,6 +232,7 @@ function CalculatorModal({
       category: category.trim() || null,
       brand: brand || null,
       markup_pct: markupPct,
+      sale_price: salePrice,   // задана руками → канон цена, бэк подстроит markup_pct
       notes: notes.trim() || null,
       lines: lines.map((l, i) => ({
         type: l.type, title: l.title, qty: l.qty, unit: l.unit,
@@ -322,7 +326,16 @@ function CalculatorModal({
           )}
         </div>
 
-        <CalcFooter cost={costTotal} pct={markupPct} onPctChange={setMarkupPct} />
+        <CalcFooter
+          cost={costTotal}
+          pct={markupPct}
+          price={salePrice}
+          onPctChange={(p) => { setMarkupPct(p); setSalePrice(null); }}
+          onPriceChange={(pr) => {
+            setSalePrice(pr);
+            if (costTotal > 0) setMarkupPct(Math.round((pr / costTotal - 1) * 1000) / 10);
+          }}
+        />
 
         {!isNew && costHistory && (
           <CostHistorySection data={costHistory} onOpenOrder={(oid) => { onClose(); navigate(`/orders/${oid}/estimate`); }} />
