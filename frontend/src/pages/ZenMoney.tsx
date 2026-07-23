@@ -4,7 +4,7 @@ import { Loading } from "../components/ui/Loading";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Briefcase, MagnifyingGlass, X, ArrowsClockwise, Tag, PencilSimple, Trash, LinkSimple } from "@phosphor-icons/react";
 import { zenmoneyApi, payeeRulesApi, mastersApi, customersApi, financeApi } from "../api";
-import { ColumnFilter, PeriodFilter } from "../components/TableFilters";
+import { ColumnFilter, PeriodFilter, AmountFilter } from "../components/TableFilters";
 import { Modal } from "../components/ui/Modal";
 import { MONO } from "../components/ui/Num";
 import { IconButton } from "../components/ui/IconButton";
@@ -444,11 +444,12 @@ export default function ZenMoneyPage() {
   const [direction, setDirection] = useState(""); // "" | "in" | "out" — подвкладки Все/Поступления/Списания
   const [catFilter, setCatFilter] = useState("");
   const [payeeFilter, setPayeeFilter] = useState("");
-  const [amountFilter, setAmountFilter] = useState("");
+  const [amountMin, setAmountMin] = useState("");
+  const [amountMax, setAmountMax] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [bankFilter, setBankFilter] = useState("");
-  const clearFilters = () => { setBankFilter(""); setCatFilter(""); setPayeeFilter(""); setAmountFilter(""); setDateFrom(""); setDateTo(""); setSelectedIds(new Set()); };
+  const clearFilters = () => { setBankFilter(""); setCatFilter(""); setPayeeFilter(""); setAmountMin(""); setAmountMax(""); setDateFrom(""); setDateTo(""); setSelectedIds(new Set()); };
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [linkModal, setLinkModal] = useState<any>(null);
@@ -465,13 +466,6 @@ export default function ZenMoneyPage() {
     }
     return m;
   }, [allCreditors]);
-
-  const AMOUNT_RANGES = [
-    { label: "до 1 000 ₽",     test: (a: number) => a < 1000 },
-    { label: "1 000–5 000 ₽",  test: (a: number) => a >= 1000 && a < 5000 },
-    { label: "5 000–20 000 ₽", test: (a: number) => a >= 5000 && a < 20000 },
-    { label: "свыше 20 000 ₽", test: (a: number) => a >= 20000 },
-  ];
 
   const { data: accounts = [] } = useQuery({
     queryKey: ["zm-accounts"],
@@ -546,17 +540,18 @@ export default function ZenMoneyPage() {
     });
     if (catFilter) result = result.filter((t: any) => (t.display_category || t.tags?.[0]) === catFilter);
     if (payeeFilter) result = result.filter((t: any) => (t.payee || t.comment) === payeeFilter);
-    if (amountFilter) {
-      const range = AMOUNT_RANGES.find(r => r.label === amountFilter);
-      if (range) result = result.filter((t: any) => {
+    if (amountMin || amountMax) {
+      result = result.filter((t: any) => {
         const amount = t.outcome > 0 ? t.outcome : t.income;
-        return range.test(amount);
+        if (amountMin && amount < parseFloat(amountMin)) return false;
+        if (amountMax && amount > parseFloat(amountMax)) return false;
+        return true;
       });
     }
     if (dateFrom) result = result.filter((t: any) => t.date >= dateFrom);
     if (dateTo) result = result.filter((t: any) => t.date <= dateTo);
     return result;
-  }, [displayTx, direction, bankFilter, catFilter, payeeFilter, amountFilter, dateFrom, dateTo]);
+  }, [displayTx, direction, bankFilter, catFilter, payeeFilter, amountMin, amountMax, dateFrom, dateTo]);
 
   // Chart
   const maxVal = Math.max(...(cashflow as any[]).map((r: any) => Math.max(r.incomes, r.expenses)), 1);
@@ -772,7 +767,7 @@ export default function ZenMoneyPage() {
 
           {/* Filter / selection bar — always visible to prevent layout shift */}
           {(() => {
-            const hasFilters = !!(bankFilter || catFilter || payeeFilter || amountFilter || dateFrom || dateTo);
+            const hasFilters = !!(bankFilter || catFilter || payeeFilter || amountMin || amountMax || dateFrom || dateTo);
             const canClear = hasFilters || selectedIds.size > 0;
             const exp = filteredTx.reduce((s: number, t: any) => s + (t.outcome > 0 && t.income === 0 ? t.outcome : 0), 0);
             const inc = filteredTx.reduce((s: number, t: any) => s + (t.income > 0 && t.outcome === 0 ? t.income : 0), 0);
@@ -824,7 +819,7 @@ export default function ZenMoneyPage() {
             </div>
             <div><ColumnFilter label="ПОЛУЧАТЕЛЬ" options={uniquePayees} value={payeeFilter} onChange={setPayeeFilter} maxHeight={220} /></div>
             <div><ColumnFilter label="КАТЕГОРИЯ" options={uniqueCats} value={catFilter} onChange={setCatFilter} /></div>
-            <div><ColumnFilter label="СУММА" options={AMOUNT_RANGES.map(r => r.label)} value={amountFilter} onChange={setAmountFilter} /></div>
+            <div><AmountFilter label="СУММА" min={amountMin} max={amountMax} onChange={(mn, mx) => { setAmountMin(mn); setAmountMax(mx); }} align="right" /></div>
             <div />
           </div>
         </div>

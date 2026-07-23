@@ -358,9 +358,17 @@ export default function Catalog() {
   const [catFilter, setCatFilter] = useState("");
   const [nameFilter, setNameFilter] = useState("");
   const [brandFilter, setBrandFilter] = useState("");
-  const clearFilters = () => { setCatFilter(""); setNameFilter(""); setBrandFilter(""); setPriceMin(""); setPriceMax(""); setSelectedIds(new Set()); };
+  const clearFilters = () => { setCatFilter(""); setNameFilter(""); setBrandFilter(""); setPriceMin(""); setPriceMax(""); setCostMin(""); setCostMax(""); setOrdersMin(""); setOrdersMax(""); setMinPMin(""); setMinPMax(""); setMaxPMin(""); setMaxPMax(""); setSelectedIds(new Set()); };
   const [priceMin, setPriceMin] = useState("");
   const [priceMax, setPriceMax] = useState("");
+  const [costMin, setCostMin] = useState("");        // Каталог: себестоимость
+  const [costMax, setCostMax] = useState("");
+  const [ordersMin, setOrdersMin] = useState("");    // Из смет: сколько раз заказывали
+  const [ordersMax, setOrdersMax] = useState("");
+  const [minPMin, setMinPMin] = useState("");        // Из смет: мин. цена
+  const [minPMax, setMinPMax] = useState("");
+  const [maxPMin, setMaxPMin] = useState("");        // Из смет: макс. цена
+  const [maxPMax, setMaxPMax] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
@@ -494,12 +502,14 @@ export default function Catalog() {
               if (brandFilter && i.brand !== brandFilter) return false;
               if (priceMin && (i.sale_price || 0) < parseFloat(priceMin)) return false;
               if (priceMax && (i.sale_price || 0) > parseFloat(priceMax)) return false;
+              if (costMin && (i.cost_total || 0) < parseFloat(costMin)) return false;
+              if (costMax && (i.cost_total || 0) > parseFloat(costMax)) return false;
               return true;
             });
             return (
               <>
                 {(() => {
-                  const hasFilters = !!(catFilter || nameFilter || brandFilter || priceMin || priceMax);
+                  const hasFilters = !!(catFilter || nameFilter || brandFilter || priceMin || priceMax || costMin || costMax);
                   const canClear = hasFilters || selectedIds.size > 0;
                   const selSum = filteredItems.filter(i => selectedIds.has(i.id)).reduce((s, i) => s + (i.sale_price || 0), 0);
                   return (
@@ -541,7 +551,7 @@ export default function Catalog() {
                   <div><ColumnFilter label="ИЗДЕЛИЕ" options={uniqueNames} value={nameFilter} onChange={setNameFilter} /></div>
                   <div><ColumnFilter label="БРЕНД" options={uniqueBrands} value={brandFilter} onChange={setBrandFilter} /></div>
                   <div><ColumnFilter label="КАТЕГОРИЯ" options={uniqueCats} value={catFilter} onChange={setCatFilter} /></div>
-                  <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>СЕБЕСТОИМОСТЬ</div>
+                  <div><AmountFilter label="СЕБЕСТОИМОСТЬ" min={costMin} max={costMax} onChange={(mn, mx) => { setCostMin(mn); setCostMax(mx); }} /></div>
                   <div><AmountFilter label="ПРОДАЖНАЯ ЦЕНА" min={priceMin} max={priceMax} onChange={(mn, mx) => { setPriceMin(mn); setPriceMax(mx); }} /></div>
                 </div>
                 {loadingSaved ? (
@@ -591,12 +601,18 @@ export default function Catalog() {
               if (nameFilter && i.title !== nameFilter) return false;
               if (priceMin && (i.avg_price || 0) < parseFloat(priceMin)) return false;
               if (priceMax && (i.avg_price || 0) > parseFloat(priceMax)) return false;
+              if (ordersMin && (i.times_ordered || 0) < parseFloat(ordersMin)) return false;
+              if (ordersMax && (i.times_ordered || 0) > parseFloat(ordersMax)) return false;
+              if (minPMin && (i.min_price || 0) < parseFloat(minPMin)) return false;
+              if (minPMax && (i.min_price || 0) > parseFloat(minPMax)) return false;
+              if (maxPMin && (i.max_price || 0) < parseFloat(maxPMin)) return false;
+              if (maxPMax && (i.max_price || 0) > parseFloat(maxPMax)) return false;
               return true;
             });
             return (
               <>
                 {(() => {
-                  const hasFilters = !!(catFilter || nameFilter || priceMin || priceMax);
+                  const hasFilters = !!(catFilter || nameFilter || priceMin || priceMax || ordersMin || ordersMax || minPMin || minPMax || maxPMin || maxPMax);
                   const canClear = hasFilters || selectedIds.size > 0;
                   const selSum = filteredSmets.filter((item: any) => selectedIds.has(item.title || "")).reduce((s: number, item: any) => s + (item.avg_price || 0), 0);
                   return (
@@ -636,10 +652,10 @@ export default function Catalog() {
             </div>
             <div><ColumnFilter label="ИЗДЕЛИЕ" options={smetsUniqueNames} value={nameFilter} onChange={setNameFilter} /></div>
             <div><ColumnFilter label="КАТЕГОРИЯ" options={smetsUniqueCats} value={catFilter} onChange={setCatFilter} /></div>
-            <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ЗАКАЗОВ</div>
+            <div><AmountFilter label="ЗАКАЗОВ" min={ordersMin} max={ordersMax} onChange={(mn, mx) => { setOrdersMin(mn); setOrdersMax(mx); }} /></div>
             <div><AmountFilter label="ЦЕНА (СР.)" min={priceMin} max={priceMax} onChange={(mn, mx) => { setPriceMin(mn); setPriceMax(mx); }} /></div>
-            <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>МИН.</div>
-            <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>МАКС.</div>
+            <div><AmountFilter label="МИН." min={minPMin} max={minPMax} onChange={(mn, mx) => { setMinPMin(mn); setMinPMax(mx); }} /></div>
+            <div><AmountFilter label="МАКС." min={maxPMin} max={maxPMax} onChange={(mn, mx) => { setMaxPMin(mn); setMaxPMax(mx); }} align="right" /></div>
           </div>
           {loadingSmets ? (
             <Loading />

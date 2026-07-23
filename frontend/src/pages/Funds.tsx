@@ -7,7 +7,7 @@ import { Modal } from "../components/ui/Modal";
 import { IconButton } from "../components/ui/IconButton";
 import { fundsApi } from "../api";
 import { Plus, Minus, Trash } from "@phosphor-icons/react";
-import { ColumnFilter } from "../components/TableFilters";
+import { ColumnFilter, AmountFilter, PeriodFilter } from "../components/TableFilters";
 
 const PRESET_COLORS = [
   "#E8592A", "#4A7C59", "#1A1A1A", "#A89070",
@@ -87,6 +87,10 @@ function FundDetailModal({ fund, onClose, onRefresh }: {
   const qc = useQueryClient();
   const [txModal, setTxModal] = useState<"deposit" | "withdraw" | null>(null);
   const [noteFilter, setNoteFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [amtMin, setAmtMin] = useState("");
+  const [amtMax, setAmtMax] = useState("");
 
   const { data: txs = [], refetch } = useQuery({
     queryKey: ["fund-txs-modal", fund.id],
@@ -94,7 +98,14 @@ function FundDetailModal({ fund, onClose, onRefresh }: {
   });
   const allTx = txs as any[];
   const noteOptions = [...new Set(allTx.map((t: any) => t.note).filter(Boolean))].sort() as string[];
-  const txList = noteFilter ? allTx.filter((t: any) => t.note === noteFilter) : allTx;
+  const txList = allTx.filter((t: any) => {
+    if (noteFilter && t.note !== noteFilter) return false;
+    if (dateFrom && (!t.date || t.date.slice(0, 10) < dateFrom)) return false;
+    if (dateTo && (!t.date || t.date.slice(0, 10) > dateTo)) return false;
+    if (amtMin && (t.amount || 0) < parseFloat(amtMin)) return false;
+    if (amtMax && (t.amount || 0) > parseFloat(amtMax)) return false;
+    return true;
+  });
 
   const deleteTx = async (txId: string) => {
     await fundsApi.deleteTx(txId);
@@ -148,9 +159,9 @@ function FundDetailModal({ fund, onClose, onRefresh }: {
 
           {/* Заголовок таблицы */}
           <div style={{ display: "grid", gridTemplateColumns: "110px 1fr 120px 28px", padding: "7px 24px", borderBottom: "1px solid #EDEBE6" }}>
-            <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>Дата</div>
+            <div><PeriodFilter label="Дата" from={dateFrom} to={dateTo} onChange={(f, t) => { setDateFrom(f); setDateTo(t); }} /></div>
             <div><ColumnFilter label="Комментарий" options={noteOptions} value={noteFilter} onChange={setNoteFilter} /></div>
-            <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>Сумма</div>
+            <div><AmountFilter label="Сумма" min={amtMin} max={amtMax} onChange={(mn, mx) => { setAmtMin(mn); setAmtMax(mx); }} align="right" /></div>
             <div />
           </div>
 

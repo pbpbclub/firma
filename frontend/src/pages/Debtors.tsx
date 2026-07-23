@@ -5,7 +5,7 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { financeApi, zenmoneyApi, ordersApi } from "../api";
 import { useNavigate } from "react-router-dom";
 import { Bank, X, Check, Plus, LinkSimple } from "@phosphor-icons/react";
-import { ColumnFilter } from "../components/TableFilters";
+import { ColumnFilter, AmountFilter, PeriodFilter } from "../components/TableFilters";
 import { Modal } from "../components/ui/Modal";
 import { MONO } from "../components/ui/Num";
 import { IconButton } from "../components/ui/IconButton";
@@ -327,8 +327,16 @@ function DebtorsTab() {
   const [statusFilter, setStatusFilter] = useState("");
   const [clientFilter, setClientFilter] = useState("");
   const [orderFilter, setOrderFilter] = useState("");
+  const [planMin, setPlanMin] = useState("");
+  const [planMax, setPlanMax] = useState("");
+  const [paidMin, setPaidMin] = useState("");
+  const [paidMax, setPaidMax] = useState("");
+  const [debtMin, setDebtMin] = useState("");
+  const [debtMax, setDebtMax] = useState("");
+  const [dlFrom, setDlFrom] = useState("");
+  const [dlTo, setDlTo] = useState("");
   const [linkItem, setLinkItem] = useState<any>(null);
-  const clearFilters = () => { setStatusFilter(""); setClientFilter(""); setOrderFilter(""); setSelectedIds(new Set()); };
+  const clearFilters = () => { setStatusFilter(""); setClientFilter(""); setOrderFilter(""); setPlanMin(""); setPlanMax(""); setPaidMin(""); setPaidMax(""); setDebtMin(""); setDebtMax(""); setDlFrom(""); setDlTo(""); setSelectedIds(new Set()); };
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
@@ -341,8 +349,16 @@ function DebtorsTab() {
     if (statusFilter) r = r.filter((d: any) => (d.status_label || d.status) === statusFilter);
     if (clientFilter) r = r.filter((d: any) => d.customer_name === clientFilter);
     if (orderFilter) r = r.filter((d: any) => d.title === orderFilter);
+    if (planMin) r = r.filter((d: any) => (d.price_plan || 0) >= parseFloat(planMin));
+    if (planMax) r = r.filter((d: any) => (d.price_plan || 0) <= parseFloat(planMax));
+    if (paidMin) r = r.filter((d: any) => (d.paid_total || 0) >= parseFloat(paidMin));
+    if (paidMax) r = r.filter((d: any) => (d.paid_total || 0) <= parseFloat(paidMax));
+    if (debtMin) r = r.filter((d: any) => (d.debt || 0) >= parseFloat(debtMin));
+    if (debtMax) r = r.filter((d: any) => (d.debt || 0) <= parseFloat(debtMax));
+    if (dlFrom) r = r.filter((d: any) => d.deadline && d.deadline.slice(0, 10) >= dlFrom);
+    if (dlTo) r = r.filter((d: any) => d.deadline && d.deadline.slice(0, 10) <= dlTo);
     return r;
-  }, [items, statusFilter, clientFilter, orderFilter]);
+  }, [items, statusFilter, clientFilter, orderFilter, planMin, planMax, paidMin, paidMax, debtMin, debtMax, dlFrom, dlTo]);
 
   const total     = filtered.reduce((s: number, r: any) => s + (r.debt || 0), 0);
   const totalPlan = filtered.reduce((s: number, r: any) => s + (r.price_plan || 0), 0);
@@ -369,7 +385,7 @@ function DebtorsTab() {
         />
       )}
       {(() => {
-        const hasFilters = !!(statusFilter || clientFilter || orderFilter);
+        const hasFilters = !!(statusFilter || clientFilter || orderFilter || planMin || planMax || paidMin || paidMax || debtMin || debtMax || dlFrom || dlTo);
         const canClear = hasFilters || selectedIds.size > 0;
         const selDebt = filtered.filter((d: any) => selectedIds.has(String(d.id || d.number))).reduce((s: number, d: any) => s + (d.debt || 0), 0);
         return (
@@ -403,10 +419,10 @@ function DebtorsTab() {
           <ColumnFilter label="ЗАКАЗ" options={uniqueOrders} value={orderFilter} onChange={setOrderFilter} />
         </div>
         <div><ColumnFilter label="СТАТУС" options={uniqueStatuses} value={statusFilter} onChange={setStatusFilter} /></div>
-        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>СОГЛАСОВАНО</div>
-        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ОПЛАЧЕНО</div>
-        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ОЖИДАЕМ</div>
-        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ДЕДЛАЙН</div>
+        <div><AmountFilter label="СОГЛАСОВАНО" min={planMin} max={planMax} onChange={(mn, mx) => { setPlanMin(mn); setPlanMax(mx); }} /></div>
+        <div><AmountFilter label="ОПЛАЧЕНО" min={paidMin} max={paidMax} onChange={(mn, mx) => { setPaidMin(mn); setPaidMax(mx); }} /></div>
+        <div><AmountFilter label="ОЖИДАЕМ" min={debtMin} max={debtMax} onChange={(mn, mx) => { setDebtMin(mn); setDebtMax(mx); }} /></div>
+        <div><PeriodFilter label="ДЕДЛАЙН" from={dlFrom} to={dlTo} onChange={(f, t) => { setDlFrom(f); setDlTo(t); }} align="right" /></div>
         <div />
       </div>
 
@@ -558,6 +574,15 @@ function UnallocatedTab() {
   const [editId, setEditId] = useState<number | null>(null);
   const [paidDraft, setPaidDraft] = useState("");
   const [linkItem, setLinkItem] = useState<any>(null);
+  const [clientF, setClientF] = useState("");
+  const [noteF, setNoteF] = useState("");
+  const [invFrom, setInvFrom] = useState("");
+  const [invTo, setInvTo] = useState("");
+  const [paidMin, setPaidMin] = useState("");
+  const [paidMax, setPaidMax] = useState("");
+  const [debtMin, setDebtMin] = useState("");
+  const [debtMax, setDebtMax] = useState("");
+  const clearFilters = () => { setClientF(""); setNoteF(""); setInvFrom(""); setInvTo(""); setPaidMin(""); setPaidMax(""); setDebtMin(""); setDebtMax(""); };
 
   const update = useMutation({
     mutationFn: ({ id, paid }: { id: number; paid: number }) =>
@@ -577,6 +602,20 @@ function UnallocatedTab() {
   if (items.length === 0) return <EmptyState title="Нет нераспределённых счетов" />;
 
   const recCols = "2fr 2fr 120px 120px 120px 28px";
+  const uniqueClients = [...new Set(items.map((r: any) => r.client).filter(Boolean))].sort() as string[];
+  const uniqueNotes = [...new Set(items.map((r: any) => r.note).filter(Boolean))].sort() as string[];
+  const hasFilters = !!(clientF || noteF || invFrom || invTo || paidMin || paidMax || debtMin || debtMax);
+  const filtered = items.filter((r: any) => {
+    if (clientF && r.client !== clientF) return false;
+    if (noteF && r.note !== noteF) return false;
+    if (invFrom && (!r.invoice_date || r.invoice_date.slice(0, 10) < invFrom)) return false;
+    if (invTo && (!r.invoice_date || r.invoice_date.slice(0, 10) > invTo)) return false;
+    if (paidMin && (r.paid || 0) < parseFloat(paidMin)) return false;
+    if (paidMax && (r.paid || 0) > parseFloat(paidMax)) return false;
+    if (debtMin && (r.debt || 0) < parseFloat(debtMin)) return false;
+    if (debtMax && (r.debt || 0) > parseFloat(debtMax)) return false;
+    return true;
+  });
 
   return (
     <>
@@ -591,17 +630,25 @@ function UnallocatedTab() {
         />
       )}
       <div style={{ padding: "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div style={{ fontSize: 11, color: "#6B6355" }}>{items.length} счетов</div>
+        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <span style={{ fontSize: 11, color: "#6B6355" }}>{filtered.length} счетов</span>
+          <button onClick={hasFilters ? clearFilters : undefined} style={{ fontSize: 10, color: hasFilters ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: hasFilters ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
+            <X size={10} /> Сбросить
+          </button>
+        </div>
         <div style={{ fontSize: 12, fontWeight: 700, color: "#4A7C59", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(data?.total_debt ?? 0)}</div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: recCols, padding: "6px 28px 6px", borderBottom: "1px solid #EDEBE6" }}>
-        {["КЛИЕНТ", "НАЗНАЧЕНИЕ", "СЧЁТ", "ОПЛАЧЕНО", "ОСТАТОК", ""].map(h => (
-          <div key={h} style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>{h}</div>
-        ))}
+        <div><ColumnFilter label="КЛИЕНТ" options={uniqueClients} value={clientF} onChange={setClientF} /></div>
+        <div><ColumnFilter label="НАЗНАЧЕНИЕ" options={uniqueNotes} value={noteF} onChange={setNoteF} /></div>
+        <div><PeriodFilter label="СЧЁТ" from={invFrom} to={invTo} onChange={(f, t) => { setInvFrom(f); setInvTo(t); }} /></div>
+        <div><AmountFilter label="ОПЛАЧЕНО" min={paidMin} max={paidMax} onChange={(mn, mx) => { setPaidMin(mn); setPaidMax(mx); }} /></div>
+        <div><AmountFilter label="ОСТАТОК" min={debtMin} max={debtMax} onChange={(mn, mx) => { setDebtMin(mn); setDebtMax(mx); }} align="right" /></div>
+        <div />
       </div>
 
-      {items.map((r: any) => (
+      {filtered.map((r: any) => (
         <div key={r.id}>
           <div
             onClick={() => { setEditId(editId === r.id ? null : r.id); setPaidDraft(String(r.paid ?? 0)); }}
@@ -787,7 +834,18 @@ function CreditorsTab() {
   const [editItem, setEditItem] = useState<any>(null);
   const [linkItem, setLinkItem] = useState<any>(null);
   const [contragentFilter, setContragentFilter] = useState("");
-  const clearFilters = () => { setContragentFilter(""); setSelectedIds(new Set()); };
+  const [descFilter, setDescFilter] = useState("");
+  const [cPlanMin, setCPlanMin] = useState("");
+  const [cPlanMax, setCPlanMax] = useState("");
+  const [cPaidMin, setCPaidMin] = useState("");
+  const [cPaidMax, setCPaidMax] = useState("");
+  const [varMin, setVarMin] = useState("");
+  const [varMax, setVarMax] = useState("");
+  const [cDebtMin, setCDebtMin] = useState("");
+  const [cDebtMax, setCDebtMax] = useState("");
+  const [dueFrom, setDueFrom] = useState("");
+  const [dueTo, setDueTo] = useState("");
+  const clearFilters = () => { setContragentFilter(""); setDescFilter(""); setCPlanMin(""); setCPlanMax(""); setCPaidMin(""); setCPaidMax(""); setVarMin(""); setVarMax(""); setCDebtMin(""); setCDebtMax(""); setDueFrom(""); setDueTo(""); setSelectedIds(new Set()); };
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const { data, isLoading } = useQuery({ queryKey: ["creditors"], queryFn: () => financeApi.creditors() });
@@ -797,7 +855,23 @@ function CreditorsTab() {
   const totalOwed = data?.total_owed ?? 0;
   const totalPaid = data?.total_paid ?? 0;
   const uniqueContragents = useMemo(() => [...new Set(items.map((c: any) => c.name).filter(Boolean))].sort() as string[], [items]);
-  const filteredItems = contragentFilter ? items.filter((c: any) => c.name === contragentFilter) : items;
+  const uniqueDescriptions = useMemo(() => [...new Set(items.map((c: any) => c.description).filter(Boolean))].sort() as string[], [items]);
+  const filteredItems = useMemo(() => {
+    let r = items;
+    if (contragentFilter) r = r.filter((c: any) => c.name === contragentFilter);
+    if (descFilter) r = r.filter((c: any) => c.description === descFilter);
+    if (cPlanMin) r = r.filter((c: any) => ((c.amount_plan ?? c.total) || 0) >= parseFloat(cPlanMin));
+    if (cPlanMax) r = r.filter((c: any) => ((c.amount_plan ?? c.total) || 0) <= parseFloat(cPlanMax));
+    if (cPaidMin) r = r.filter((c: any) => (c.paid || 0) >= parseFloat(cPaidMin));
+    if (cPaidMax) r = r.filter((c: any) => (c.paid || 0) <= parseFloat(cPaidMax));
+    if (varMin) r = r.filter((c: any) => c.variance != null && c.variance >= parseFloat(varMin));
+    if (varMax) r = r.filter((c: any) => c.variance != null && c.variance <= parseFloat(varMax));
+    if (cDebtMin) r = r.filter((c: any) => (c.debt || 0) >= parseFloat(cDebtMin));
+    if (cDebtMax) r = r.filter((c: any) => (c.debt || 0) <= parseFloat(cDebtMax));
+    if (dueFrom) r = r.filter((c: any) => c.due_date && c.due_date.slice(0, 10) >= dueFrom);
+    if (dueTo) r = r.filter((c: any) => c.due_date && c.due_date.slice(0, 10) <= dueTo);
+    return r;
+  }, [items, contragentFilter, descFilter, cPlanMin, cPlanMax, cPaidMin, cPaidMax, varMin, varMax, cDebtMin, cDebtMax, dueFrom, dueTo]);
 
   if (isLoading) return <Loading />;
 
@@ -808,7 +882,7 @@ function CreditorsTab() {
       {linkItem && <LinkTxModal creditor={linkItem} onClose={() => setLinkItem(null)} />}
 
       {(() => {
-        const hasFilters = !!contragentFilter;
+        const hasFilters = !!(contragentFilter || descFilter || cPlanMin || cPlanMax || cPaidMin || cPaidMax || varMin || varMax || cDebtMin || cDebtMax || dueFrom || dueTo);
         const canClear = hasFilters || selectedIds.size > 0;
         const selDebt = filteredItems.filter((c: any) => selectedIds.has(String(c.id))).reduce((s: number, c: any) => s + (c.debt || 0), 0);
         return (
@@ -837,12 +911,12 @@ function CreditorsTab() {
           />
         </div>
         <div><ColumnFilter label="КОНТРАГЕНТ" options={uniqueContragents} value={contragentFilter} onChange={setContragentFilter} /></div>
-        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ЗА ЧТО</div>
-        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ПЛАН</div>
-        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ОПЛАЧЕНО</div>
-        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ОТКЛОНЕНИЕ</div>
-        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ОСТАТОК</div>
-        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>СРОК</div>
+        <div><ColumnFilter label="ЗА ЧТО" options={uniqueDescriptions} value={descFilter} onChange={setDescFilter} /></div>
+        <div><AmountFilter label="ПЛАН" min={cPlanMin} max={cPlanMax} onChange={(mn, mx) => { setCPlanMin(mn); setCPlanMax(mx); }} /></div>
+        <div><AmountFilter label="ОПЛАЧЕНО" min={cPaidMin} max={cPaidMax} onChange={(mn, mx) => { setCPaidMin(mn); setCPaidMax(mx); }} /></div>
+        <div><AmountFilter label="ОТКЛОНЕНИЕ" min={varMin} max={varMax} onChange={(mn, mx) => { setVarMin(mn); setVarMax(mx); }} /></div>
+        <div><AmountFilter label="ОСТАТОК" min={cDebtMin} max={cDebtMax} onChange={(mn, mx) => { setCDebtMin(mn); setCDebtMax(mx); }} /></div>
+        <div><PeriodFilter label="СРОК" from={dueFrom} to={dueTo} onChange={(f, t) => { setDueFrom(f); setDueTo(t); }} align="right" /></div>
         <div />
       </div>
 
@@ -1026,6 +1100,14 @@ function FixedTab() {
   const [editTemplate, setEditTemplate] = useState<any>(null);
   const [payItem, setPayItem] = useState<any>(null);
   const [linkItem, setLinkItem] = useState<any>(null);
+  const [nameF, setNameF] = useState("");
+  const [amtMin, setAmtMin] = useState("");
+  const [amtMax, setAmtMax] = useState("");
+  const [fPaidMin, setFPaidMin] = useState("");
+  const [fPaidMax, setFPaidMax] = useState("");
+  const [fDebtMin, setFDebtMin] = useState("");
+  const [fDebtMax, setFDebtMax] = useState("");
+  const clearFilters = () => { setNameF(""); setAmtMin(""); setAmtMax(""); setFPaidMin(""); setFPaidMax(""); setFDebtMin(""); setFDebtMax(""); };
   const { data, isLoading } = useQuery({
     queryKey: ["fixed-obligations", month],
     queryFn: () => financeApi.fixedObligations(month),
@@ -1057,8 +1139,29 @@ function FixedTab() {
       {payItem && <PayCreditorModal item={payItem} onClose={() => setPayItem(null)} />}
       {linkItem && <LinkTxModal creditor={linkItem} onClose={() => setLinkItem(null)} />}
 
+      {(() => {
+        const uniqueNames = [...new Set(items.map((f: any) => f.name).filter(Boolean))].sort() as string[];
+        const hasFilters = !!(nameF || amtMin || amtMax || fPaidMin || fPaidMax || fDebtMin || fDebtMax);
+        const filtered = items.filter((f: any) => {
+          if (nameF && f.name !== nameF) return false;
+          const amt = (f.month_total ?? f.amount) || 0;
+          if (amtMin && amt < parseFloat(amtMin)) return false;
+          if (amtMax && amt > parseFloat(amtMax)) return false;
+          if (fPaidMin && (f.paid || 0) < parseFloat(fPaidMin)) return false;
+          if (fPaidMax && (f.paid || 0) > parseFloat(fPaidMax)) return false;
+          if (fDebtMin && (f.debt || 0) < parseFloat(fDebtMin)) return false;
+          if (fDebtMax && (f.debt || 0) > parseFloat(fDebtMax)) return false;
+          return true;
+        });
+        return (
+      <>
       <div style={{ padding: "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
-        <div style={{ fontSize: 11, color: "#6B6355" }}>{items.length} постоянных · нагрузка {fmt(totals.plan_month)}/мес</div>
+        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <span style={{ fontSize: 11, color: "#6B6355" }}>{filtered.length} постоянных · нагрузка {fmt(totals.plan_month)}/мес</span>
+          <button onClick={hasFilters ? clearFilters : undefined} style={{ fontSize: 10, color: hasFilters ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: hasFilters ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
+            <X size={10} /> Сбросить
+          </button>
+        </div>
         <select
           value={month} onChange={e => setMonth(e.target.value)}
           style={{ fontSize: 12, border: "1px solid #EDEBE6", background: "none", color: "#1A1A1A", padding: "4px 8px", cursor: "pointer", outline: "none" }}
@@ -1072,21 +1175,21 @@ function FixedTab() {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: fixedCols, padding: "8px 28px", borderBottom: "1px solid #EDEBE6", alignItems: "center" }}>
-        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>НАЗВАНИЕ</div>
+        <div><ColumnFilter label="НАЗВАНИЕ" options={uniqueNames} value={nameF} onChange={setNameF} /></div>
         <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ЗАМЕТКА</div>
-        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>СУММА/МЕС</div>
+        <div><AmountFilter label="СУММА/МЕС" min={amtMin} max={amtMax} onChange={(mn, mx) => { setAmtMin(mn); setAmtMax(mx); }} /></div>
         <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ДЕНЬ</div>
-        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ОПЛАЧЕНО</div>
-        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ОСТАТОК</div>
+        <div><AmountFilter label="ОПЛАЧЕНО" min={fPaidMin} max={fPaidMax} onChange={(mn, mx) => { setFPaidMin(mn); setFPaidMax(mx); }} /></div>
+        <div><AmountFilter label="ОСТАТОК" min={fDebtMin} max={fDebtMax} onChange={(mn, mx) => { setFDebtMin(mn); setFDebtMax(mx); }} /></div>
         <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em" }}>ШАБЛОН</div>
         <div />
       </div>
 
-      {items.length === 0 ? (
-        <EmptyState title="Нет постоянных обязательств" hint="Добавь регулярные расходы: аренда, зарплаты, подписки" />
+      {filtered.length === 0 ? (
+        <EmptyState title={hasFilters ? "Ничего не найдено" : "Нет постоянных обязательств"} hint={hasFilters ? undefined : "Добавь регулярные расходы: аренда, зарплаты, подписки"} />
       ) : (
         <>
-          {items.map((f: any, i: number) => (
+          {filtered.map((f: any, i: number) => (
             <div
               key={i}
               onClick={() => f.creditor_id && setPayItem(toCreditor(f))}
@@ -1147,6 +1250,9 @@ function FixedTab() {
           </div>
         </>
       )}
+      </>
+        );
+      })()}
     </>
   );
 }

@@ -523,7 +523,7 @@ export default function OrdersV2() {
   const [customerFilter, setCustomerFilter] = useState("");
   const [titleFilter, setTitleFilter] = useState("");
   const [brandFilter, setBrandFilter] = useState("");
-  const clearFilters = () => { setCustomerFilter(""); setTitleFilter(""); setAmountMin(""); setAmountMax(""); setBrandFilter(""); setPage(0); setSelectedIds(new Set()); };
+  const clearFilters = () => { setCustomerFilter(""); setTitleFilter(""); setStatusFilter(""); setAmountMin(""); setAmountMax(""); setDebtMin(""); setDebtMax(""); setBrandFilter(""); setPage(0); setSelectedIds(new Set()); };
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -546,6 +546,9 @@ export default function OrdersV2() {
   });
   const [amountMin, setAmountMin] = useState("");
   const [amountMax, setAmountMax] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [debtMin, setDebtMin] = useState("");
+  const [debtMax, setDebtMax] = useState("");
   const [showNewOrder, setShowNewOrder] = useState(false);
   const [summaryMode, setSummaryMode] = useState(false);
   const [reviewMode, setReviewMode] = useState(false);
@@ -602,15 +605,19 @@ export default function OrdersV2() {
   const allData = data as any[];
   const uniqueCustomers = useMemo(() => [...new Set(allData.map((r: any) => r.customer_name).filter(Boolean))].sort() as string[], [allData]);
   const uniqueTitles = useMemo(() => [...new Set(allData.map((r: any) => r.title).filter(Boolean))].sort() as string[], [allData]);
+  const uniqueStatuses = useMemo(() => [...new Set(allData.map((r: any) => (STATUS_MAP[r.status] || {}).label || r.status).filter(Boolean))].sort() as string[], [allData]);
   const filteredData = useMemo(() => {
     let r = allData;
     if (customerFilter) r = r.filter((o: any) => o.customer_name === customerFilter);
     if (titleFilter) r = r.filter((o: any) => o.title === titleFilter);
+    if (statusFilter) r = r.filter((o: any) => ((STATUS_MAP[o.status] || {}).label || o.status) === statusFilter);
     if (brandFilter) r = r.filter((o: any) => o.brand === brandFilter);
     if (amountMin) r = r.filter((o: any) => (o.price_plan || 0) >= parseFloat(amountMin));
     if (amountMax) r = r.filter((o: any) => (o.price_plan || 0) <= parseFloat(amountMax));
+    if (debtMin) r = r.filter((o: any) => (o.debt || 0) >= parseFloat(debtMin));
+    if (debtMax) r = r.filter((o: any) => (o.debt || 0) <= parseFloat(debtMax));
     return r;
-  }, [allData, customerFilter, titleFilter, brandFilter, amountMin, amountMax]);
+  }, [allData, customerFilter, titleFilter, statusFilter, brandFilter, amountMin, amountMax, debtMin, debtMax]);
   const totalCount = filteredData.length;
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
   const pageData = filteredData.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
@@ -843,7 +850,7 @@ export default function OrdersV2() {
         ) : (<>
         {/* Filter / selection bar — always visible to prevent layout shift */}
         {(() => {
-          const hasFilters = !!(titleFilter || customerFilter || brandFilter || amountMin || amountMax);
+          const hasFilters = !!(titleFilter || customerFilter || statusFilter || brandFilter || amountMin || amountMax || debtMin || debtMax);
           const canClear = hasFilters || selectedIds.size > 0;
           const sum = filteredData.reduce((s: number, o: any) => s + (o.price_plan || 0), 0);
           const selSum = filteredData.filter((o: any) => selectedIds.has(o.id)).reduce((s: number, o: any) => s + (o.price_plan || 0), 0);
@@ -898,9 +905,9 @@ export default function OrdersV2() {
           </div>
           <div><ColumnFilter label="НАЗВАНИЕ" options={uniqueTitles} value={titleFilter} onChange={(v) => { setTitleFilter(v); setPage(0); }} /></div>
           <div><ColumnFilter label="КЛИЕНТ" options={uniqueCustomers} value={customerFilter} onChange={(v) => { setCustomerFilter(v); setPage(0); }} /></div>
-          <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>СТАТУС</div>
+          <div><ColumnFilter label="СТАТУС" options={uniqueStatuses} value={statusFilter} onChange={(v) => { setStatusFilter(v); setPage(0); }} /></div>
           <div><AmountFilter label="СУММА" min={amountMin} max={amountMax} onChange={(mn, mx) => { setAmountMin(mn); setAmountMax(mx); setPage(0); }} /></div>
-          {!selected && <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>К ПОЛУЧЕНИЮ</div>}
+          {!selected && <div><AmountFilter label="К ПОЛУЧЕНИЮ" min={debtMin} max={debtMax} onChange={(mn, mx) => { setDebtMin(mn); setDebtMax(mx); setPage(0); }} /></div>}
           <div />
         </div>
 

@@ -3,7 +3,7 @@ import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { MONO } from "../components/ui/Num";
 import { Loading } from "../components/ui/Loading";
 import { EmptyState } from "../components/ui/EmptyState";
-import { PeriodFilter, AmountFilter } from "../components/TableFilters";
+import { PeriodFilter, AmountFilter, ColumnFilter } from "../components/TableFilters";
 import { inboxApi, ordersApi, mastersApi, payeeRulesApi, estimatesApi, paymentsApi } from "../api";
 import { EXPENSE_CATEGORIES } from "../components/ExpenseModal";
 import { Modal } from "../components/ui/Modal";
@@ -468,6 +468,7 @@ export default function ExpensesInbox() {
   const [to, setTo] = useState("");
   const [amtMin, setAmtMin] = useState("");
   const [amtMax, setAmtMax] = useState("");
+  const [cpFilter, setCpFilter] = useState("");   // контрагент (клиентская фильтрация)
   const [openId, setOpenId] = useState<string | null>(null);
   const [showDismissed, setShowDismissed] = useState(false);
   // Разнесли платёж одним заказом → предложить отложить резерв под материалы.
@@ -488,7 +489,9 @@ export default function ExpensesInbox() {
     queryFn: () => (isIncoming ? paymentsApi.inbox(params) : inboxApi.list(params)),
   });
 
-  const items: any[] = data?.items ?? [];
+  const allItems: any[] = data?.items ?? [];
+  const uniqueCps = [...new Set(allItems.map((t: any) => t.counterparty).filter(Boolean))].sort() as string[];
+  const items: any[] = cpFilter ? allItems.filter((t: any) => t.counterparty === cpFilter) : allItems;
   // degraded: набор «уже разнесённых» неполон (сбой БД) — разноска отключена, иначе
   // риск двойного платежа. truncated: показаны не все неразнесённые — уточни фильтры.
   const degraded = isIncoming && !!data?.degraded;
@@ -512,8 +515,8 @@ export default function ExpensesInbox() {
     onSuccess: () => { setReservePrompt(null); onDone(); },
   });
 
-  const clearFilters = () => { setSearch(""); setFrom(""); setTo(""); setAmtMin(""); setAmtMax(""); };
-  const hasFilters = !!(search || from || to || amtMin || amtMax);
+  const clearFilters = () => { setSearch(""); setFrom(""); setTo(""); setAmtMin(""); setAmtMax(""); setCpFilter(""); };
+  const hasFilters = !!(search || from || to || amtMin || amtMax || cpFilter);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
@@ -547,8 +550,6 @@ export default function ExpensesInbox() {
       <div style={{ padding: "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
         <div style={{ display: "flex", gap: 16, alignItems: "center", fontSize: 11, color: "#6B6355" }}>
           <span>{items.length}{truncated ? "+" : ""} неразнесённых</span>
-          <PeriodFilter label="ПЕРИОД" from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} />
-          <AmountFilter label="СУММА" min={amtMin} max={amtMax} onChange={(mn, mx) => { setAmtMin(mn); setAmtMax(mx); }} />
           {source === "zen" && !from && (
             <span style={{ fontSize: 10, color: "#C8C0B0" }}>показаны последние 90 дней — расширь период</span>
           )}
@@ -576,11 +577,11 @@ export default function ExpensesInbox() {
         </div>
       )}
 
-      {/* Заголовки */}
+      {/* Заголовки = фильтры (единый формат таблиц: название столбца открывает фильтр) */}
       <div style={{ display: "grid", gridTemplateColumns: "80px 1fr 130px", gap: 12, padding: "8px 28px", borderBottom: "1px solid #F7F5F1" }}>
-        {["ДАТА", "КОНТРАГЕНТ / НАЗНАЧЕНИЕ", "СУММА"].map((h, i) => (
-          <div key={h} style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em", textAlign: i === 2 ? "right" : "left" }}>{h}</div>
-        ))}
+        <div><PeriodFilter label="ДАТА" from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} /></div>
+        <div><ColumnFilter label="КОНТРАГЕНТ / НАЗНАЧЕНИЕ" options={uniqueCps} value={cpFilter} onChange={setCpFilter} /></div>
+        <div style={{ textAlign: "right" }}><AmountFilter label="СУММА" min={amtMin} max={amtMax} onChange={(mn, mx) => { setAmtMin(mn); setAmtMax(mx); }} align="right" /></div>
       </div>
 
       {/* Список */}
