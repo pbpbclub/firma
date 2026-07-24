@@ -199,7 +199,10 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
 
   const addOrder = (orderId: string) => {
     if (allocs.some(a => a.order_id === orderId)) return;
-    setAllocs([...allocs, { order_id: orderId, amount: "", category: tx.category_hint || "material", master_id: payeeMaster || "", creditor_id: null }]);
+    // По умолчанию — остаток неразнесённого (первый заказ = полная сумма платежа).
+    const other = allocs.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    const left = Math.round((tx.amount - other) * 100) / 100;
+    setAllocs([...allocs, { order_id: orderId, amount: left > 0 ? String(left) : "", category: tx.category_hint || "material", master_id: payeeMaster || "", creditor_id: null }]);
   };
   const patch = (i: number, p: Partial<Alloc>) => setAllocs(allocs.map((x, j) => j === i ? { ...x, ...p } : x));
   const splitEvenly = () => {
@@ -492,8 +495,10 @@ function PaymentAllocRow({ tx, onDone, onReservePrompt }: {
 
   const addOrder = (orderId: string) => {
     if (allocs.some(a => a.order_id === orderId)) return;
-    // Первый заказ получает всю сумму платежа — частый случай «один платёж = один заказ».
-    setAllocs([...allocs, { order_id: orderId, amount: allocs.length === 0 ? String(tx.amount) : "" }]);
+    // По умолчанию — остаток неразнесённого (первый заказ = полная сумма платежа).
+    const other = allocs.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    const left = Math.round((tx.amount - other) * 100) / 100;
+    setAllocs([...allocs, { order_id: orderId, amount: left > 0 ? String(left) : "" }]);
   };
   const patch = (i: number, amount: string) => setAllocs(allocs.map((x, j) => (j === i ? { ...x, amount } : x)));
 
