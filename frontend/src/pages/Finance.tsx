@@ -519,6 +519,9 @@ const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
                     {t.is_tax && (
                       <span style={{ color: "#A89070", background: "#F2EFE9", padding: "1px 6px", fontSize: 10, fontWeight: 600, marginLeft: 8 }}>налог</span>
                     )}
+                    {t.is_fee && (
+                      <span style={{ color: "#A89070", background: "#F2EFE9", padding: "1px 6px", fontSize: 10, fontWeight: 600, marginLeft: 8 }}>комиссия</span>
+                    )}
                   </div>
                 </div>
                 <div style={{ fontSize: 12 }}>

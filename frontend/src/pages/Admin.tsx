@@ -571,7 +571,7 @@ function PayeeRulesSection() {
             <div>
               <div style={{ fontSize: 10, color: "#A89070", marginBottom: 3 }}>ПАТТЕРН</div>
               <input value={form.pattern} onChange={e => setForm(f => ({ ...f, pattern: e.target.value.toLowerCase() }))}
-                placeholder="yandex*доставка или имя плательщика" style={inputStyle} />
+                placeholder="yandex*доставка или имя в выписке" style={inputStyle} />
             </div>
             <div>
               <div style={{ fontSize: 10, color: "#A89070", marginBottom: 3 }}>ТИП</div>

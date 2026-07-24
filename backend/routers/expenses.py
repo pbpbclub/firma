@@ -133,10 +133,12 @@ def inbox(
         conn = get_finance()
         try:
             # Авто-распределённые мимо инбокса: налоги → раздел «Налоги», переводы
-            # между своими (вывод на личные карты) — не расход бизнеса вовсе.
+            # между своими — не расход бизнеса, комиссии банка → «Регулярные траты»
+            # (на заказы их не разнести).
             from routers.taxes import TAX_TX_SQL
-            from routers.finance import OWN_TRANSFER_SQL
-            sql = f"SELECT * FROM transactions WHERE direction = 'out' AND NOT {TAX_TX_SQL} AND NOT {OWN_TRANSFER_SQL}"
+            from routers.finance import OWN_TRANSFER_SQL, BANK_FEE_SQL
+            sql = (f"SELECT * FROM transactions WHERE direction = 'out'"
+                   f" AND NOT {TAX_TX_SQL} AND NOT {OWN_TRANSFER_SQL} AND NOT {BANK_FEE_SQL}")
             params: list = []
             if date_from:
                 sql += " AND date >= ?"; params.append(date_from)
@@ -188,12 +190,15 @@ def inbox(
             sql += " ORDER BY date DESC LIMIT ?"
             params.append(limit * 3)
             import json as _json
-            from routers.finance import ZEN_OWN_PAYEES
+            from routers.finance import ZEN_OWN_PAYEES, zen_recurring_category
             for r in conn.execute(sql, params).fetchall():
                 if str(r["id"]) in zen_done:
                     continue
                 # Перевод себе на карту вне ZenMoney (Райффайзен) — не расход.
                 if (r["payee"] or "").strip() in ZEN_OWN_PAYEES:
+                    continue
+                # Личные регулярки (подписки/связь/услуги карт) → «Регулярные траты».
+                if zen_recurring_category(r["payee"]):
                     continue
                 if str(r["id"]) in dismissed and not show_dismissed:
                     continue

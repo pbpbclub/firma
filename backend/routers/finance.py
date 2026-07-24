@@ -136,11 +136,12 @@ def get_balance_at_date(date: str):
 TRANSFER_REASON = "Перевод между своими"
 
 # ── Авто-детектор переводов между своими (решение Юры 24.07.2026) ────────────
-# Банк: вывод с ИП на личные карты и переброски между своими р/с идут с
-# назначением «Перевод собственных …средств» — матчим по нему («еревод» без
-# первой буквы — чтобы не зависеть от регистра П/п). НЕ матчить по контрагенту
-# «Некрасов» вообще: там же прилетают его платежи как клиента.
-OWN_TRANSFER_SQL = "(purpose LIKE '%еревод собственных%')"
+# Банк: вывод с ИП на личные карты идёт двумя маршрутами — «Перевод собственных
+# …средств» и через зарплатный реестр Сбера «Перевод средств ИП на личный счет
+# по реестру №…». Матчим по назначению («еревод» без первой буквы — чтобы не
+# зависеть от регистра П/п). НЕ матчить по контрагенту «Некрасов» вообще: там
+# же прилетают его платежи как клиента.
+OWN_TRANSFER_SQL = "(purpose LIKE '%еревод собственных%' OR purpose LIKE '%ИП на личный счет%')"
 
 # ZenMoney: переводы себе на карты ВНЕ ZenMoney (Райффайзен и т.п.) выглядят
 # расходом с получателем-Юрой без парной ноги. Матчить payee ТОЧНО — рядом
@@ -149,7 +150,60 @@ ZEN_OWN_PAYEES = {"Юрий Владимирович Н", "Юрий Владим
 
 
 def is_own_transfer_tx(counterparty, purpose) -> bool:
-    return "еревод собственных" in (purpose or "")
+    p = purpose or ""
+    return "еревод собственных" in p or "ИП на личный счет" in p
+
+
+# ── Регулярные траты: раздельная статистика по категориям (Юра 24.07.2026:
+# «не сливать в одну категорию — важно видеть объёмы и оправданность»). ─────────
+# Комиссии банков по ИП-счетам: платы/комиссии самих банков. Реальный расход
+# бизнеса — из оборотов НЕ исключается, только из Разноски (не по заказам).
+BANK_FEE_SQL = ("((purpose LIKE '%омисси%' OR purpose LIKE '%лата за%')"
+                " AND (counterparty LIKE '%ТБанк%' OR counterparty LIKE '%Сбербанк%'"
+                " OR counterparty LIKE '%СБЕРБАНК%'))")
+
+
+def is_bank_fee_tx(counterparty, purpose) -> bool:
+    c, p = counterparty or "", purpose or ""
+    return (("омисси" in p or "лата за" in p)
+            and ("ТБанк" in c or "Сбербанк" in c or "СБЕРБАНК" in c))
+
+
+# Личные регулярки в ZenMoney: категория по payee. Матчи консервативные (точные
+# строки/узкие префиксы) — такси/доставку не трогаем, они бывают бизнесовыми.
+_ZEN_RECURRING_EXACT = {
+    "Яндекс.Плюс": "subscriptions",
+    "Sportbox.ru": "subscriptions",
+    "МегаФон": "telecom",
+    "PAO MegaFon": "telecom",
+    "За услугу «Уведомления»": "card_fees",
+    "Обслуживание карты": "card_fees",
+}
+_ZEN_RECURRING_PREFIX = [
+    ("YM*OKKO", "subscriptions"),
+    ("YM*MATCHTV", "subscriptions"),
+    ("MEGAFON", "telecom"),
+]
+
+RECURRING_LABELS = {
+    "subscriptions": "Подписки",
+    "telecom": "Связь",
+    "card_fees": "Услуги банка · личные карты",
+    "bank_fees": "Комиссии банка · ИП",
+}
+
+
+def zen_recurring_category(payee) -> str | None:
+    p = (payee or "").strip()
+    if p in _ZEN_RECURRING_EXACT:
+        return _ZEN_RECURRING_EXACT[p]
+    # Яндекс.Плюс в банковской выписке: YANDEX*XXXX*PLUS
+    if p.startswith("YANDEX*") and p.endswith("*PLUS"):
+        return "subscriptions"
+    for pref, cat in _ZEN_RECURRING_PREFIX:
+        if p.startswith(pref):
+            return cat
+    return None
 
 
 def _transfer_tx_ids() -> set:
@@ -208,6 +262,7 @@ def list_transactions(
             **dict(r),
             "is_transfer": str(r["id"]) in transfers or is_own_transfer_tx(r["counterparty"], r["purpose"]),
             "is_tax": r["direction"] == "out" and is_tax_tx(r["counterparty"], r["purpose"]),
+            "is_fee": r["direction"] == "out" and is_bank_fee_tx(r["counterparty"], r["purpose"]),
         } for r in rows]
     except Exception as e:
         bank_rows = []
@@ -318,6 +373,66 @@ def get_summary():
         return {"error": str(e)}
     finally:
         conn.close()
+
+
+@router.get("/recurring")
+def recurring_summary():
+    """Регулярные траты по категориям: комиссии банка (ИП, finance.db) и личные
+    регулярки (подписки/связь/услуги карт, zenmoney.db). Юра следит за объёмом
+    и оправданностью — категории раздельные, скрываются из Разноски автоматом."""
+    from datetime import date as _date
+    today = _date.today()
+    cur_month = today.strftime("%Y-%m")
+    m, y = today.month - 6, today.year
+    if m <= 0:
+        m, y = m + 12, y - 1
+    six_months_ago = f"{y}-{m:02d}-01"
+    cats: dict = {k: {"key": k, "label": lbl, "count": 0, "total": 0.0,
+                      "current_month": 0.0, "last6": 0.0, "last": []}
+                  for k, lbl in RECURRING_LABELS.items()}
+
+    def add(cat, d, amount, title):
+        c = cats[cat]
+        c["count"] += 1
+        c["total"] += amount
+        if (d or "").startswith(cur_month):
+            c["current_month"] += amount
+        if (d or "") >= six_months_ago:
+            c["last6"] += amount
+        if len(c["last"]) < 5:
+            c["last"].append({"date": d, "amount": amount, "title": title})
+
+    conn = get_finance()
+    try:
+        for r in conn.execute(
+            f"SELECT date, amount, counterparty, purpose FROM transactions "
+            f"WHERE direction = 'out' AND {BANK_FEE_SQL} ORDER BY date DESC"
+        ):
+            add("bank_fees", r["date"], r["amount"] or 0, r["purpose"] or r["counterparty"])
+    finally:
+        conn.close()
+
+    from db import get_zenmoney
+    zconn = get_zenmoney()
+    try:
+        for r in zconn.execute(
+            "SELECT date, outcome, payee FROM zm_transactions "
+            "WHERE outcome > 0 AND income = 0 AND deleted = 0 ORDER BY date DESC"
+        ):
+            cat = zen_recurring_category(r["payee"])
+            if cat:
+                add(cat, r["date"], r["outcome"] or 0, r["payee"])
+    finally:
+        zconn.close()
+
+    out = []
+    for c in cats.values():
+        c["total"] = round(c["total"], 2)
+        c["current_month"] = round(c["current_month"], 2)
+        c["month_avg"] = round(c["last6"] / 6, 2)
+        del c["last6"]
+        out.append(c)
+    return {"categories": out}
 
 
 @router.get("/by-brand")

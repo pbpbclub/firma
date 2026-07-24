@@ -77,7 +77,7 @@ export function PayeeRulesSection({ entityType, entityId }: { entityType: string
           <div>
             <div style={{ fontSize: 9, color: "#A89070", marginBottom: 2 }}>ПАТТЕРН (нижний регистр)</div>
             <input value={form.pattern} onChange={e => setForm(f => ({ ...f, pattern: e.target.value }))}
-              placeholder="имя плательщика" style={inputStyle} />
+              placeholder="имя в выписке" style={inputStyle} />
           </div>
           <div>
             <div style={{ fontSize: 9, color: "#A89070", marginBottom: 2 }}>ТИП</div>

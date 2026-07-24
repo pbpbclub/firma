@@ -190,10 +190,10 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
   return (
     <div style={{ padding: "14px 28px 18px", background: "#FAF8F5", borderBottom: "1px solid #EDEBE6" }}>
 
-      {/* Плательщик: кто получил перевод. Правило — уверенно, похожесть — предложение. */}
+      {/* Получатель: кому ушли деньги. Правило — уверенно, похожесть — предложение. */}
       <div style={{ marginBottom: 14, padding: "10px 12px", background: "#fff", border: "1px solid #EDEBE6" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em" }}>ПЛАТЕЛЬЩИК</div>
+          <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em" }}>ПОЛУЧАТЕЛЬ</div>
           <div style={{ fontSize: 12, color: "#1A1A1A", flex: "0 0 auto" }}>{payeeStr || "—"}</div>
           <span style={{ color: "#C8C0B0" }}>→</span>
           <select value={payeeMaster} onChange={e => { setPayeeMaster(e.target.value); setRemember(!!e.target.value); }}

@@ -424,6 +424,35 @@ const DIR_FILTERS = [
   { v: "out", l: "Списания" },
 ];
 
+// ── Регулярные траты: подписки / связь / услуги банка (личные карты) /
+// комиссии банка (ИП). Из Разноски скрыты автоматом — контроль объёмов здесь.
+function RecurringSection() {
+  const { data } = useQuery({ queryKey: ["finance-recurring"], queryFn: financeApi.recurring });
+  const cats = (data?.categories ?? []).filter((c: any) => c.count > 0);
+  if (!cats.length) return null;
+  return (
+    <div style={{ marginBottom: 28 }}>
+      <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10 }}>
+        РЕГУЛЯРНЫЕ ТРАТЫ <span style={{ letterSpacing: 0, color: "#C8C0B0" }}>· скрыты из Разноски</span>
+      </div>
+      {cats.map((c: any) => (
+        <div key={c.key} style={{ padding: "7px 0", borderBottom: "1px solid #F2EFE9" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <div style={{ fontSize: 12, color: "#6B6355" }}>{c.label}</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
+              {fmt(c.month_avg)} ₽<span style={{ fontSize: 10, fontWeight: 400, color: "#A89070" }}>/мес</span>
+            </div>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#A89070", marginTop: 2, fontVariantNumeric: "tabular-nums" }}>
+            <span>в этом месяце <span style={{ fontFamily: MONO }}>{fmt(c.current_month)} ₽</span></span>
+            <span>всего <span style={{ fontFamily: MONO }}>{fmt(c.total)} ₽</span> · {c.count}</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function ZenMoneyPage() {
   const queryClient = useQueryClient();
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth);
@@ -992,6 +1021,10 @@ export default function ZenMoneyPage() {
               ))}
           </div>
         </div>
+
+        {/* Регулярные траты — раздельная статистика (подписки/связь/услуги карт/
+            комиссии ИП): из Разноски они скрыты автоматом, объёмы видны здесь. */}
+        <RecurringSection />
 
         {/* Cashflow chart */}
         <div style={{ marginBottom: 28 }}>
