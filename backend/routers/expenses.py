@@ -159,6 +159,9 @@ def inbox(
                 if str(r["id"]) in dismissed and not show_dismissed:
                     continue
                 res = _resolve_payee(r["counterparty"] or "", rules, masters_match)
+                # Контрагент помечен «личное» правилом — не бизнес-расход, мимо Разноски.
+                if res.get("entity_type") == "personal" and not show_dismissed:
+                    continue
                 out.append({
                     "id": str(r["id"]), "source": "bank", "date": r["date"], "amount": r["amount"],
                     "counterparty": r["counterparty"], "purpose": r["purpose"], "bank": r["bank"],
@@ -204,6 +207,10 @@ def inbox(
                 if str(r["id"]) in dismissed and not show_dismissed:
                     continue
                 res = _resolve_payee(r["payee"] or "", rules, masters_match)
+                # Контрагент помечен «личное» (друг, разовое) — в личном ZM-леджере
+                # трата остаётся, а из Разноски убираем.
+                if res.get("entity_type") == "personal" and not show_dismissed:
+                    continue
                 try:
                     tags = _json.loads(r["tags"] or "[]")
                 except Exception:

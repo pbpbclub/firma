@@ -168,6 +168,22 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
     onSuccess: onDone,
   });
 
+  // Личное: не бизнес-расход (друг, разовая покупка). В личном ZM-леджере трата
+  // остаётся, из Разноски убираем. «Запомнить» → правило entity_type='personal':
+  // будущие платежи этому контрагенту авто-скрываются (инбокс их отсеивает).
+  const [personalMode, setPersonalMode] = useState(false);
+  const [rememberPersonal, setRememberPersonal] = useState(false);
+  const markPersonal = useMutation({
+    mutationFn: async () => {
+      if (rememberPersonal && payeeStr) {
+        await payeeRulesApi.create({ pattern: payeeStr, match_type: "exact", entity_type: "personal", entity_name: "Личное" });
+      } else {
+        await inboxApi.dismiss(tx.id, tx.source, "Личное");
+      }
+    },
+    onSuccess: onDone,
+  });
+
   // Выдача под отчёт: перевод доверенному лицу — НЕ расход по заказу (расход
   // возникнет при его оплате поставщику). Баланс лица «на руках» вырастет.
   const [accountableMode, setAccountableMode] = useState(false);
@@ -350,6 +366,23 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
                 <X size={11} />
               </button>
             </>
+          ) : personalMode ? (
+            <>
+              <span style={{ fontSize: 10, color: "#A89070" }}>Личное:</span>
+              {payeeStr && (
+                <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "#6B6355", cursor: "pointer" }}>
+                  <input type="checkbox" checked={rememberPersonal} onChange={e => setRememberPersonal(e.target.checked)} />
+                  запомнить «{payeeStr}» → всегда личное
+                </label>
+              )}
+              <button disabled={markPersonal.isPending} onClick={() => markPersonal.mutate()}
+                style={{ fontSize: 10, padding: "3px 10px", border: "none", background: "#E8592A", color: "#fff", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
+                {markPersonal.isPending ? "..." : (rememberPersonal && payeeStr ? "Запомнить и скрыть" : "Скрыть")}
+              </button>
+              <button onClick={() => setPersonalMode(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}>
+                <X size={11} />
+              </button>
+            </>
           ) : (
             <>
               <button onClick={() => setHideMode(true)}
@@ -361,6 +394,12 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
                 title="Перевод доверенному лицу: не расход по заказу — деньги выданы под отчёт"
                 style={{ fontSize: 10, color: "#A89070", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
                 Под отчёт
+              </button>
+              <span style={{ color: "#EDEBE6" }}>·</span>
+              <button onClick={() => setPersonalMode(true)}
+                title="Личная трата (не бизнес): убрать из Разноски. В личном ZenMoney остаётся."
+                style={{ fontSize: 10, color: "#A89070", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
+                Личное
               </button>
             </>
           )}
