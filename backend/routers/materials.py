@@ -77,6 +77,21 @@ def search_materials(q: Optional[str] = None, limit: int = Query(40, le=200)):
         mconn.close()
 
 
+@router.get("/supplier-sync")
+def supplier_sync(code: str):
+    """Свежесть прайса поставщика (для карточки в Вики): дата последнего синка и
+    число позиций. code — значение prices.supplier (vrep|metplus)."""
+    mconn = get_materials()
+    try:
+        r = mconn.execute(
+            "SELECT MAX(price_date) AS last_date, COUNT(*) AS count FROM prices WHERE supplier = ?",
+            (code,),
+        ).fetchone()
+        return {"code": code, "last_date": r["last_date"] if r else None, "count": (r["count"] if r else 0) or 0}
+    finally:
+        mconn.close()
+
+
 @router.get("/{code}/prices")
 def material_prices(code: str):
     """Все цены поставщиков по карточке номенклатуры + карточка."""

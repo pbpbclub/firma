@@ -1,11 +1,30 @@
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigationGuard, NavigationGuardModal } from "../../components/NavigationGuard";
 import { EditModal, type FieldDef } from "../../components/EditModal";
 import { PayeeRulesSection } from "../../components/PayeeRulesSection";
-import { suppliersApi } from "../../api";
+import { suppliersApi, materialsApi } from "../../api";
+import { MONO } from "../../components/ui/Num";
 import { DetailRow as Row } from "./DetailRow";
 import { DetailShell, DetailSection, NoteBlock } from "./DetailShell";
+
+// Свежесть прайса поставщика из materials.db (живые цены ВРЭП/Металлинвест).
+function PriceSync({ code }: { code: string }) {
+  const { data } = useQuery({
+    queryKey: ["supplier-sync", code],
+    queryFn: () => materialsApi.supplierSync(code),
+  });
+  if (!data?.last_date) return null;
+  return (
+    <DetailSection label="ПРАЙС">
+      <div style={{ fontSize: 13, color: "#1A1A1A" }}>
+        {PRICE_SUPPLIER_LABELS[code] || code} · обновлён{" "}
+        <span style={{ fontFamily: MONO }}>{data.last_date}</span>
+        <span style={{ color: "#A89070" }}> · {new Intl.NumberFormat("ru-RU").format(data.count)} позиций</span>
+      </div>
+    </DetailSection>
+  );
+}
 
 // Код прайса materials.db → метка (справочно; join не строим).
 export const PRICE_SUPPLIER_LABELS: Record<string, string> = {
@@ -79,6 +98,10 @@ export function SupplierDetail({ row, onClose, onDeleted }: { row: any; onClose:
           <Row label="Telegram"        value={s.telegram} />
           <Row label="Сайт"            value={s.website} />
         </DetailSection>
+
+        {s.price_supplier && PRICE_SUPPLIER_LABELS[s.price_supplier] && (
+          <PriceSync code={s.price_supplier} />
+        )}
 
         {s.notes && (
           <DetailSection label="ЗАМЕТКИ">

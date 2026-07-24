@@ -225,6 +225,9 @@ function WikiCategoryView({ cat, id, navigate }: { cat: WikiCategory; id?: strin
               </div>
             );
           })}
+
+          {/* Доп. блок категории (напр. «только в вики» у подрядчиков) — под списком */}
+          {!rightOpen && cat.footer && <cat.footer />}
         </div>
 
         {/* Пагинация */}

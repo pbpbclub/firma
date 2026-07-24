@@ -188,6 +188,8 @@ export const materialsApi = {
     api.get("/materials/search", { params: q ? { q } : {} }).then((r) => r.data),
   prices: (code: string) =>
     api.get(`/materials/${encodeURIComponent(code)}/prices`).then((r) => r.data),
+  supplierSync: (code: string) =>
+    api.get("/materials/supplier-sync", { params: { code } }).then((r) => r.data),
 };
 
 export const fundsApi = {

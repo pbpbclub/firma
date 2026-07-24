@@ -1,5 +1,6 @@
 import type { ComponentType, ReactNode } from "react";
-import { User, Wrench, Truck, Palette, Buildings } from "@phosphor-icons/react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { User, Wrench, Truck, Palette, Buildings, Plus } from "@phosphor-icons/react";
 import { customersApi, mastersApi, suppliersApi, brandsApi, businessUnitsApi, financeApi } from "../../api";
 import { MONO } from "../../components/ui/Num";
 import { T } from "../../components/ui/type";
@@ -62,7 +63,53 @@ export type WikiCategory = {
   // Создание: либо форма EditModal по полям, либо своя модалка (бренды/юрлица — палитра/счета).
   createFields?: FieldDef[];
   createModal?: ComponentType<{ row: any; onClose: () => void }>;
+  // Доп. блок под списком (напр. «только в вики» у подрядчиков). Виден в полном списке.
+  footer?: ComponentType;
 };
+
+// ── «Только в вики»: контрагенты в вики фин-агента без пары в картотеке ────────
+// Они невидимы в списках (нет строки в masters). Кнопка заводит мастера и
+// связывает пару в вики (POST /masters проставляет mes_master_id).
+function WikiOnlyContractors() {
+  const qc = useQueryClient();
+  const { data: items = [] } = useQuery({ queryKey: ["wiki-only"], queryFn: mastersApi.wikiOnly });
+  const add = useMutation({
+    mutationFn: (w: any) => mastersApi.create({ name: w.name, specialization: w.specialization || undefined }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["wiki-only"] });
+      qc.invalidateQueries({ queryKey: ["wiki", "contractors"] });
+    },
+  });
+  const list = items as any[];
+  if (!list.length) return null;
+
+  return (
+    <div style={{ padding: "18px 28px 24px", borderTop: "1px solid #EDEBE6", marginTop: 8 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 4 }}>
+        <span style={{ ...T.sectionLabel }}>ТОЛЬКО В ВИКИ</span>
+        <span style={{ fontSize: 11, color: "#C8C0B0" }}>· {list.length}</span>
+      </div>
+      <div style={{ fontSize: 11, color: "#A89070", marginBottom: 12 }}>
+        Есть в вики фин-агента, но нет в картотеке — поэтому не видны в списках выше.
+      </div>
+      {list.map((w: any) => (
+        <div key={w.contractor_id || w.name}
+          style={{ display: "grid", gridTemplateColumns: "1.4fr 1.4fr 120px auto", gap: 12, alignItems: "center", padding: "10px 0", borderBottom: "1px solid #F2EFE9" }}>
+          <span style={{ ...T.body, fontWeight: 500, ...ell }}>{w.name}</span>
+          <span style={{ ...T.body, color: "#6B6355", ...ell }}>{w.specialization || "—"}</span>
+          <span style={{ ...T.body, color: w.pay_label ? "#1A1A1A" : "#C8C0B0", ...ell }}>{w.pay_label || "—"}</span>
+          <button
+            onClick={() => add.mutate(w)} disabled={add.isPending}
+            style={{ fontSize: 11, fontWeight: 600, color: "#E8592A", background: "transparent", border: "1px solid #E8592A", padding: "5px 12px", cursor: add.isPending ? "default" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}
+            onMouseEnter={e => { if (!add.isPending) { e.currentTarget.style.background = "#E8592A"; e.currentTarget.style.color = "#fff"; } }}
+            onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#E8592A"; }}>
+            <Plus size={11} /> В картотеку
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 // ── категории ─────────────────────────────────────────────────────────────
 const clients: WikiCategory = {
@@ -86,6 +133,7 @@ const contractors: WikiCategory = {
   Detail: ContractorDetail,
   createFields: CONTRACTOR_FIELDS,
   avatar: { kind: "initials", debtTint: true },
+  footer: WikiOnlyContractors,
   columns: [
     { key: "name", label: "ИМЯ", width: "1.6fr", render: (r) => nameCell(r.name) },
     { key: "status", label: "СТАТУС", width: "120px", filter: true, render: (r) => statusCell(r.status ? (CONTRACTOR_STATUS_LABELS[r.status] || r.status) : undefined, STATUS_COLORS[r.status]) },
