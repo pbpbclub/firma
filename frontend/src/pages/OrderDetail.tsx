@@ -11,13 +11,14 @@ import { Button } from "../components/ui/Button";
 import { fmtMoney, fmtDate } from "../components/ui/format";
 import { ESTIMATE_STATUS } from "../components/domain";
 import { ordersApi, customersApi, estimatesApi, expensesApi } from "../api";
-import { ArrowLeft, Plus, CaretRight, Trash, LinkSimple, PencilSimple, Warning } from "@phosphor-icons/react";
+import { Plus, CaretRight, Trash, LinkSimple, PencilSimple, Warning } from "@phosphor-icons/react";
 import { ExpenseModal, EXPENSE_CATEGORIES } from "../components/ExpenseModal";
 import { ProfitLadder, PlanFactDuel } from "../components/OrderFinance";
 import { OrderSummaryStrip } from "../components/order/OrderSummaryStrip";
 import { OrderParams } from "../components/order/OrderParams";
 import type { OrderFormState } from "../components/order/OrderParams";
 import { useNavigationGuard, NavigationGuardModal } from "../components/NavigationGuard";
+import { Breadcrumbs } from "../components/ui/Breadcrumbs";
 
 // Заголовок стадии оси: ПЛАН → ФАКТ → ИТОГ.
 function StageHeader({ n, title, hint }: { n: string; title: string; hint?: string }) {
@@ -196,20 +197,11 @@ export default function OrderDetail() {
 
       {/* Top bar */}
       <div style={{ padding: "16px 28px", borderBottom: "1px solid #EDEBE6", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <button
-            onClick={() => navigate("/orders")}
-            style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", color: "#A89070", fontSize: 12, padding: 0, fontFamily: "inherit" }}
-            onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
-            onMouseLeave={e => (e.currentTarget.style.color = "#A89070")}
-          >
-            <ArrowLeft size={13} /> Заказы
-          </button>
-          <div style={{ width: 1, height: 14, background: "#EDEBE6" }} />
-          {/* Название ведёт; номер — тусклый хвост для инженерии */}
-          <span style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A" }}>{order?.title}</span>
-          <span style={{ fontSize: 10, color: "#C8C0B0", fontFamily: MONO }}>{order?.number}</span>
-        </div>
+        {/* Крошки: Заказы › {название} · номер — выход всегда одной кнопкой */}
+        <Breadcrumbs
+          items={[{ label: "Заказы", to: "/orders" }, { label: order?.title || "…" }]}
+          tail={<span style={{ fontSize: 10, color: "#C8C0B0", fontFamily: MONO }}>{order?.number}</span>}
+        />
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           {saveMutation.isError && <span style={{ fontSize: 11, color: "#8B3A3A" }}>Ошибка сохранения</span>}
           {saveMutation.isSuccess && <span style={{ fontSize: 11, color: "#4A7C59" }}>Сохранено ✓</span>}

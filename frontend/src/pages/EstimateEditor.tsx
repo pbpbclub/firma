@@ -9,11 +9,12 @@ import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { CalcHeader, CalcSection, CalcRow, CalcFooter } from "../components/ui/Calc";
 import { BrandSelect, EditableText } from "../components/ui/Selects";
 import { markupToPct, pctToMarkup } from "../components/ui/priceMath";
+import { Breadcrumbs } from "../components/ui/Breadcrumbs";
 import { MONO } from "../components/ui/Num";
 
 const SANS = "inherit";
 import {
-  ArrowLeft, Plus, Trash, Package, Cube,
+  Plus, Trash, Package, Cube,
   FileText, DotsSixVertical, PencilSimple, FloppyDisk, ListChecks, CheckCircle, Circle,
 } from "@phosphor-icons/react";
 
@@ -549,27 +550,13 @@ export default function EstimateEditor() {
       {/* ─ Header ─────────────────────────────────────────────────────────── */}
       <div style={{ padding: "0 16px 0 28px", borderBottom: "1px solid #EDEBE6", display: "flex", alignItems: "center", gap: 8, flexShrink: 0, height: 46 }}>
 
-        {/* Left fixed: back + add item + order title */}
+        {/* Left fixed: крошки Заказы › {заказ} › Смета — каждый уровень кликабелен */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-          <button
-            onClick={() => navigate("/orders")}
-            style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070", display: "flex", alignItems: "center", gap: 4, fontSize: 12, padding: 0 }}
-            onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
-            onMouseLeave={e => (e.currentTarget.style.color = "#A89070")}
-          >
-            <ArrowLeft size={13} /> Заказы
-          </button>
-
-          <span style={{ color: "#EDEBE6" }}>·</span>
-          <button
-            onClick={() => navigate(`/orders/${orderId}`)}
-            title="Открыть сводку по заказу"
-            style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 13, fontWeight: 500, color: "#1A1A1A", whiteSpace: "nowrap", fontFamily: "inherit", borderBottom: "1px solid transparent" }}
-            onMouseEnter={e => { e.currentTarget.style.color = "#E8592A"; e.currentTarget.style.borderBottomColor = "#E8592A"; }}
-            onMouseLeave={e => { e.currentTarget.style.color = "#1A1A1A"; e.currentTarget.style.borderBottomColor = "transparent"; }}
-          >
-            {order?.title ?? orderId}
-          </button>
+          <Breadcrumbs items={[
+            { label: "Заказы", to: "/orders" },
+            { label: order?.title ?? String(orderId), to: `/orders/${orderId}` },
+            { label: "Смета" },
+          ]} />
         </div>
 
         {/* Middle scrollable: estimate tabs */}

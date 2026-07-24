@@ -10,6 +10,7 @@ import { MagnifyingGlass, DotsThree, Plus, Files, CaretRight, Archive, ArrowCoun
 import { ColumnFilter, AmountFilter } from "../components/TableFilters";
 import { ProfitLadder, PlanFactDuel } from "../components/OrderFinance";
 import { EstimateReviewQueue } from "../components/EstimateReviewQueue";
+import { Breadcrumbs } from "../components/ui/Breadcrumbs";
 
 const BRANDS: { value: string; color: string }[] = [
   { value: "MeRA",    color: "#2E6DA4" },
@@ -709,7 +710,16 @@ export default function OrdersV2() {
           </div>
 
           {/* Status tabs */}
-          <div style={{ display: "flex", gap: 24, borderBottom: "1px solid #EDEBE6" }}>
+          <div style={{ display: "flex", gap: 24, borderBottom: "1px solid #EDEBE6", alignItems: "baseline" }}>
+            {/* Режим-таб активен → статус-табы спрятаны; крошки дают выход одной кнопкой */}
+            {(archiveMode || summaryMode || reviewMode) && (
+              <div style={{ paddingBottom: 12 }}>
+                <Breadcrumbs items={[
+                  { label: "Заказы", onClick: () => { setReviewMode(false); setSummaryMode(false); setArchiveMode(false); setStatus("in_production"); setPage(0); } },
+                  { label: reviewMode ? "К утверждению" : summaryMode ? "Сводка П/Ф" : "Архив" },
+                ]} />
+              </div>
+            )}
             {!archiveMode && !summaryMode && !reviewMode && STATUSES.map((s) => (
               <button
                 key={s.value}
