@@ -1074,10 +1074,13 @@ class SplitIn(BaseModel):
 @router.post("/{order_id}/expenses/{expense_id}/split")
 def split_expense(order_id: str, expense_id: str, body: SplitIn):
     """Детализация: разбить один расход на несколько категорий (материалы/работы/…).
-    Первая часть остаётся в исходной строке (id, creditor_id и ссылки целы — инвариант
+    Первая часть остаётся в исходной строке (id, ссылки целы — инвариант
     «одна оплата = один факт» не ломается), остальные — сиблинги с общим group_id.
-    Копирование tx-ссылок на сиблингов повторяет паттерн from-tx (несколько строк
-    одной транзакции); дедуп creditors матчит любую из них."""
+    creditor_id и tx-ссылки копируются на КАЖДУЮ часть (паттерн from-tx: несколько
+    строк одной транзакции), иначе привязка к обязательству теряется у сиблингов
+    (list_obligations недосчитал бы факт). Наличный контур (payment_source=cash_fund)
+    пересчитывает движение кассы для каждой части, а не оставляет одно на исходной
+    строке на полную сумму — иначе касса рассинхронится при правке/удалении части."""
     if len(body.parts) < 2:
         raise HTTPException(status_code=400, detail="Нужно минимум 2 части")
     for p in body.parts:
@@ -1100,22 +1103,33 @@ def split_expense(order_id: str, expense_id: str, body: SplitIn):
                 detail=f"Сумма частей {total:.2f} не сходится с расходом {r['amount']:.2f}")
         group_id = r["group_id"] or str(uuid4())
         first = body.parts[0]
+        first_title = (first.title or "").strip() or r["title"]
         conn.execute(
             "UPDATE expenses SET amount = ?, category = ?, title = COALESCE(?, title), group_id = ? WHERE id = ?",
             (first.amount, first.category, (first.title or "").strip() or None, group_id, expense_id))
+        # Наличный контур: движение кассы пересчитываем под НОВУЮ сумму части — иначе
+        # на исходной строке осталось бы списание на полную сумму (см. код-правило 2026-07-24).
+        _sync_cash_fund(conn, expense_id, ExpenseIn(
+            title=first_title, amount=first.amount, category=first.category,
+            payment_source=r["payment_source"], expense_date=r["expense_date"]))
         new_ids = []
         for p in body.parts[1:]:
             eid = str(uuid4())
             new_ids.append(eid)
+            p_title = (p.title or "").strip() or r["title"]
             conn.execute(
                 """INSERT INTO expenses (id, order_id, title, amount, category, supplier, master_id,
-                                         expense_date, source, finance_tx_id, zenmoney_tx_id,
+                                         expense_date, source, creditor_id, finance_tx_id, zenmoney_tx_id,
                                          payment_source, accountable_person_id, group_id, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
-                (eid, r["order_id"], (p.title or "").strip() or r["title"], p.amount, p.category,
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+                (eid, r["order_id"], p_title, p.amount, p.category,
                  r["supplier"], r["master_id"], r["expense_date"], r["source"],
-                 r["finance_tx_id"], r["zenmoney_tx_id"],
+                 r["creditor_id"], r["finance_tx_id"], r["zenmoney_tx_id"],
                  r["payment_source"], r["accountable_person_id"], group_id))
+            # Каждая часть — своё движение кассы, а не одно на исходной строке.
+            _sync_cash_fund(conn, eid, ExpenseIn(
+                title=p_title, amount=p.amount, category=p.category,
+                payment_source=r["payment_source"], expense_date=r["expense_date"]))
         conn.commit()
         rows = [dict(x) for x in conn.execute(
             "SELECT * FROM expenses WHERE id IN ({}) ORDER BY created_at".format(

@@ -217,14 +217,15 @@ def _accountable_issue_tx_ids() -> set:
     """Банковские транзакции, оформленные как «выдача под отчёт» — бейдж в ДДС."""
     conn = get_production()
     try:
+        # accountable_ops гарантированно создаётся ensure-схемой на старте (db.py),
+        # поэтому не глушим ошибку в except: пропавшая таблица/колонка обязана
+        # всплыть, а не молча выкидывать бейдж из ДДС (см. код-правило 2026-07-21).
         return {
             str(r["finance_tx_id"])
             for r in conn.execute(
                 "SELECT finance_tx_id FROM accountable_ops WHERE finance_tx_id IS NOT NULL"
             )
         }
-    except Exception:
-        return set()
     finally:
         conn.close()
 
