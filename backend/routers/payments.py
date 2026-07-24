@@ -93,7 +93,10 @@ def inbox(
     truncated = False
     fin = get_finance()
     try:
-        where = "WHERE direction = 'in'"
+        # Входящая нога перевода между своими (пополнение ИП с личной карты) —
+        # не выручка, в инбоксе поступлений ей делать нечего.
+        from routers.finance import OWN_TRANSFER_SQL
+        where = f"WHERE direction = 'in' AND NOT {OWN_TRANSFER_SQL}"
         params: list = []
         if date_from:
             where += " AND date >= ?"; params.append(date_from)

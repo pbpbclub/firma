@@ -135,12 +135,28 @@ def get_balance_at_date(date: str):
 
 TRANSFER_REASON = "Перевод между своими"
 
+# ── Авто-детектор переводов между своими (решение Юры 24.07.2026) ────────────
+# Банк: вывод с ИП на личные карты и переброски между своими р/с идут с
+# назначением «Перевод собственных …средств» — матчим по нему («еревод» без
+# первой буквы — чтобы не зависеть от регистра П/п). НЕ матчить по контрагенту
+# «Некрасов» вообще: там же прилетают его платежи как клиента.
+OWN_TRANSFER_SQL = "(purpose LIKE '%еревод собственных%')"
+
+# ZenMoney: переводы себе на карты ВНЕ ZenMoney (Райффайзен и т.п.) выглядят
+# расходом с получателем-Юрой без парной ноги. Матчить payee ТОЧНО — рядом
+# есть чужой «Юрий Николаевич Г.».
+ZEN_OWN_PAYEES = {"Юрий Владимирович Н", "Юрий Владимирович Н.", "Юрий Н."}
+
+
+def is_own_transfer_tx(counterparty, purpose) -> bool:
+    return "еревод собственных" in (purpose or "")
+
 
 def _transfer_tx_ids() -> set:
-    """Банковские транзакции, помеченные «Перевод между своими» (обе ноги:
-    bank-in из инбокса поступлений, bank-out из инбокса списаний). Такие не
-    являются оборотом бизнеса — /summary и футер ДДС их исключают; балансы
-    счетов не трогаются (они от банка)."""
+    """Банковские транзакции, помеченные ВРУЧНУЮ «Перевод между своими» (обе
+    ноги: bank-in/bank-out). Итоговый признак перевода = ручные ∪ авто-детект
+    (is_own_transfer_tx). Такие не являются оборотом бизнеса — /summary и футер
+    ДДС их исключают; балансы счетов не трогаются (они от банка)."""
     conn = get_production()
     try:
         return {
@@ -190,7 +206,7 @@ def list_transactions(
         from routers.taxes import is_tax_tx
         bank_rows = [{
             **dict(r),
-            "is_transfer": str(r["id"]) in transfers,
+            "is_transfer": str(r["id"]) in transfers or is_own_transfer_tx(r["counterparty"], r["purpose"]),
             "is_tax": r["direction"] == "out" and is_tax_tx(r["counterparty"], r["purpose"]),
         } for r in rows]
     except Exception as e:
@@ -248,13 +264,14 @@ def list_transactions(
 
 @router.get("/summary")
 def get_summary():
-    # Переводы между своими счетами — не оборот: помеченные исключаем из сумм и
-    # графика (балансы не трогаются — они от банка).
+    # Переводы между своими счетами — не оборот: авто-распознанные (по назначению)
+    # и помеченные вручную исключаем из сумм и графика (балансы не трогаются —
+    # они от банка).
     transfers = _transfer_tx_ids()
-    not_transfer = ""
+    not_transfer = f" AND NOT {OWN_TRANSFER_SQL}"
     tparams: list = []
     if transfers:
-        not_transfer = f" AND CAST(id AS TEXT) NOT IN ({','.join('?' * len(transfers))})"
+        not_transfer += f" AND CAST(id AS TEXT) NOT IN ({','.join('?' * len(transfers))})"
         tparams = list(transfers)
     conn = get_finance()
     try:

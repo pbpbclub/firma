@@ -132,10 +132,11 @@ def inbox(
     if source == "bank":
         conn = get_finance()
         try:
-            # Платежи в налоговую распределяются автоматически в раздел «Налоги» —
-            # на заказы их не разнести, в инбоксе им делать нечего.
+            # Авто-распределённые мимо инбокса: налоги → раздел «Налоги», переводы
+            # между своими (вывод на личные карты) — не расход бизнеса вовсе.
             from routers.taxes import TAX_TX_SQL
-            sql = f"SELECT * FROM transactions WHERE direction = 'out' AND NOT {TAX_TX_SQL}"
+            from routers.finance import OWN_TRANSFER_SQL
+            sql = f"SELECT * FROM transactions WHERE direction = 'out' AND NOT {TAX_TX_SQL} AND NOT {OWN_TRANSFER_SQL}"
             params: list = []
             if date_from:
                 sql += " AND date >= ?"; params.append(date_from)
@@ -187,8 +188,12 @@ def inbox(
             sql += " ORDER BY date DESC LIMIT ?"
             params.append(limit * 3)
             import json as _json
+            from routers.finance import ZEN_OWN_PAYEES
             for r in conn.execute(sql, params).fetchall():
                 if str(r["id"]) in zen_done:
+                    continue
+                # Перевод себе на карту вне ZenMoney (Райффайзен) — не расход.
+                if (r["payee"] or "").strip() in ZEN_OWN_PAYEES:
                     continue
                 if str(r["id"]) in dismissed and not show_dismissed:
                     continue
