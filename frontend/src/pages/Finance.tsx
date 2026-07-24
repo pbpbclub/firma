@@ -312,7 +312,10 @@ export default function Finance() {
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [linkModal, setLinkModal] = useState<any>(null);
   const [linkOrderModal, setLinkOrderModal] = useState<any>(null);
-  const FIN_GRID = "28px 110px 1fr 120px 120px 28px 28px";
+  // Одна общая иконко-колонка: скрепка (out→обязательство) или линк (in→заказ)
+// рендерятся в ОДНОМ столбце — раньше их было два и единственная видимая иконка
+// «прыгала» между x-позициями от строки к строке.
+const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
 
   const { data: allCreditors } = useQuery({
     queryKey: ["creditors-all"],
@@ -477,7 +480,7 @@ export default function Finance() {
           <div><ColumnFilter label="ОПИСАНИЕ" options={uniqueDescs} value={descFilter} onChange={setDescFilter} /></div>
           <div><ColumnFilter label="СЧЁТ" options={["Т-Банк", "Сбербанк", "Фонды"]} value={accountFilter} onChange={setAccountFilter} /></div>
           <div><AmountFilter label="СУММА" min={amountMin} max={amountMax} onChange={(mn, mx) => { setAmountMin(mn); setAmountMax(mx); }} /></div>
-          <div /><div />
+          <div />
         </div>
 
         {/* Rows */}
@@ -537,18 +540,15 @@ export default function Finance() {
                   )}
                 </div>
                 <div style={{ display: "flex", justifyContent: "center" }}>
-                  {t.direction === "out" && t.source !== "fund" && (
+                  {t.source !== "fund" && (t.direction === "out" ? (
                     <IconButton icon={LinkSimple} title="Привязать к обязательству" size={24} iconSize={12}
                       color={creditorByFinTx.has(String(t.id)) ? "#4A7C59" : "#C8C0B0"}
                       onClick={e => { e.stopPropagation(); setLinkModal(t); }} />
-                  )}
-                </div>
-                <div style={{ display: "flex", justifyContent: "center" }}>
-                  {t.direction === "in" && t.source !== "fund" && (
+                  ) : (
                     <IconButton icon={LinkSimple} title="Привязать к заказу" size={24} iconSize={12}
                       color={paymentByFinTx.has(String(t.id)) ? "#4A7C59" : "#C8C0B0"}
                       onClick={e => { e.stopPropagation(); setLinkOrderModal(t); }} />
-                  )}
+                  ))}
                 </div>
               </div>
             ))

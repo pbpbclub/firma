@@ -508,8 +508,11 @@ def update_creditor(creditor_id: str, body: CreditorPatch):
         row = conn.execute("SELECT * FROM creditors WHERE id = ?", (creditor_id,)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Not found")
+        # exclude_unset (а не exclude_none): явный null должен ДОХОДИТЬ до UPDATE —
+        # «Отвязать» шлёт {finance_tx_id: null}, и exclude_none молча съедал отвязку.
+        # Не присланные поля по-прежнему не трогаются (паттерн update_receivable).
         fields, params = [], []
-        for field, val in body.model_dump(exclude_none=True).items():
+        for field, val in body.model_dump(exclude_unset=True).items():
             fields.append(f"{field} = ?")
             params.append(val)
         if not fields:

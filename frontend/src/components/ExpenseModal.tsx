@@ -35,7 +35,12 @@ export function ExpenseModal({ orderId, expense, onSave, onClose, saving }: {
 
   const { data: masters = [] } = useQuery({ queryKey: ["masters"], queryFn: mastersApi.list });
   // Обязательства этого заказа — чтобы поймать двойной счёт до того, как он случится.
-  const { data: creditors = [] } = useQuery({ queryKey: ["creditors"], queryFn: () => financeApi.creditors() });
+  // Эндпоинт отдаёт обёртку {items, total_*} — разворачиваем сразу, иначе .find по
+  // объекту роняет рендер («Добавить расход» падал в ErrorBoundary).
+  const { data: creditors = [] } = useQuery({
+    queryKey: ["creditors"],
+    queryFn: () => financeApi.creditors().then((r: any) => r?.items ?? r ?? []),
+  });
 
   const master = (masters as any[]).find((m: any) => m.id === masterId);
   const supplier = master?.name ?? expense?.supplier ?? null;
