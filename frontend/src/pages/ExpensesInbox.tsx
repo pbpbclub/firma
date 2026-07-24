@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { MONO } from "../components/ui/Num";
 import { Loading } from "../components/ui/Loading";
@@ -7,7 +7,7 @@ import { PeriodFilter, AmountFilter, ColumnFilter } from "../components/TableFil
 import { inboxApi, ordersApi, mastersApi, payeeRulesApi, estimatesApi, paymentsApi , accountableApi} from "../api";
 import { EXPENSE_CATEGORIES } from "../components/ExpenseModal";
 import { Modal } from "../components/ui/Modal";
-import { MagnifyingGlass, X, Check, ArrowCounterClockwise } from "@phosphor-icons/react";
+import { MagnifyingGlass, X, Check, ArrowCounterClockwise, EyeSlash, HandCoins, User } from "@phosphor-icons/react";
 
 function fmt(n: number | null | undefined) {
   if (!n) return "—";
@@ -173,12 +173,13 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
   // будущие платежи этому контрагенту авто-скрываются (инбокс их отсеивает).
   const [personalMode, setPersonalMode] = useState(false);
   const [rememberPersonal, setRememberPersonal] = useState(false);
+  const [personalSubcat, setPersonalSubcat] = useState("Прочее");
   const markPersonal = useMutation({
     mutationFn: async () => {
       if (rememberPersonal && payeeStr) {
-        await payeeRulesApi.create({ pattern: payeeStr, match_type: "exact", entity_type: "personal", entity_name: "Личное" });
+        await payeeRulesApi.create({ pattern: payeeStr, match_type: "exact", entity_type: "personal", entity_name: "Личное", category: personalSubcat });
       } else {
-        await inboxApi.dismiss(tx.id, tx.source, "Личное");
+        await inboxApi.dismiss(tx.id, tx.source, "Личное: " + personalSubcat);
       }
     },
     onSuccess: onDone,
@@ -369,15 +370,26 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
           ) : personalMode ? (
             <>
               <span style={{ fontSize: 10, color: "#A89070" }}>Личное:</span>
+              {PERSONAL_SUBCATS.map(sc => {
+                const on = personalSubcat === sc;
+                return (
+                  <button key={sc} onClick={() => setPersonalSubcat(sc)}
+                    style={{ fontSize: 10, padding: "3px 8px", border: `1px solid ${on ? "#E8592A" : "#EDEBE6"}`,
+                      background: on ? "#FFF4EE" : "#fff", color: on ? "#E8592A" : "#6B6355",
+                      cursor: "pointer", fontFamily: "inherit", fontWeight: on ? 600 : 400 }}>
+                    {sc}
+                  </button>
+                );
+              })}
               {payeeStr && (
                 <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "#6B6355", cursor: "pointer" }}>
                   <input type="checkbox" checked={rememberPersonal} onChange={e => setRememberPersonal(e.target.checked)} />
-                  запомнить «{payeeStr}» → всегда личное
+                  запомнить «{payeeStr}»
                 </label>
               )}
               <button disabled={markPersonal.isPending} onClick={() => markPersonal.mutate()}
                 style={{ fontSize: 10, padding: "3px 10px", border: "none", background: "#E8592A", color: "#fff", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
-                {markPersonal.isPending ? "..." : (rememberPersonal && payeeStr ? "Запомнить и скрыть" : "Скрыть")}
+                {markPersonal.isPending ? "..." : (rememberPersonal && payeeStr ? "Запомнить" : "Скрыть")}
               </button>
               <button onClick={() => setPersonalMode(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}>
                 <X size={11} />
@@ -385,22 +397,15 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
             </>
           ) : (
             <>
-              <button onClick={() => setHideMode(true)}
-                style={{ fontSize: 10, color: "#A89070", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
-                Это не расход — скрыть
-              </button>
-              <span style={{ color: "#EDEBE6" }}>·</span>
-              <button onClick={() => setAccountableMode(true)}
+              <ActionChip icon={<EyeSlash size={12} />} label="Не расход"
+                title="Скрыть: перевод между своими, возврат — не расход бизнеса"
+                onClick={() => setHideMode(true)} />
+              <ActionChip icon={<HandCoins size={12} />} label="Под отчёт"
                 title="Перевод доверенному лицу: не расход по заказу — деньги выданы под отчёт"
-                style={{ fontSize: 10, color: "#A89070", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
-                Под отчёт
-              </button>
-              <span style={{ color: "#EDEBE6" }}>·</span>
-              <button onClick={() => setPersonalMode(true)}
+                onClick={() => setAccountableMode(true)} />
+              <ActionChip icon={<User size={12} />} label="Личное"
                 title="Личная трата (не бизнес): убрать из Разноски. В личном ZenMoney остаётся."
-                style={{ fontSize: 10, color: "#A89070", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
-                Личное
-              </button>
+                onClick={() => setPersonalMode(true)} />
             </>
           )}
         </div>
@@ -429,6 +434,26 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
 
 // ── Строка разноски ПОСТУПЛЕНИЯ: входящий платёж банка → payments по заказам ──
 const DISMISS_REASONS = ["Перевод между своими", "Возврат", "Не по заказам"];
+// Под-категории личных трат (синхрон с PERSONAL_SUBCATS в backend/routers/finance.py).
+const PERSONAL_SUBCATS = ["Подписки", "Еда", "Друзья", "Развлечения", "Прочее"];
+
+// Кнопка-действие «иконка + подпись» с рамкой — явная кликабельность (не серый текст).
+function ActionChip({ icon, label, title, onClick }:
+  { icon: ReactNode; label: string; title?: string; onClick: () => void }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button onClick={onClick} title={title}
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{
+        display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, lineHeight: 1,
+        padding: "4px 9px", cursor: "pointer", fontFamily: "inherit",
+        border: `1px solid ${hover ? "#E8592A" : "#EDEBE6"}`,
+        background: hover ? "#FFF4EE" : "#fff", color: hover ? "#E8592A" : "#6B6355",
+      }}>
+      {icon} {label}
+    </button>
+  );
+}
 
 function PaymentAllocRow({ tx, onDone, onReservePrompt }: {
   tx: any; onDone: () => void;

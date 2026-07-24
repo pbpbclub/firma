@@ -151,6 +151,10 @@ OWN_TRANSFER_SQL = "(purpose LIKE '%еревод собственных%' OR pur
 # есть чужой «Юрий Николаевич Г.».
 ZEN_OWN_PAYEES = {"Юрий Владимирович Н", "Юрий Владимирович Н.", "Юрий Н."}
 
+# Под-категории личных трат (градация «Личное» в Разноске). «Прочее» — фолбэк
+# для неразмеченного. Держать в синхроне с PERSONAL_SUBCATS во фронте (ExpensesInbox.tsx).
+PERSONAL_SUBCATS = ["Подписки", "Еда", "Друзья", "Развлечения", "Прочее"]
+
 
 def is_own_transfer_tx(counterparty, purpose) -> bool:
     p = purpose or ""
@@ -470,10 +474,11 @@ def personal_spending():
     if m <= 0:
         m, y = m + 12, y - 1
     six_months_ago = f"{y}-{m:02d}-01"
-    cats = {
-        "raiffeisen": {"key": "raiffeisen", "label": "Переводы на Райффайзен"},
-        "marked": {"key": "marked", "label": "Отмечено личным"},
-    }
+    # Райффайзен-переводы + помеченное личным с градацией по под-категориям.
+    # Ключ под-категории: "sub:{Название}"; в UI строка «Личное · {Название}».
+    cats = {"raiffeisen": {"key": "raiffeisen", "label": "Переводы на Райффайзен"}}
+    for sc in PERSONAL_SUBCATS:
+        cats[f"sub:{sc}"] = {"key": f"sub:{sc}", "label": f"Личное · {sc}"}
     for c in cats.values():
         c.update(count=0, total=0.0, current_month=0.0, last6=0.0)
 
@@ -486,16 +491,27 @@ def personal_spending():
         if (d or "") >= six_months_ago:
             c["last6"] += amount
 
-    # personal-правила + разовые dismiss «Личное» (production.db)
+    def sub_key(subcat):
+        sc = (subcat or "").strip() or "Прочее"
+        return f"sub:{sc}" if f"sub:{sc}" in cats else "sub:Прочее"
+
+    # personal-правила (pattern → под-категория) + разовые dismiss «Личное[: субкат]»
     prod = get_production()
     try:
         personal_patterns = {
-            (r["pattern"] or "").strip().lower()
-            for r in prod.execute("SELECT pattern FROM payee_rules WHERE entity_type = 'personal'")
+            (r["pattern"] or "").strip().lower(): (r["category"] or "").strip() or "Прочее"
+            for r in prod.execute(
+                "SELECT pattern, category FROM payee_rules WHERE entity_type = 'personal'"
+            )
         }
-        dismissed_zen, dismissed_bank = set(), set()
-        for r in prod.execute("SELECT tx_id, source FROM inbox_dismissed WHERE reason = 'Личное'"):
-            (dismissed_zen if r["source"] == "zen-out" else dismissed_bank).add(str(r["tx_id"]))
+        dismissed_zen, dismissed_bank = {}, {}
+        for r in prod.execute(
+            "SELECT tx_id, source, reason FROM inbox_dismissed "
+            "WHERE reason = 'Личное' OR reason LIKE 'Личное:%'"
+        ):
+            reason = r["reason"] or ""
+            subcat = reason.split(":", 1)[1].strip() if ":" in reason else "Прочее"
+            (dismissed_zen if r["source"] == "zen-out" else dismissed_bank)[str(r["tx_id"])] = subcat
     finally:
         prod.close()
 
@@ -511,8 +527,10 @@ def personal_spending():
             amount = r["outcome"] or 0
             if payee in ZEN_OWN_PAYEES:
                 add("raiffeisen", r["date"], amount)
-            elif payee.lower() in personal_patterns or str(r["id"]) in dismissed_zen:
-                add("marked", r["date"], amount)
+            elif payee.lower() in personal_patterns:
+                add(sub_key(personal_patterns[payee.lower()]), r["date"], amount)
+            elif str(r["id"]) in dismissed_zen:
+                add(sub_key(dismissed_zen[str(r["id"])]), r["date"], amount)
     finally:
         zconn.close()
 
@@ -523,13 +541,18 @@ def personal_spending():
             "SELECT id, date, amount, counterparty FROM transactions WHERE direction = 'out'"
         ):
             cp = (r["counterparty"] or "").strip()
-            if cp.lower() in personal_patterns or str(r["id"]) in dismissed_bank:
-                add("marked", r["date"], r["amount"] or 0)
+            amount = r["amount"] or 0
+            if cp.lower() in personal_patterns:
+                add(sub_key(personal_patterns[cp.lower()]), r["date"], amount)
+            elif str(r["id"]) in dismissed_bank:
+                add(sub_key(dismissed_bank[str(r["id"])]), r["date"], amount)
     finally:
         fconn.close()
 
     out = []
     for c in cats.values():
+        if c["count"] == 0 and c["key"] != "raiffeisen":
+            continue  # пустые под-категории не показываем; Райффайзен — всегда
         c["total"] = round(c["total"], 2)
         c["current_month"] = round(c["current_month"], 2)
         c["month_avg"] = round(c["last6"] / 6, 2)
