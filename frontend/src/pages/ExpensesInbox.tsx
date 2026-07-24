@@ -645,7 +645,8 @@ export default function ExpensesInbox() {
                 </div>
                 {(t.purpose || t.zen_tag) && (
                   <div style={{ fontSize: 10, color: "#A89070", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {t.purpose}{t.zen_tag ? ` · ${t.zen_tag}` : ""}
+                    {t.purpose}
+                    {t.zen_tag && <span style={{ color: "#C8C0B0" }}>{t.purpose ? " · " : ""}ZenMoney: {t.zen_tag}</span>}
                   </div>
                 )}
               </div>

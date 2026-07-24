@@ -98,6 +98,46 @@ export default function Taxes() {
           </div>
         </div>
       </div>
+
+      {/* Оплачено в ФНС — фактические платежи (авто-распознанные из банка).
+          Это «контрагент-налоговая»: все платежи Казначейству/ФНС собираются здесь,
+          в Разноску они не попадают. */}
+      {(data.tax_payments?.length ?? 0) > 0 && (
+        <div style={section}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 16, marginBottom: 4 }}>
+            <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.06em" }}>ОПЛАЧЕНО В ФНС</div>
+            <div style={{ fontSize: 10, color: "#C8C0B0" }}>платежи Казначейству/ФНС распознаются автоматически, в Разноску не попадают</div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 220px))", gap: "0 24px", margin: "12px 0 6px" }}>
+            {[
+              { label: `ЗА ${data.year} ГОД`, value: fmt(data.tax_paid_year), color: "#1A1A1A" },
+              { label: "ЗА ВСЁ ВРЕМЯ", value: fmt(data.tax_paid_total), color: "#1A1A1A" },
+              {
+                label: `К НАЧИСЛЕННОМУ ${data.year} (6%)`,
+                value: (data.tax_paid_year - data.tax_year >= 0 ? "+" : "−") + fmt(Math.abs(data.tax_paid_year - data.tax_year)),
+                color: data.tax_paid_year - data.tax_year >= 0 ? "#4A7C59" : "#8B3A3A",
+              },
+            ].map(m => (
+              <div key={m.label}>
+                <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 6 }}>{m.label}</div>
+                <div style={{ fontSize: 17, fontWeight: 700, color: m.color, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{m.value}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ marginTop: 14 }}>
+            {data.tax_payments.map((p: any) => (
+              <div key={p.id} style={{ display: "grid", gridTemplateColumns: "90px 1fr 110px", gap: 12, padding: "8px 0", borderBottom: "1px solid #F2EFE9", alignItems: "baseline" }}>
+                <div style={{ fontSize: 11, color: "#A89070", fontFamily: MONO }}>{p.date}</div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 12, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.counterparty}</div>
+                  {p.purpose && <div style={{ fontSize: 10, color: "#A89070", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.purpose}</div>}
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#8B3A3A", textAlign: "right", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>−{fmt(p.amount)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -187,7 +187,12 @@ def list_transactions(
         params.append(limit)
         rows = conn.execute(sql, params).fetchall()
         transfers = _transfer_tx_ids()
-        bank_rows = [{**dict(r), "is_transfer": str(r["id"]) in transfers} for r in rows]
+        from routers.taxes import is_tax_tx
+        bank_rows = [{
+            **dict(r),
+            "is_transfer": str(r["id"]) in transfers,
+            "is_tax": r["direction"] == "out" and is_tax_tx(r["counterparty"], r["purpose"]),
+        } for r in rows]
     except Exception as e:
         bank_rows = []
     finally:

@@ -132,7 +132,10 @@ def inbox(
     if source == "bank":
         conn = get_finance()
         try:
-            sql = "SELECT * FROM transactions WHERE direction = 'out'"
+            # Платежи в налоговую распределяются автоматически в раздел «Налоги» —
+            # на заказы их не разнести, в инбоксе им делать нечего.
+            from routers.taxes import TAX_TX_SQL
+            sql = f"SELECT * FROM transactions WHERE direction = 'out' AND NOT {TAX_TX_SQL}"
             params: list = []
             if date_from:
                 sql += " AND date >= ?"; params.append(date_from)
