@@ -4,7 +4,7 @@ import { MONO } from "../components/ui/Num";
 import { Loading } from "../components/ui/Loading";
 import { EmptyState } from "../components/ui/EmptyState";
 import { PeriodFilter, AmountFilter, ColumnFilter } from "../components/TableFilters";
-import { inboxApi, ordersApi, mastersApi, payeeRulesApi, estimatesApi, paymentsApi } from "../api";
+import { inboxApi, ordersApi, mastersApi, payeeRulesApi, estimatesApi, paymentsApi , accountableApi} from "../api";
 import { EXPENSE_CATEGORIES } from "../components/ExpenseModal";
 import { Modal } from "../components/ui/Modal";
 import { MagnifyingGlass, X, Check, ArrowCounterClockwise } from "@phosphor-icons/react";
@@ -168,6 +168,18 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
     onSuccess: onDone,
   });
 
+  // Выдача под отчёт: перевод доверенному лицу — НЕ расход по заказу (расход
+  // возникнет при его оплате поставщику). Баланс лица «на руках» вырастет.
+  const [accountableMode, setAccountableMode] = useState(false);
+  const [accountablePick, setAccountablePick] = useState<string>(tx.master_id || tx.master_suggested?.id || "");
+  const issueAccountable = useMutation({
+    mutationFn: () => accountableApi.issueFromTx({
+      tx_id: tx.id, source: tx.source, master_id: accountablePick,
+      amount: tx.amount, date: (tx.date || "").slice(0, 10) || undefined,
+    }),
+    onSuccess: onDone,
+  });
+
   const addOrder = (orderId: string) => {
     if (allocs.some(a => a.order_id === orderId)) return;
     setAllocs([...allocs, { order_id: orderId, amount: "", category: tx.category_hint || "material", master_id: payeeMaster || "", creditor_id: null }]);
@@ -321,11 +333,36 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
                 <X size={11} />
               </button>
             </>
+          ) : accountableMode ? (
+            <>
+              <span style={{ fontSize: 10, color: "#A89070" }}>Под отчёт:</span>
+              <select value={accountablePick} onChange={e => setAccountablePick(e.target.value)}
+                style={{ border: "1px solid #EDEBE6", padding: "3px 6px", fontSize: 11, outline: "none", background: "#fff", cursor: "pointer" }}>
+                <option value="">— кому —</option>
+                {(masters as any[]).map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+              <button disabled={!accountablePick || issueAccountable.isPending} onClick={() => issueAccountable.mutate()}
+                style={{ fontSize: 10, padding: "3px 10px", border: "none", background: accountablePick ? "#E8592A" : "#EDEBE6",
+                  color: accountablePick ? "#fff" : "#A89070", cursor: accountablePick ? "pointer" : "default", fontFamily: "inherit", fontWeight: 600 }}>
+                {issueAccountable.isPending ? "..." : "Выдать"}
+              </button>
+              <button onClick={() => setAccountableMode(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}>
+                <X size={11} />
+              </button>
+            </>
           ) : (
-            <button onClick={() => setHideMode(true)}
-              style={{ fontSize: 10, color: "#A89070", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
-              Это не расход — скрыть
-            </button>
+            <>
+              <button onClick={() => setHideMode(true)}
+                style={{ fontSize: 10, color: "#A89070", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
+                Это не расход — скрыть
+              </button>
+              <span style={{ color: "#EDEBE6" }}>·</span>
+              <button onClick={() => setAccountableMode(true)}
+                title="Перевод доверенному лицу: не расход по заказу — деньги выданы под отчёт"
+                style={{ fontSize: 10, color: "#A89070", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
+                Под отчёт
+              </button>
+            </>
           )}
         </div>
         <div style={{ fontSize: 11, color: Math.abs(diff) < 0.01 ? "#4A7C59" : "#8B3A3A", fontFamily: MONO }}>

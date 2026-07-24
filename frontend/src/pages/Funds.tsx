@@ -5,7 +5,7 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { MONO } from "../components/ui/Num";
 import { Modal } from "../components/ui/Modal";
 import { IconButton } from "../components/ui/IconButton";
-import { fundsApi } from "../api";
+import { fundsApi, accountableApi } from "../api";
 import { Plus, Minus, Trash } from "@phosphor-icons/react";
 import { ColumnFilter, AmountFilter, PeriodFilter } from "../components/TableFilters";
 
@@ -256,6 +256,107 @@ function CreateFundModal({ onClose, onDone }: { onClose: () => void; onDone: () 
   );
 }
 
+// ── Под отчётом ──────────────────────────────────────────────────────────────
+function AccountableSection() {
+  const qc = useQueryClient();
+  const { data: people = [] } = useQuery({ queryKey: ["accountable"], queryFn: accountableApi.list });
+  const [opFor, setOpFor] = useState<{ person: any; kind: "issue" | "return" } | null>(null);
+  const [histFor, setHistFor] = useState<any>(null);
+  const [amount, setAmount] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const { data: hist } = useQuery({
+    queryKey: ["accountable-ops", histFor?.id],
+    queryFn: () => accountableApi.ops(histFor!.id),
+    enabled: !!histFor,
+  });
+
+  const doOp = async () => {
+    const a = parseFloat(amount);
+    if (!opFor || !a || a <= 0) return;
+    setSaving(true);
+    try {
+      await accountableApi.addOp(opFor!.person.id, { kind: opFor!.kind, amount: a });
+      qc.invalidateQueries({ queryKey: ["accountable"] });
+      qc.invalidateQueries({ queryKey: ["funds"] });
+      setOpFor(null); setAmount("");
+    } finally { setSaving(false); }
+  };
+
+  if (!(people as any[]).length) return null;
+  return (
+    <div style={{ padding: "20px 28px", borderBottom: "1px solid #EDEBE6" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 12 }}>
+        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.06em" }}>ПОД ОТЧЁТОМ</div>
+        <div style={{ fontSize: 10, color: "#C8C0B0" }}>выдача — не расход по заказу; расход появится при оплате поставщику</div>
+      </div>
+      {(people as any[]).map((p: any) => (
+        <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "9px 0", borderBottom: "1px solid #F2EFE9" }}>
+          <button onClick={() => setHistFor(p)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 13, color: "#1A1A1A", textDecoration: "underline", textDecorationColor: "#EDEBE6", fontFamily: "inherit" }}>
+            {p.name}
+          </button>
+          <span style={{ fontSize: 10, color: "#A89070" }}>на руках</span>
+          <span style={{ fontSize: 14, fontWeight: 700, color: p.balance > 0 ? "#E8592A" : "#1A1A1A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(p.balance)}</span>
+          <div style={{ flex: 1 }} />
+          {opFor?.person.id === p.id ? (
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <span style={{ fontSize: 10, color: "#A89070" }}>{opFor!.kind === "issue" ? "Выдать из кассы:" : "Возврат в кассу:"}</span>
+              <input type="number" value={amount} onChange={e => setAmount(e.target.value)} autoFocus
+                style={{ width: 100, border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 12, outline: "none", textAlign: "right", fontFamily: MONO }} />
+              <button disabled={saving || !parseFloat(amount)} onClick={doOp}
+                style={{ fontSize: 11, padding: "4px 12px", border: "none", background: "#E8592A", color: "#fff", cursor: "pointer", fontWeight: 600, fontFamily: "inherit" }}>
+                {saving ? "..." : "OK"}
+              </button>
+              <button onClick={() => { setOpFor(null); setAmount(""); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2 }}>✕</button>
+            </div>
+          ) : (
+            <div style={{ display: "flex", gap: 6 }}>
+              <button onClick={() => setOpFor({ person: p, kind: "issue" })}
+                style={{ fontSize: 11, padding: "4px 10px", border: "1px solid #EDEBE6", background: "transparent", color: "#4A7C59", cursor: "pointer", fontFamily: "inherit" }}>
+                Выдать из кассы
+              </button>
+              <button onClick={() => setOpFor({ person: p, kind: "return" })} disabled={p.balance <= 0}
+                style={{ fontSize: 11, padding: "4px 10px", border: "1px solid #EDEBE6", background: "transparent", color: p.balance > 0 ? "#8B3A3A" : "#C8C0B0", cursor: p.balance > 0 ? "pointer" : "default", fontFamily: "inherit" }}>
+                Возврат в кассу
+              </button>
+            </div>
+          )}
+        </div>
+      ))}
+
+      {/* История операций лица */}
+      {histFor && (
+        <Modal size="md" eyebrow={`ПОД ОТЧЁТОМ · ${histFor.name.toUpperCase()}`} onClose={() => setHistFor(null)} onCancel={() => setHistFor(null)}>
+          <div style={{ padding: "16px 24px 20px" }}>
+            <div style={{ fontSize: 12, color: "#6B6355", marginBottom: 12 }}>
+              На руках: <span style={{ fontFamily: MONO, fontWeight: 700, color: "#1A1A1A" }}>{fmt(hist?.balance ?? histFor.balance)}</span>
+            </div>
+            {(hist?.ops ?? []).map((o: any) => (
+              <div key={o.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "7px 0", borderBottom: "1px solid #F2EFE9", fontSize: 12 }}>
+                <span style={{ color: "#A89070", fontFamily: MONO }}>{o.date}</span>
+                <span style={{ flex: 1, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.note || (o.kind === "issue" ? "Выдача" : "Возврат")}</span>
+                <span style={{ fontFamily: MONO, fontWeight: 600, color: o.kind === "issue" ? "#4A7C59" : "#8B3A3A" }}>
+                  {o.kind === "issue" ? "+" : "−"}{fmt(o.amount)}
+                </span>
+              </div>
+            ))}
+            {(hist?.expenses ?? []).map((e: any) => (
+              <div key={e.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "7px 0", borderBottom: "1px solid #F2EFE9", fontSize: 12 }}>
+                <span style={{ color: "#A89070", fontFamily: MONO }}>{e.date}</span>
+                <span style={{ flex: 1, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Оплата: {e.title}</span>
+                <span style={{ fontFamily: MONO, fontWeight: 600, color: "#8B3A3A" }}>−{fmt(e.amount)}</span>
+              </div>
+            ))}
+            {!(hist?.ops ?? []).length && !(hist?.expenses ?? []).length && (
+              <div style={{ fontSize: 12, color: "#C8C0B0" }}>Операций нет</div>
+            )}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 // ── Главная страница ─────────────────────────────────────────────────────────
 
 export default function Funds() {
@@ -326,6 +427,10 @@ export default function Funds() {
                   <span style={{ fontSize: 11, fontWeight: 600, color: "#6B6355", letterSpacing: "0.02em", textDecoration: "underline", textDecorationColor: "#EDEBE6" }}>
                     {f.name.toUpperCase()}
                   </span>
+                  {f.kind === "cash" && (
+                    <span title="Физические наличные — вне банковских счетов, из свободных денег банка не вычитается"
+                      style={{ fontSize: 9, color: "#A89070", background: "#F2EFE9", padding: "1px 5px", flexShrink: 0 }}>вне банка</span>
+                  )}
                 </button>
 
                 <div style={{ fontSize: 22, fontWeight: 700, color: f.balance > 0 ? "#1A1A1A" : "#C8C0B0", letterSpacing: "-0.02em", marginBottom: 12, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
@@ -353,6 +458,11 @@ export default function Funds() {
               </div>
             ))}
           </div>
+
+          {/* Под отчётом: доверенные лица с выданными наличными на руках.
+              Выдача — НЕ расход по заказу; расход возникает при их оплате
+              поставщику (ExpenseModal → «Через подотчётника»). */}
+          <AccountableSection />
         </div>
       )}
 

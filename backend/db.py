@@ -208,10 +208,66 @@ def ensure_expenses_schema():
             "zenmoney_tx_id": "TEXT",            # транзакция ZenMoney
             "group_id": "TEXT",                  # группа разнесённого расхода (одна поездка)
             "master_id": "TEXT",                 # подрядчик из production.masters
+            # Наличный контур (ТЗ cash_expenses 24.07.2026): NULL = безнал/банк,
+            # 'cash_fund' = из кассы наличных, 'accountable' = оплатило подотчётное лицо.
+            "payment_source": "TEXT",
+            "accountable_person_id": "TEXT",     # masters.id подотчётного лица
         }
         for col, decl in cols.items():
             if col not in existing:
                 conn.execute(f"ALTER TABLE expenses ADD COLUMN {col} {decl}")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_cash_schema():
+    """Наличный контур (ТЗ cash_expenses, 24.07.2026).
+
+    Касса — фонд kind='cash': физические наличные ВНЕ банка, из «свободных денег»
+    банка НЕ вычитается (в отличие от фондов-резервов). fund_transactions.expense_id
+    связывает списание кассы с расходом (наличная оплата поставщику = expense +
+    fund-out одной операцией; удаление расхода подчищает движение кассы).
+    accountable_ops — выдачи/возвраты под отчёт: выдача подотчётному лицу — НЕ
+    расход по заказу (расход возникает при оплате поставщику), баланс лица =
+    выдачи − возвраты − его оплаты (expenses.payment_source='accountable')."""
+    conn = get_production()
+    try:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        # funds.kind: 'reserve' (резерв поверх банка) | 'cash' (физическая касса)
+        if "funds" in tables:
+            existing = {r[1] for r in conn.execute("PRAGMA table_info(funds)").fetchall()}
+            if "kind" not in existing:
+                conn.execute("ALTER TABLE funds ADD COLUMN kind TEXT DEFAULT 'reserve'")
+            cash = conn.execute("SELECT id FROM funds WHERE kind = 'cash'").fetchone()
+            if not cash:
+                import uuid as _uuid
+                conn.execute(
+                    "INSERT INTO funds (id, name, description, color, kind) VALUES (?, ?, ?, ?, 'cash')",
+                    (str(_uuid.uuid4()), "Касса (наличные)", "Физические наличные — вне банковских счетов", "#6B6355"),
+                )
+        if "fund_transactions" in tables:
+            existing = {r[1] for r in conn.execute("PRAGMA table_info(fund_transactions)").fetchall()}
+            if "expense_id" not in existing:
+                conn.execute("ALTER TABLE fund_transactions ADD COLUMN expense_id TEXT")
+        # Подотчётные лица — флаг на мастере (Эдуард Малафеев — первый).
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(masters)").fetchall()}
+        if existing and "is_accountable" not in existing:
+            conn.execute("ALTER TABLE masters ADD COLUMN is_accountable INTEGER DEFAULT 0")
+            conn.execute("UPDATE masters SET is_accountable = 1 WHERE name = 'Эдуард Малафеев'")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS accountable_ops (
+                id             TEXT PRIMARY KEY,
+                master_id      TEXT NOT NULL,
+                kind           TEXT NOT NULL,          -- issue (выдача) | return (возврат)
+                amount         REAL NOT NULL,
+                date           TEXT DEFAULT (date('now')),
+                finance_tx_id  TEXT,                   -- перевод из банка (выдача из Разноски)
+                zenmoney_tx_id TEXT,
+                note           TEXT,
+                created_at     TEXT DEFAULT (datetime('now'))
+            )
+        """)
         conn.commit()
     finally:
         conn.close()

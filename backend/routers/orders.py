@@ -844,6 +844,9 @@ class ExpenseIn(BaseModel):
     finance_tx_id: Optional[str] = None
     zenmoney_tx_id: Optional[str] = None
     creditor_id: Optional[str] = None
+    # Наличный контур: None = безнал/банк | cash_fund (из кассы) | accountable (через подотчётника)
+    payment_source: Optional[str] = None
+    accountable_person_id: Optional[str] = None
 
 
 def _resolve_order(conn, order_id: str):
@@ -861,6 +864,26 @@ def _validate_expense(body: ExpenseIn):
         raise HTTPException(status_code=400, detail="amount must be > 0")
     if body.category not in EXPENSE_CATEGORIES:
         raise HTTPException(status_code=400, detail=f"category must be one of {'|'.join(EXPENSE_CATEGORIES)}")
+    if body.payment_source not in (None, "cash_fund", "accountable"):
+        raise HTTPException(status_code=400, detail="payment_source must be cash_fund|accountable or empty")
+    if body.payment_source == "accountable" and not body.accountable_person_id:
+        raise HTTPException(status_code=400, detail="accountable_person_id required for payment_source=accountable")
+
+
+def _sync_cash_fund(conn, eid: str, body: ExpenseIn):
+    """Наличный расход из кассы = expense + списание кассы одной операцией.
+    Движение кассы связано через fund_transactions.expense_id — правка/удаление
+    расхода подчищает его (кассовый остаток не расходится с фактами)."""
+    conn.execute("DELETE FROM fund_transactions WHERE expense_id = ?", (eid,))
+    if body.payment_source == "cash_fund":
+        fund = conn.execute("SELECT id FROM funds WHERE kind = 'cash'").fetchone()
+        if fund:
+            conn.execute(
+                """INSERT INTO fund_transactions (id, fund_id, direction, amount, note, date, expense_id)
+                   VALUES (?, ?, 'out', ?, ?, COALESCE(?, date('now')), ?)""",
+                (str(uuid4()), fund["id"], body.amount, f"Расход: {body.title.strip()}",
+                 body.expense_date, eid),
+            )
 
 
 def _autolink_creditor(conn, oid: str, body: ExpenseIn) -> Optional[str]:
@@ -994,11 +1017,14 @@ def add_expense(order_id: str, body: ExpenseIn):
         eid = str(uuid4())
         conn.execute(
             """INSERT INTO expenses (id, order_id, title, amount, category, supplier, master_id,
-                                     expense_date, source, creditor_id, finance_tx_id, zenmoney_tx_id, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), 'manual', ?, ?, ?, datetime('now'))""",
+                                     expense_date, source, creditor_id, finance_tx_id, zenmoney_tx_id,
+                                     payment_source, accountable_person_id, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), 'manual', ?, ?, ?, ?, ?, datetime('now'))""",
             (eid, oid, body.title.strip(), body.amount, body.category, body.supplier, body.master_id,
-             body.expense_date, _autolink_creditor(conn, oid, body), body.finance_tx_id, body.zenmoney_tx_id)
+             body.expense_date, _autolink_creditor(conn, oid, body), body.finance_tx_id, body.zenmoney_tx_id,
+             body.payment_source, body.accountable_person_id if body.payment_source == "accountable" else None)
         )
+        _sync_cash_fund(conn, eid, body)
         conn.commit()
         return dict(conn.execute("SELECT * FROM expenses WHERE id = ?", (eid,)).fetchone())
     finally:
@@ -1019,12 +1045,16 @@ def update_expense(order_id: str, expense_id: str, body: ExpenseIn):
         conn.execute(
             """UPDATE expenses SET title = ?, amount = ?, category = ?, supplier = ?, master_id = ?,
                       expense_date = COALESCE(?, expense_date), creditor_id = ?,
-                      finance_tx_id = ?, zenmoney_tx_id = ?
+                      finance_tx_id = ?, zenmoney_tx_id = ?,
+                      payment_source = ?, accountable_person_id = ?
                WHERE id = ?""",
             (body.title.strip(), body.amount, body.category, body.supplier, body.master_id,
              body.expense_date, _autolink_creditor(conn, r["order_id"], body),
-             body.finance_tx_id, body.zenmoney_tx_id, expense_id)
+             body.finance_tx_id, body.zenmoney_tx_id,
+             body.payment_source, body.accountable_person_id if body.payment_source == "accountable" else None,
+             expense_id)
         )
+        _sync_cash_fund(conn, expense_id, body)
         conn.commit()
         return dict(conn.execute("SELECT * FROM expenses WHERE id = ?", (expense_id,)).fetchone())
     finally:
@@ -1043,11 +1073,16 @@ def delete_expense(order_id: str, expense_id: str, with_group: bool = False):
         if not r:
             raise HTTPException(status_code=404, detail="Not found")
         if with_group and r["group_id"]:
+            ids = [x["id"] for x in conn.execute("SELECT id FROM expenses WHERE group_id = ?", (r["group_id"],)).fetchall()]
             cur = conn.execute("DELETE FROM expenses WHERE group_id = ?", (r["group_id"],))
             deleted = cur.rowcount
         else:
+            ids = [expense_id]
             conn.execute("DELETE FROM expenses WHERE id = ?", (expense_id,))
             deleted = 1
+        # Подчистить связанные движения кассы (наличные расходы).
+        for x in ids:
+            conn.execute("DELETE FROM fund_transactions WHERE expense_id = ?", (x,))
         conn.commit()
         return {"ok": True, "deleted": deleted}
     finally:

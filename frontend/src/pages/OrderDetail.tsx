@@ -234,6 +234,7 @@ export default function OrderDetail() {
           <ExpenseModal
             orderId={id!}
             expense={expenseModal.item}
+            existingExpenses={expensesData?.items ?? []}
             saving={saveExpense.isPending}
             onSave={(d) => saveExpense.mutate(d)}
             onClose={() => setExpenseModal(null)}
@@ -450,6 +451,14 @@ export default function OrderDetail() {
                           {e.creditor_id && (
                             <span title="Оплата обязательства — в факте учтена один раз"
                               style={{ fontSize: 9, color: "#4A7C59", marginLeft: 5 }}>обяз.</span>
+                          )}
+                          {e.payment_source === "cash_fund" && (
+                            <span title="Оплачено наличными из кассы"
+                              style={{ fontSize: 9, color: "#A89070", background: "#F2EFE9", padding: "1px 5px", marginLeft: 5 }}>нал</span>
+                          )}
+                          {e.payment_source === "accountable" && (
+                            <span title="Оплачено подотчётным лицом"
+                              style={{ fontSize: 9, color: "#A89070", background: "#F2EFE9", padding: "1px 5px", marginLeft: 5 }}>под отчёт</span>
                           )}
                         </div>
                         {e.supplier && <div style={{ fontSize: 10, color: "#A89070", marginTop: 1 }}>{e.supplier}</div>}

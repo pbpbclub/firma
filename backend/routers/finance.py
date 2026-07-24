@@ -67,12 +67,15 @@ def get_free_cash():
         ]
         reserved_total = round(sum(x["amount"] for x in reserves), 2)
 
+        # Касса (kind='cash') — физические наличные ВНЕ банка: в резервы поверх
+        # банковского остатка не входит, иначе свободные деньги занизятся дважды.
         funds = [
             {"name": f["name"], "balance": round(f["balance"] or 0, 2)}
             for f in prod.execute(
                 """SELECT fu.name,
                           COALESCE(SUM(CASE WHEN ft.direction='in' THEN ft.amount ELSE -ft.amount END), 0) AS balance
                    FROM funds fu LEFT JOIN fund_transactions ft ON ft.fund_id = fu.id
+                   WHERE COALESCE(fu.kind, 'reserve') != 'cash'
                    GROUP BY fu.id ORDER BY fu.created_at"""
             ).fetchall()
         ]
@@ -206,6 +209,22 @@ def zen_recurring_category(payee) -> str | None:
     return None
 
 
+def _accountable_issue_tx_ids() -> set:
+    """Банковские транзакции, оформленные как «выдача под отчёт» — бейдж в ДДС."""
+    conn = get_production()
+    try:
+        return {
+            str(r["finance_tx_id"])
+            for r in conn.execute(
+                "SELECT finance_tx_id FROM accountable_ops WHERE finance_tx_id IS NOT NULL"
+            )
+        }
+    except Exception:
+        return set()
+    finally:
+        conn.close()
+
+
 def _transfer_tx_ids() -> set:
     """Банковские транзакции, помеченные ВРУЧНУЮ «Перевод между своими» (обе
     ноги: bank-in/bank-out). Итоговый признак перевода = ручные ∪ авто-детект
@@ -257,12 +276,14 @@ def list_transactions(
         params.append(limit)
         rows = conn.execute(sql, params).fetchall()
         transfers = _transfer_tx_ids()
+        accountable_issues = _accountable_issue_tx_ids()
         from routers.taxes import is_tax_tx
         bank_rows = [{
             **dict(r),
             "is_transfer": str(r["id"]) in transfers or is_own_transfer_tx(r["counterparty"], r["purpose"]),
             "is_tax": r["direction"] == "out" and is_tax_tx(r["counterparty"], r["purpose"]),
             "is_fee": r["direction"] == "out" and is_bank_fee_tx(r["counterparty"], r["purpose"]),
+            "is_accountable_issue": str(r["id"]) in accountable_issues,
         } for r in rows]
     except Exception as e:
         bank_rows = []

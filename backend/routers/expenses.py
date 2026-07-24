@@ -66,11 +66,12 @@ def _allocated_ids() -> tuple[set, set]:
     """id уже разнесённых транзакций: (банк, zenmoney).
 
     Источники: expenses (наша разноска), creditors (привязка обязательств),
+    accountable_ops (выдачи под отчёт — учтены, разносить нельзя),
     zm_links (разноска фин-агента, expenses не создаёт)."""
     bank, zen = set(), set()
     conn = get_production()
     try:
-        for tbl in ("expenses", "creditors"):
+        for tbl in ("expenses", "creditors", "accountable_ops"):
             for col, dest in (("finance_tx_id", bank), ("zenmoney_tx_id", zen)):
                 try:
                     for r in conn.execute(f"SELECT DISTINCT {col} FROM {tbl} WHERE {col} IS NOT NULL AND {col} != ''"):

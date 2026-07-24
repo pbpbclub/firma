@@ -120,6 +120,16 @@ export const financeApi = {
     api.patch(`/finance/receivables/${id}`, data).then((r) => r.data),
 };
 
+export const accountableApi = {
+  list: () => api.get("/accountable").then((r) => r.data),
+  ops: (masterId: string) => api.get(`/accountable/${masterId}/ops`).then((r) => r.data),
+  addOp: (masterId: string, data: { kind: "issue" | "return"; amount: number; date?: string; note?: string; via_cash_fund?: boolean }) =>
+    api.post(`/accountable/${masterId}/ops`, data).then((r) => r.data),
+  deleteOp: (opId: string) => api.delete(`/accountable/ops/${opId}`).then((r) => r.data),
+  issueFromTx: (data: { tx_id: string; source: string; master_id: string; amount: number; date?: string }) =>
+    api.post("/accountable/issue-from-tx", data).then((r) => r.data),
+};
+
 export const taxApi = {
   summary: () => api.get("/taxes/summary").then((r) => r.data),
 };
