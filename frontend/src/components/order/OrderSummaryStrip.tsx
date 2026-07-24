@@ -19,7 +19,7 @@ function Cell({ label, value, color, sub }: {
   );
 }
 
-export function OrderSummaryStrip({ order, paidTotal }: { order: any; paidTotal: number }) {
+export function OrderSummaryStrip({ order, paidTotal, compact }: { order: any; paidTotal: number; compact?: boolean }) {
   const pf = order?.plan_fact || {};
   const revenue = pf.revenue ?? order?.price_plan ?? 0;
   const debt = order?.debt ?? 0;
@@ -28,8 +28,9 @@ export function OrderSummaryStrip({ order, paidTotal }: { order: any; paidTotal:
   const overCost = (pf.cost_fact ?? 0) > (pf.cost_plan ?? 0);
 
   return (
-    <div style={{ marginBottom: 28 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0 24px" }}>
+    <div style={{ marginBottom: compact ? 20 : 28 }}>
+      {/* compact — узкая правая колонка карточки: 2×2 вместо одной строки */}
+      <div style={{ display: "grid", gridTemplateColumns: compact ? "repeat(2, 1fr)" : "repeat(4, 1fr)", gap: compact ? "16px 20px" : "0 24px" }}>
         <Cell
           label="ЦЕНА"
           value={fmtMoney(revenue)}

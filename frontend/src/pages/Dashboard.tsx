@@ -5,34 +5,11 @@ import { financeApi, taxApi, ordersApi } from "../api";
 import { MONO } from "../components/ui/Num";
 import { DeadlinePill } from "../components/ui/Pill";
 import { POLARITY } from "../components/ui/type";
+import { CircleProgress } from "../components/ui/CircleProgress";
 
 function fmt(n: number) {
   if (!n && n !== 0) return "—";
   return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) + " ₽";
-}
-
-function CircleProgress({ pct, size = 64 }: { pct: number; size?: number }) {
-  const stroke = 3.5;
-  const r = (size - stroke * 2) / 2;
-  const circ = 2 * Math.PI * r;
-  const offset = circ * (1 - Math.min(1, pct / 100));
-  const cx = size / 2;
-  return (
-    <svg width={size} height={size} style={{ display: "block" }}>
-      <circle cx={cx} cy={cx} r={r} fill="none" stroke="#EDEBE6" strokeWidth={stroke} />
-      <circle
-        cx={cx} cy={cx} r={r} fill="none"
-        stroke="#E8592A" strokeWidth={stroke}
-        strokeDasharray={circ}
-        strokeDashoffset={offset}
-        transform={`rotate(-90 ${cx} ${cx})`}
-        style={{ transition: "stroke-dashoffset 0.5s ease" }}
-      />
-      <text x={cx} y={cx + 4} textAnchor="middle" fontSize={11} fontWeight={700} fill="#1A1A1A" fontFamily={MONO}>
-        {Math.round(pct)}%
-      </text>
-    </svg>
-  );
 }
 
 function ThinBar({ pct, color = "#E8592A" }: { pct: number; color?: string }) {

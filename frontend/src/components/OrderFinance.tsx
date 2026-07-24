@@ -1,4 +1,5 @@
 import { MONO } from "./ui/Num";
+import { CircleProgress } from "./ui/CircleProgress";
 
 // Общие финансовые блоки заказа: панель списка и монитор заказа рисуют их одинаково.
 // ВАЖНО: лестница и прогноз считаются на бэке (_margin / _plan_fact). Здесь ничего
@@ -37,98 +38,118 @@ export function ProfitLadder({ order, paidTotal }: { order: any; paidTotal: numb
   );
 }
 
-// ── План-Факт: бары себестоимости и чистой, пояснение, таблица категорий ──
-export function PlanFactBlock({ planFact }: { planFact: any }) {
+// ── План ⇄ Факт: «дуэль» — табло себестоимости для правой колонки карточки ──
+// Соревнование: факт против плана. Счёт по центру (экономия зелёным, перерасход
+// красным), парные бары по категориям (шкала = max(plan,fact), риска = план,
+// факт-заливка выигрывает/проигрывает цветом), кольцо покрытия плана фактом.
+export function PlanFactDuel({ planFact }: { planFact: any }) {
   const pf = planFact;
   if (!pf?.has_estimate) return null;
 
-  const barPct = (fact: number, plan: number) => {
-    const base = Math.max(plan, fact, 1);
-    return { f: Math.min(100, (fact / base) * 100), p: Math.min(100, (plan / base) * 100) };
-  };
-  const overCost = pf.cost_fact > pf.cost_plan;
-  const netPlan = pf.net_plan;
-  const netForecast = pf.net_forecast;
   const coveragePct = pf.cost_coverage != null ? Math.round(pf.cost_coverage * 100) : null;
+  const delta = pf.cost_delta || 0;            // fact − plan; <0 = факт бьёт план
+  const winning = delta < 0;
+  const cats = (pf.categories || []).filter((c: any) => c.plan > 0 || c.fact > 0);
 
-  const Metric = ({ label, fact, plan, barColor, factColor }: any) => (
-    <div style={{ marginBottom: 14 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 5 }}>
-        <span style={{ fontSize: 11, color: "#6B6355" }}>{label}</span>
-        <span style={{ fontSize: 13 }}>
-          <span style={{ fontWeight: 700, color: factColor, fontVariantNumeric: "tabular-nums" }}>{fmt(fact)}</span>
-          {plan != null && <span style={{ color: "#A89070", fontVariantNumeric: "tabular-nums" }}> / {fmt(plan)}</span>}
-        </span>
+  // Строка категории: имя + числа, под ними парный бар 7px.
+  const CatRow = ({ c }: { c: any }) => {
+    const base = Math.max(c.plan, c.fact, 1);
+    const planPct = Math.min(100, (c.plan / base) * 100);
+    const factPct = Math.min(100, (c.fact / base) * 100);
+    const over = c.fact > c.plan;
+    const factColor = !pf.has_facts || c.fact === 0 ? "#C8C0B0" : over ? "#8B3A3A" : "#4A7C59";
+    return (
+      <div style={{ marginBottom: 13 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 5 }}>
+          <span style={{ fontSize: 12, color: "#1A1A1A", flex: 1 }}>{c.category}</span>
+          <span style={{ fontSize: 11, color: "#A89070", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(c.plan)}</span>
+          <span style={{ fontSize: 11, color: "#C8C0B0" }}>→</span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: factColor, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{c.fact ? fmt(c.fact) : "—"}</span>
+          <span style={{ fontSize: 11, fontWeight: 600, minWidth: 58, textAlign: "right", fontFamily: MONO, fontVariantNumeric: "tabular-nums",
+            color: c.delta === 0 || c.fact === 0 ? "#D0C8C0" : c.delta > 0 ? "#8B3A3A" : "#4A7C59" }}>
+            {c.delta === 0 || c.fact === 0 ? "" : (c.delta > 0 ? "+" : "−") + fmt(Math.abs(c.delta))}
+          </span>
+        </div>
+        <div style={{ height: 7, background: "#EDEBE6", position: "relative" }}>
+          {/* план — приглушённая заливка до риски */}
+          <div style={{ position: "absolute", inset: 0, width: `${planPct}%`, background: "#DDD6C8" }} />
+          {/* факт — цветная заливка поверх */}
+          <div style={{ position: "absolute", inset: 0, width: `${factPct}%`, background: factColor, transition: "width 0.4s" }} />
+          {/* риска плана */}
+          {c.plan > 0 && <div style={{ position: "absolute", top: -2, bottom: -2, width: 2, background: "#1A1A1A", left: `calc(${planPct}% - 1px)` }} />}
+        </div>
       </div>
-      <div style={{ height: 2, background: "#EDEBE6", position: "relative" }}>
-        <div style={{ position: "absolute", left: 0, top: 0, height: 2, background: barColor, width: `${barPct(fact, plan ?? fact).f}%` }} />
-        {plan != null && plan > 0 && (
-          <div style={{ position: "absolute", top: -2, height: 6, width: 1, background: "#A89070", left: `${barPct(fact, plan).p}%` }} />
-        )}
-      </div>
-    </div>
-  );
+    );
+  };
 
   return (
-    <div>
-      <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 16, textTransform: "uppercase" }}>
-        План-Факт
-        {!pf.detailed && (
-          <span style={{ marginLeft: 8, textTransform: "none", letterSpacing: 0, color: "#A89070", fontSize: 10 }}>
-            · смета без детализации, план в «Прочее»
-          </span>
+    <div style={{ background: "#FAF8F5", borderLeft: "3px solid #E8592A", padding: "16px 16px 14px" }}>
+      {/* Шапка: заголовок + кольцо покрытия */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 12 }}>
+        <div>
+          <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.08em" }}>ПЛАН ⇄ ФАКТ</div>
+          {!pf.detailed && (
+            <div style={{ fontSize: 10, color: "#A89070", marginTop: 3 }}>смета без детализации, план в «Прочее»</div>
+          )}
+        </div>
+        {coveragePct != null && pf.has_facts && (
+          <div style={{ textAlign: "center" }} title="Сколько плановых затрат уже закрыто фактом">
+            <CircleProgress pct={coveragePct} size={46} color={pf.cost_fact > pf.cost_plan ? "#8B3A3A" : "#4A7C59"} />
+            <div style={{ fontSize: 9, color: "#A89070", marginTop: 2 }}>факт внесён</div>
+          </div>
         )}
       </div>
 
-      <Metric label="Себестоимость" fact={pf.cost_fact} plan={pf.cost_plan}
-        barColor="#E8592A" factColor={overCost ? "#8B3A3A" : "#1A1A1A"} />
-      <Metric label="Чистая: прогноз / план" fact={netForecast} plan={netPlan}
-        barColor={netForecast >= 0 ? "#4A7C59" : "#8B3A3A"}
-        factColor={netForecast < netPlan ? "#8B3A3A" : netForecast >= 0 ? "#4A7C59" : "#8B3A3A"} />
-
-      <div style={{ fontSize: 10, color: "#A89070", lineHeight: 1.5, marginBottom: 12 }}>
-        {pf.has_facts
-          ? <>Внесено {coveragePct}% плановых затрат. Прогноз считается от большего из плана и факта — пока расходы внесены не полностью, он держится плана и растёт только перерасход.</>
-          : <>Фактические траты ещё не внесены — прогноз равен плану.</>}
-        {pf.tax > 0 && <> Налог УСН {fmt(pf.tax)} уже вычтен.</>}
-      </div>
-
-      {pf.categories.length > 0 && (
-        <div style={{ marginTop: 14 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: "0 16px",
-            fontSize: 10, color: "#A89070", letterSpacing: "0.04em", paddingBottom: 6, borderBottom: "1px solid #EDEBE6" }}>
-            <span>КАТЕГОРИЯ</span>
-            <span style={{ textAlign: "right" }}>ПЛАН</span>
-            <span style={{ textAlign: "right" }}>ФАКТ</span>
-            <span style={{ textAlign: "right", minWidth: 70 }}>Δ</span>
-          </div>
-          {pf.categories.map((c: any) => {
-            const over = c.delta > 0;
-            return (
-              <div key={c.category} style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: "0 16px",
-                fontSize: 12, padding: "7px 0", borderBottom: "1px solid #F2EFE9", fontVariantNumeric: "tabular-nums" }}>
-                <span style={{ color: "#1A1A1A" }}>{c.category}</span>
-                <span style={{ textAlign: "right", color: "#6B6355" }}>{fmt(c.plan)}</span>
-                <span style={{ textAlign: "right", color: "#1A1A1A" }}>{fmt(c.fact)}</span>
-                <span style={{ textAlign: "right", minWidth: 70, fontWeight: 600,
-                  color: c.delta === 0 ? "#A89070" : over ? "#8B3A3A" : "#4A7C59" }}>
-                  {c.delta === 0 ? "—" : (over ? "+" : "") + fmt(c.delta)}
-                </span>
+      {/* Счёт */}
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 14 }}>
+        <div>
+          <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em" }}>ПЛАН</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#6B6355", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(pf.cost_plan)}</div>
+        </div>
+        <div style={{ textAlign: "center", flex: 1 }}>
+          {pf.has_facts ? (
+            <>
+              <div style={{ fontSize: 20, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: "tabular-nums", letterSpacing: "-0.01em",
+                color: delta === 0 ? "#6B6355" : winning ? "#4A7C59" : "#8B3A3A" }}>
+                {delta === 0 ? "0 ₽" : (winning ? "−" : "+") + fmt(Math.abs(delta))}
               </div>
-            );
-          })}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: "0 16px",
-            fontSize: 12, padding: "8px 0", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
-            <span>Итого</span>
-            <span style={{ textAlign: "right", color: "#6B6355" }}>{fmt(pf.cost_plan)}</span>
-            <span style={{ textAlign: "right", color: "#1A1A1A" }}>{fmt(pf.cost_fact)}</span>
-            <span style={{ textAlign: "right", minWidth: 70,
-              color: pf.cost_delta === 0 ? "#A89070" : pf.cost_delta > 0 ? "#8B3A3A" : "#4A7C59" }}>
-              {pf.cost_delta === 0 ? "—" : (pf.cost_delta > 0 ? "+" : "") + fmt(pf.cost_delta)}
-            </span>
+              <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.04em" }}>
+                {delta === 0 ? "ровно по плану" : winning ? "факт ниже плана" : "сверх плана"}
+              </div>
+            </>
+          ) : (
+            <div style={{ fontSize: 11, color: "#A89070" }}>счёт откроется с первым расходом</div>
+          )}
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em" }}>ФАКТ</div>
+          <div style={{ fontSize: 15, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: "tabular-nums",
+            color: !pf.has_facts ? "#C8C0B0" : pf.cost_fact > pf.cost_plan ? "#8B3A3A" : "#1A1A1A" }}>
+            {pf.has_facts ? fmt(pf.cost_fact) : "—"}
           </div>
         </div>
-      )}
+      </div>
+
+      {/* Категории */}
+      {cats.map((c: any) => <CatRow key={c.category} c={c} />)}
+
+      {/* Финал: маржа */}
+      <div style={{ borderTop: "1px solid #EDEBE6", paddingTop: 10, marginTop: 2 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+          <span style={{ fontSize: 11, color: "#6B6355" }}>Чистая: план → прогноз</span>
+          <span style={{ fontSize: 13, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
+            <span style={{ color: "#A89070" }}>{fmt(pf.net_plan)}</span>
+            <span style={{ color: "#C8C0B0" }}> → </span>
+            <span style={{ fontWeight: 700, color: (pf.net_forecast ?? 0) >= (pf.net_plan ?? 0) && (pf.net_forecast ?? 0) >= 0 ? "#4A7C59" : "#8B3A3A" }}>{fmt(pf.net_forecast)}</span>
+          </span>
+        </div>
+        <div style={{ fontSize: 10, color: "#A89070", lineHeight: 1.5, marginTop: 6 }}>
+          {pf.has_facts
+            ? <>Внесено {coveragePct}% плановых затрат. Прогноз держится большего из плана и факта — экономия зачтётся, когда факт внесён полностью.</>
+            : <>Факта ещё нет — вноси расходы и выигрывай у плана.</>}
+          {pf.tax > 0 && <> УСН {fmt(pf.tax)} уже вычтен.</>}
+        </div>
+      </div>
     </div>
   );
 }

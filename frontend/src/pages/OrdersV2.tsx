@@ -8,7 +8,7 @@ import { useNavigate } from "react-router-dom";
 import { ordersApi, customersApi, brandsApi, estimatesApi } from "../api";
 import { MagnifyingGlass, DotsThree, Plus, Files, CaretRight, Archive, ArrowCounterClockwise, CaretDown, X, Trash, UserCircle } from "@phosphor-icons/react";
 import { ColumnFilter, AmountFilter } from "../components/TableFilters";
-import { ProfitLadder, PlanFactBlock } from "../components/OrderFinance";
+import { ProfitLadder, PlanFactDuel } from "../components/OrderFinance";
 import { EstimateReviewQueue } from "../components/EstimateReviewQueue";
 
 const BRANDS: { value: string; color: string }[] = [
@@ -1129,7 +1129,7 @@ export default function OrdersV2() {
             {/* План-Факт */}
             {detail?.plan_fact?.has_estimate && (
               <div style={{ marginBottom: 24 }}>
-                <PlanFactBlock planFact={detail.plan_fact} />
+                <PlanFactDuel planFact={detail.plan_fact} />
               </div>
             )}
 

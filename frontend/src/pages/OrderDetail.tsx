@@ -13,7 +13,7 @@ import { ESTIMATE_STATUS } from "../components/domain";
 import { ordersApi, customersApi, estimatesApi, expensesApi } from "../api";
 import { ArrowLeft, Plus, CaretRight, Trash, LinkSimple, PencilSimple, Warning } from "@phosphor-icons/react";
 import { ExpenseModal, EXPENSE_CATEGORIES } from "../components/ExpenseModal";
-import { ProfitLadder, PlanFactBlock } from "../components/OrderFinance";
+import { ProfitLadder, PlanFactDuel } from "../components/OrderFinance";
 import { OrderSummaryStrip } from "../components/order/OrderSummaryStrip";
 import { OrderParams } from "../components/order/OrderParams";
 import type { OrderFormState } from "../components/order/OrderParams";
@@ -260,9 +260,11 @@ export default function OrderDetail() {
         )}
       </div>
 
-      {/* Scrollable body */}
+      {/* Scrollable body: слева рабочий поток (ПЛАН → ФАКТ), справа sticky-табло
+          (сводка + дуэль план⇄факт + лестница) — фин-картина видна при любом скролле */}
       <div style={{ flex: 1, overflow: "auto" }}>
-        <div style={{ maxWidth: 760, padding: "28px 28px 48px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(460px, 1fr) minmax(330px, 400px)", gap: 48, alignItems: "start", maxWidth: 1400, padding: "28px 36px 48px" }}>
+        <div style={{ minWidth: 0 }}>
 
           {/* Editable title */}
           <input
@@ -274,10 +276,7 @@ export default function OrderDetail() {
             onBlur={e => (e.currentTarget.style.borderBottomColor = "transparent")}
           />
 
-          {/* Сводка деньгами — карточка открывается финансовой картиной */}
-          {order && <OrderSummaryStrip order={order} paidTotal={paidTotal} />}
-
-          {/* Параметры (статус/бренд/клиент/дедлайн) — под катом */}
+          {/* Параметры (статус/бренд/клиент/дедлайн) — под катом; сводка деньгами — в табло справа */}
           <OrderParams order={order} form={form} field={field} customers={customers as any[]} />
 
           {/* ═══ СТАДИЯ 1: ПЛАН ═══ */}
@@ -559,46 +558,47 @@ export default function OrderDetail() {
             )}
           </div>
 
-          {/* ═══ СТАДИЯ 3: ИТОГ ═══ */}
-          <StageHeader n="03" title="ИТОГ" hint="финансовая картинка заказа" />
+        </div>
 
-          <div style={{ paddingTop: 18 }}>
-            {!order?.plan_fact?.has_estimate ? (
-              <div style={{ padding: "18px 0" }}>
-                <div style={{ fontSize: 12, color: "#6B6355", marginBottom: 12 }}>
-                  Итога пока нет: без сметы не с чем сравнивать факт. Создай смету — появится
-                  план-факт и лестница прибыли.
-                </div>
-                <Button variant="primary" size="sm" onClick={() => addEstimateMutation.mutate()} disabled={addEstimateMutation.isPending}>
-                  <Plus size={11} /> Создать смету
-                </Button>
+        {/* ═══ Табло: сводка + дуэль план⇄факт + лестница (sticky) ═══ */}
+        <div style={{ position: "sticky", top: 0, minWidth: 0 }}>
+          {order && <OrderSummaryStrip order={order} paidTotal={paidTotal} compact />}
+
+          {!order?.plan_fact?.has_estimate ? (
+            <div style={{ background: "#FAF8F5", borderLeft: "3px solid #EDEBE6", padding: "16px" }}>
+              <div style={{ fontSize: 12, color: "#6B6355", marginBottom: 12, lineHeight: 1.5 }}>
+                Табло пока пустое: без сметы не с чем сравнивать факт. Создай смету —
+                появится план⇄факт и лестница прибыли.
               </div>
-            ) : (
-              <>
-                {order?.plan_source === "draft" && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
-                    background: "#FAF8F5", border: "1px solid #EDEBE6", padding: "10px 14px", marginBottom: 18 }}>
-                    <Warning size={13} style={{ color: "#E8592A", flexShrink: 0 }} />
-                    <span style={{ fontSize: 11, color: "#6B6355", flex: 1, minWidth: 200 }}>
-                      План считается по <b>неутверждённой</b> смете — числа ещё не согласованы с клиентом.
-                    </span>
-                    {activeDraft && (
-                      <Button size="sm" variant="primary" disabled={approveSet.isPending}
-                        onClick={() => approveSet.mutate(activeDraft.id)} style={{ fontSize: 11 }}>
-                        {approveSet.isPending ? "..." : "Утвердить смету"}
-                      </Button>
-                    )}
-                  </div>
-                )}
-                {/* Сначала обоснование (план-факт по категориям), затем итог (лестница) */}
-                <PlanFactBlock planFact={order.plan_fact} />
-                <div style={{ marginTop: 24, paddingTop: 18, borderTop: "1px solid #EDEBE6" }}>
-                  <div style={{ marginBottom: 12 }}><SectionLabel>ЛЕСТНИЦА ПРИБЫЛИ</SectionLabel></div>
-                  <ProfitLadder order={order} paidTotal={paidTotal} />
+              <Button variant="primary" size="sm" onClick={() => addEstimateMutation.mutate()} disabled={addEstimateMutation.isPending}>
+                <Plus size={11} /> Создать смету
+              </Button>
+            </div>
+          ) : (
+            <>
+              {order?.plan_source === "draft" && (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+                  background: "#FAF8F5", border: "1px solid #EDEBE6", padding: "10px 14px", marginBottom: 14 }}>
+                  <Warning size={13} style={{ color: "#E8592A", flexShrink: 0 }} />
+                  <span style={{ fontSize: 11, color: "#6B6355", flex: 1, minWidth: 160 }}>
+                    План — по <b>неутверждённой</b> смете.
+                  </span>
+                  {activeDraft && (
+                    <Button size="sm" variant="primary" disabled={approveSet.isPending}
+                      onClick={() => approveSet.mutate(activeDraft.id)} style={{ fontSize: 11 }}>
+                      {approveSet.isPending ? "..." : "Утвердить"}
+                    </Button>
+                  )}
                 </div>
-              </>
-            )}
-          </div>
+              )}
+              <PlanFactDuel planFact={order.plan_fact} />
+              <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid #EDEBE6" }}>
+                <div style={{ marginBottom: 12 }}><SectionLabel>ЛЕСТНИЦА ПРИБЫЛИ</SectionLabel></div>
+                <ProfitLadder order={order} paidTotal={paidTotal} />
+              </div>
+            </>
+          )}
+        </div>
 
         </div>
       </div>
