@@ -87,6 +87,7 @@ export const financeApi = {
     api.get("/finance/balance-at-date", { params: { date } }).then((r) => r.data),
   byBrand: () => api.get("/finance/by-brand").then((r) => r.data),
   recurring: () => api.get("/finance/recurring").then((r) => r.data),
+  personalSpending: () => api.get("/finance/personal-spending").then((r) => r.data),
   transactions: (params?: Record<string, string>) =>
     api.get("/finance/transactions", { params }).then((r) => r.data),
   summary: () => api.get("/finance/summary").then((r) => r.data),

@@ -456,6 +456,88 @@ def recurring_summary():
     return {"categories": out}
 
 
+@router.get("/personal-spending")
+def personal_spending():
+    """Личная статистика Юры (не бизнес): (1) переводы на Райффайзен — ZM-оттоки
+    на карты вне ZenMoney (ZEN_OWN_PAYEES), личный расход-прокси; (2) помеченное
+    «Личное» в Разноске — разовый скрыв (inbox_dismissed.reason='Личное') и
+    правило (payee_rules.entity_type='personal'). Read-only, на бизнес-цифры не
+    влияет. Контуры непересекающиеся: Райффайзен-переводы исключены из bucket B."""
+    from datetime import date as _date
+    today = _date.today()
+    cur_month = today.strftime("%Y-%m")
+    m, y = today.month - 6, today.year
+    if m <= 0:
+        m, y = m + 12, y - 1
+    six_months_ago = f"{y}-{m:02d}-01"
+    cats = {
+        "raiffeisen": {"key": "raiffeisen", "label": "Переводы на Райффайзен"},
+        "marked": {"key": "marked", "label": "Отмечено личным"},
+    }
+    for c in cats.values():
+        c.update(count=0, total=0.0, current_month=0.0, last6=0.0)
+
+    def add(cat, d, amount):
+        c = cats[cat]
+        c["count"] += 1
+        c["total"] += amount
+        if (d or "").startswith(cur_month):
+            c["current_month"] += amount
+        if (d or "") >= six_months_ago:
+            c["last6"] += amount
+
+    # personal-правила + разовые dismiss «Личное» (production.db)
+    prod = get_production()
+    try:
+        personal_patterns = {
+            (r["pattern"] or "").strip().lower()
+            for r in prod.execute("SELECT pattern FROM payee_rules WHERE entity_type = 'personal'")
+        }
+        dismissed_zen, dismissed_bank = set(), set()
+        for r in prod.execute("SELECT tx_id, source FROM inbox_dismissed WHERE reason = 'Личное'"):
+            (dismissed_zen if r["source"] == "zen-out" else dismissed_bank).add(str(r["tx_id"]))
+    finally:
+        prod.close()
+
+    # ZenMoney: Райффайзен-переводы + помеченное личным (кроме Райффайзен-переводов)
+    from db import get_zenmoney
+    zconn = get_zenmoney()
+    try:
+        for r in zconn.execute(
+            "SELECT id, date, outcome, payee FROM zm_transactions "
+            "WHERE outcome > 0 AND income = 0 AND deleted = 0"
+        ):
+            payee = (r["payee"] or "").strip()
+            amount = r["outcome"] or 0
+            if payee in ZEN_OWN_PAYEES:
+                add("raiffeisen", r["date"], amount)
+            elif payee.lower() in personal_patterns or str(r["id"]) in dismissed_zen:
+                add("marked", r["date"], amount)
+    finally:
+        zconn.close()
+
+    # Банк: помеченное личным (редко)
+    fconn = get_finance()
+    try:
+        for r in fconn.execute(
+            "SELECT id, date, amount, counterparty FROM transactions WHERE direction = 'out'"
+        ):
+            cp = (r["counterparty"] or "").strip()
+            if cp.lower() in personal_patterns or str(r["id"]) in dismissed_bank:
+                add("marked", r["date"], r["amount"] or 0)
+    finally:
+        fconn.close()
+
+    out = []
+    for c in cats.values():
+        c["total"] = round(c["total"], 2)
+        c["current_month"] = round(c["current_month"], 2)
+        c["month_avg"] = round(c["last6"] / 6, 2)
+        del c["last6"]
+        out.append(c)
+    return {"categories": out, "total": round(sum(c["total"] for c in out), 2)}
+
+
 @router.get("/by-brand")
 def finance_by_brand():
     """Доход/расход/прибыль по брендам (через заказы)."""

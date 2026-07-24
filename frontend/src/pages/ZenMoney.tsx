@@ -453,6 +453,41 @@ function RecurringSection() {
   );
 }
 
+// ── Личные траты (для Юры лично): переводы на Райффайзен (ZM-оттоки на карты вне
+// ZenMoney) + всё, что помечено «Личное» в Разноске. Личный счётчик, на бизнес не влияет.
+function PersonalSpendingSection() {
+  const { data } = useQuery({ queryKey: ["personal-spending"], queryFn: financeApi.personalSpending });
+  const cats = (data?.categories ?? []).filter((c: any) => c.count > 0);
+  if (!cats.length) return null;
+  return (
+    <div style={{ marginBottom: 28 }}>
+      <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10 }}>
+        ЛИЧНЫЕ ТРАТЫ <span style={{ letterSpacing: 0, color: "#C8C0B0" }}>· для меня</span>
+      </div>
+      {cats.map((c: any) => (
+        <div key={c.key} style={{ padding: "7px 0", borderBottom: "1px solid #F2EFE9" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <div style={{ fontSize: 12, color: "#6B6355" }}>{c.label}</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
+              {fmt(c.month_avg)} ₽<span style={{ fontSize: 10, fontWeight: 400, color: "#A89070" }}>/мес</span>
+            </div>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#A89070", marginTop: 2, fontVariantNumeric: "tabular-nums" }}>
+            <span>в этом месяце <span style={{ fontFamily: MONO }}>{fmt(c.current_month)} ₽</span></span>
+            <span>всего <span style={{ fontFamily: MONO }}>{fmt(c.total)} ₽</span> · {c.count}</span>
+          </div>
+        </div>
+      ))}
+      {cats.length > 1 && (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "8px 0 0", fontVariantNumeric: "tabular-nums" }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "#1A1A1A" }}>Итого личных</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: "#1A1A1A", fontFamily: MONO }}>{fmt(data?.total ?? 0)} ₽</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ZenMoneyPage() {
   const queryClient = useQueryClient();
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth);
@@ -1025,6 +1060,9 @@ export default function ZenMoneyPage() {
         {/* Регулярные траты — раздельная статистика (подписки/связь/услуги карт/
             комиссии ИП): из Разноски они скрыты автоматом, объёмы видны здесь. */}
         <RecurringSection />
+
+        {/* Личные траты: Райффайзен-переводы + помеченное «Личное» — счётчик для Юры */}
+        <PersonalSpendingSection />
 
         {/* Cashflow chart */}
         <div style={{ marginBottom: 28 }}>
