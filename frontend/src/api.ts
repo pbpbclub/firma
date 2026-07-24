@@ -165,6 +165,11 @@ export const inboxApi = {
     }[];
   }) => api.post("/expenses/from-tx", data).then((r) => r.data),
   deleteGroup: (groupId: string) => api.delete(`/expenses/groups/${groupId}`).then((r) => r.data),
+  // Скрытие списания из инбокса (внутренний перевод между своими, возврат…)
+  dismiss: (txId: string, source: string, reason?: string) =>
+    api.post(`/expenses/inbox/${txId}/dismiss`, { source, reason }).then((r) => r.data),
+  undismiss: (txId: string, source: string) =>
+    api.delete(`/expenses/inbox/${txId}/dismiss`, { params: { source } }).then((r) => r.data),
 };
 
 export const materialsApi = {

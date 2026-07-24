@@ -115,6 +115,7 @@ function ObligationPicker({ orderId, categoryLabel, value, amount, onPick }: {
 
 function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
   const [title, setTitle] = useState(tx.counterparty || tx.purpose || "");
+  const [hideMode, setHideMode] = useState(false);
   // Каждая строка — свой заказ, сумма, категория, подрядчик и (опц.) обязательство.
   const [allocs, setAllocs] = useState<Alloc[]>([]);
   const [error, setError] = useState("");
@@ -158,6 +159,13 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
     },
     onSuccess: onDone,
     onError: (e: any) => setError(e?.response?.data?.detail || "Не удалось разнести"),
+  });
+
+  // Скрыть списание: внутренний перевод между своими счетами, возврат… — это не
+  // расход бизнеса, разносить на заказ нечего.
+  const dismiss = useMutation({
+    mutationFn: (reason: string) => inboxApi.dismiss(tx.id, tx.source, reason),
+    onSuccess: onDone,
   });
 
   const addOrder = (orderId: string) => {
@@ -297,7 +305,29 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
       </div>
 
       {/* Итог и кнопка */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #EDEBE6", paddingTop: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #EDEBE6", paddingTop: 10, gap: 12, flexWrap: "wrap" }}>
+        {/* Скрыть: перевод между своими счетами, возврат — не расход бизнеса */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {hideMode ? (
+            <>
+              <span style={{ fontSize: 10, color: "#A89070" }}>Скрыть:</span>
+              {DISMISS_REASONS.map(r => (
+                <button key={r} disabled={dismiss.isPending} onClick={() => dismiss.mutate(r)}
+                  style={{ fontSize: 10, padding: "3px 8px", border: "1px solid #EDEBE6", background: "#fff", cursor: "pointer", color: "#6B6355", fontFamily: "inherit" }}>
+                  {r}
+                </button>
+              ))}
+              <button onClick={() => setHideMode(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}>
+                <X size={11} />
+              </button>
+            </>
+          ) : (
+            <button onClick={() => setHideMode(true)}
+              style={{ fontSize: 10, color: "#A89070", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
+              Это не расход — скрыть
+            </button>
+          )}
+        </div>
         <div style={{ fontSize: 11, color: Math.abs(diff) < 0.01 ? "#4A7C59" : "#8B3A3A", fontFamily: MONO }}>
           {allocs.length === 0 ? <span style={{ color: "#A89070" }}>выберите заказ</span> :
             Math.abs(diff) < 0.01 ? `✓ разнесено ${fmt(sum)} — сходится с платежом` :
@@ -477,7 +507,7 @@ export default function ExpensesInbox() {
   const isIncoming = source === "in";
   const params: Record<string, string | number> = { limit: 100 };
   if (!isIncoming) params.source = source;
-  if (isIncoming && showDismissed) params.show_dismissed = "true";
+  if (showDismissed) params.show_dismissed = "true";
   if (search) params.search = search;
   if (from) params.date_from = from;
   if (to) params.date_to = to;
@@ -506,7 +536,8 @@ export default function ExpensesInbox() {
   };
 
   const undismiss = useMutation({
-    mutationFn: (txId: string) => paymentsApi.undismiss(txId),
+    // Поступления и списания скрываются в одной таблице, но под разными source-ключами.
+    mutationFn: (txId: string) => isIncoming ? paymentsApi.undismiss(txId) : inboxApi.undismiss(txId, source),
     onSuccess: onDone,
   });
 
@@ -556,12 +587,10 @@ export default function ExpensesInbox() {
           {truncated && (
             <span style={{ fontSize: 10, color: "#8B3A3A" }}>показаны первые {items.length} — уточни период/фильтры</span>
           )}
-          {isIncoming && (
-            <label style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer", fontSize: 10, color: "#A89070" }}>
-              <input type="checkbox" checked={showDismissed} onChange={e => setShowDismissed(e.target.checked)} />
-              показать скрытые
-            </label>
-          )}
+          <label style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer", fontSize: 10, color: "#A89070" }}>
+            <input type="checkbox" checked={showDismissed} onChange={e => setShowDismissed(e.target.checked)} />
+            показать скрытые
+          </label>
         </div>
         <button onClick={hasFilters ? clearFilters : undefined}
           style={{ fontSize: 10, color: hasFilters ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: hasFilters ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>

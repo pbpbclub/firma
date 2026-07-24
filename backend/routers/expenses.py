@@ -91,6 +91,26 @@ def _allocated_ids() -> tuple[set, set]:
     return bank, zen
 
 
+# Скрытие списаний из инбокса (внутренние переводы между своими счетами, возвраты).
+# Та же таблица inbox_dismissed, что у поступлений (source='bank-in'), но свои ключи.
+_DISMISS_OUT = {"bank": "bank-out", "zen": "zen-out"}
+
+
+def _dismissed_out_map(source: str) -> dict:
+    """tx_id → причина скрытия для инбокса списаний."""
+    conn = get_production()
+    try:
+        return {
+            str(r["tx_id"]): r["reason"]
+            for r in conn.execute(
+                "SELECT tx_id, reason FROM inbox_dismissed WHERE source = ?",
+                (_DISMISS_OUT[source],),
+            )
+        }
+    finally:
+        conn.close()
+
+
 @router.get("/inbox")
 def inbox(
     source: str = Query("bank", pattern="^(bank|zen)$"),
@@ -99,10 +119,12 @@ def inbox(
     search: Optional[str] = None,
     amount_min: Optional[float] = None,
     amount_max: Optional[float] = None,
+    show_dismissed: bool = False,
     limit: int = Query(100, le=500),
 ):
     """Неразнесённые списания. payee_hint — подсказка поставщика/категории."""
     bank_done, zen_done = _allocated_ids()
+    dismissed = _dismissed_out_map(source)
     rules = _load_payee_rules()
     masters_match, name_to_id = _load_masters_matching()
     out = []
@@ -127,12 +149,15 @@ def inbox(
             for r in conn.execute(sql, params).fetchall():
                 if str(r["id"]) in bank_done:
                     continue
+                if str(r["id"]) in dismissed and not show_dismissed:
+                    continue
                 res = _resolve_payee(r["counterparty"] or "", rules, masters_match)
                 out.append({
                     "id": str(r["id"]), "source": "bank", "date": r["date"], "amount": r["amount"],
                     "counterparty": r["counterparty"], "purpose": r["purpose"], "bank": r["bank"],
                     "payee_hint": res.get("display_name"),
                     "category_hint": _guess_category(res.get("category")),
+                    "dismissed_reason": dismissed.get(str(r["id"])),
                     **_payee_fields(res, name_to_id),
                 })
                 if len(out) >= limit:
@@ -162,6 +187,8 @@ def inbox(
             for r in conn.execute(sql, params).fetchall():
                 if str(r["id"]) in zen_done:
                     continue
+                if str(r["id"]) in dismissed and not show_dismissed:
+                    continue
                 res = _resolve_payee(r["payee"] or "", rules, masters_match)
                 try:
                     tags = _json.loads(r["tags"] or "[]")
@@ -174,6 +201,7 @@ def inbox(
                     "payee_hint": res.get("display_name"),
                     "category_hint": _guess_category(res.get("category") or _CATEGORY_RU.get(zen_cat) or zen_cat),
                     "zen_tag": _CATEGORY_RU.get(zen_cat) or zen_cat or None,
+                    "dismissed_reason": dismissed.get(str(r["id"])),
                     **_payee_fields(res, name_to_id),
                 })
                 if len(out) >= limit:
@@ -313,11 +341,55 @@ def create_from_tx(body: FromTxIn):
                  exp_date, src, cred, fin_id, zen_id, group_id)
             )
             created.append(eid)
+        # Разнесли по-настоящему → скрытие (если было) снимаем, как в payments.
+        conn.execute(
+            "DELETE FROM inbox_dismissed WHERE tx_id = ? AND source = ?",
+            (str(body.tx_id), _DISMISS_OUT.get(body.source, "bank-out")),
+        )
         conn.commit()
         rows = [dict(r) for r in conn.execute(
             f"SELECT * FROM expenses WHERE id IN ({','.join('?' * len(created))})", created
         ).fetchall()]
         return {"ok": True, "group_id": group_id, "created": len(rows), "items": rows}
+    finally:
+        conn.close()
+
+
+class DismissOutIn(BaseModel):
+    source: str = "bank"             # bank | zen
+    reason: Optional[str] = None
+
+
+@router.post("/inbox/{tx_id}/dismiss")
+def dismiss_out_tx(tx_id: str, body: Optional[DismissOutIn] = None):
+    """Скрыть списание из инбокса: внутренний перевод между своими счетами, возврат…
+    Транзакция уходит из Разноски; помеченные «Перевод между своими» ещё и
+    исключаются из оборотов ДДС (finance._transfer_tx_ids)."""
+    src = (body.source if body else "bank")
+    if src not in _DISMISS_OUT:
+        raise HTTPException(status_code=400, detail="source must be bank|zen")
+    conn = get_production()
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO inbox_dismissed (tx_id, source, reason) VALUES (?, ?, ?)",
+            (str(tx_id), _DISMISS_OUT[src], body.reason if body else None),
+        )
+        conn.commit()
+        return {"ok": True}
+    finally:
+        conn.close()
+
+
+@router.delete("/inbox/{tx_id}/dismiss")
+def undismiss_out_tx(tx_id: str, source: str = Query("bank", pattern="^(bank|zen)$")):
+    conn = get_production()
+    try:
+        conn.execute(
+            "DELETE FROM inbox_dismissed WHERE tx_id = ? AND source = ?",
+            (str(tx_id), _DISMISS_OUT[source]),
+        )
+        conn.commit()
+        return {"ok": True}
     finally:
         conn.close()
 

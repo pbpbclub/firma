@@ -438,8 +438,9 @@ const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
         {(() => {
           const hasFilters = !!(accountFilter || dateFrom || dateTo || descFilter || amountMin || amountMax);
           const canClear = hasFilters || selectedIds.size > 0;
-          const fIn = filteredTxs.filter((t: any) => t.direction === "in").reduce((s: number, t: any) => s + t.amount, 0);
-          const fOut = filteredTxs.filter((t: any) => t.direction === "out").reduce((s: number, t: any) => s + t.amount, 0);
+          // Переводы между своими счетами — не оборот, в суммы не входят.
+          const fIn = filteredTxs.filter((t: any) => t.direction === "in" && !t.is_transfer).reduce((s: number, t: any) => s + t.amount, 0);
+          const fOut = filteredTxs.filter((t: any) => t.direction === "out" && !t.is_transfer).reduce((s: number, t: any) => s + t.amount, 0);
           const selItems = filteredTxs.filter((t: any) => selectedIds.has(String(t.id)));
           const selIn = selItems.filter((t: any) => t.direction === "in").reduce((s: number, t: any) => s + t.amount, 0);
           const selOut = selItems.filter((t: any) => t.direction === "out").reduce((s: number, t: any) => s + t.amount, 0);
@@ -512,6 +513,9 @@ const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
                     {t.source === "fund"
                       ? (t.counterparty || t.purpose || `Фонд: ${t.fund_name}`)
                       : (t.counterparty || t.purpose || "—")}
+                    {t.is_transfer && (
+                      <span style={{ color: "#A89070", background: "#F2EFE9", padding: "1px 6px", fontSize: 10, fontWeight: 600, marginLeft: 8 }}>перевод</span>
+                    )}
                   </div>
                 </div>
                 <div style={{ fontSize: 12 }}>

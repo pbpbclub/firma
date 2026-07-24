@@ -133,6 +133,27 @@ def get_balance_at_date(date: str):
         conn.close()
 
 
+TRANSFER_REASON = "Перевод между своими"
+
+
+def _transfer_tx_ids() -> set:
+    """Банковские транзакции, помеченные «Перевод между своими» (обе ноги:
+    bank-in из инбокса поступлений, bank-out из инбокса списаний). Такие не
+    являются оборотом бизнеса — /summary и футер ДДС их исключают; балансы
+    счетов не трогаются (они от банка)."""
+    conn = get_production()
+    try:
+        return {
+            str(r["tx_id"])
+            for r in conn.execute(
+                "SELECT tx_id FROM inbox_dismissed WHERE reason = ? AND source IN ('bank-in','bank-out')",
+                (TRANSFER_REASON,),
+            )
+        }
+    finally:
+        conn.close()
+
+
 @router.get("/transactions")
 def list_transactions(
     account: Optional[str] = None,
@@ -165,7 +186,8 @@ def list_transactions(
         sql += " ORDER BY date DESC, id DESC LIMIT ?"
         params.append(limit)
         rows = conn.execute(sql, params).fetchall()
-        bank_rows = [dict(r) for r in rows]
+        transfers = _transfer_tx_ids()
+        bank_rows = [{**dict(r), "is_transfer": str(r["id"]) in transfers} for r in rows]
     except Exception as e:
         bank_rows = []
     finally:
@@ -221,38 +243,47 @@ def list_transactions(
 
 @router.get("/summary")
 def get_summary():
+    # Переводы между своими счетами — не оборот: помеченные исключаем из сумм и
+    # графика (балансы не трогаются — они от банка).
+    transfers = _transfer_tx_ids()
+    not_transfer = ""
+    tparams: list = []
+    if transfers:
+        not_transfer = f" AND CAST(id AS TEXT) NOT IN ({','.join('?' * len(transfers))})"
+        tparams = list(transfers)
     conn = get_finance()
     try:
         month_data = conn.execute(
-            """
+            f"""
             SELECT
                 SUM(CASE WHEN direction='in' THEN amount ELSE 0 END) as income,
                 SUM(CASE WHEN direction='out' THEN amount ELSE 0 END) as expense
             FROM transactions
-            WHERE strftime('%Y-%m', date) = strftime('%Y-%m', 'now')
-            """
+            WHERE strftime('%Y-%m', date) = strftime('%Y-%m', 'now'){not_transfer}
+            """, tparams
         ).fetchone()
 
         totals = conn.execute(
-            """
+            f"""
             SELECT
                 SUM(CASE WHEN direction='in' THEN amount ELSE 0 END) as total_in,
                 SUM(CASE WHEN direction='out' THEN amount ELSE 0 END) as total_out
             FROM transactions
-            """
+            WHERE 1=1{not_transfer}
+            """, tparams
         ).fetchone()
 
         monthly = conn.execute(
-            """
+            f"""
             SELECT
                 strftime('%Y-%m', date) as month,
                 SUM(CASE WHEN direction='in' THEN amount ELSE 0 END) as income,
                 SUM(CASE WHEN direction='out' THEN amount ELSE 0 END) as expense
             FROM transactions
-            WHERE date >= date('now', '-6 months')
+            WHERE date >= date('now', '-6 months'){not_transfer}
             GROUP BY month
             ORDER BY month
-            """
+            """, tparams
         ).fetchall()
 
         return {
