@@ -163,6 +163,8 @@ export const expensesApi = {
     api.put(`/orders/${orderId}/expenses/${expenseId}`, data).then((r) => r.data),
   delete: (orderId: string, expenseId: string, withGroup = false) =>
     api.delete(`/orders/${orderId}/expenses/${expenseId}`, { params: withGroup ? { with_group: true } : {} }).then((r) => r.data),
+  split: (orderId: string, expenseId: string, parts: { amount: number; category: string; title?: string | null }[]) =>
+    api.post(`/orders/${orderId}/expenses/${expenseId}/split`, { parts }).then((r) => r.data),
 };
 
 export const inboxApi = {

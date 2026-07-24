@@ -5,13 +5,13 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { MONO } from "../components/ui/Num";
-import { ConfirmModal } from "../components/ui/Modal";
+import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { Loading } from "../components/ui/Loading";
 import { Button } from "../components/ui/Button";
 import { fmtMoney, fmtDate } from "../components/ui/format";
 import { ESTIMATE_STATUS } from "../components/domain";
 import { ordersApi, customersApi, estimatesApi, expensesApi } from "../api";
-import { Plus, CaretRight, Trash, LinkSimple, PencilSimple, Warning } from "@phosphor-icons/react";
+import { Plus, CaretRight, Trash, LinkSimple, PencilSimple, Warning, ArrowsSplit } from "@phosphor-icons/react";
 import { ExpenseModal, EXPENSE_CATEGORIES } from "../components/ExpenseModal";
 import { ProfitLadder, PlanFactDuel } from "../components/OrderFinance";
 import { OrderSummaryStrip } from "../components/order/OrderSummaryStrip";
@@ -33,6 +33,77 @@ function StageHeader({ n, title, hint }: { n: string; title: string; hint?: stri
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>{children}</div>;
+}
+
+// Детализация расхода: разбить одну привязанную сумму на несколько категорий
+// (материалы/работы/доставка/прочее). Сумма частей должна сойтись с исходной.
+function SplitExpenseModal({ expense, saving, onSave, onClose }: {
+  expense: any; saving: boolean;
+  onSave: (parts: { amount: number; category: string; title?: string | null }[]) => void;
+  onClose: () => void;
+}) {
+  type Part = { amount: string; category: string; title: string };
+  const [parts, setParts] = useState<Part[]>([
+    { amount: String(expense.amount ?? ""), category: expense.category || "material", title: "" },
+    { amount: "", category: "work", title: "" },
+  ]);
+  const patch = (i: number, p: Partial<Part>) => setParts(parts.map((x, j) => (j === i ? { ...x, ...p } : x)));
+  const sum = parts.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+  const diff = Math.round(((expense.amount || 0) - sum) * 100) / 100;
+  const valid = parts.length >= 2 && parts.every(p => (parseFloat(p.amount) || 0) > 0) && Math.abs(diff) < 0.01;
+  const addPart = () => setParts([...parts, { amount: diff > 0 ? String(diff) : "", category: "other", title: "" }]);
+  return (
+    <Modal size="lg" eyebrow="ДЕТАЛИЗАЦИЯ РАСХОДА" onClose={onClose}
+      onCancel={onClose} onSave={() => valid && onSave(parts.map(p => ({
+        amount: parseFloat(p.amount), category: p.category, title: p.title.trim() || null,
+      })))}
+      saveLabel={saving ? "Разбиваем..." : "Разбить"} saving={saving} canSave={valid}>
+      <div style={{ padding: "18px 24px" }}>
+        <div style={{ fontSize: 12, color: "#6B6355", marginBottom: 14 }}>
+          «{expense.title}» — <span style={{ fontFamily: MONO, fontWeight: 600, color: "#1A1A1A" }}>{fmtMoney(expense.amount)}</span>
+          <span style={{ color: "#A89070" }}> → на что ушло:</span>
+        </div>
+        {parts.map((p, i) => (
+          <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+            <input value={p.amount} onChange={e => patch(i, { amount: e.target.value })} placeholder="сумма" type="number"
+              style={{ width: 110, border: "1px solid #EDEBE6", padding: "6px 8px", fontSize: 12, outline: "none",
+                       fontFamily: MONO, textAlign: "right" }} />
+            <div style={{ display: "flex" }}>
+              {EXPENSE_CATEGORIES.map(c => (
+                <button key={c.v} onClick={() => patch(i, { category: c.v })}
+                  style={{ fontSize: 10.5, padding: "6px 10px", cursor: "pointer", fontFamily: "inherit",
+                           border: "1px solid #EDEBE6", marginLeft: -1,
+                           background: p.category === c.v ? "#1A1A1A" : "#fff",
+                           color: p.category === c.v ? "#fff" : "#6B6355" }}>
+                  {c.l}
+                </button>
+              ))}
+            </div>
+            <input value={p.title} onChange={e => patch(i, { title: e.target.value })} placeholder="название (опц.)"
+              style={{ flex: 1, border: "1px solid #EDEBE6", padding: "6px 8px", fontSize: 12, outline: "none" }} />
+            {parts.length > 2 && (
+              <button onClick={() => setParts(parts.filter((_, j) => j !== i))}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 3, display: "flex" }}>
+                <Trash size={12} />
+              </button>
+            )}
+          </div>
+        ))}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12 }}>
+          <button onClick={addPart}
+            style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, padding: "5px 10px",
+                     border: "1px solid #EDEBE6", background: "#fff", color: "#6B6355", cursor: "pointer", fontFamily: "inherit" }}>
+            <Plus size={11} /> часть
+          </button>
+          <div style={{ fontSize: 11, fontFamily: MONO, color: Math.abs(diff) < 0.01 ? "#4A7C59" : "#8B3A3A" }}>
+            {Math.abs(diff) < 0.01 ? `✓ ${fmtMoney(sum)} — сходится` :
+              diff > 0 ? `осталось распределить ${fmtMoney(diff)}` :
+                         `перебор на ${fmtMoney(Math.abs(diff))}`}
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
 }
 
 export default function OrderDetail() {
@@ -121,6 +192,13 @@ export default function OrderDetail() {
   const removeExpense = useMutation({
     mutationFn: (e: any) => expensesApi.delete(id!, e.id, !!e.group_id),
     onSuccess: () => { invalidateFact(); setDelExpense(null); },
+  });
+
+  const [splitExpense, setSplitExpense] = useState<any>(null);
+  const doSplit = useMutation({
+    mutationFn: (parts: { amount: number; category: string; title?: string | null }[]) =>
+      expensesApi.split(id!, splitExpense.id, parts),
+    onSuccess: () => { invalidateFact(); setSplitExpense(null); },
   });
 
   // ── Утверждение сметы (актуализация) ───────────────────────────────────
@@ -238,6 +316,16 @@ export default function OrderDetail() {
             saving={saveExpense.isPending}
             onSave={(d) => saveExpense.mutate(d)}
             onClose={() => setExpenseModal(null)}
+          />
+        )}
+
+        {/* Детализация расхода: разбить сумму на категории */}
+        {splitExpense && (
+          <SplitExpenseModal
+            expense={splitExpense}
+            saving={doSplit.isPending}
+            onSave={(parts) => doSplit.mutate(parts)}
+            onClose={() => setSplitExpense(null)}
           />
         )}
 
@@ -439,7 +527,7 @@ export default function OrderDetail() {
                   const cat = EXPENSE_CATEGORIES.find(c => c.v === e.category);
                   return (
                     <div key={e.id}
-                      style={{ display: "grid", gridTemplateColumns: "78px 1fr 96px 110px 52px",
+                      style={{ display: "grid", gridTemplateColumns: "78px 1fr 96px 110px 74px",
                                gap: 10, alignItems: "center", padding: "9px 0", borderBottom: "1px solid #F2EFE9" }}>
                       <div style={{ fontSize: 11, color: "#A89070", fontFamily: MONO }}>{fmtDate(e.expense_date)}</div>
                       <div style={{ minWidth: 0 }}>
@@ -472,6 +560,13 @@ export default function OrderDetail() {
                           onMouseEnter={ev => (ev.currentTarget.style.color = "#1A1A1A")}
                           onMouseLeave={ev => (ev.currentTarget.style.color = "#C8C0B0")}>
                           <PencilSimple size={13} />
+                        </button>
+                        <button onClick={() => setSplitExpense(e)}
+                          title="Детализировать: разбить на категории (материалы/работы/…)"
+                          style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 3, display: "flex" }}
+                          onMouseEnter={ev => (ev.currentTarget.style.color = "#E8592A")}
+                          onMouseLeave={ev => (ev.currentTarget.style.color = "#C8C0B0")}>
+                          <ArrowsSplit size={13} />
                         </button>
                         <button onClick={() => setDelExpense(e)}
                           style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 3, display: "flex" }}

@@ -1061,6 +1061,70 @@ def update_expense(order_id: str, expense_id: str, body: ExpenseIn):
         conn.close()
 
 
+class SplitPart(BaseModel):
+    amount: float
+    category: str
+    title: Optional[str] = None
+
+
+class SplitIn(BaseModel):
+    parts: List[SplitPart]
+
+
+@router.post("/{order_id}/expenses/{expense_id}/split")
+def split_expense(order_id: str, expense_id: str, body: SplitIn):
+    """Детализация: разбить один расход на несколько категорий (материалы/работы/…).
+    Первая часть остаётся в исходной строке (id, creditor_id и ссылки целы — инвариант
+    «одна оплата = один факт» не ломается), остальные — сиблинги с общим group_id.
+    Копирование tx-ссылок на сиблингов повторяет паттерн from-tx (несколько строк
+    одной транзакции); дедуп creditors матчит любую из них."""
+    if len(body.parts) < 2:
+        raise HTTPException(status_code=400, detail="Нужно минимум 2 части")
+    for p in body.parts:
+        if p.category not in EXPENSE_CATEGORIES:
+            raise HTTPException(status_code=400, detail=f"category must be one of {'|'.join(EXPENSE_CATEGORIES)}")
+        if p.amount <= 0:
+            raise HTTPException(status_code=400, detail="Сумма части должна быть > 0")
+    conn = get_production()
+    try:
+        r = conn.execute(
+            "SELECT * FROM expenses WHERE id = ? AND order_id IN (SELECT id FROM orders WHERE id = ? OR number = ?)",
+            (expense_id, order_id, order_id)
+        ).fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="Not found")
+        total = sum(p.amount for p in body.parts)
+        if abs(total - (r["amount"] or 0)) > 0.01:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Сумма частей {total:.2f} не сходится с расходом {r['amount']:.2f}")
+        group_id = r["group_id"] or str(uuid4())
+        first = body.parts[0]
+        conn.execute(
+            "UPDATE expenses SET amount = ?, category = ?, title = COALESCE(?, title), group_id = ? WHERE id = ?",
+            (first.amount, first.category, (first.title or "").strip() or None, group_id, expense_id))
+        new_ids = []
+        for p in body.parts[1:]:
+            eid = str(uuid4())
+            new_ids.append(eid)
+            conn.execute(
+                """INSERT INTO expenses (id, order_id, title, amount, category, supplier, master_id,
+                                         expense_date, source, finance_tx_id, zenmoney_tx_id,
+                                         payment_source, accountable_person_id, group_id, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+                (eid, r["order_id"], (p.title or "").strip() or r["title"], p.amount, p.category,
+                 r["supplier"], r["master_id"], r["expense_date"], r["source"],
+                 r["finance_tx_id"], r["zenmoney_tx_id"],
+                 r["payment_source"], r["accountable_person_id"], group_id))
+        conn.commit()
+        rows = [dict(x) for x in conn.execute(
+            "SELECT * FROM expenses WHERE id IN ({}) ORDER BY created_at".format(
+                ",".join("?" * (len(new_ids) + 1))), [expense_id] + new_ids).fetchall()]
+        return {"ok": True, "group_id": group_id, "items": rows}
+    finally:
+        conn.close()
+
+
 @router.delete("/{order_id}/expenses/{expense_id}")
 def delete_expense(order_id: str, expense_id: str, with_group: bool = False):
     """with_group=true удаляет всю группу разноски (одна поездка на несколько заказов)."""
