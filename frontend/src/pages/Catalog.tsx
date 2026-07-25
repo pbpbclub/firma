@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loading } from "../components/ui/Loading";
 import { EmptyState } from "../components/ui/EmptyState";
 import { catalogApi } from "../api";
-import { MagnifyingGlass, Plus, X, Trash } from "@phosphor-icons/react";
+import { MagnifyingGlass, Plus, X, Trash, Tag } from "@phosphor-icons/react";
 import { ColumnFilter, AmountFilter } from "../components/TableFilters";
 import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { CalcHeader, CalcSection, CalcRow, CalcFooter } from "../components/ui/Calc";
@@ -183,16 +183,22 @@ function emptyLine(type: LineType): Line {
   return { _key: newKey(), type, title: "", qty: 1, unit: type === "labor" ? "ч" : "шт", unit_price: 0 };
 }
 
+// Подсказки категорий изделий. Не справочник: свободный ввод в форме создаёт новую
+// категорию, она подхватится в группировке и подсказках из данных.
+const CATEGORIES = ["Столы", "Уличная мебель", "Мягкая мебель", "Металлокаркасы", "Стулья", "Каркас дивана", "Кашпо", "Перегородки", "Полки", "Скамейки", "Доставка"];
+
 // ─── Calculator Modal ────────────────────────────────────────────────────────
 
 function CalculatorModal({
   item,
   onClose,
   onSaved,
+  categoryOptions = CATEGORIES,
 }: {
   item: CatalogItemFull | null;
   onClose: () => void;
   onSaved: () => void;
+  categoryOptions?: string[];
 }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -263,7 +269,6 @@ function CalculatorModal({
     outline: "none", padding: "6px 10px", boxSizing: "border-box", width: "100%",
   };
   const fieldLabel: React.CSSProperties = { fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 };
-  const CATEGORIES = ["Столы", "Уличная мебель", "Мягкая мебель", "Металлокаркасы", "Стулья", "Каркас дивана", "Кашпо", "Перегородки", "Полки", "Скамейки", "Доставка"];
 
   const renderRow = (l: Line) => (
     <CalcRow
@@ -295,11 +300,12 @@ function CalculatorModal({
           <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 16, marginTop: 14, alignItems: "end" }}>
             <div>
               <div style={fieldLabel}>КАТЕГОРИЯ</div>
-              <select value={category} onChange={e => setCategory(e.target.value)} style={{ ...inputBase, appearance: "none", cursor: "pointer" }}>
-                <option value="">— не выбрана —</option>
-                {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                {category && !CATEGORIES.includes(category) && <option value={category}>{category}</option>}
-              </select>
+              <input list="catalog-cat-options" style={inputBase} value={category}
+                onChange={e => setCategory(e.target.value)}
+                placeholder="выбери или впиши новую" />
+              <datalist id="catalog-cat-options">
+                {categoryOptions.map(c => <option key={c} value={c} />)}
+              </datalist>
             </div>
             <div>
               <div style={fieldLabel}>БРЕНД</div>
@@ -355,7 +361,7 @@ function CalculatorModal({
 
 // ─── Main page ───────────────────────────────────────────────────────────────
 
-const tabs = ["Каталог", "Из смет"] as const;
+const tabs = ["Изделия", "Из смет"] as const;
 type Tab = typeof tabs[number];
 
 const catalogCols = "28px 2fr 90px 1fr 130px 130px";
@@ -363,7 +369,7 @@ const fromSmetsCols = "28px 2fr 1fr 80px 140px 120px 120px";
 
 export default function Catalog() {
   const qc = useQueryClient();
-  const [tab, setTab] = useState<Tab>("Каталог");
+  const [tab, setTab] = useState<Tab>("Изделия");
   const [search, setSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [modalItem, setModalItem] = useState<CatalogItemFull | null | "new">(undefined as any);
@@ -413,11 +419,32 @@ export default function Catalog() {
     }
   };
 
+  // Массовая категория выбранным (PATCH — точечно, не трогает рецептуру).
+  const [bulkCatOpen, setBulkCatOpen] = useState(false);
+  const [bulkCat, setBulkCat] = useState("");
+  const [bulkCatSaving, setBulkCatSaving] = useState(false);
+  const bulkSetCategory = async () => {
+    setBulkCatSaving(true);
+    try {
+      for (const id of Array.from(selectedIds)) {
+        await catalogApi.items.patch(id, { category: bulkCat.trim() || null });
+      }
+      qc.invalidateQueries({ queryKey: ["catalog-items"] });
+      setSelectedIds(new Set());
+      setBulkCatOpen(false);
+      setBulkCat("");
+    } finally {
+      setBulkCatSaving(false);
+    }
+  };
+
   const { data: savedItems = [], isLoading: loadingSaved } = useQuery<CatalogItem[]>({
     queryKey: ["catalog-items"],
     queryFn: catalogApi.items.list,
-    enabled: tab === "Каталог",
+    enabled: tab === "Изделия",
   });
+  // Подсказки категорий: зашитый список + всё, что уже встречается в данных.
+  const allCatOptions = [...new Set([...CATEGORIES, ...savedItems.map(i => i.category).filter(Boolean) as string[]])];
 
   const { data: fromSmets = [], isLoading: loadingSmets } = useQuery({
     queryKey: ["catalog", search],
@@ -448,7 +475,7 @@ export default function Catalog() {
       <div style={{ padding: "24px 28px 0", borderBottom: "1px solid #EDEBE6" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16 }}>
           <div>
-            <div style={{ fontSize: 26, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em" }}>Изделия</div>
+            <div style={{ fontSize: 26, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em" }}>Каталог</div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, paddingBottom: 2 }}>
             {tab === "Из смет" && (
@@ -470,7 +497,7 @@ export default function Catalog() {
                 </button>
               )
             )}
-            {tab === "Каталог" && (
+            {tab === "Изделия" && (
               <button
                 onClick={openNew}
                 style={{ width: 28, height: 28, background: "#E8592A", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
@@ -502,7 +529,7 @@ export default function Catalog() {
       </div>
 
       {/* Tab: Каталог */}
-      {tab === "Каталог" && (
+      {tab === "Изделия" && (
         <>
           {/* Column headers */}
           {(() => {
@@ -533,7 +560,32 @@ export default function Catalog() {
                         {selectedIds.size === 0 && <span>{filteredItems.length} изделий</span>}
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                        {selectedIds.size > 0 && (
+                        {selectedIds.size > 0 && (bulkCatOpen ? (
+                          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                            <input list="catalog-cat-bulk" value={bulkCat} onChange={e => setBulkCat(e.target.value)}
+                              autoFocus placeholder="категория (пусто = снять)"
+                              style={{ border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 11, outline: "none", width: 190, fontFamily: "inherit" }} />
+                            <datalist id="catalog-cat-bulk">
+                              {allCatOptions.map(c => <option key={c} value={c} />)}
+                            </datalist>
+                            <button onClick={bulkSetCategory} disabled={bulkCatSaving}
+                              style={{ fontSize: 10, padding: "4px 10px", border: "none", background: "#E8592A", color: "#fff", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
+                              {bulkCatSaving ? "..." : `Применить (${selectedIds.size})`}
+                            </button>
+                            <button onClick={() => { setBulkCatOpen(false); setBulkCat(""); }}
+                              style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}>
+                              <X size={11} />
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setBulkCatOpen(true)}
+                            style={{ fontSize: 10, color: "#6B6355", background: "#fff", border: "1px solid #EDEBE6", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", fontFamily: "inherit" }}
+                          >
+                            <Tag size={10} /> Категория ({selectedIds.size})
+                          </button>
+                        ))}
+                        {selectedIds.size > 0 && !bulkCatOpen && (
                           <button
                             onClick={() => setConfirmBulkDelete(true)}
                             disabled={bulkDeleting}
@@ -571,32 +623,57 @@ export default function Catalog() {
                   <Loading />
                 ) : filteredItems.length === 0 ? (
                   <EmptyState title={catFilter ? "Нет изделий в этой категории" : "Каталог пуст — нажмите + чтобы добавить первое изделие"} />
-                ) : filteredItems.map((item) => (
-            <div
-              key={item.id}
-              onClick={() => openEdit(item)}
-              style={{ display: "grid", gridTemplateColumns: catalogCols, padding: "13px 28px", borderBottom: "1px solid #F2EFE9", alignItems: "center", cursor: "pointer", transition: "background 0.1s", background: selectedIds.has(item.id) ? "#FFF8F5" : "transparent" }}
-              onMouseEnter={(e) => { if (!selectedIds.has(item.id)) e.currentTarget.style.background = "#FAF8F5"; }}
-              onMouseLeave={(e) => { if (!selectedIds.has(item.id)) e.currentTarget.style.background = "transparent"; }}
-            >
-              <div style={{ display: "flex", alignItems: "center" }}>
-                <Checkbox checked={selectedIds.has(item.id)} onChange={() => toggleSelect(item.id)} />
-              </div>
-              <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.title}</div>
-              <div>
-                {item.brand ? (
-                  <span style={{
-                    fontSize: 10, fontWeight: 700, padding: "2px 6px", fontFamily: MONO,
-                    color: item.brand === "MeRA" ? "#2E6DA4" : item.brand === "pbpb" ? "#7B4F9E" : "#3D8C6B",
-                    border: `1px solid ${item.brand === "MeRA" ? "#2E6DA4" : item.brand === "pbpb" ? "#7B4F9E" : "#3D8C6B"}`,
-                  }}>{item.brand}</span>
-                ) : <span style={{ fontSize: 11, color: "#C8C0B0" }}>—</span>}
-              </div>
-              <div style={{ fontSize: 12, color: "#A89070" }}>{item.category || "—"}</div>
-              <div style={{ fontSize: 12, color: "#6B6355", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(item.cost_total)}</div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#E8592A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(item.sale_price)}</div>
-            </div>
-          ))}
+                ) : (() => {
+                  // Разбивка по категориям: сначала известные (в порядке подсказок),
+                  // затем прочие по алфавиту, «Без категории» — последней.
+                  const renderItem = (item: CatalogItem) => (
+                    <div
+                      key={item.id}
+                      onClick={() => openEdit(item)}
+                      style={{ display: "grid", gridTemplateColumns: catalogCols, padding: "13px 28px", borderBottom: "1px solid #F2EFE9", alignItems: "center", cursor: "pointer", transition: "background 0.1s", background: selectedIds.has(item.id) ? "#FFF8F5" : "transparent" }}
+                      onMouseEnter={(e) => { if (!selectedIds.has(item.id)) e.currentTarget.style.background = "#FAF8F5"; }}
+                      onMouseLeave={(e) => { if (!selectedIds.has(item.id)) e.currentTarget.style.background = "transparent"; }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center" }}>
+                        <Checkbox checked={selectedIds.has(item.id)} onChange={() => toggleSelect(item.id)} />
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.title}</div>
+                      <div>
+                        {item.brand ? (
+                          <span style={{
+                            fontSize: 10, fontWeight: 700, padding: "2px 6px", fontFamily: MONO,
+                            color: item.brand === "MeRA" ? "#2E6DA4" : item.brand === "pbpb" ? "#7B4F9E" : "#3D8C6B",
+                            border: `1px solid ${item.brand === "MeRA" ? "#2E6DA4" : item.brand === "pbpb" ? "#7B4F9E" : "#3D8C6B"}`,
+                          }}>{item.brand}</span>
+                        ) : <span style={{ fontSize: 11, color: "#C8C0B0" }}>—</span>}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#A89070" }}>{item.category || "—"}</div>
+                      <div style={{ fontSize: 12, color: "#6B6355", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(item.cost_total)}</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#E8592A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(item.sale_price)}</div>
+                    </div>
+                  );
+                  const others = [...new Set(filteredItems.map(i => i.category).filter(Boolean))]
+                    .filter(c => !CATEGORIES.includes(c as string)).sort() as string[];
+                  const sections = [...CATEGORIES, ...others]
+                    .map(c => ({ label: c, items: filteredItems.filter(i => i.category === c) }))
+                    .filter(s => s.items.length > 0);
+                  const uncat = filteredItems.filter(i => !i.category);
+                  if (uncat.length) sections.push({ label: "Без категории", items: uncat });
+                  return sections.map(sec => (
+                    <div key={sec.label}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline",
+                                    padding: "14px 28px 6px", borderBottom: "1px solid #EDEBE6", background: "#FAF8F5" }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: "#A89070", letterSpacing: "0.06em" }}>
+                          {sec.label.toUpperCase()} <span style={{ color: "#C8C0B0", fontWeight: 400 }}>· {sec.items.length}</span>
+                        </span>
+                        <span style={{ fontSize: 11, color: "#6B6355", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
+                          {fmt(sec.items.reduce((s, i) => s + (i.sale_price || 0), 0))}
+                        </span>
+                      </div>
+                      {sec.items.map(renderItem)}
+                    </div>
+                  ));
+                })()}
               </>
             );
           })()}
@@ -707,6 +784,7 @@ export default function Catalog() {
           item={modalItem as CatalogItemFull | null}
           onClose={closeModal}
           onSaved={closeModal}
+          categoryOptions={allCatOptions}
         />
       )}
       {confirmBulkDelete && (

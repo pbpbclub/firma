@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query, HTTPException, Body
 from typing import Optional, List
 from pydantic import BaseModel
 from db import get_production
@@ -311,6 +311,28 @@ def update_item(item_id: str, body: ItemIn):
         result = dict(item)
         result["lines"] = [dict(l) for l in lines]
         return result
+    finally:
+        conn.close()
+
+
+@router.patch("/items/{item_id}")
+def patch_item(item_id: str, body: dict = Body(...)):
+    """Точечное обновление полей карточки (массовая категория и т.п.).
+    PUT — полнотельный и пересобирает рецептуру; сюда — только скалярные поля."""
+    allowed = ("category", "brand", "notes")
+    fields = {k: body[k] for k in allowed if k in body}
+    if not fields:
+        raise HTTPException(status_code=400, detail=f"Нет полей для обновления (можно: {', '.join(allowed)})")
+    conn = get_production()
+    try:
+        _ensure_tables(conn)
+        if not conn.execute("SELECT 1 FROM catalog_items WHERE id = ?", (item_id,)).fetchone():
+            raise HTTPException(status_code=404, detail="Not found")
+        sets = ", ".join(f"{k} = ?" for k in fields)
+        conn.execute(f"UPDATE catalog_items SET {sets}, updated_at = ? WHERE id = ?",
+                     (*fields.values(), datetime.utcnow().isoformat(), item_id))
+        conn.commit()
+        return dict(conn.execute("SELECT * FROM catalog_items WHERE id = ?", (item_id,)).fetchone())
     finally:
         conn.close()
 

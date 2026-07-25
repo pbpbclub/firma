@@ -145,6 +145,7 @@ export const catalogApi = {
     get:    (id: string)            => api.get(`/catalog/items/${id}`).then((r) => r.data),
     create: (data: any)             => api.post("/catalog/items", data).then((r) => r.data),
     update: (id: string, data: any) => api.put(`/catalog/items/${id}`, data).then((r) => r.data),
+    patch:  (id: string, data: any) => api.patch(`/catalog/items/${id}`, data).then((r) => r.data),
     delete: (id: string)            => api.delete(`/catalog/items/${id}`).then((r) => r.data),
     costHistory: (id: string)       => api.get(`/catalog/items/${id}/cost-history`).then((r) => r.data),
   },
