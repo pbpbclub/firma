@@ -41,6 +41,7 @@ class CustomerCreateRequest(BaseModel):
     finagent_ref: Optional[str] = None
     source: Optional[str] = None
     status: Optional[str] = None
+    master_id: Optional[str] = None      # он же подрядчик (masters.id)
 
 
 class CustomerUpdateRequest(BaseModel):
@@ -58,6 +59,7 @@ class CustomerUpdateRequest(BaseModel):
     finagent_ref: Optional[str] = None
     source: Optional[str] = None
     status: Optional[str] = None
+    master_id: Optional[str] = None      # он же подрядчик (masters.id)
 
 
 @router.get("")
@@ -141,6 +143,13 @@ def get_customer(customer_id: str):
         ).fetchall()
         orders = [dict(r) for r in orders]
         order_refs = [r["number"] for r in orders if r["number"]]
+
+        # Тот же человек в картотеке подрядчиков (клиент бывает и мастером).
+        linked_master = None
+        if customer.get("master_id"):
+            m = prod.execute("SELECT id, name, role, specialization FROM masters WHERE id = ?",
+                             (customer["master_id"],)).fetchone()
+            linked_master = dict(m) if m else None
     finally:
         prod.close()
 
@@ -171,6 +180,7 @@ def get_customer(customer_id: str):
 
     return {
         "customer": customer,
+        "linked_master": linked_master,
         "orders": orders,
         "transactions": transactions,
         "transaction_summary": summary,

@@ -4,10 +4,13 @@ import { MONO } from "../../components/ui/Num";
 import { useNavigationGuard, NavigationGuardModal } from "../../components/NavigationGuard";
 import { EditModal, type FieldDef } from "../../components/EditModal";
 import { PayeeRulesSection } from "../../components/PayeeRulesSection";
-import { customersApi } from "../../api";
+import { useNavigate } from "react-router-dom";
+import { customersApi, mastersApi } from "../../api";
 import { fmt } from "./helpers";
 import { DetailRow as Row } from "./DetailRow";
 import { DetailShell, DetailSection, NoteBlock } from "./DetailShell";
+import { ContactStrip, contactHref } from "../../components/ui/ContactLinks";
+import { Wrench, X } from "@phosphor-icons/react";
 
 // Цвета — по ОТОБРАЖАЕМОЙ метке (см. LABELS ниже).
 export const CUSTOMER_STATUS_COLORS: Record<string, string> = {
@@ -52,6 +55,70 @@ export const CLIENT_FIELDS: FieldDef[] = [
   { key: "wiki_ref",  label: "Ссылка (wiki)" },
   { key: "notes",     label: "Заметки", type: "textarea" },
 ];
+
+// Клиент бывает и подрядчиком (заказ пришёл от своего мастера). Карточки остаются
+// раздельными — у ролей разные данные, — но связываются переходом «это тот же человек».
+function LinkedMasterSection({ customerId, linked }: { customerId: string; linked?: any }) {
+  const qc = useQueryClient();
+  const nav = useNavigate();
+  const [picking, setPicking] = useState(false);
+  const [pick, setPick] = useState("");
+  const { data: masters = [] } = useQuery({
+    queryKey: ["masters-lite"], queryFn: () => mastersApi.list(), enabled: picking,
+  });
+  const link = useMutation({
+    mutationFn: (masterId: string | null) => customersApi.update(customerId, { master_id: masterId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["customer", customerId] });
+      qc.invalidateQueries({ queryKey: ["master"] });
+      setPicking(false); setPick("");
+    },
+  });
+
+  return (
+    <DetailSection label="СВЯЗИ">
+      {linked ? (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #F2EFE9" }}>
+          <div style={{ fontSize: 11, color: "#A89070" }}>Он же подрядчик</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button onClick={() => nav(`/wiki/contractors/${linked.id}`)}
+              style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 13, fontWeight: 500, color: "#E8592A",
+                       background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", padding: 0 }}>
+              <Wrench size={12} /> {linked.name} →
+            </button>
+            <button onClick={() => link.mutate(null)} title="Убрать связь"
+              style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}>
+              <X size={11} />
+            </button>
+          </div>
+        </div>
+      ) : picking ? (
+        <div style={{ display: "flex", gap: 6, alignItems: "center", padding: "8px 0" }}>
+          <select value={pick} onChange={e => setPick(e.target.value)} autoFocus
+            style={{ flex: 1, border: "1px solid #EDEBE6", padding: "5px 8px", fontSize: 12, outline: "none", background: "#fff", fontFamily: "inherit" }}>
+            <option value="">— выбери подрядчика —</option>
+            {(masters as any[]).map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+          <button disabled={!pick || link.isPending} onClick={() => link.mutate(pick)}
+            style={{ fontSize: 11, padding: "5px 10px", border: "none", background: pick ? "#E8592A" : "#EDEBE6",
+                     color: pick ? "#fff" : "#A89070", cursor: pick ? "pointer" : "default", fontFamily: "inherit", fontWeight: 600 }}>
+            {link.isPending ? "..." : "Связать"}
+          </button>
+          <button onClick={() => setPicking(false)}
+            style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}>
+            <X size={11} />
+          </button>
+        </div>
+      ) : (
+        <button onClick={() => setPicking(true)}
+          style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, padding: "4px 9px", marginTop: 2,
+                   border: "1px solid #EDEBE6", background: "#fff", color: "#6B6355", cursor: "pointer", fontFamily: "inherit" }}>
+          <Wrench size={11} /> Он же подрядчик
+        </button>
+      )}
+    </DetailSection>
+  );
+}
 
 export function ClientDetail({ id, onClose }: { id: string; onClose: () => void }) {
   const qc = useQueryClient();
@@ -115,11 +182,18 @@ export function ClientDetail({ id, onClose }: { id: string; onClose: () => void 
         onClose={onClose}
       >
         <DetailSection label="КОНТАКТЫ" first>
+          <ContactStrip entity={customer} />
           <Row label="ИНН"              value={customer.inn} mono />
-          <Row label="Телефон"          value={customer.phone} mono />
-          <Row label="Email"            value={customer.email} />
+          <Row label="Телефон"          value={customer.phone} mono href={contactHref("phone", customer.phone)} />
+          {/* Мессенджеры показываем только заполненные — иначе карточка в прочерках */}
+          {customer.telegram && <Row label="Telegram" value={customer.telegram} href={contactHref("telegram", customer.telegram)} />}
+          {customer.whatsapp && <Row label="WhatsApp" value={customer.whatsapp} href={contactHref("whatsapp", customer.whatsapp)} />}
+          {customer.instagram && <Row label="Instagram" value={customer.instagram} href={contactHref("instagram", customer.instagram)} />}
+          <Row label="Email"            value={customer.email} href={contactHref("email", customer.email)} />
           <Row label="Контактное лицо"  value={customer.contact} />
         </DetailSection>
+
+        <LinkedMasterSection customerId={id} linked={data?.linked_master} />
 
         {(customer.source || customer.notes) && (
           <DetailSection label="ПРОФИЛЬ">

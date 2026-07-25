@@ -1,16 +1,30 @@
+import { useState } from "react";
 import { MONO } from "../../components/ui/Num";
 
 // Общая строка «метка — значение» в карточке вики. Метка — мета 11, значение —
-// контент 13 (единый кегль контента по всей Вики).
-export function DetailRow({ label, value, mono }: { label: string; value?: string | null; mono?: boolean }) {
+// контент 13 (единый кегль контента по всей Вики). href — значение кликабельно
+// (звонок, почта, переход в мессенджер).
+export function DetailRow({ label, value, mono, href }: {
+  label: string; value?: string | null; mono?: boolean; href?: string;
+}) {
+  const [hover, setHover] = useState(false);
+  const valueStyle: React.CSSProperties = {
+    fontSize: 13, fontWeight: 500,
+    color: !value ? "#C8C0B0" : href && hover ? "#E8592A" : "#1A1A1A",
+    textAlign: "right", maxWidth: 240, wordBreak: "break-word",
+    fontFamily: mono && value ? MONO : undefined, fontVariantNumeric: mono ? "tabular-nums" : undefined,
+  };
+  const external = !!href && !/^(tel:|mailto:)/.test(href);
   return (
     <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #F2EFE9" }}>
       <div style={{ fontSize: 11, color: "#A89070" }}>{label}</div>
-      <div style={{
-        fontSize: 13, fontWeight: 500, color: value ? "#1A1A1A" : "#C8C0B0",
-        textAlign: "right", maxWidth: 240, wordBreak: "break-word",
-        fontFamily: mono && value ? MONO : undefined, fontVariantNumeric: mono ? "tabular-nums" : undefined,
-      }}>{value || "—"}</div>
+      {href && value ? (
+        <a href={href} target={external ? "_blank" : undefined} rel={external ? "noreferrer" : undefined}
+          onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+          style={{ ...valueStyle, textDecoration: "none", cursor: "pointer" }}>{value}</a>
+      ) : (
+        <div style={valueStyle}>{value || "—"}</div>
+      )}
     </div>
   );
 }

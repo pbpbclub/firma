@@ -4,6 +4,7 @@ import { useNavigationGuard, NavigationGuardModal } from "../../components/Navig
 import { EditModal, type FieldDef } from "../../components/EditModal";
 import { PayeeRulesSection } from "../../components/PayeeRulesSection";
 import { suppliersApi, materialsApi } from "../../api";
+import { ContactStrip, contactHref } from "../../components/ui/ContactLinks";
 import { MONO } from "../../components/ui/Num";
 import { DetailRow as Row } from "./DetailRow";
 import { DetailShell, DetailSection, NoteBlock } from "./DetailShell";
@@ -91,12 +92,13 @@ export function SupplierDetail({ row, onClose, onDeleted }: { row: any; onClose:
         onClose={onClose}
       >
         <DetailSection label="КОНТАКТЫ" first>
+          <ContactStrip entity={s} />
           <Row label="ИНН"             value={s.inn} mono />
-          <Row label="Телефон"         value={s.phone} mono />
-          <Row label="Email"           value={s.email} />
+          <Row label="Телефон"         value={s.phone} mono href={contactHref("phone", s.phone)} />
+          <Row label="Email"           value={s.email} href={contactHref("email", s.email)} />
           <Row label="Контактное лицо" value={s.contact} />
-          <Row label="Telegram"        value={s.telegram} />
-          <Row label="Сайт"            value={s.website} />
+          <Row label="Telegram"        value={s.telegram} href={contactHref("telegram", s.telegram)} />
+          <Row label="Сайт"            value={s.website} href={s.website ? (/^https?:\/\//.test(s.website) ? s.website : `https://${s.website}`) : undefined} />
         </DetailSection>
 
         {s.price_supplier && PRICE_SUPPLIER_LABELS[s.price_supplier] && (

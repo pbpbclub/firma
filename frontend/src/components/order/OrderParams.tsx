@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { CaretDown, CaretRight, Phone, EnvelopeSimple } from "@phosphor-icons/react";
 import { customersApi } from "../../api";
+import { contactHref } from "../ui/ContactLinks";
 import { MONO } from "../ui/Num";
 import { fmtDate } from "../ui/format";
 import { BRANDS, ORDER_STATUSES } from "../domain";
@@ -125,16 +126,18 @@ export function OrderParams({ order, form, field, customers }: {
             {(order?.customer_phone || order?.customer_email) && form.customer_id === String(order?.customer_id ?? "") && (
               <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: 11, color: "#6B6355", flexWrap: "wrap" }}>
                 {order.customer_phone && (
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                  <a href={contactHref("phone", order.customer_phone)}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 5, color: "inherit", textDecoration: "none" }}>
                     <Phone size={11} style={{ color: "#A89070" }} />
                     <span style={{ fontFamily: MONO }}>{order.customer_phone}</span>
-                  </span>
+                  </a>
                 )}
                 {order.customer_email && (
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                  <a href={contactHref("email", order.customer_email)}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 5, color: "inherit", textDecoration: "none" }}>
                     <EnvelopeSimple size={11} style={{ color: "#A89070" }} />
                     <span style={{ fontFamily: MONO }}>{order.customer_email}</span>
-                  </span>
+                  </a>
                 )}
               </div>
             )}

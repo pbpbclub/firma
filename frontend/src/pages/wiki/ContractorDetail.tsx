@@ -4,8 +4,10 @@ import { MONO } from "../../components/ui/Num";
 import { useNavigationGuard, NavigationGuardModal } from "../../components/NavigationGuard";
 import { EditModal, type FieldDef } from "../../components/EditModal";
 import { PayeeRulesSection } from "../../components/PayeeRulesSection";
+import { useNavigate } from "react-router-dom";
 import { mastersApi, financeApi } from "../../api";
-import { Check } from "@phosphor-icons/react";
+import { ContactStrip, contactHref } from "../../components/ui/ContactLinks";
+import { Check, User } from "@phosphor-icons/react";
 import { fmt, fmtDate } from "./helpers";
 import { DetailRow as Row } from "./DetailRow";
 import { DetailShell, DetailSection, NoteBlock, type DetailMetric } from "./DetailShell";
@@ -53,6 +55,7 @@ export const CONTRACTOR_FIELDS: FieldDef[] = [
 
 export function ContractorDetail({ id, onClose }: { id: string; onClose: () => void }) {
   const qc = useQueryClient();
+  const nav = useNavigate();
   const [editing, setEditing] = useState(false);
   const [editCreditor, setEditCreditor] = useState<any>(null);
   const blocker = useNavigationGuard(editing || !!editCreditor);
@@ -142,12 +145,29 @@ export function ContractorDetail({ id, onClose }: { id: string; onClose: () => v
         onClose={onClose}
       >
         <DetailSection label="КОНТАКТЫ" first>
-          <Row label="Телефон"  value={master.phone} mono />
-          <Row label="Telegram" value={master.telegram} />
-          <Row label="Email"    value={master.email} />
+          <ContactStrip entity={master} />
+          <Row label="Телефон"  value={master.phone} mono href={contactHref("phone", master.phone)} />
+          <Row label="Telegram" value={master.telegram} href={contactHref("telegram", master.telegram)} />
+          <Row label="Email"    value={master.email} href={contactHref("email", master.email)} />
         </DetailSection>
 
-        {(wiki.pay_label || wiki.pay_note || wiki.prepay_pct) && (
+        {data?.linked_customers?.length > 0 && (
+          <DetailSection label="СВЯЗИ">
+            {data.linked_customers.map((c: any) => (
+              <div key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #F2EFE9" }}>
+                <div style={{ fontSize: 11, color: "#A89070" }}>Он же клиент</div>
+                <button onClick={() => nav(`/wiki/clients/${c.id}`)}
+                  style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 13, fontWeight: 500, color: "#E8592A",
+                           background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", padding: 0 }}>
+                  <User size={12} /> {c.name} →
+                </button>
+              </div>
+            ))}
+          </DetailSection>
+        )}
+
+        {/* prepay_pct === 0 без сравнения утекал в разметку голым «0» */}
+        {(wiki.pay_label || wiki.pay_note || wiki.prepay_pct > 0) && (
           <DetailSection label="ОПЛАТА">
             {wiki.pay_label && <Row label="Схема" value={wiki.pay_label} />}
             {wiki.prepay_pct > 0 && <Row label="Предоплата" value={`${wiki.prepay_pct}%`} mono />}

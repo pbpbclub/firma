@@ -301,6 +301,11 @@ def get_master(master_id: str):
         # Карта номер→название: события вики хранят только order_number (текст),
         # а показываем заказ по названию. 23 заказа — дёшево одним запросом.
         num2title = {r["number"]: r["title"] for r in conn.execute("SELECT number, title FROM orders")}
+
+        # Обратная сторона связки «клиент = подрядчик» (customers.master_id).
+        linked_customers = [dict(r) for r in conn.execute(
+            "SELECT id, name, phone FROM customers WHERE master_id = ? ORDER BY name", (master_id,)
+        ).fetchall()]
     finally:
         conn.close()
 
@@ -337,6 +342,7 @@ def get_master(master_id: str):
         "paid_total": paid_total,
         "total_debt": round(sum(c["debt"] for c in creditors if c["status"] == "open"), 2),
         "wiki": wiki,
+        "linked_customers": linked_customers,
     }
 
 
@@ -412,7 +418,9 @@ def update_master(master_id: str, body: MasterUpdate):
                 pass  # analytics.db update is best-effort
 
         updated = dict(conn.execute("SELECT * FROM masters WHERE id = ?", (master_id,)).fetchone())
-        wiki = _wiki(updated["name"], updated.get("mes_id"))
+        # ВАЖНО: _wiki матчит по production masters.id (mes_master_id), НЕ по mes_id —
+        # см. докстринг _wiki. Раньше сюда уходил mes_id и спасал только фолбэк по имени.
+        wiki = _wiki(updated["name"], updated["id"])
         return {**updated, "wiki": wiki}
     finally:
         conn.close()
