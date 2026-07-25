@@ -361,23 +361,23 @@ function CalculatorModal({
 
 // ─── Main page ───────────────────────────────────────────────────────────────
 
-const tabs = ["Изделия", "Из смет"] as const;
-type Tab = typeof tabs[number];
+// Вкладки: по вкладке на бренд (изделия бренда, разбитые по категориям) + «Из смет».
+const SMETS_TAB = "Из смет";
+const NO_BRAND_TAB = "Без бренда";
 
-const catalogCols = "28px 2fr 90px 1fr 130px 130px 120px";
+const catalogCols = "28px 2fr 1fr 130px 130px 120px";
 const fromSmetsCols = "28px 2fr 1fr 80px 140px 120px 120px";
 
 export default function Catalog() {
   const qc = useQueryClient();
-  const [tab, setTab] = useState<Tab>("Изделия");
+  const [tab, setTab] = useState<string>("");   // "" → первая бренд-вкладка (крупнейшая)
   const [search, setSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [modalItem, setModalItem] = useState<CatalogItemFull | null | "new">(undefined as any);
   const [modalOpen, setModalOpen] = useState(false);
   const [catFilter, setCatFilter] = useState("");
   const [nameFilter, setNameFilter] = useState("");
-  const [brandFilter, setBrandFilter] = useState("");
-  const clearFilters = () => { setCatFilter(""); setNameFilter(""); setBrandFilter(""); setPriceMin(""); setPriceMax(""); setCostMin(""); setCostMax(""); setOrdersMin(""); setOrdersMax(""); setMinPMin(""); setMinPMax(""); setMaxPMin(""); setMaxPMax(""); setSelectedIds(new Set()); };
+  const clearFilters = () => { setCatFilter(""); setNameFilter(""); setPriceMin(""); setPriceMax(""); setCostMin(""); setCostMax(""); setOrdersMin(""); setOrdersMax(""); setMinPMin(""); setMinPMax(""); setMaxPMin(""); setMaxPMax(""); setSelectedIds(new Set()); };
   const [priceMin, setPriceMin] = useState("");
   const [priceMax, setPriceMax] = useState("");
   const [costMin, setCostMin] = useState("");        // Каталог: себестоимость
@@ -438,18 +438,35 @@ export default function Catalog() {
     }
   };
 
+  // Изделия грузим всегда: из них строится список бренд-вкладок.
   const { data: savedItems = [], isLoading: loadingSaved } = useQuery<CatalogItem[]>({
     queryKey: ["catalog-items"],
     queryFn: catalogApi.items.list,
-    enabled: tab === "Изделия",
   });
   // Подсказки категорий: зашитый список + всё, что уже встречается в данных.
   const allCatOptions = [...new Set([...CATEGORIES, ...savedItems.map(i => i.category).filter(Boolean) as string[]])];
 
+  // Бренд-вкладки: бренды с изделиями, крупнейший первым (он же дефолтный);
+  // «Без бренда» — только если такие изделия есть, иначе они пропали бы из всех вкладок.
+  const brandTabs = (() => {
+    const counts = new Map<string, number>();
+    let noBrand = 0;
+    for (const i of savedItems) {
+      if (i.brand) counts.set(i.brand, (counts.get(i.brand) || 0) + 1);
+      else noBrand++;
+    }
+    const list = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([b]) => b);
+    if (noBrand) list.push(NO_BRAND_TAB);
+    return list;
+  })();
+  const tabs = [...brandTabs, SMETS_TAB];
+  const activeTab = tab || brandTabs[0] || SMETS_TAB;
+  const isSmets = activeTab === SMETS_TAB;
+
   const { data: fromSmets = [], isLoading: loadingSmets } = useQuery({
     queryKey: ["catalog", search],
     queryFn: () => catalogApi.list(search || undefined),
-    enabled: tab === "Из смет",
+    enabled: isSmets,
   });
 
   const openNew = () => {
@@ -478,7 +495,7 @@ export default function Catalog() {
             <div style={{ fontSize: 26, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em" }}>Каталог</div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, paddingBottom: 2 }}>
-            {tab === "Из смет" && (
+            {isSmets && (
               searchOpen ? (
                 <div style={{ position: "relative" }}>
                   <MagnifyingGlass size={13} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "#A89070" }} />
@@ -497,7 +514,7 @@ export default function Catalog() {
                 </button>
               )
             )}
-            {tab === "Изделия" && (
+            {!isSmets && (
               <button
                 onClick={openNew}
                 style={{ width: 28, height: 28, background: "#E8592A", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
@@ -517,9 +534,9 @@ export default function Catalog() {
               style={{
                 padding: "8px 18px",
                 background: "none", border: "none", cursor: "pointer",
-                fontSize: 13, fontWeight: tab === t ? 600 : 400,
-                color: tab === t ? "#1A1A1A" : "#A89070",
-                borderBottom: tab === t ? "2px solid #E8592A" : "2px solid transparent",
+                fontSize: 13, fontWeight: activeTab === t ? 600 : 400,
+                color: activeTab === t ? "#1A1A1A" : "#A89070",
+                borderBottom: activeTab === t ? "2px solid #E8592A" : "2px solid transparent",
               }}
             >
               {t}
@@ -529,17 +546,18 @@ export default function Catalog() {
       </div>
 
       {/* Tab: Каталог */}
-      {tab === "Изделия" && (
+      {!isSmets && (
         <>
           {/* Column headers */}
           {(() => {
-            const uniqueCats = [...new Set(savedItems.map(i => i.category).filter(Boolean))].sort() as string[];
-            const uniqueNames = [...new Set(savedItems.map(i => i.title).filter(Boolean))].sort() as string[];
-            const uniqueBrands = [...new Set(savedItems.map(i => i.brand).filter(Boolean))].sort() as string[];
-            const filteredItems = savedItems.filter(i => {
+            // Вкладка = бренд: показываем только его изделия.
+            const brandItems = savedItems.filter(i =>
+              activeTab === NO_BRAND_TAB ? !i.brand : i.brand === activeTab);
+            const uniqueCats = [...new Set(brandItems.map(i => i.category).filter(Boolean))].sort() as string[];
+            const uniqueNames = [...new Set(brandItems.map(i => i.title).filter(Boolean))].sort() as string[];
+            const filteredItems = brandItems.filter(i => {
               if (catFilter && i.category !== catFilter) return false;
               if (nameFilter && i.title !== nameFilter) return false;
-              if (brandFilter && i.brand !== brandFilter) return false;
               if (priceMin && (i.sale_price || 0) < parseFloat(priceMin)) return false;
               if (priceMax && (i.sale_price || 0) > parseFloat(priceMax)) return false;
               if (costMin && (i.cost_total || 0) < parseFloat(costMin)) return false;
@@ -549,7 +567,7 @@ export default function Catalog() {
             return (
               <>
                 {(() => {
-                  const hasFilters = !!(catFilter || nameFilter || brandFilter || priceMin || priceMax || costMin || costMax);
+                  const hasFilters = !!(catFilter || nameFilter || priceMin || priceMax || costMin || costMax);
                   const canClear = hasFilters || selectedIds.size > 0;
                   const selSum = filteredItems.filter(i => selectedIds.has(i.id)).reduce((s, i) => s + (i.sale_price || 0), 0);
                   return (
@@ -614,7 +632,6 @@ export default function Catalog() {
                     />
                   </div>
                   <div><ColumnFilter label="ИЗДЕЛИЕ" options={uniqueNames} value={nameFilter} onChange={setNameFilter} /></div>
-                  <div><ColumnFilter label="БРЕНД" options={uniqueBrands} value={brandFilter} onChange={setBrandFilter} /></div>
                   <div><ColumnFilter label="КАТЕГОРИЯ" options={uniqueCats} value={catFilter} onChange={setCatFilter} /></div>
                   <div><AmountFilter label="СЕБЕСТОИМОСТЬ" min={costMin} max={costMax} onChange={(mn, mx) => { setCostMin(mn); setCostMax(mx); }} /></div>
                   <div><AmountFilter label="ПРОДАЖНАЯ ЦЕНА" min={priceMin} max={priceMax} onChange={(mn, mx) => { setPriceMin(mn); setPriceMax(mx); }} /></div>
@@ -639,15 +656,6 @@ export default function Catalog() {
                         <Checkbox checked={selectedIds.has(item.id)} onChange={() => toggleSelect(item.id)} />
                       </div>
                       <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.title}</div>
-                      <div>
-                        {item.brand ? (
-                          <span style={{
-                            fontSize: 10, fontWeight: 700, padding: "2px 6px", fontFamily: MONO,
-                            color: item.brand === "MeRA" ? "#2E6DA4" : item.brand === "pbpb" ? "#7B4F9E" : "#3D8C6B",
-                            border: `1px solid ${item.brand === "MeRA" ? "#2E6DA4" : item.brand === "pbpb" ? "#7B4F9E" : "#3D8C6B"}`,
-                          }}>{item.brand}</span>
-                        ) : <span style={{ fontSize: 11, color: "#C8C0B0" }}>—</span>}
-                      </div>
                       <div style={{ fontSize: 12, color: "#A89070" }}>{item.category || "—"}</div>
                       <div style={{ fontSize: 12, color: "#6B6355", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(item.cost_total)}</div>
                       <div style={{ fontSize: 13, fontWeight: 700, color: "#E8592A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(item.sale_price)}</div>
@@ -689,12 +697,12 @@ export default function Catalog() {
                         <span style={{ fontSize: 11, fontWeight: 600, color: "#A89070", letterSpacing: "0.06em" }}>
                           {sec.label.toUpperCase()} <span style={{ color: "#C8C0B0", fontWeight: 400 }}>· {sec.items.length}</span>
                         </span>
-                        <span style={{ fontSize: 11, color: "#6B6355", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
-                          {fmt(sec.items.reduce((s, i) => s + (i.sale_price || 0), 0))}
-                          {secPct !== null && (
-                            <span style={{ color: secPct > 0 ? "#4A7C59" : "#8B3A3A", marginLeft: 8 }}>маржа {secPct}%</span>
-                          )}
-                        </span>
+                        {secPct !== null && (
+                          <span style={{ fontSize: 11, fontFamily: MONO, fontVariantNumeric: "tabular-nums",
+                                         color: secPct > 0 ? "#4A7C59" : "#8B3A3A" }}>
+                            маржа {secPct}%
+                          </span>
+                        )}
                       </div>
                       {sec.items.map(renderItem)}
                     </div>
@@ -708,7 +716,7 @@ export default function Catalog() {
       )}
 
       {/* Tab: Из смет */}
-      {tab === "Из смет" && (
+      {isSmets && (
         <>
           {(() => {
             const smetsUniqueCats = [...new Set((fromSmets as any[]).map((i: any) => i.category).filter(Boolean))].sort() as string[];
