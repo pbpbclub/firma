@@ -8,7 +8,7 @@ import { inboxApi, ordersApi, mastersApi, payeeRulesApi, estimatesApi, paymentsA
 import { EXPENSE_CATEGORIES } from "../components/ExpenseModal";
 import { Modal } from "../components/ui/Modal";
 import { PayeePicker } from "../components/ui/PayeePicker";
-import { MagnifyingGlass, X, Check, ArrowCounterClockwise, EyeSlash, HandCoins, User } from "@phosphor-icons/react";
+import { MagnifyingGlass, X, Check, ArrowCounterClockwise, EyeSlash, HandCoins, User, FloppyDisk } from "@phosphor-icons/react";
 
 function fmt(n: number | null | undefined) {
   if (!n) return "—";
@@ -123,8 +123,10 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
   // Получатель платежа (уровень транзакции). Из правила — уверенно; из похожести —
   // предложение. По умолчанию запоминаем, когда угадано похожестью (не правилом).
   const [payeeMaster, setPayeeMaster] = useState<string>(tx.master_id || tx.master_suggested?.id || "");
-  const [remember, setRemember] = useState<boolean>(!!(tx.master_suggested && !tx.master_id));
   const payeeStr = (tx.counterparty || "").trim();
+  const qcRow = useQueryClient();
+  // Привязка сохранена, когда она пришла правилом и с тех пор не менялась вручную.
+  const ruleSaved = tx.match_source === "rule" && payeeMaster === tx.master_id;
 
   const { data: suggestions = [] } = useQuery({
     // amount=0 намеренно: suggest скорит сумму против price_plan (выручки заказа),
@@ -135,6 +137,16 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
   const { data: masters = [] } = useQuery({ queryKey: ["masters"], queryFn: mastersApi.list });
 
   const masterName = (mid: string) => (masters as any[]).find((m: any) => m.id === mid)?.name;
+
+  // Запомнить получателя отдельно от разноски: одно правило закрывает все платежи
+  // этого контрагента сразу. Список обновляем БЕЗ onDone — строка не должна схлопнуться.
+  const saveRule = useMutation({
+    mutationFn: () => payeeRulesApi.create({
+      pattern: payeeStr, match_type: "exact",
+      entity_type: "master", entity_id: payeeMaster, entity_name: masterName(payeeMaster),
+    }),
+    onSuccess: () => qcRow.invalidateQueries({ queryKey: ["expenses-inbox"] }),
+  });
 
   const save = useMutation({
     mutationFn: async () => {
@@ -148,8 +160,9 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
           creditor_id: a.creditor_id,
         })),
       });
-      // Запомнить плательщика: строка банка → подрядчик (правило на будущее).
-      if (remember && payeeMaster && payeeStr) {
+      // Запомнить плательщика: строка банка → контрагент (правило на будущее).
+      // Если уже сохранено кнопкой — повторно не пишем.
+      if (!ruleSaved && payeeMaster && payeeStr) {
         try {
           await payeeRulesApi.create({
             pattern: payeeStr, match_type: "exact",
@@ -232,22 +245,33 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
           {/* Контрагент любой роли (подрядчик/мастер/поставщик) + завести нового на месте */}
           <PayeePicker
             value={payeeMaster}
-            onChange={v => { setPayeeMaster(v); setRemember(!!v); }}
+            onChange={setPayeeMaster}
             suggestName={payeeStr}
             highlight={tx.match_source === "suggest"}
             style={{ flex: 1, minWidth: 260 }}
           />
+          {/* Запомнить привязку сразу — не дожидаясь разноски платежа */}
+          {payeeMaster && payeeStr && !ruleSaved && (
+            <button onClick={() => saveRule.mutate()} disabled={saveRule.isPending}
+              title={`Запомнить: все платежи «${payeeStr}» → ${masterName(payeeMaster)}`}
+              style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, padding: "5px 10px",
+                       border: "1px solid #E8592A", background: "#fff", color: "#E8592A",
+                       cursor: saveRule.isPending ? "default" : "pointer", fontFamily: "inherit",
+                       fontWeight: 600, whiteSpace: "nowrap", flexShrink: 0 }}>
+              <FloppyDisk size={12} /> {saveRule.isPending ? "..." : "Запомнить"}
+            </button>
+          )}
         </div>
-        {tx.match_source === "suggest" && tx.master_suggested && (
+        {tx.match_source === "suggest" && tx.master_suggested && !ruleSaved && (
           <div style={{ fontSize: 10, color: "#E8592A", marginTop: 6 }}>
-            Похоже: {tx.master_suggested.name}? Проверь и подтверди.
+            Похоже: {tx.master_suggested.name}? Проверь и нажми «Запомнить» — правило закроет
+            все платежи этого контрагента.
           </div>
         )}
-        {payeeMaster && (
-          <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 11, color: "#6B6355", cursor: "pointer" }}>
-            <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} />
-            Запомнить: платежи «{payeeStr}» → {masterName(payeeMaster)}
-          </label>
+        {ruleSaved && (
+          <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "#4A7C59", marginTop: 6 }}>
+            <Check size={11} /> запомнено: платежи «{payeeStr}» → {masterName(payeeMaster) || tx.payee_hint}
+          </div>
         )}
       </div>
 
@@ -743,8 +767,11 @@ export default function ExpensesInbox() {
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 12, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {t.counterparty || "—"}
+                  {/* Зелёное — привязка подтверждена правилом; оранжевое с «?» — только догадка */}
                   {t.payee_hint && t.payee_hint !== t.counterparty && (
-                    <span style={{ color: "#4A7C59", fontSize: 10, marginLeft: 6 }}>→ {t.payee_hint}</span>
+                    <span style={{ color: t.match_source === "suggest" ? "#E8592A" : "#4A7C59", fontSize: 10, marginLeft: 6 }}>
+                      → {t.payee_hint}{t.match_source === "suggest" ? "?" : ""}
+                    </span>
                   )}
                   {t.dismissed_reason && (
                     <span style={{ color: "#A89070", fontSize: 10, marginLeft: 6 }}>· скрыто: {t.dismissed_reason}</span>

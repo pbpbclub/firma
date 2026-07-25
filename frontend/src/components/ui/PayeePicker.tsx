@@ -48,6 +48,8 @@ export function PayeePicker({ value, onChange, suggestName, placeholder = "— �
     onSuccess: (m: any) => {
       qc.invalidateQueries({ queryKey: ["masters"] });
       qc.invalidateQueries({ queryKey: ["wiki", "contractors"] });
+      // Инбокс тоже: новый контрагент должен сразу попасть в подсказки других строк
+      qc.invalidateQueries({ queryKey: ["expenses-inbox"] });
       onChange(m.id);                 // дедуп по имени вернёт существующего — тоже выберется
       setAdding(false); setName("");
     },

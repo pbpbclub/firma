@@ -55,13 +55,21 @@ def create_rule(body: dict = Body(...)):
             (pattern.lower(), match_type),
         ).fetchone()
         if existing:
-            # Upsert: обновляем существующее правило вместо ошибки
-            conn.execute(
-                """UPDATE payee_rules SET display_name=?, entity_type=?, entity_id=?, entity_name=?,
-                   category=?, updated_at=datetime('now') WHERE id=?""",
-                (display_name, entity_type, entity_id, entity_name, category, existing["id"]),
-            )
-            conn.commit()
+            # Upsert: обновляем существующее правило вместо ошибки. Только те поля,
+            # что реально пришли в теле — иначе сохранение привязки получателя молча
+            # обнулило бы, например, category («Личное · Подписки») чужого правила.
+            incoming = {
+                "display_name": display_name, "entity_type": entity_type,
+                "entity_id": entity_id, "entity_name": entity_name, "category": category,
+            }
+            fields = {k: v for k, v in incoming.items() if k in body}
+            if fields:
+                sets = ", ".join(f"{k} = ?" for k in fields)
+                conn.execute(
+                    f"UPDATE payee_rules SET {sets}, updated_at = datetime('now') WHERE id = ?",
+                    (*fields.values(), existing["id"]),
+                )
+                conn.commit()
             return dict(conn.execute("SELECT * FROM payee_rules WHERE id = ?", (existing["id"],)).fetchone())
 
         conn.execute(
