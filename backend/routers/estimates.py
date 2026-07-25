@@ -146,8 +146,13 @@ def _approve_set(conn, set_id: str) -> dict:
     obligations = _gen_obligations(conn, es)
     # Обучение себестоимости: approve = «Юра подтвердил цифры» — лучший момент
     # зафиксировать знания. Материал без кода с ценой → price_book (цены вне
-    # прайсов: фанера/ткань/крепёж); связка работа×мастер с ценой → work_rates.
-    # Существующие записи не перетираем (ручное главнее выученного).
+    # прайсов: фанера/ткань/крепёж) — материалы стабильны, их запоминать полезно.
+    #
+    # Ставки РАБОТ здесь больше не учим: мастера называют цену каждый раз новую
+    # (сварка в сметах Юры: 1 700…30 000 ₽), и заучивание превращало разовую цену
+    # в постоянную ставку — так в справочнике появились «Сварка 30 000 ₽/шт» и
+    # «Покраска 40 000 ₽/шт», которые подставились бы в новую смету. Вместо ставки
+    # costing показывает историю цен по этой работе и спрашивает сумму.
     learned = {"prices": 0, "rates": 0}
     for ln in conn.execute(
         """SELECT el.* FROM estimate_lines el JOIN estimate_items ei ON ei.id = el.item_id
@@ -159,12 +164,6 @@ def _approve_set(conn, set_id: str) -> dict:
                                  "exact", "learned", note="из утверждённой сметы",
                                  overwrite=False) == "created":
                 learned["prices"] += 1
-        if (ln["type"] in ("labor", "service") and ln["work_type_id"] and ln["master_id"]
-                and (ln["unit_price"] or 0) > 0):
-            if upsert_work_rate(conn, ln["work_type_id"], ln["master_id"], "per_unit",
-                                ln["unit_price"], ln["unit"], "из утверждённой сметы",
-                                "learned", overwrite=False) == "created":
-                learned["rates"] += 1
     after = conn.execute(
         "SELECT price_plan, cost_plan FROM orders WHERE id = ?", (es["order_id"],)
     ).fetchone()
@@ -790,15 +789,9 @@ def update_line(line_id: str, body: LineUpdate):
                 "INSERT OR IGNORE INTO master_work_types (master_id, work_type_id) VALUES (?, ?)",
                 (final["master_id"], final["work_type_id"])
             )
-        # Обучение ставке: Юра руками вбил цену работы с известной парой вид×мастер —
-        # если такой ставки ещё нет, запоминаем (ручное в work_rates не перетираем).
-        # no_learn=true (форма «только в эту смету») — обучение подавлено.
-        if (not no_learn
-                and final["type"] in ("labor", "service") and final["master_id"] and final["work_type_id"]
-                and (final["unit_price"] or 0) > 0):
-            upsert_work_rate(conn, final["work_type_id"], final["master_id"], "per_unit",
-                             final["unit_price"], final["unit"], "из строки сметы", "learned",
-                             overwrite=False)
+        # Ставку работы из строки НЕ запоминаем: цена работы у Юры разовая (мастер
+        # называет её заново каждый раз), а разовая цена в справочнике потом молча
+        # подставилась бы в другую смету. Историю цен costing собирает из самих строк.
         _recalc_item(conn, row["item_id"])
         _touch_set(conn, row["item_id"])
         _sync_order_if_approved(conn, row["item_id"])

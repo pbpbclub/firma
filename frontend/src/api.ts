@@ -216,6 +216,8 @@ export const ratesApi = {
                    scheme: string; rate: number; unit?: string; note?: string; source?: string }) =>
     api.post("/work-rates", data).then(r => r.data),
   delete: (id: string)   => api.delete(`/work-rates/${id}`).then(r => r.data),
+  // История цен на работы: цена разовая, справочник ставок её не описывает
+  prices: ()             => api.get("/work-prices").then(r => r.data),
 };
 
 export const estimatesApi = {

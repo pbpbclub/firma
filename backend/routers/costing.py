@@ -74,6 +74,62 @@ def _match_material_code(conn, title: str):
     return None, None
 
 
+def _work_price_history(conn, title: str, master_id: Optional[str], limit: int = 5) -> dict:
+    """Что эта работа стоила раньше. Мастера называют цену каждый раз новую
+    (сварка в сметах Юры: 1 700…30 000 ₽), поэтому фиксированная ставка врёт —
+    показываем вилку и последние цены, а сумму он вводит сам.
+
+    Ищем по названию строки: work_type_id заполнен у 2 строк из 75, master_id — ни у одной."""
+    t = norm_title(title)
+    if not t:
+        return {}
+    rows = conn.execute(
+        """SELECT el.unit_price, el.unit, el.title, el.master_id,
+                  es.created_at, o.title AS order_title, m.name AS master_name
+           FROM estimate_lines el
+           JOIN estimate_items ei ON ei.id = el.item_id
+           JOIN estimate_sets es ON es.id = ei.set_id
+           JOIN orders o ON o.id = es.order_id
+           LEFT JOIN masters m ON m.id = el.master_id
+           WHERE el.type IN ('labor','service') AND COALESCE(el.unit_price,0) > 0
+           ORDER BY es.created_at DESC""",
+    ).fetchall()
+    same = [r for r in rows if norm_title(r["title"]) == t]
+    if not same:
+        return {}
+    prices = sorted(r["unit_price"] for r in same)
+    mid = len(prices) // 2
+    median = prices[mid] if len(prices) % 2 else (prices[mid - 1] + prices[mid]) / 2
+    # Вилка «обычно»: середина выборки, без выбросов по краям
+    lo_i, hi_i = int(len(prices) * 0.25), max(0, int(len(prices) * 0.75) - 1)
+    by_master = [r for r in same if master_id and r["master_id"] == master_id]
+    recent = (by_master or same)[:limit]
+    return {
+        "count": len(same),
+        "median": round(median, 2),
+        "typical_min": prices[lo_i], "typical_max": prices[hi_i],
+        "min": prices[0], "max": prices[-1],
+        "recent": [{"price": r["unit_price"], "unit": r["unit"],
+                    "date": (r["created_at"] or "")[:10],
+                    "order": r["order_title"], "master": r["master_name"]} for r in recent],
+    }
+
+
+def _history_hint(h: dict) -> str:
+    """Хвост вопроса: «обычно 2 500–6 000 ₽; последние — 3 000 (18.06, MIRRA), 4 500 (05.06)»."""
+    if not h:
+        return ""
+    parts = []
+    if h["count"] > 2 and h["typical_min"] != h["typical_max"]:
+        parts.append(f"обычно {h['typical_min']:g}–{h['typical_max']:g} ₽")
+    last = ", ".join(
+        f"{r['price']:g}" + (f" ({r['date'][8:10]}.{r['date'][5:7]}, {r['order'][:18]})" if r["date"] and r["order"] else "")
+        for r in h["recent"][:3])
+    if last:
+        parts.append(f"последние — {last}")
+    return ("; ".join(parts) + ". ") if parts else ""
+
+
 STUB_MARKUP = 2.0   # дефолт `production.py estimate-create --markup`
 
 
@@ -164,47 +220,33 @@ def _resolve_line(conn, line, item, set_row) -> dict:
             ).fetchone()
             if wt:
                 wt_id, via = wt["id"], "name"
-        if not wt_id:
-            if not has_price:
-                out.update(status="missing", reason="no_work_type",
-                           ask=f"Работа «{line['title'] or '—'}»: какой это вид работ и почём?")
-            return out
-        rate = find_work_rate(conn, wt_id, line["master_id"])
-        if not rate:
-            if not has_price:
-                wt = conn.execute("SELECT name FROM work_types WHERE id = ?", (wt_id,)).fetchone()
-                master = conn.execute("SELECT name FROM masters WHERE id = ?", (line["master_id"],)).fetchone() if line["master_id"] else None
-                who = f" у {master['name']}" if master else ""
-                out.update(status="missing", reason="no_rate",
-                           ask=f"Ставка за «{wt['name'] if wt else line['title']}»{who}: сколько и как (₽/шт, ₽/ч, фикс за изделие, % от цены)?",
-                           work_type_id=wt_id,
-                           work_type_name=wt["name"] if wt else None,
-                           master_id=line["master_id"],
-                           master_name=master["name"] if master else None)
-            return out
-        # «Переменная» ставка-ориентир: молча НЕ подставляем (нет proposal → fill
-        # пропустит), просим подтвердить цену в каждой смете с prefill ориентиром.
-        if not has_price and (rate["variable"] if "variable" in rate.keys() else 0):
-            wt = conn.execute("SELECT name FROM work_types WHERE id = ?", (wt_id,)).fetchone()
+        # Цену работы НЕ подставляем автоматически: мастера называют её каждый раз
+        # заново (сварка в сметах Юры: 1 700…30 000 ₽). Спрашиваем всегда, но с
+        # подсказкой — вилка и последние цены из истории; ставка из справочника,
+        # если есть, идёт лишь ориентиром.
+        if not has_price:
+            wt = conn.execute("SELECT name FROM work_types WHERE id = ?", (wt_id,)).fetchone() if wt_id else None
             master = conn.execute("SELECT name FROM masters WHERE id = ?", (line["master_id"],)).fetchone() if line["master_id"] else None
             who = f" у {master['name']}" if master else ""
-            unit_lbl = {"per_unit": "₽/ед", "hourly": "₽/ч", "fixed": "₽ за изделие", "percent": "%"}.get(rate["scheme"], "₽")
-            out.update(status="missing", reason="variable_rate",
-                       ask=f"Работа «{wt['name'] if wt else line['title']}»{who}: ориентир {rate['rate']:g} {unit_lbl} — подтверди цену для этой сметы",
+            name = (wt["name"] if wt else None) or line["title"] or "—"
+            hist = _work_price_history(conn, line["title"] or name, line["master_id"])
+            rate = find_work_rate(conn, wt_id, line["master_id"]) if wt_id else None
+            hint = _history_hint(hist)
+            if not hint and rate:
+                unit_lbl = {"per_unit": "₽/ед", "hourly": "₽/ч", "fixed": "₽ за изделие",
+                            "percent": "%"}.get(rate["scheme"], "₽")
+                hint = f"ориентир {rate['rate']:g} {unit_lbl}. "
+            out.update(status="missing", reason="ask_price",
+                       ask=f"Работа «{name}»{who}: {hint}Сколько в этот раз, ₽/{line['unit'] or 'ед'}?",
                        work_type_id=wt_id,
                        work_type_name=wt["name"] if wt else None,
                        master_id=line["master_id"],
-                       master_name=master["name"] if master else None,
-                       prefill_scheme=rate["scheme"], prefill_rate=rate["rate"], variable=True)
-            return out
-        if not has_price:
-            out.update(status="proposed",
-                       source="percent" if rate["scheme"] == "percent" else "work_rate",
-                       proposal={
-                           "unit_price": _rate_price(rate, item, set_row, line["qty"]),
-                           "work_rate_id": rate["id"], "scheme": rate["scheme"], "rate": rate["rate"],
-                           **({"work_type_id": wt_id} if via == "name" else {}),
-                       })
+                       master_name=master["name"] if master else None)
+            if hist:
+                out["history"] = hist
+            if rate:
+                out["prefill_scheme"] = rate["scheme"]
+                out["prefill_rate"] = rate["rate"]
         return out
 
     # delivery / other

@@ -63,44 +63,34 @@ function StubRow({ it, onSaved }: { it: any; onSaved: () => void }) {
   );
 }
 
-// Ставка на вид работ: одна строка — схема, число, единица.
-function RateRow({ hole, onSaved }: { hole: any; onSaved: () => void }) {
-  const [rate, setRate] = useState("");
-  const [scheme, setScheme] = useState("per_unit");
-  const [unit, setUnit] = useState("шт");
-  const save = useMutation({
-    mutationFn: () => ratesApi.create({
-      work_type_id: hole.id, scheme, rate: parseFloat(rate), unit, source: "manual",
-    }),
-    onSuccess: () => { setRate(""); onSaved(); },
-  });
-  const ok = !isNaN(parseFloat(rate)) && parseFloat(rate) > 0;
-  const SCHEMES = [["per_unit", "₽/ед"], ["hourly", "₽/час"], ["fixed", "₽/изделие"], ["percent", "% от цены"]];
+// Цены на работы: у Юры мастер называет сумму заново каждый раз, поэтому вместо
+// «ставки» показываем историю — вилку и последние цифры.
+function WorkPrices() {
+  const { data } = useQuery({ queryKey: ["work-prices"], queryFn: ratesApi.prices });
+  const items: any[] = data?.items ?? [];
+  if (!items.length) return null;
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 100px 90px 90px",
-                  gap: 8, alignItems: "center", padding: "8px 0", borderBottom: "1px solid #F2EFE9" }}>
-      <span style={{ fontSize: 13, color: "#1A1A1A" }}>{hole.name}</span>
-      <div style={{ display: "flex" }}>
-        {SCHEMES.map(([v, l]) => (
-          <button key={v} onClick={() => setScheme(v)}
-            style={{ fontSize: 10, padding: "4px 7px", cursor: "pointer", fontFamily: "inherit", marginLeft: -1,
-                     border: `1px solid ${scheme === v ? "#E8592A" : "#EDEBE6"}`,
-                     background: scheme === v ? "#FFF4EE" : "#fff",
-                     color: scheme === v ? "#E8592A" : "#6B6355" }}>{l}</button>
-        ))}
+    <Section label="ЦЕНЫ НА РАБОТЫ" count={items.length}
+      hint="Ставки на работы не задаются: цена разовая. При заполнении сметы система спросит сумму и покажет эту подсказку.">
+      <div style={{ display: "grid", gridTemplateColumns: "1.5fr 70px 150px 110px 1fr",
+                    gap: 10, padding: "0 0 6px", fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>
+        <span>РАБОТА</span><span style={{ textAlign: "right" }}>РАЗ</span>
+        <span style={{ textAlign: "right" }}>ОБЫЧНО</span>
+        <span style={{ textAlign: "right" }}>ПОСЛЕДНЯЯ</span><span>ВЕСЬ РАЗБРОС</span>
       </div>
-      <input value={rate} onChange={e => setRate(e.target.value)} type="number" placeholder="сколько"
-        style={{ border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 12, outline: "none",
-                 fontFamily: MONO, textAlign: "right", minWidth: 0 }} />
-      <input value={unit} onChange={e => setUnit(e.target.value)} placeholder="ед"
-        style={{ border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 12, outline: "none", minWidth: 0 }} />
-      <button disabled={!ok || save.isPending} onClick={() => save.mutate()}
-        style={{ fontSize: 11, padding: "4px 10px", border: "none", fontFamily: "inherit", fontWeight: 600,
-                 background: ok ? "#E8592A" : "#EDEBE6", color: ok ? "#fff" : "#A89070",
-                 cursor: ok ? "pointer" : "default" }}>
-        {save.isPending ? "..." : "OK"}
-      </button>
-    </div>
+      {items.map((it: any) => (
+        <div key={it.title} style={{ display: "grid", gridTemplateColumns: "1.5fr 70px 150px 110px 1fr",
+               gap: 10, alignItems: "center", padding: "7px 0", borderBottom: "1px solid #F2EFE9" }}>
+          <span style={{ fontSize: 13, color: "#1A1A1A" }}>{it.title}</span>
+          <span style={{ fontSize: 12, color: "#A89070", textAlign: "right", fontFamily: MONO }}>{it.count}</span>
+          <span style={{ fontSize: 12, color: "#1A1A1A", textAlign: "right", fontFamily: MONO }}>
+            {it.typical_min === it.typical_max ? fmt(it.typical_min) : `${fmt(it.typical_min)} – ${fmt(it.typical_max)}`}
+          </span>
+          <span style={{ fontSize: 12, color: "#6B6355", textAlign: "right", fontFamily: MONO }}>{fmt(it.last)}</span>
+          <span style={{ fontSize: 11, color: "#C8C0B0", fontFamily: MONO }}>{fmt(it.min)} … {fmt(it.max)}</span>
+        </div>
+      ))}
+    </Section>
   );
 }
 
@@ -108,6 +98,10 @@ export function ReadinessPanel() {
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({ queryKey: ["readiness"], queryFn: estimatesApi.readiness });
   const refresh = () => qc.invalidateQueries({ queryKey: ["readiness"] });
+  const delRate = useMutation({
+    mutationFn: (id: string) => ratesApi.delete(id),
+    onSuccess: refresh,
+  });
   const keep = useMutation({
     mutationFn: (setId: string) => estimatesApi.keepActual(setId),
     onSuccess: refresh,
@@ -122,7 +116,6 @@ export function ReadinessPanel() {
       <div style={{ display: "flex", gap: 28, marginBottom: 26, flexWrap: "wrap" }}>
         {[["Дубли смет", s.orders_with_duplicates, "#8B3A3A"],
           ["Себестоимость-заглушка", s.stub_items, "#8B3A3A"],
-          ["Работы без ставки", s.rate_holes, "#E8592A"],
           ["Подозрительные ставки", s.suspicious_rates, "#E8592A"],
           ["Суммы без состава", s.sum_only_items, "#A89070"]].map(([l, v, c]: any) => (
           <div key={l}>
@@ -186,17 +179,18 @@ export function ReadinessPanel() {
                 {fmt(r.rate)} / {r.unit || "ед"}
               </span>
               <span style={{ fontSize: 10, color: "#C8C0B0" }}>источник: {r.source}</span>
+              <button onClick={() => delRate.mutate(r.id)} disabled={delRate.isPending}
+                title="Удалить ставку — она разовая, а не постоянная"
+                style={{ fontSize: 10, padding: "3px 8px", border: "1px solid #EDEBE6", background: "#fff",
+                         color: "#8B3A3A", cursor: "pointer", fontFamily: "inherit" }}>
+                удалить
+              </button>
             </div>
           ))}
         </Section>
       )}
 
-      {!!data?.rate_holes?.length && (
-        <Section label="РАБОТЫ БЕЗ СТАВКИ" count={data.rate_holes.length}
-          hint="Пока ставки нет, система будет спрашивать цену в каждой смете. Задай один раз — дальше подставится сама.">
-          {data.rate_holes.map((h: any) => <RateRow key={h.id} hole={h} onSaved={refresh} />)}
-        </Section>
-      )}
+      <WorkPrices />
 
       {!!data?.sum_only_items?.length && (
         <Section label="СУММЫ БЕЗ СОСТАВА" count={data.sum_only_items.length}

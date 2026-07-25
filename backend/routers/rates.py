@@ -435,3 +435,52 @@ def delete_costing_rule(rule_id: int):
         return {"ok": True}
     finally:
         conn.close()
+
+
+@router.get("/api/work-prices")
+def work_prices():
+    """История цен на работы: что и почём делали раньше. Заменяет справочник ставок
+    там, где цена разовая — Юре нужна вилка и последние цифры, а не «одна ставка»."""
+    conn = get_production()
+    try:
+        rows = conn.execute(
+            """SELECT el.title, el.unit, el.unit_price, el.master_id,
+                      es.created_at, o.title AS order_title, o.brand, m.name AS master_name
+               FROM estimate_lines el
+               JOIN estimate_items ei ON ei.id = el.item_id
+               JOIN estimate_sets es ON es.id = ei.set_id
+               JOIN orders o ON o.id = es.order_id
+               LEFT JOIN masters m ON m.id = el.master_id
+               WHERE el.type IN ('labor','service') AND COALESCE(el.unit_price,0) > 0
+               ORDER BY es.created_at DESC"""
+        ).fetchall()
+        groups: dict = {}
+        for r in rows:
+            key = norm_title(r["title"])
+            if not key:
+                continue
+            g = groups.setdefault(key, {"title": (r["title"] or "").strip(), "prices": [], "recent": []})
+            g["prices"].append(r["unit_price"])
+            if len(g["recent"]) < 5:
+                g["recent"].append({
+                    "price": r["unit_price"], "unit": r["unit"],
+                    "date": (r["created_at"] or "")[:10],
+                    "order": r["order_title"], "brand": r["brand"], "master": r["master_name"],
+                })
+        out = []
+        for g in groups.values():
+            p = sorted(g["prices"])
+            mid = len(p) // 2
+            median = p[mid] if len(p) % 2 else (p[mid - 1] + p[mid]) / 2
+            lo, hi = int(len(p) * 0.25), max(0, int(len(p) * 0.75) - 1)
+            out.append({
+                "title": g["title"], "count": len(p),
+                "min": p[0], "max": p[-1], "median": round(median, 2),
+                "typical_min": p[lo], "typical_max": p[hi],
+                "last": g["recent"][0]["price"] if g["recent"] else None,
+                "recent": g["recent"],
+            })
+        out.sort(key=lambda x: -x["count"])
+        return {"items": out, "count": len(out)}
+    finally:
+        conn.close()
