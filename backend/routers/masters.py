@@ -82,8 +82,12 @@ def _wiki(name: str, master_id: Optional[str]) -> dict:
         try:
             row = None
             if master_id:
+                # На одного мастера может смотреть несколько строк вики (дубли фин-агента).
+                # Берём живую и самую свежую, а не первую попавшуюся blocked.
                 row = conn.execute(
-                    "SELECT * FROM contractors WHERE mes_master_id = ?", (master_id,)
+                    """SELECT * FROM contractors WHERE mes_master_id = ?
+                       ORDER BY (status = 'blocked'), updated_at DESC, id DESC LIMIT 1""",
+                    (master_id,)
                 ).fetchone()
             if not row:
                 # Фолбэк по имени — нормализованный: кавычки/регистр не должны рвать пару.
@@ -124,10 +128,14 @@ def _load_wiki_map() -> tuple[dict, dict]:
     try:
         ac = get_analytics_ro()
         try:
-            for row in ac.execute("SELECT * FROM contractors").fetchall():
+            # Тот же порядок, что и в _wiki(): при нескольких строках на мастера
+            # (дубли вики) выигрывает живая и свежая, а не blocked.
+            for row in ac.execute(
+                """SELECT * FROM contractors
+                   ORDER BY (status = 'blocked') DESC, updated_at ASC, id ASC""").fetchall():
                 r = dict(row)
                 if r.get("mes_master_id"):
-                    by_id[str(r["mes_master_id"])] = r
+                    by_id[str(r["mes_master_id"])] = r   # последняя запись перетирает — живая свежая
                 by_name[_norm_name(r.get("name"))] = r
         finally:
             ac.close()
