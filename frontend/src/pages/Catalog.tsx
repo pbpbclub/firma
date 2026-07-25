@@ -364,7 +364,7 @@ function CalculatorModal({
 const tabs = ["Изделия", "Из смет"] as const;
 type Tab = typeof tabs[number];
 
-const catalogCols = "28px 2fr 90px 1fr 130px 130px";
+const catalogCols = "28px 2fr 90px 1fr 130px 130px 120px";
 const fromSmetsCols = "28px 2fr 1fr 80px 140px 120px 120px";
 
 export default function Catalog() {
@@ -618,6 +618,7 @@ export default function Catalog() {
                   <div><ColumnFilter label="КАТЕГОРИЯ" options={uniqueCats} value={catFilter} onChange={setCatFilter} /></div>
                   <div><AmountFilter label="СЕБЕСТОИМОСТЬ" min={costMin} max={costMax} onChange={(mn, mx) => { setCostMin(mn); setCostMax(mx); }} /></div>
                   <div><AmountFilter label="ПРОДАЖНАЯ ЦЕНА" min={priceMin} max={priceMax} onChange={(mn, mx) => { setPriceMin(mn); setPriceMax(mx); }} /></div>
+                  <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", textAlign: "right" }}>МАРЖА</div>
                 </div>
                 {loadingSaved ? (
                   <Loading />
@@ -650,16 +651,38 @@ export default function Catalog() {
                       <div style={{ fontSize: 12, color: "#A89070" }}>{item.category || "—"}</div>
                       <div style={{ fontSize: 12, color: "#6B6355", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(item.cost_total)}</div>
                       <div style={{ fontSize: 13, fontWeight: 700, color: "#E8592A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(item.sale_price)}</div>
+                      {(() => {
+                        // Дельта = продажная − себестоимость; % — маржа как доля цены.
+                        if (!item.sale_price) return <div style={{ fontSize: 11, color: "#C8C0B0", textAlign: "right" }}>—</div>;
+                        const delta = (item.sale_price || 0) - (item.cost_total || 0);
+                        const pct = item.sale_price > 0 ? Math.round((delta / item.sale_price) * 100) : 0;
+                        const col = delta > 0 ? "#4A7C59" : "#8B3A3A";
+                        return (
+                          <div style={{ textAlign: "right", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: col }}>{delta > 0 ? "+" : ""}{fmt(delta)}</span>
+                            <span style={{ fontSize: 10, color: "#A89070", marginLeft: 5 }}>{pct}%</span>
+                          </div>
+                        );
+                      })()}
                     </div>
                   );
+                  // Внутри секции — самые маржинальные сверху (без цены — вниз).
+                  const marginPct = (i: CatalogItem) =>
+                    i.sale_price && i.sale_price > 0 ? ((i.sale_price - (i.cost_total || 0)) / i.sale_price) : -Infinity;
+                  const byMargin = (a: CatalogItem, b: CatalogItem) => marginPct(b) - marginPct(a);
                   const others = [...new Set(filteredItems.map(i => i.category).filter(Boolean))]
                     .filter(c => !CATEGORIES.includes(c as string)).sort() as string[];
                   const sections = [...CATEGORIES, ...others]
-                    .map(c => ({ label: c, items: filteredItems.filter(i => i.category === c) }))
+                    .map(c => ({ label: c, items: filteredItems.filter(i => i.category === c).sort(byMargin) }))
                     .filter(s => s.items.length > 0);
-                  const uncat = filteredItems.filter(i => !i.category);
+                  const uncat = filteredItems.filter(i => !i.category).sort(byMargin);
                   if (uncat.length) sections.push({ label: "Без категории", items: uncat });
-                  return sections.map(sec => (
+                  return sections.map(sec => {
+                    const priced = sec.items.filter(i => (i.sale_price || 0) > 0);
+                    const saleSum = priced.reduce((s, i) => s + (i.sale_price || 0), 0);
+                    const costSum = priced.reduce((s, i) => s + (i.cost_total || 0), 0);
+                    const secPct = saleSum > 0 ? Math.round(((saleSum - costSum) / saleSum) * 100) : null;
+                    return (
                     <div key={sec.label}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline",
                                     padding: "14px 28px 6px", borderBottom: "1px solid #EDEBE6", background: "#FAF8F5" }}>
@@ -668,11 +691,15 @@ export default function Catalog() {
                         </span>
                         <span style={{ fontSize: 11, color: "#6B6355", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
                           {fmt(sec.items.reduce((s, i) => s + (i.sale_price || 0), 0))}
+                          {secPct !== null && (
+                            <span style={{ color: secPct > 0 ? "#4A7C59" : "#8B3A3A", marginLeft: 8 }}>маржа {secPct}%</span>
+                          )}
                         </span>
                       </div>
                       {sec.items.map(renderItem)}
                     </div>
-                  ));
+                    );
+                  });
                 })()}
               </>
             );
