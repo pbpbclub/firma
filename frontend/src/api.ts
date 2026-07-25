@@ -47,8 +47,9 @@ export const ordersApi = {
 };
 
 export const customersApi = {
+  // limit=500 (потолок сервера): иначе клиентов пришло бы максимум 100 и счётчик в Вики врал бы
   list: (search?: string) =>
-    api.get("/customers", { params: search ? { search } : {} }).then((r) => r.data),
+    api.get("/customers", { params: { limit: 500, ...(search ? { search } : {}) } }).then((r) => r.data),
   get: (id: string) => api.get(`/customers/${id}`).then((r) => r.data),
   create: (data: Record<string, any>) => api.post("/customers", data).then((r) => r.data),
   update: (id: string, data: Record<string, any>) => api.put(`/customers/${id}`, data).then((r) => r.data),

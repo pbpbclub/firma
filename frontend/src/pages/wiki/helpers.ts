@@ -1,6 +1,7 @@
 // Общие хелперы вики-экрана (раньше по 2-3 копии в Customers/Contractors/ContractorDetail).
 
-export const PAGE_SIZE = 15;
+export const PAGE_SIZE = 100;                        // дефолт: справочники небольшие
+export const PAGE_SIZE_OPTIONS = [25, 50, 100, 0];   // 0 = «Все»
 
 export function initials(name: string | undefined) {
   if (!name) return "—";

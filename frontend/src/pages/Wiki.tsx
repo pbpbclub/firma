@@ -7,7 +7,7 @@ import { ColumnFilter } from "../components/TableFilters";
 import { EditModal } from "../components/EditModal";
 import { MagnifyingGlass, Plus, CaretRight, X } from "@phosphor-icons/react";
 import { WIKI_CATEGORIES, findCategory, type WikiCategory } from "./wiki/registry";
-import { initials, PAGE_SIZE } from "./wiki/helpers";
+import { initials, PAGE_SIZE, PAGE_SIZE_OPTIONS } from "./wiki/helpers";
 import { T } from "../components/ui/type";
 
 export default function Wiki() {
@@ -24,6 +24,16 @@ function WikiCategoryView({ cat, id, navigate }: { cat: WikiCategory; id?: strin
   const [search, setSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [page, setPage] = useState(0);
+  // Размер страницы запоминается между визитами (справочники маленькие, дефолт 100).
+  const [pageSize, setPageSize] = useState<number>(() => {
+    // Number(null) === 0, а 0 — это «Все»: без проверки на null дефолт был бы «Все».
+    const raw = localStorage.getItem("wiki_page_size");
+    const saved = raw === null ? NaN : Number(raw);
+    return PAGE_SIZE_OPTIONS.includes(saved) ? saved : PAGE_SIZE;
+  });
+  const changePageSize = (n: number) => {
+    setPageSize(n); setPage(0); localStorage.setItem("wiki_page_size", String(n));
+  };
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [creating, setCreating] = useState(false);        // создание через EditModal (поля)
   const [creatingModal, setCreatingModal] = useState(false); // создание через свою модалку (бренды/юрлица)
@@ -57,8 +67,9 @@ function WikiCategoryView({ cat, id, navigate }: { cat: WikiCategory; id?: strin
   }, [all, search, filters, cat]);
 
   const totalCount = filtered.length;
-  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
-  const pageItems = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const size = pageSize || Math.max(totalCount, 1);   // 0 = «Все» — одним срезом
+  const totalPages = Math.max(1, Math.ceil(totalCount / size));
+  const pageItems = filtered.slice(page * size, (page + 1) * size);
   const selectedRow = id ? all.find((r) => r.id === id) : null;
 
   const hasFilters = Object.values(filters).some(Boolean) || !!search;
@@ -232,16 +243,32 @@ function WikiCategoryView({ cat, id, navigate }: { cat: WikiCategory; id?: strin
 
         {/* Пагинация */}
         <div style={{ padding: "8px 28px", borderTop: "1px solid #F7F5F1", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
-          <div style={{ fontSize: 10, color: "#A89070" }}>
-            {totalCount > 0 ? `${page * PAGE_SIZE + 1}–${Math.min((page + 1) * PAGE_SIZE, totalCount)} из ${totalCount}` : "0"}
+          <div style={{ display: "flex", gap: 14, alignItems: "center", fontSize: 10, color: "#A89070" }}>
+            <span>{totalCount > 0 ? `${page * size + 1}–${Math.min((page + 1) * size, totalCount)} из ${totalCount}` : "0"}</span>
+            <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <span style={{ letterSpacing: "0.06em" }}>НА СТРАНИЦЕ</span>
+              {PAGE_SIZE_OPTIONS.map(n => (
+                <button key={n} onClick={() => changePageSize(n)}
+                  style={{
+                    background: "none", border: "none", cursor: "pointer", padding: "0 1px", fontSize: 10,
+                    fontFamily: "inherit", fontWeight: pageSize === n ? 600 : 400,
+                    color: pageSize === n ? "#1A1A1A" : "#A89070",
+                    borderBottom: pageSize === n ? "2px solid #E8592A" : "2px solid transparent",
+                  }}>
+                  {n === 0 ? "Все" : n}
+                </button>
+              ))}
+            </span>
           </div>
-          <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
-            {renderPageNums()}
-            <button onClick={() => setPage(p => Math.min(p + 1, totalPages - 1))} disabled={page >= totalPages - 1}
-              style={{ background: "none", border: "none", cursor: page >= totalPages - 1 ? "default" : "pointer", color: page >= totalPages - 1 ? "#D0C8C0" : "#A89070", display: "flex", alignItems: "center", padding: "0 2px" }}>
-              <CaretRight size={11} />
-            </button>
-          </div>
+          {totalPages > 1 && (
+            <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
+              {renderPageNums()}
+              <button onClick={() => setPage(p => Math.min(p + 1, totalPages - 1))} disabled={page >= totalPages - 1}
+                style={{ background: "none", border: "none", cursor: page >= totalPages - 1 ? "default" : "pointer", color: page >= totalPages - 1 ? "#D0C8C0" : "#A89070", display: "flex", alignItems: "center", padding: "0 2px" }}>
+                <CaretRight size={11} />
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
