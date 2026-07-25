@@ -209,6 +209,15 @@ export const fundsApi = {
   deleteTx:     (txId: string)                       => api.delete(`/funds/transactions/${txId}`).then(r => r.data),
 };
 
+// Справочник ставок работ (costing): дыры видны на вкладке «Готовность»
+export const ratesApi = {
+  list:   ()             => api.get("/work-rates").then(r => r.data),
+  create: (data: { work_type_id?: string; work_type_name?: string; master_id?: string;
+                   scheme: string; rate: number; unit?: string; note?: string; source?: string }) =>
+    api.post("/work-rates", data).then(r => r.data),
+  delete: (id: string)   => api.delete(`/work-rates/${id}`).then(r => r.data),
+};
+
 export const estimatesApi = {
   createSet:   (orderId: string, data?: any) => api.post("/estimates/sets", { order_id: orderId, ...data }).then(r => r.data),
   updateSet:   (setId: string, data: any)   => api.put(`/estimates/sets/${setId}`, data).then(r => r.data),
@@ -231,6 +240,9 @@ export const estimatesApi = {
   approveSet:  (setId: string, force = false) => api.post(`/estimates/sets/${setId}/approve`, { force }).then(r => r.data),
   reviewQueue: ()                           => api.get("/estimates/review-queue").then(r => r.data),
   costCheck:   (setId: string)              => api.get(`/estimates/sets/${setId}/cost-check`).then(r => r.data),
+  // Готовность к заполнению: дубли смет, заглушки себестоимости, дыры в ставках
+  readiness:   ()                           => api.get("/estimates/readiness").then(r => r.data),
+  keepActual:  (setId: string)              => api.post(`/estimates/sets/${setId}/keep-actual`, {}).then(r => r.data),
   costFill:    (setId: string, opts?: { expand_items?: boolean; refresh_materials?: boolean; only?: string[] }) =>
     api.post(`/estimates/sets/${setId}/cost-fill`, opts ?? {}).then(r => r.data),
 };

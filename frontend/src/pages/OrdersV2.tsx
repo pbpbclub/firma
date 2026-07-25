@@ -9,6 +9,7 @@ import { ordersApi, customersApi, brandsApi, estimatesApi } from "../api";
 import { MagnifyingGlass, DotsThree, Plus, Files, CaretRight, Archive, ArrowCounterClockwise, CaretDown, X, Trash, UserCircle } from "@phosphor-icons/react";
 import { ColumnFilter, AmountFilter } from "../components/TableFilters";
 import { ProfitLadder, PlanFactDuel } from "../components/OrderFinance";
+import { ReadinessPanel } from "../components/order/ReadinessPanel";
 import { EstimateReviewQueue } from "../components/EstimateReviewQueue";
 import { Breadcrumbs } from "../components/ui/Breadcrumbs";
 
@@ -552,6 +553,7 @@ export default function OrdersV2() {
   const [debtMax, setDebtMax] = useState("");
   const [showNewOrder, setShowNewOrder] = useState(false);
   const [summaryMode, setSummaryMode] = useState(false);
+  const [readyMode, setReadyMode] = useState(false);
   const [reviewMode, setReviewMode] = useState(false);
 
   const { data: summary } = useQuery({
@@ -738,7 +740,7 @@ export default function OrdersV2() {
               </button>
             ))}
             <button
-              onClick={() => { setReviewMode(!reviewMode); setSummaryMode(false); setArchiveMode(false); setStatus(reviewMode ? "in_production" : ""); setPage(0); setSelected(null); }}
+              onClick={() => { setReviewMode(!reviewMode); setReadyMode(false); setSummaryMode(false); setArchiveMode(false); setStatus(reviewMode ? "in_production" : ""); setPage(0); setSelected(null); }}
               style={{
                 fontSize: 13, padding: "0 0 12px",
                 border: "none", background: "none", cursor: "pointer",
@@ -753,7 +755,7 @@ export default function OrdersV2() {
               К утверждению{reviewCount > 0 ? ` (${reviewCount})` : ""}
             </button>
             <button
-              onClick={() => { setSummaryMode(!summaryMode); setArchiveMode(false); setReviewMode(false); setStatus(summaryMode ? "in_production" : ""); setPage(0); setSelected(null); }}
+              onClick={() => { setSummaryMode(!summaryMode); setReadyMode(false); setArchiveMode(false); setReviewMode(false); setStatus(summaryMode ? "in_production" : ""); setPage(0); setSelected(null); }}
               style={{
                 fontSize: 13, padding: "0 0 12px",
                 border: "none", background: "none", cursor: "pointer",
@@ -767,7 +769,21 @@ export default function OrdersV2() {
               Сводка П/Ф
             </button>
             <button
-              onClick={() => { setArchiveMode(!archiveMode); setSummaryMode(false); setReviewMode(false); setStatus(""); setPage(0); setSelected(null); }}
+              onClick={() => { setReadyMode(!readyMode); setSummaryMode(false); setArchiveMode(false); setReviewMode(false); setSelected(null); }}
+              style={{
+                fontSize: 13, padding: "0 0 12px",
+                border: "none", background: "none", cursor: "pointer",
+                color: readyMode ? "#1A1A1A" : "#A89070",
+                fontWeight: readyMode ? 600 : 400,
+                borderBottom: readyMode ? "2px solid #E8592A" : "2px solid transparent",
+                marginBottom: -1,
+                transition: "all 0.15s",
+              }}
+            >
+              Готовность
+            </button>
+            <button
+              onClick={() => { setArchiveMode(!archiveMode); setReadyMode(false); setSummaryMode(false); setReviewMode(false); setStatus(""); setPage(0); setSelected(null); }}
               style={{
                 fontSize: 13, padding: "0 0 12px",
                 border: "none", background: "none", cursor: "pointer",
@@ -785,7 +801,9 @@ export default function OrdersV2() {
           </div>
         </div>
 
-        {reviewMode ? (
+        {readyMode ? (
+          <ReadinessPanel />
+        ) : reviewMode ? (
           <EstimateReviewQueue />
         ) : summaryMode ? (
           <div style={{ flex: 1, overflow: "auto", padding: "8px 28px 24px" }}>

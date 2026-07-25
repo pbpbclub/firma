@@ -74,6 +74,27 @@ def _match_material_code(conn, title: str):
     return None, None
 
 
+STUB_MARKUP = 2.0   # дефолт `production.py estimate-create --markup`
+
+
+def _is_stub_cost(item) -> bool:
+    """Себестоимость — заглушка `цена ÷ наценка` из production.py estimate-create,
+    а не расчёт по составу: цена ровно вдвое больше себестоимости при дефолтной
+    наценке 2.0. Осознанно введённые суммы (доставка в минус, транзит 13%) дают
+    произвольную наценку и заглушками НЕ считаются — их видно отдельным списком."""
+    cost = item["cost_total"] or 0
+    sale = item["sale_price"] or 0
+    markup = item["markup"] or 0
+    if cost <= 0 or sale <= 0 or markup <= 0:
+        return False
+    return abs(markup - STUB_MARKUP) < 0.001 and abs(cost * markup - sale) < 1.0
+
+
+def _is_sum_without_breakdown(item) -> bool:
+    """Себестоимость введена одной суммой, состава нет — не тревожно, но видеть полезно."""
+    return (item["cost_total"] or 0) > 0 and not _is_stub_cost(item)
+
+
 def _client_price_per_unit(item, set_row) -> float:
     """Клиентская цена одного изделия позиции (та же формула, что set_totals)."""
     sale = item["sale_price"] or 0
@@ -237,6 +258,20 @@ def _cost_report(conn, set_id: str) -> dict:
                     "title": item["title"],
                     "ask": f"Позиция «{item['title'] or 'Без названия'}» без состава и себестоимости — из чего состоит (материалы/работы) или какая рецептура каталога?",
                 })
+            elif _is_stub_cost(item):
+                # Себестоимость = цена ÷ наценка: это заглушка estimate-create, а не
+                # расчёт. Раньше она молча проходила как «посчитано» (cost_total > 0),
+                # и отчёт показывал «вопросов 0» на смете без единой реальной цифры.
+                missing.append({
+                    "scope": "item", "id": item["id"], "kind": "stub",
+                    "title": item["title"],
+                    "cost_total": item["cost_total"], "sale_price": item["sale_price"],
+                    # разделитель тысяч меняем только в самом числе: .replace на всей
+                    # строке съедал запятую в тексте вопроса
+                    "ask": (f"Позиция «{item['title'] or 'Без названия'}»: себестоимость "
+                            f"{(item['cost_total'] or 0):,.0f}".replace(",", " ")
+                            + " ₽ — это просто цена ÷ наценка, а не расчёт. Сколько она стоит на самом деле?"),
+                })
 
         for line in lines:
             lines_total += 1
@@ -384,5 +419,124 @@ def cost_fill(set_id: str, body: Optional[CostFillIn] = None):
         final = _cost_report(conn, set_id)
         final["applied"] = applied
         return final
+    finally:
+        conn.close()
+
+
+# ─── готовность к заполнению: что мешает доверять цифрам ────────────────────
+
+@router.get("/readiness")
+def readiness():
+    """Сводка «что не заполнено» по всем живым заказам: дубли смет, позиции с
+    заглушкой вместо себестоимости, дыры и мусор в ставках. Один экран вместо
+    обхода каждой сметы руками."""
+    conn = get_production()
+    try:
+        orders = conn.execute(
+            "SELECT id, number, title, brand, status FROM orders WHERE COALESCE(archived,0) = 0"
+        ).fetchall()
+
+        duplicate_sets, stub_items, sum_only_items = [], [], []
+        for o in orders:
+            sets = conn.execute(
+                """SELECT id, title, status, created_at, updated_at FROM estimate_sets
+                   WHERE order_id = ? AND COALESCE(status,'') != 'superseded'
+                   ORDER BY created_at DESC""", (o["id"],)
+            ).fetchall()
+            enriched = []
+            for s in sets:
+                items = conn.execute(
+                    "SELECT * FROM estimate_items WHERE set_id = ?", (s["id"],)
+                ).fetchall()
+                lines_n = conn.execute(
+                    """SELECT COUNT(*) FROM estimate_lines el JOIN estimate_items ei ON ei.id = el.item_id
+                       WHERE ei.set_id = ?""", (s["id"],)
+                ).fetchone()[0]
+                enriched.append({
+                    "set_id": s["id"], "title": s["title"], "status": s["status"],
+                    "created_at": s["created_at"], "updated_at": s["updated_at"],
+                    "items": len(items), "lines": lines_n,
+                    "sale_total": round(sum((i["sale_price"] or 0) for i in items), 2),
+                    "cost_total": round(sum((i["cost_total"] or 0) for i in items), 2),
+                })
+                for it in items:
+                    has_lines = conn.execute(
+                        "SELECT COUNT(*) FROM estimate_lines WHERE item_id = ?", (it["id"],)
+                    ).fetchone()[0]
+                    if has_lines:
+                        continue
+                    entry = {
+                        "order_id": o["id"], "order_number": o["number"],
+                        "order_title": o["title"], "brand": o["brand"],
+                        "set_id": s["id"], "set_status": s["status"],
+                        "item_id": it["id"], "title": it["title"],
+                        "quantity": it["quantity"], "markup": it["markup"],
+                        "sale_price": it["sale_price"], "cost_total": it["cost_total"],
+                    }
+                    if _is_stub_cost(it):
+                        stub_items.append(entry)
+                    elif _is_sum_without_breakdown(it):
+                        sum_only_items.append(entry)
+            if len(enriched) > 1:
+                duplicate_sets.append({
+                    "order_id": o["id"], "order_number": o["number"],
+                    "order_title": o["title"], "brand": o["brand"], "sets": enriched,
+                })
+
+        # Ставки: дыры и мусор. Ставка «Сварка 30 000 ₽/шт» выучена из истории целых
+        # заказов — в новой смете подставится как цена за штуку и раздует себестоимость.
+        rate_holes = [dict(r) for r in conn.execute(
+            """SELECT wt.id, wt.name FROM work_types wt
+               WHERE NOT EXISTS (SELECT 1 FROM work_rates wr WHERE wr.work_type_id = wt.id)
+               ORDER BY wt.sort_order, wt.name"""
+        ).fetchall()]
+        suspicious_rates = [dict(r) for r in conn.execute(
+            """SELECT wr.id, wr.rate, wr.scheme, wr.unit, wr.source,
+                      wt.name AS work_type_name, m.name AS master_name
+               FROM work_rates wr
+               LEFT JOIN work_types wt ON wt.id = wr.work_type_id
+               LEFT JOIN masters m ON m.id = wr.master_id
+               WHERE wr.scheme IN ('per_unit','hourly') AND wr.rate >= 10000
+               ORDER BY wr.rate DESC"""
+        ).fetchall()]
+
+        return {
+            "duplicate_sets": duplicate_sets,
+            "stub_items": stub_items,
+            "sum_only_items": sum_only_items,
+            "rate_holes": rate_holes,
+            "suspicious_rates": suspicious_rates,
+            "summary": {
+                "orders_with_duplicates": len(duplicate_sets),
+                "stub_items": len(stub_items),
+                "sum_only_items": len(sum_only_items),
+                "rate_holes": len(rate_holes),
+                "suspicious_rates": len(suspicious_rates),
+            },
+        }
+    finally:
+        conn.close()
+
+
+class SupersedeIn(BaseModel):
+    keep_set_id: str
+
+
+@router.post("/sets/{set_id}/keep-actual")
+def keep_actual(set_id: str, body: Optional[SupersedeIn] = None):
+    """Оставить эту смету актуальной: остальные не-superseded сметы заказа помечаются
+    заменёнными. Раньше superseded ставился только автоматически при approve соседней —
+    у Юры из-за этого копились по три черновика на заказ."""
+    conn = get_production()
+    try:
+        es = conn.execute("SELECT id, order_id FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
+        if not es:
+            raise HTTPException(status_code=404, detail="Смета не найдена")
+        cur = conn.execute(
+            """UPDATE estimate_sets SET status = 'superseded', updated_at = datetime('now')
+               WHERE order_id = ? AND id != ? AND COALESCE(status,'') != 'superseded'""",
+            (es["order_id"], set_id))
+        conn.commit()
+        return {"ok": True, "kept": set_id, "superseded": cur.rowcount}
     finally:
         conn.close()
