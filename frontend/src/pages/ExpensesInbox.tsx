@@ -7,6 +7,7 @@ import { PeriodFilter, AmountFilter, ColumnFilter } from "../components/TableFil
 import { inboxApi, ordersApi, mastersApi, payeeRulesApi, estimatesApi, paymentsApi , accountableApi} from "../api";
 import { EXPENSE_CATEGORIES } from "../components/ExpenseModal";
 import { Modal } from "../components/ui/Modal";
+import { PayeePicker } from "../components/ui/PayeePicker";
 import { MagnifyingGlass, X, Check, ArrowCounterClockwise, EyeSlash, HandCoins, User } from "@phosphor-icons/react";
 
 function fmt(n: number | null | undefined) {
@@ -228,11 +229,14 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
           <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em" }}>ПОЛУЧАТЕЛЬ</div>
           <div style={{ fontSize: 12, color: "#1A1A1A", flex: "0 0 auto" }}>{payeeStr || "—"}</div>
           <span style={{ color: "#C8C0B0" }}>→</span>
-          <select value={payeeMaster} onChange={e => { setPayeeMaster(e.target.value); setRemember(!!e.target.value); }}
-            style={{ flex: 1, minWidth: 150, border: "1px solid " + (tx.match_source === "suggest" && payeeMaster ? "#E8592A" : "#EDEBE6"), padding: "5px 8px", fontSize: 12, outline: "none", background: "#fff", cursor: "pointer" }}>
-            <option value="">— подрядчик —</option>
-            {(masters as any[]).map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
-          </select>
+          {/* Контрагент любой роли (подрядчик/мастер/поставщик) + завести нового на месте */}
+          <PayeePicker
+            value={payeeMaster}
+            onChange={v => { setPayeeMaster(v); setRemember(!!v); }}
+            suggestName={payeeStr}
+            highlight={tx.match_source === "suggest"}
+            style={{ flex: 1, minWidth: 260 }}
+          />
         </div>
         {tx.match_source === "suggest" && tx.master_suggested && (
           <div style={{ fontSize: 10, color: "#E8592A", marginTop: 6 }}>
@@ -294,12 +298,9 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
                     }}>{c.l}</button>
                 ))}
               </div>
-              {/* Подрядчик */}
-              <select value={a.master_id} onChange={e => patch(i, { master_id: e.target.value })}
-                style={{ flex: 1, minWidth: 130, border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 11, outline: "none", background: "#fff", cursor: "pointer" }}>
-                <option value="">— подрядчик —</option>
-                {(masters as any[]).map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
-              </select>
+              {/* Контрагент строки: может отличаться от получателя платежа */}
+              <PayeePicker value={a.master_id} onChange={v => patch(i, { master_id: v })}
+                suggestName={payeeStr} style={{ flex: 1, minWidth: 220 }} />
             </div>
             {/* Плановая строка сметы — привязка платежа к конкретному обязательству */}
             <ObligationPicker

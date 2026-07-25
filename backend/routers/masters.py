@@ -113,6 +113,12 @@ class MasterUpdate(BaseModel):
     specialization: Optional[str] = None
     notes:          Optional[str] = None
     status:         Optional[str] = None
+    # реквизиты организации (поставщик — та же картотека, роль различает)
+    inn:            Optional[str] = None
+    full_name:      Optional[str] = None
+    contact:        Optional[str] = None
+    website:        Optional[str] = None
+    price_supplier: Optional[str] = None
     # wiki fields — written back to analytics.db
     pay_scheme:     Optional[str] = None
     pay_rate:       Optional[float] = None
@@ -254,6 +260,8 @@ class MasterCreate(BaseModel):
     specialization: Optional[str] = None
     work_type_id: Optional[str] = None
     contractor_id: Optional[int] = None   # строка вики, которую заводим в картотеку
+    inn: Optional[str] = None
+    price_supplier: Optional[str] = None
 
 
 @router.post("")
@@ -274,8 +282,9 @@ def create_master(body: MasterCreate):
         else:
             mid = str(uuid.uuid4())
             conn.execute(
-                "INSERT INTO masters (id, name, role, specialization, status, created_at) VALUES (?, ?, ?, ?, 'active', datetime('now'))",
-                (mid, name, body.role, body.specialization)
+                """INSERT INTO masters (id, name, role, specialization, inn, price_supplier, status, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, 'active', datetime('now'))""",
+                (mid, name, body.role, body.specialization, body.inn, body.price_supplier)
             )
         if body.work_type_id:
             conn.execute(
@@ -457,7 +466,8 @@ def update_master(master_id: str, body: MasterUpdate):
         master = dict(row)
 
         # Update production.db fields
-        prod_fields = ["name", "role", "phone", "telegram", "email", "specialization", "notes", "status"]
+        prod_fields = ["name", "role", "phone", "telegram", "email", "specialization", "notes", "status",
+                       "inn", "full_name", "contact", "website", "price_supplier"]
         fields, params = [], []
         data = body.model_dump(exclude_none=True)
         for f in prod_fields:

@@ -7,6 +7,7 @@ import { PayeeRulesSection } from "../../components/PayeeRulesSection";
 import { useNavigate } from "react-router-dom";
 import { mastersApi, financeApi } from "../../api";
 import { ContactStrip, contactHref } from "../../components/ui/ContactLinks";
+import { PriceSync } from "./SupplierDetail";
 import { Check, User } from "@phosphor-icons/react";
 import { fmt, fmtDate } from "./helpers";
 import { DetailRow as Row } from "./DetailRow";
@@ -27,11 +28,18 @@ const EVENT_LABELS: Record<string, string> = {
 export const CONTRACTOR_FIELDS: FieldDef[] = [
   { key: "name",           label: "Имя / Название" },
   { key: "role",           label: "Роль",
-    type: "select", options: [{ v: "Мастер", l: "Мастер" }, { v: "Подрядчик", l: "Подрядчик" }] },
+    type: "select", options: [{ v: "Мастер", l: "Мастер" }, { v: "Подрядчик", l: "Подрядчик" },
+                              { v: "Поставщик", l: "Поставщик" }] },
   { key: "specialization", label: "Специализация" },
   { key: "phone",          label: "Телефон" },
   { key: "telegram",       label: "Telegram" },
   { key: "email",          label: "Email" },
+  // Реквизиты организации — актуальны для поставщиков (та же картотека, роль различает)
+  { key: "inn",            label: "ИНН" },
+  { key: "contact",        label: "Контактное лицо" },
+  { key: "website",        label: "Сайт" },
+  { key: "price_supplier", label: "Прайс материалов",
+    type: "select", options: [{ v: "vrep", l: "ВРЭП" }, { v: "metplus", l: "Металлинвест" }] },
   { key: "pay_scheme",     label: "Схема оплаты",
     type: "select", options: [
       { v: "percent",  l: "% от счёта" },
@@ -114,6 +122,10 @@ export function ContractorDetail({ id, onClose }: { id: string; onClose: () => v
     notes:          master.notes || "",
     wiki_notes:     wiki.wiki_notes || "",
     status:         master.status,
+    inn:            master.inn || "",
+    contact:        master.contact || "",
+    website:        master.website || "",
+    price_supplier: master.price_supplier || "",
   };
 
   return (
@@ -146,10 +158,19 @@ export function ContractorDetail({ id, onClose }: { id: string; onClose: () => v
       >
         <DetailSection label="КОНТАКТЫ" first>
           <ContactStrip entity={master} />
+          {master.inn && <Row label="ИНН" value={master.inn} mono />}
           <Row label="Телефон"  value={master.phone} mono href={contactHref("phone", master.phone)} />
           <Row label="Telegram" value={master.telegram} href={contactHref("telegram", master.telegram)} />
           <Row label="Email"    value={master.email} href={contactHref("email", master.email)} />
+          {master.contact && <Row label="Контактное лицо" value={master.contact} />}
+          {master.website && (
+            <Row label="Сайт" value={master.website}
+              href={/^https?:\/\//.test(master.website) ? master.website : `https://${master.website}`} />
+          )}
         </DetailSection>
+
+        {/* Свежесть прайса — у поставщиков материалов (код прайса materials.db) */}
+        {master.price_supplier && <PriceSync code={master.price_supplier} />}
 
         {data?.linked_customers?.length > 0 && (
           <DetailSection label="СВЯЗИ">

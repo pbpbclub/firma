@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { ComponentType, ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { User, Wrench, Truck, Palette, Buildings, Plus, LinkSimple, X } from "@phosphor-icons/react";
-import { customersApi, mastersApi, suppliersApi, brandsApi, businessUnitsApi, financeApi } from "../../api";
+import { customersApi, mastersApi, brandsApi, businessUnitsApi, financeApi } from "../../api";
 import { MONO } from "../../components/ui/Num";
 import { T } from "../../components/ui/type";
 import type { FieldDef } from "../../components/EditModal";
@@ -32,7 +32,7 @@ const statusCell = (label?: string, color?: string) =>
     : <span style={{ color: "#C8C0B0" }}>—</span>;
 import { ClientDetail, CLIENT_FIELDS, CUSTOMER_STATUS_COLORS, customerStatusLabel } from "./ClientDetail";
 import { ContractorDetail, CONTRACTOR_FIELDS, STATUS_COLORS, CONTRACTOR_STATUS_LABELS } from "./ContractorDetail";
-import { SupplierDetail, SUPPLIER_FIELDS, PRICE_SUPPLIER_LABELS } from "./SupplierDetail";
+import { PRICE_SUPPLIER_LABELS } from "./SupplierDetail";
 import { BrandDetail, BrandModal } from "./BrandDetail";
 import { UnitDetail, UnitModal } from "./UnitDetail";
 
@@ -200,18 +200,25 @@ const contractors: WikiCategory = {
   ],
 };
 
+// Поставщики — та же картотека контрагентов, отфильтрованная по роли: деньги,
+// долги и история висят на masters, дублировать сущность незачем.
 const suppliers: WikiCategory = {
   key: "suppliers", label: "Поставщики", singular: "поставщика", icon: Truck,
-  adapter: { list: () => suppliersApi.list(), create: suppliersApi.create, serverSearch: false },
-  searchFields: ["name", "category", "phone"],
-  Detail: SupplierDetail,
-  createFields: SUPPLIER_FIELDS,
-  avatar: { kind: "initials" },
+  adapter: {
+    list: () => mastersApi.list().then((rows: any[]) => rows.filter(r => r.role === "Поставщик")),
+    create: (d) => mastersApi.create({ ...(d as any), role: "Поставщик" }),
+    serverSearch: false,
+  },
+  searchFields: ["name", "specialization", "phone", "inn"],
+  Detail: ContractorDetail,
+  createFields: CONTRACTOR_FIELDS.filter(f => !["role", "pay_scheme", "pay_rate", "pay_note", "prepay_pct"].includes(f.key)),
+  avatar: { kind: "initials", debtTint: true },
   columns: [
-    { key: "name", label: "ПОСТАВЩИК", width: "2fr", filter: true },
-    { key: "category", label: "КАТЕГОРИЯ", width: "150px", render: (r) => subCell(r.category) },
+    { key: "name", label: "ПОСТАВЩИК", width: "2fr", filter: true, render: (r) => nameCell(r.name) },
+    { key: "specialization", label: "ЧТО ПОСТАВЛЯЕТ", width: "1.2fr", render: (r) => subCell(r.specialization) },
     { key: "phone", label: "ТЕЛЕФОН", width: "150px", render: (r) => numText(r.phone) },
     { key: "price_supplier", label: "ПРАЙС", width: "110px", render: (r) => <span style={{ ...T.body, color: r.price_supplier ? "#E8592A" : "#C8C0B0", ...ell }}>{PRICE_SUPPLIER_LABELS[r.price_supplier] || "—"}</span> },
+    { key: "paid_total", label: "ОПЛАЧЕНО", width: "110px", align: "right", render: (r) => numCell(r.paid_total, "#4A7C59", { dashZero: true }) },
   ],
 };
 

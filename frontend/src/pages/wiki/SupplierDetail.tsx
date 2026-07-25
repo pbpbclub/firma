@@ -10,7 +10,7 @@ import { DetailRow as Row } from "./DetailRow";
 import { DetailShell, DetailSection, NoteBlock } from "./DetailShell";
 
 // Свежесть прайса поставщика из materials.db (живые цены ВРЭП/Металлинвест).
-function PriceSync({ code }: { code: string }) {
+export function PriceSync({ code }: { code: string }) {
   const { data } = useQuery({
     queryKey: ["supplier-sync", code],
     queryFn: () => materialsApi.supplierSync(code),

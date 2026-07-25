@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Modal } from "./ui/Modal";
+import { PayeePicker } from "./ui/PayeePicker";
 import { MONO } from "./ui/Num";
 import { mastersApi, financeApi, accountableApi } from "../api";
 
@@ -171,12 +172,8 @@ export function ExpenseModal({ orderId, expense, existingExpenses = [], onSave, 
 
         <div style={{ marginTop: 14 }}>
           <div style={lbl}>ПОДРЯДЧИК / ПОСТАВЩИК</div>
-          <select style={{ ...inp, cursor: "pointer" }} value={masterId} onChange={e => setMasterId(e.target.value)}>
-            <option value="">— не указан —</option>
-            {(masters as any[]).map((m: any) => (
-              <option key={m.id} value={m.id}>{m.name}{m.specialization ? ` · ${m.specialization}` : ""}</option>
-            ))}
-          </select>
+          <PayeePicker value={masterId} onChange={setMasterId} placeholder="— не указан —"
+            suggestName={expense?.supplier} />
         </div>
 
         {/* Похоже на дубль: уже есть трата с тем же поставщиком/суммой в ±3 дня */}

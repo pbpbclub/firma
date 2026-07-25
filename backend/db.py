@@ -257,6 +257,13 @@ def ensure_cash_schema():
         if existing and "is_accountable" not in existing:
             conn.execute("ALTER TABLE masters ADD COLUMN is_accountable INTEGER DEFAULT 0")
             conn.execute("UPDATE masters SET is_accountable = 1 WHERE name = 'Эдуард Малафеев'")
+        # Реквизиты контрагента-организации: поставщик — та же картотека, роль различает
+        # (masters.role = Мастер | Подрядчик | Поставщик). price_supplier — код прайса
+        # materials.db ('vrep'/'metplus') для метки свежести цен.
+        if existing:
+            for col in ("inn", "full_name", "contact", "website", "price_supplier"):
+                if col not in existing:
+                    conn.execute(f"ALTER TABLE masters ADD COLUMN {col} TEXT")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS accountable_ops (
                 id             TEXT PRIMARY KEY,
