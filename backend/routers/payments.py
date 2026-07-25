@@ -14,10 +14,41 @@ from typing import Optional, List
 
 from db import get_production, get_finance
 from routers.orders import _create_payment, _reserve_hint
+from routers.zenmoney import _load_payee_rules, _resolve_payee, contractor_tokens
 
 router = APIRouter()
 
 DISMISS_SOURCE = "bank-in"
+
+
+def _load_customers_matching():
+    """Клиенты для похожести: [{name, tokens, id}] + карта имя→id.
+    Зеркало _load_masters_matching из expenses.py, но плательщик поступления —
+    это клиент, а не подрядчик."""
+    customers, name_to_id = [], {}
+    conn = get_production()
+    try:
+        for c in conn.execute("SELECT id, name FROM customers").fetchall():
+            nm = (c["name"] or "").strip()
+            if not nm:
+                continue
+            customers.append({"name": nm, "tokens": contractor_tokens(nm), "id": c["id"]})
+            name_to_id[nm] = c["id"]
+    finally:
+        conn.close()
+    return customers, name_to_id
+
+
+def _payer_fields(res: dict, name_to_id: dict) -> dict:
+    """customer_id (из правила, уверенно) / customer_suggested (похожесть) / match_source."""
+    if res.get("entity_type") == "customer" and res.get("entity_id"):
+        return {"customer_id": res["entity_id"], "customer_suggested": None, "match_source": "rule"}
+    if res.get("matched_via") == "algorithm" and res.get("display_name"):
+        nm = res["display_name"]
+        cid = name_to_id.get(nm)
+        if cid:
+            return {"customer_id": None, "customer_suggested": {"id": cid, "name": nm}, "match_source": "suggest"}
+    return {"customer_id": None, "customer_suggested": None, "match_source": None}
 
 
 def _is_missing_schema(exc: sqlite3.OperationalError) -> bool:
@@ -84,11 +115,14 @@ def inbox(
     amount_min: Optional[float] = None,
     amount_max: Optional[float] = None,
     show_dismissed: bool = False,
-    limit: int = Query(100, le=500),
+    limit: int = Query(100, le=2000),
 ):
-    """Неразнесённые поступления банка."""
+    """Неразнесённые поступления банка. Плательщик резолвится в КЛИЕНТА:
+    правило (entity_type='customer') — уверенно, похожесть имени — предложение."""
     used, degraded = _allocated_in_ids()
     dismissed = _dismissed_map()
+    rules = _load_payee_rules()
+    customers_match, cust_name_to_id = _load_customers_matching()
     out = []
     truncated = False
     fin = get_finance()
@@ -129,10 +163,13 @@ def inbox(
                     continue
                 if tid in dismissed and not show_dismissed:
                     continue
+                res = _resolve_payee(r["counterparty"] or "", rules, customers_match)
                 out.append({
                     "id": tid, "source": "bank", "date": r["date"], "amount": r["amount"],
                     "counterparty": r["counterparty"], "purpose": r["purpose"], "bank": r["bank"],
+                    "payee_hint": res.get("display_name"),
                     "dismissed_reason": dismissed.get(tid),
+                    **_payer_fields(res, cust_name_to_id),
                 })
                 if len(out) >= limit:
                     # набрали лимит, а строки в БД ещё есть → усечение

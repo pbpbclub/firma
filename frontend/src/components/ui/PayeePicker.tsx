@@ -4,7 +4,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { Plus, X } from "@phosphor-icons/react";
-import { mastersApi } from "../../api";
+import { mastersApi, customersApi } from "../../api";
 
 export const PAYEE_ROLES = ["Поставщик", "Подрядчик", "Мастер"];
 
@@ -113,6 +113,71 @@ export function PayeePicker({ value, onChange, suggestName, placeholder = "— �
       </select>
       <button onClick={() => { setName(prettifyPayee(suggestName)); setAdding(true); }}
         title="Завести нового контрагента"
+        style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10.5, padding: "5px 9px",
+                 border: "1px solid #EDEBE6", background: "#fff", color: "#6B6355",
+                 cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0 }}>
+        <Plus size={11} /> новый
+      </button>
+    </div>
+  );
+}
+
+// Плательщик поступления — это КЛИЕНТ (не подрядчик), поэтому отдельный список.
+// Тот же вид и та же логика «выбрать или завести на месте».
+export function CustomerPicker({ value, onChange, suggestName, placeholder = "— клиент —", style, highlight }: {
+  value: string;
+  onChange: (customerId: string) => void;
+  suggestName?: string | null;
+  placeholder?: string;
+  style?: React.CSSProperties;
+  highlight?: boolean;
+}) {
+  const qc = useQueryClient();
+  const { data: customers = [] } = useQuery({ queryKey: ["customers", ""], queryFn: () => customersApi.list("") });
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState("");
+
+  const create = useMutation({
+    mutationFn: () => customersApi.create({ name: name.trim() }),
+    onSuccess: (c: any) => {
+      qc.invalidateQueries({ queryKey: ["customers"] });
+      qc.invalidateQueries({ queryKey: ["wiki", "clients"] });
+      qc.invalidateQueries({ queryKey: ["expenses-inbox"] });
+      onChange(c.id);
+      setAdding(false); setName("");
+    },
+  });
+
+  if (adding) {
+    return (
+      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", ...style }}>
+        <input value={name} onChange={e => setName(e.target.value)} autoFocus placeholder="название клиента"
+          style={{ border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 12, outline: "none", minWidth: 220, flex: 1, fontFamily: "inherit" }} />
+        <button disabled={!name.trim() || create.isPending} onClick={() => create.mutate()}
+          style={{ fontSize: 11, padding: "5px 10px", border: "none", fontFamily: "inherit", fontWeight: 600,
+                   background: name.trim() ? "#E8592A" : "#EDEBE6", color: name.trim() ? "#fff" : "#A89070",
+                   cursor: name.trim() ? "pointer" : "default" }}>
+          {create.isPending ? "..." : "Создать"}
+        </button>
+        <button onClick={() => { setAdding(false); setName(""); }}
+          style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}>
+          <X size={11} />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", gap: 6, alignItems: "center", ...style }}>
+      <select value={value} onChange={e => onChange(e.target.value)}
+        style={{ flex: 1, border: `1px solid ${highlight && value ? "#E8592A" : "#EDEBE6"}`,
+                 padding: "5px 8px", fontSize: 12, outline: "none", background: "#fff",
+                 cursor: "pointer", fontFamily: "inherit", minWidth: 0 }}>
+        <option value="">{placeholder}</option>
+        {(customers as any[]).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+      </select>
+      <button onClick={() => { setName(prettifyPayee(suggestName)); setAdding(true); }}
+        title="Завести нового клиента"
         style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10.5, padding: "5px 9px",
                  border: "1px solid #EDEBE6", background: "#fff", color: "#6B6355",
                  cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0 }}>

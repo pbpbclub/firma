@@ -121,7 +121,7 @@ def inbox(
     amount_min: Optional[float] = None,
     amount_max: Optional[float] = None,
     show_dismissed: bool = False,
-    limit: int = Query(100, le=500),
+    limit: int = Query(100, le=2000),
 ):
     """Неразнесённые списания. payee_hint — подсказка поставщика/категории."""
     bank_done, zen_done = _allocated_ids()
@@ -129,6 +129,7 @@ def inbox(
     rules = _load_payee_rules()
     masters_match, name_to_id = _load_masters_matching()
     out = []
+    truncated = False
 
     if source == "bank":
         conn = get_finance()
@@ -151,27 +152,36 @@ def inbox(
                 sql += " AND amount <= ?"; params.append(amount_max)
             if search:
                 sql += " AND (counterparty LIKE ? OR purpose LIKE ?)"; params += [f"%{search}%"] * 2
-            sql += " ORDER BY date DESC, id DESC LIMIT ?"
-            params.append(limit * 3)  # запас: часть отсеется как разнесённая
-            for r in conn.execute(sql, params).fetchall():
-                if str(r["id"]) in bank_done:
-                    continue
-                if str(r["id"]) in dismissed and not show_dismissed:
-                    continue
-                res = _resolve_payee(r["counterparty"] or "", rules, masters_match)
-                # Контрагент помечен «личное» правилом — не бизнес-расход, мимо Разноски.
-                if res.get("entity_type") == "personal" and not show_dismissed:
-                    continue
-                out.append({
-                    "id": str(r["id"]), "source": "bank", "date": r["date"], "amount": r["amount"],
-                    "counterparty": r["counterparty"], "purpose": r["purpose"], "bank": r["bank"],
-                    "payee_hint": res.get("display_name"),
-                    "category_hint": _guess_category(res.get("category")),
-                    "dismissed_reason": dismissed.get(str(r["id"])),
-                    **_payee_fields(res, name_to_id),
-                })
-                if len(out) >= limit:
-                    break
+            # Разнесённые/скрытые отсеиваются в Python (разные файлы БД) → читаем
+            # страницами, пока не набрали limit. «Запас limit*3» терял старые
+            # неразнесённые, когда разнесённых большинство (тот же приём, что в payments).
+            sql += " ORDER BY date DESC, id DESC LIMIT ? OFFSET ?"
+            CHUNK, offset, done = 500, 0, False
+            while not done and len(out) < limit:
+                page = conn.execute(sql, params + [CHUNK, offset]).fetchall()
+                if len(page) < CHUNK:
+                    done = True
+                offset += CHUNK
+                for r in page:
+                    if str(r["id"]) in bank_done:
+                        continue
+                    if str(r["id"]) in dismissed and not show_dismissed:
+                        continue
+                    res = _resolve_payee(r["counterparty"] or "", rules, masters_match)
+                    # Контрагент помечен «личное» правилом — не бизнес-расход, мимо Разноски.
+                    if res.get("entity_type") == "personal" and not show_dismissed:
+                        continue
+                    out.append({
+                        "id": str(r["id"]), "source": "bank", "date": r["date"], "amount": r["amount"],
+                        "counterparty": r["counterparty"], "purpose": r["purpose"], "bank": r["bank"],
+                        "payee_hint": res.get("display_name"),
+                        "category_hint": _guess_category(res.get("category")),
+                        "dismissed_reason": dismissed.get(str(r["id"])),
+                        **_payee_fields(res, name_to_id),
+                    })
+                    if len(out) >= limit:
+                        truncated = not (done and r is page[-1])
+                        break
         finally:
             conn.close()
     else:
@@ -191,46 +201,52 @@ def inbox(
                 sql += " AND outcome <= ?"; params.append(amount_max)
             if search:
                 sql += " AND (payee LIKE ? OR comment LIKE ?)"; params += [f"%{search}%"] * 2
-            sql += " ORDER BY date DESC LIMIT ?"
-            params.append(limit * 3)
+            sql += " ORDER BY date DESC, id DESC LIMIT ? OFFSET ?"
             import json as _json
             from routers.finance import ZEN_OWN_PAYEES, zen_recurring_category
-            for r in conn.execute(sql, params).fetchall():
-                if str(r["id"]) in zen_done:
-                    continue
-                # Перевод себе на карту вне ZenMoney (Райффайзен) — не расход.
-                if (r["payee"] or "").strip() in ZEN_OWN_PAYEES:
-                    continue
-                # Личные регулярки (подписки/связь/услуги карт) → «Регулярные траты».
-                if zen_recurring_category(r["payee"]):
-                    continue
-                if str(r["id"]) in dismissed and not show_dismissed:
-                    continue
-                res = _resolve_payee(r["payee"] or "", rules, masters_match)
-                # Контрагент помечен «личное» (друг, разовое) — в личном ZM-леджере
-                # трата остаётся, а из Разноски убираем.
-                if res.get("entity_type") == "personal" and not show_dismissed:
-                    continue
-                try:
-                    tags = _json.loads(r["tags"] or "[]")
-                except Exception:
-                    tags = []
-                zen_cat = tags[0] if tags else ""
-                out.append({
-                    "id": str(r["id"]), "source": "zen", "date": r["date"], "amount": r["outcome"],
-                    "counterparty": r["payee"], "purpose": r["comment"], "account": r["outcome_account"],
-                    "payee_hint": res.get("display_name"),
-                    "category_hint": _guess_category(res.get("category") or _CATEGORY_RU.get(zen_cat) or zen_cat),
-                    "zen_tag": _CATEGORY_RU.get(zen_cat) or zen_cat or None,
-                    "dismissed_reason": dismissed.get(str(r["id"])),
-                    **_payee_fields(res, name_to_id),
-                })
-                if len(out) >= limit:
-                    break
+            CHUNK, offset, done = 500, 0, False
+            while not done and len(out) < limit:
+                page = conn.execute(sql, params + [CHUNK, offset]).fetchall()
+                if len(page) < CHUNK:
+                    done = True
+                offset += CHUNK
+                for r in page:
+                    if str(r["id"]) in zen_done:
+                        continue
+                    # Перевод себе на карту вне ZenMoney (Райффайзен) — не расход.
+                    if (r["payee"] or "").strip() in ZEN_OWN_PAYEES:
+                        continue
+                    # Личные регулярки (подписки/связь/услуги карт) → «Регулярные траты».
+                    if zen_recurring_category(r["payee"]):
+                        continue
+                    if str(r["id"]) in dismissed and not show_dismissed:
+                        continue
+                    res = _resolve_payee(r["payee"] or "", rules, masters_match)
+                    # Контрагент помечен «личное» (друг, разовое) — в личном ZM-леджере
+                    # трата остаётся, а из Разноски убираем.
+                    if res.get("entity_type") == "personal" and not show_dismissed:
+                        continue
+                    try:
+                        tags = _json.loads(r["tags"] or "[]")
+                    except Exception:
+                        tags = []
+                    zen_cat = tags[0] if tags else ""
+                    out.append({
+                        "id": str(r["id"]), "source": "zen", "date": r["date"], "amount": r["outcome"],
+                        "counterparty": r["payee"], "purpose": r["comment"], "account": r["outcome_account"],
+                        "payee_hint": res.get("display_name"),
+                        "category_hint": _guess_category(res.get("category") or _CATEGORY_RU.get(zen_cat) or zen_cat),
+                        "zen_tag": _CATEGORY_RU.get(zen_cat) or zen_cat or None,
+                        "dismissed_reason": dismissed.get(str(r["id"])),
+                        **_payee_fields(res, name_to_id),
+                    })
+                    if len(out) >= limit:
+                        truncated = not (done and r is page[-1])
+                        break
         finally:
             conn.close()
 
-    return {"items": out, "count": len(out), "source": source}
+    return {"items": out, "count": len(out), "truncated": truncated, "source": source}
 
 
 class Allocation(BaseModel):

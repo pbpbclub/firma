@@ -4,10 +4,11 @@ import { MONO } from "../components/ui/Num";
 import { Loading } from "../components/ui/Loading";
 import { EmptyState } from "../components/ui/EmptyState";
 import { PeriodFilter, AmountFilter, ColumnFilter } from "../components/TableFilters";
-import { inboxApi, ordersApi, mastersApi, payeeRulesApi, estimatesApi, paymentsApi , accountableApi} from "../api";
+import { inboxApi, ordersApi, mastersApi, payeeRulesApi, estimatesApi, paymentsApi, accountableApi, customersApi } from "../api";
 import { EXPENSE_CATEGORIES } from "../components/ExpenseModal";
 import { Modal } from "../components/ui/Modal";
-import { PayeePicker } from "../components/ui/PayeePicker";
+import { PayeePicker, CustomerPicker } from "../components/ui/PayeePicker";
+import { Pager, usePager } from "../components/ui/Pager";
 import { MagnifyingGlass, X, Check, ArrowCounterClockwise, EyeSlash, HandCoins, User, FloppyDisk } from "@phosphor-icons/react";
 
 function fmt(n: number | null | undefined) {
@@ -490,6 +491,21 @@ function PaymentAllocRow({ tx, onDone, onReservePrompt }: {
   const [allocs, setAllocs] = useState<{ order_id: string; amount: string }[]>([]);
   const [error, setError] = useState("");
   const [hideMode, setHideMode] = useState(false);
+  // Плательщик поступления — клиент. Правило запоминает строку банка → клиент,
+  // чтобы следующие платежи от него узнавались сами.
+  const [payerCustomer, setPayerCustomer] = useState<string>(tx.customer_id || tx.customer_suggested?.id || "");
+  const payerStr = (tx.counterparty || "").trim();
+  const qcRow = useQueryClient();
+  const { data: customers = [] } = useQuery({ queryKey: ["customers", ""], queryFn: () => customersApi.list("") });
+  const customerName = (cid: string) => (customers as any[]).find((c: any) => c.id === cid)?.name;
+  const payerSaved = tx.match_source === "rule" && payerCustomer === tx.customer_id;
+  const savePayerRule = useMutation({
+    mutationFn: () => payeeRulesApi.create({
+      pattern: payerStr, match_type: "exact",
+      entity_type: "customer", entity_id: payerCustomer, entity_name: customerName(payerCustomer),
+    }),
+    onSuccess: () => qcRow.invalidateQueries({ queryKey: ["expenses-inbox"] }),
+  });
 
   // Для поступлений сумма — сильный сигнал: скорим против цены заказа (долга).
   const { data: suggestions = [] } = useQuery({
@@ -533,6 +549,37 @@ function PaymentAllocRow({ tx, onDone, onReservePrompt }: {
 
   return (
     <div style={{ padding: "14px 28px 18px", background: "#FAF8F5", borderBottom: "1px solid #EDEBE6" }}>
+      {/* Плательщик: кто прислал деньги. Правило учит систему узнавать его впредь. */}
+      <div style={{ marginBottom: 14, padding: "10px 12px", background: "#fff", border: "1px solid #EDEBE6" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em" }}>ПЛАТЕЛЬЩИК</div>
+          <div style={{ fontSize: 12, color: "#1A1A1A", flex: "0 0 auto" }}>{payerStr || "—"}</div>
+          <span style={{ color: "#C8C0B0" }}>→</span>
+          <CustomerPicker value={payerCustomer} onChange={setPayerCustomer} suggestName={payerStr}
+            highlight={tx.match_source === "suggest"} style={{ flex: 1, minWidth: 260 }} />
+          {payerCustomer && payerStr && !payerSaved && (
+            <button onClick={() => savePayerRule.mutate()} disabled={savePayerRule.isPending}
+              title={`Запомнить: все платежи от «${payerStr}» → ${customerName(payerCustomer)}`}
+              style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, padding: "5px 10px",
+                       border: "1px solid #E8592A", background: "#fff", color: "#E8592A",
+                       cursor: savePayerRule.isPending ? "default" : "pointer", fontFamily: "inherit",
+                       fontWeight: 600, whiteSpace: "nowrap", flexShrink: 0 }}>
+              <FloppyDisk size={12} /> {savePayerRule.isPending ? "..." : "Запомнить"}
+            </button>
+          )}
+        </div>
+        {tx.match_source === "suggest" && tx.customer_suggested && !payerSaved && (
+          <div style={{ fontSize: 10, color: "#E8592A", marginTop: 6 }}>
+            Похоже: {tx.customer_suggested.name}? Проверь и нажми «Запомнить».
+          </div>
+        )}
+        {payerSaved && (
+          <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "#4A7C59", marginTop: 6 }}>
+            <Check size={11} /> запомнено: платежи от «{payerStr}» → {customerName(payerCustomer) || tx.payee_hint}
+          </div>
+        )}
+      </div>
+
       <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 6 }}>
         ПЛАТЁЖ ПО ЗАКАЗАМ
       </div>
@@ -636,7 +683,8 @@ export default function ExpensesInbox() {
   const [reservePrompt, setReservePrompt] = useState<{ order_id: string; amount: number } | null>(null);
 
   const isIncoming = source === "in";
-  const params: Record<string, string | number> = { limit: 100 };
+  // Тянем широкий срез — страницы листаются на клиенте (Pager), чтобы был виден весь год.
+  const params: Record<string, string | number> = { limit: 500 };
   if (!isIncoming) params.source = source;
   if (showDismissed) params.show_dismissed = "true";
   if (search) params.search = search;
@@ -657,6 +705,8 @@ export default function ExpensesInbox() {
   // риск двойного платежа. truncated: показаны не все неразнесённые — уточни фильтры.
   const degraded = isIncoming && !!data?.degraded;
   const truncated = !!data?.truncated;
+  const pager = usePager(items.length, "inbox_page_size");
+  const pageItems = pager.slice(items);
 
   const onDone = () => {
     setOpenId(null);
@@ -712,8 +762,13 @@ export default function ExpensesInbox() {
       <div style={{ padding: "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
         <div style={{ display: "flex", gap: 16, alignItems: "center", fontSize: 11, color: "#6B6355" }}>
           <span>{items.length}{truncated ? "+" : ""} неразнесённых</span>
+          {/* Личные по умолчанию окном в 90 дней — раньше это был просто текст, теперь кнопка */}
           {source === "zen" && !from && (
-            <span style={{ fontSize: 10, color: "#C8C0B0" }}>показаны последние 90 дней — расширь период</span>
+            <button onClick={() => { setFrom("2020-01-01"); setTo(""); }}
+              style={{ fontSize: 10, color: "#6B6355", background: "#fff", border: "1px solid #EDEBE6",
+                       padding: "3px 8px", cursor: "pointer", fontFamily: "inherit" }}>
+              показаны 90 дней — за всё время
+            </button>
           )}
           {truncated && (
             <span style={{ fontSize: 10, color: "#8B3A3A" }}>показаны первые {items.length} — уточни период/фильтры</span>
@@ -752,7 +807,7 @@ export default function ExpensesInbox() {
             ? <EmptyState compact title="Все поступления разнесены" hint="Входящих платежей без привязки к заказам не осталось" />
             : <EmptyState compact title="Всё разнесено" hint="Списаний без привязки к заказам не осталось" />
          ) :
-         items.map((t: any) => (
+         pageItems.map((t: any) => (
           <div key={t.id}>
             <div onClick={() => { if (!(isIncoming && degraded)) setOpenId(openId === t.id ? null : t.id); }}
               style={{
@@ -808,6 +863,8 @@ export default function ExpensesInbox() {
           </div>
         ))}
       </div>
+
+      {items.length > 0 && <Pager pager={pager} totalCount={items.length} truncated={truncated} />}
 
       {/* Деньги пришли → предложение резерва под материалы */}
       {reservePrompt && (

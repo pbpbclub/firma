@@ -165,14 +165,18 @@ def is_own_transfer_tx(counterparty, purpose) -> bool:
 # «не сливать в одну категорию — важно видеть объёмы и оправданность»). ─────────
 # Комиссии банков по ИП-счетам: платы/комиссии самих банков. Реальный расход
 # бизнеса — из оборотов НЕ исключается, только из Разноски (не по заказам).
-BANK_FEE_SQL = ("((purpose LIKE '%омисси%' OR purpose LIKE '%лата за%')"
+# «нформирован» — плата за СМС-информирование: до сентября 2024 Сбер писал её
+# как «Информирование об операциях…», без слова «комиссия», и такие строки
+# висели в Разноске как расходы и не попадали в статистику услуг банка.
+BANK_FEE_SQL = ("((purpose LIKE '%омисси%' OR purpose LIKE '%лата за%'"
+                " OR purpose LIKE '%нформирован%')"
                 " AND (counterparty LIKE '%ТБанк%' OR counterparty LIKE '%Сбербанк%'"
                 " OR counterparty LIKE '%СБЕРБАНК%'))")
 
 
 def is_bank_fee_tx(counterparty, purpose) -> bool:
     c, p = counterparty or "", purpose or ""
-    return (("омисси" in p or "лата за" in p)
+    return (("омисси" in p or "лата за" in p or "нформирован" in p)
             and ("ТБанк" in c or "Сбербанк" in c or "СБЕРБАНК" in c))
 
 
