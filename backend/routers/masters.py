@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
+import re
 from db import get_production, get_analytics, get_analytics_ro
 
 router = APIRouter()
@@ -45,6 +46,15 @@ def _pay_label(r: dict) -> Optional[str]:
     return note or None
 
 
+def _norm_name(s: Optional[str]) -> str:
+    """Имя для сопоставления вики↔картотека: регистр, ё, кавычки и пунктуация не в счёт.
+    Так `ООО ЯНДЕКС.ТАКСИ` (вики) и `ООО "ЯНДЕКС.ТАКСИ"` (картотека) — одно и то же.
+    Префиксы ООО/ИП/АО НЕ срезаем: «ООО Ромашка» и «ИП Ромашка» — разные юрлица."""
+    s = (s or "").lower().replace("ё", "е")
+    s = re.sub(r"[«»\"'`.,\-()]+", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
 def _wiki_fields(r: dict) -> dict:
     """Разложить строку analytics.contractors в поля вики."""
     return {
@@ -76,9 +86,10 @@ def _wiki(name: str, master_id: Optional[str]) -> dict:
                     "SELECT * FROM contractors WHERE mes_master_id = ?", (master_id,)
                 ).fetchone()
             if not row:
-                row = conn.execute(
-                    "SELECT * FROM contractors WHERE name = ?", (name,)
-                ).fetchone()
+                # Фолбэк по имени — нормализованный: кавычки/регистр не должны рвать пару.
+                target = _norm_name(name)
+                row = next((r for r in conn.execute("SELECT * FROM contractors").fetchall()
+                            if _norm_name(r["name"]) == target), None)
             if not row:
                 return {}
             r = dict(row)
@@ -107,7 +118,8 @@ class MasterUpdate(BaseModel):
 
 
 def _load_wiki_map() -> tuple[dict, dict]:
-    """Все контрагенты вики разом: (по mes_master_id, по имени). Без N+1."""
+    """Все контрагенты вики разом: (по mes_master_id, по нормализованному имени).
+    Без N+1. Ключ имени нормализован — иначе кавычки рвут пару (см. _norm_name)."""
     by_id, by_name = {}, {}
     try:
         ac = get_analytics_ro()
@@ -116,7 +128,7 @@ def _load_wiki_map() -> tuple[dict, dict]:
                 r = dict(row)
                 if r.get("mes_master_id"):
                     by_id[str(r["mes_master_id"])] = r
-                by_name[(r.get("name") or "").strip()] = r
+                by_name[_norm_name(r.get("name"))] = r
         finally:
             ac.close()
     except Exception:
@@ -166,7 +178,7 @@ def list_masters():
         result = []
         for m in rows:
             name = (m["name"] or "").strip()
-            w = wiki_by_id.get(str(m["id"])) or wiki_by_name.get(name) or {}
+            w = wiki_by_id.get(str(m["id"])) or wiki_by_name.get(_norm_name(name)) or {}
             wf = _wiki_fields(w) if w else {}
             # «Выплачено» = расходы + непокрытые обязательства (дедуп, см. _paid_total).
             # contractor_events сюда НЕ входят: одна выплата бывает и там, и там.
@@ -195,20 +207,35 @@ def list_wiki_only():
     """Контрагенты вики фин-агента без пары в картотеке. Read-only, не мигрируем."""
     conn = get_production()
     try:
-        names = {(r["name"] or "").strip() for r in conn.execute("SELECT name FROM masters")}
-        ids = {str(r["id"]) for r in conn.execute("SELECT id FROM masters")}
+        masters = [dict(r) for r in conn.execute("SELECT id, name FROM masters")]
+        ids = {str(m["id"]) for m in masters}
     finally:
         conn.close()
+    # Пара по нормализованному имени: кавычки/регистр не должны плодить «висяки»,
+    # с которых кнопка «В картотеку» создавала бы дубль (было с Рамилем).
+    by_norm = {_norm_name(m["name"]): m for m in masters}
+
+    def suggest(wiki_name: str):
+        """Кандидат из картотеки, когда точной пары нет: один содержит другого
+        («Яндекс» ↔ «ООО ЯНДЕКС.ТАКСИ»). Неоднозначность → без подсказки."""
+        n = _norm_name(wiki_name)
+        if not n:
+            return None
+        hits = [m for k, m in by_norm.items() if k and (n in k or k in n)]
+        return {"id": hits[0]["id"], "name": hits[0]["name"]} if len(hits) == 1 else None
+
     wiki_by_id, wiki_by_name = _load_wiki_map()
     out = []
     for w in wiki_by_name.values():
-        paired = (w.get("mes_master_id") and str(w["mes_master_id"]) in ids) or (w.get("name") or "").strip() in names
+        paired = (w.get("mes_master_id") and str(w["mes_master_id"]) in ids) \
+            or _norm_name(w.get("name")) in by_norm
         if paired:
             continue
         out.append({
             "contractor_id": w.get("id"), "name": w.get("name"), "type": w.get("type"),
             "specialization": w.get("specialization"), "status": w.get("status"),
             "pay_label": _pay_label(w), "notes": w.get("notes"),
+            "suggested_master": suggest(w.get("name")),
         })
     return sorted(out, key=lambda x: x["name"] or "")
 
@@ -218,6 +245,7 @@ class MasterCreate(BaseModel):
     role: Optional[str] = "Мастер"
     specialization: Optional[str] = None
     work_type_id: Optional[str] = None
+    contractor_id: Optional[int] = None   # строка вики, которую заводим в картотеку
 
 
 @router.post("")
@@ -228,7 +256,11 @@ def create_master(body: MasterCreate):
         raise HTTPException(status_code=400, detail="name required")
     conn = get_production()
     try:
-        existing = conn.execute("SELECT * FROM masters WHERE name = ? COLLATE NOCASE", (name,)).fetchone()
+        # Дедуп по нормализованному имени: `ООО ЯНДЕКС.ТАКСИ` из вики не должен
+        # заводить второго `ООО "ЯНДЕКС.ТАКСИ"` (ровно так появился дубль Рамиля).
+        target = _norm_name(name)
+        existing = next((r for r in conn.execute("SELECT * FROM masters").fetchall()
+                         if _norm_name(r["name"]) == target), None)
         if existing:
             mid = existing["id"]
         else:
@@ -254,20 +286,67 @@ def create_master(body: MasterCreate):
         try:
             # Привязку заполняем ТОЛЬКО когда она пустая — не воруем существующую
             # связь, если контрагент с этим именем уже привязан к другому мастеру.
-            ac.execute(
-                """INSERT INTO contractors (name, type, specialization, mes_master_id, created_at, updated_at)
-                   VALUES (?, 'contractor', ?, ?, datetime('now'), datetime('now'))
-                   ON CONFLICT(name) DO UPDATE SET
-                        mes_master_id = COALESCE(NULLIF(contractors.mes_master_id, ''), excluded.mes_master_id),
-                        updated_at = datetime('now')""",
-                (name, body.specialization, mid)
-            )
+            if body.contractor_id:
+                # Знаем конкретную строку вики (кнопка «в картотеку») — привязываем её,
+                # а не совпадение по имени: имена как раз и расходятся.
+                ac.execute(
+                    """UPDATE contractors
+                       SET mes_master_id = COALESCE(NULLIF(mes_master_id, ''), ?),
+                           updated_at = datetime('now')
+                       WHERE id = ?""",
+                    (mid, body.contractor_id)
+                )
+            else:
+                ac.execute(
+                    """INSERT INTO contractors (name, type, specialization, mes_master_id, created_at, updated_at)
+                       VALUES (?, 'contractor', ?, ?, datetime('now'), datetime('now'))
+                       ON CONFLICT(name) DO UPDATE SET
+                            mes_master_id = COALESCE(NULLIF(contractors.mes_master_id, ''), excluded.mes_master_id),
+                            updated_at = datetime('now')""",
+                    (name, body.specialization, mid)
+                )
             ac.commit()
         finally:
             ac.close()
     except Exception:
         pass
     return created
+
+
+class WikiLinkIn(BaseModel):
+    contractor_id: int
+    master_id: str
+
+
+@router.post("/wiki-link")
+def wiki_link(body: WikiLinkIn):
+    """Привязать запись вики к УЖЕ существующему подрядчику вместо создания дубля.
+    Пишет analytics.contractors.mes_master_id (best-effort, как create/patch)."""
+    conn = get_production()
+    try:
+        m = conn.execute("SELECT id, name FROM masters WHERE id = ?", (body.master_id,)).fetchone()
+        if not m:
+            raise HTTPException(status_code=404, detail="Подрядчик не найден")
+        m = dict(m)
+    finally:
+        conn.close()
+    try:
+        ac = get_analytics()
+        try:
+            row = ac.execute("SELECT id, name, mes_master_id FROM contractors WHERE id = ?",
+                             (body.contractor_id,)).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Запись вики не найдена")
+            ac.execute("UPDATE contractors SET mes_master_id = ?, updated_at = datetime('now') WHERE id = ?",
+                       (body.master_id, body.contractor_id))
+            ac.commit()
+        finally:
+            ac.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Вики фин-агента недоступна: {e}")
+    return {"ok": True, "master": m}
 
 
 @router.get("/{master_id}")
@@ -400,17 +479,26 @@ def update_master(master_id: str, body: MasterUpdate):
                     # обновлял бы ноль строк.
                     row = ac.execute("SELECT id FROM contractors WHERE mes_master_id = ?", (master_id,)).fetchone()
                     if not row:
-                        row = ac.execute("SELECT id FROM contractors WHERE name = ?", (master["name"],)).fetchone()
+                        # По имени — нормализованно: точное сравнение промахивалось на
+                        # кавычках, ветка ниже вслепую вставляла дубль и падала на
+                        # UNIQUE(name), а ошибка глушилась — поля оплаты терялись молча.
+                        target = _norm_name(master["name"])
+                        row = next((r for r in ac.execute("SELECT id, name FROM contractors").fetchall()
+                                    if _norm_name(r["name"]) == target), None)
+                        if row:   # нашли пару по имени — заодно чиним привязку
+                            ac.execute(
+                                "UPDATE contractors SET mes_master_id = COALESCE(NULLIF(mes_master_id,''), ?) WHERE id = ?",
+                                (master_id, row["id"]))
                     if row:
                         ac.execute(f"UPDATE contractors SET {', '.join(afields)} WHERE id = ?", aparams + [row["id"]])
                     else:
                         # Пары нет — завести, иначе схема оплаты просто потеряется.
-                        ac.execute(
+                        cur = ac.execute(
                             "INSERT INTO contractors (name, type, mes_master_id, created_at, updated_at) VALUES (?, 'contractor', ?, datetime('now'), datetime('now'))",
                             (data.get("name", master["name"]), master_id)
                         )
-                        new_id = ac.execute("SELECT id FROM contractors WHERE mes_master_id = ?", (master_id,)).fetchone()["id"]
-                        ac.execute(f"UPDATE contractors SET {', '.join(afields)} WHERE id = ?", aparams + [new_id])
+                        ac.execute(f"UPDATE contractors SET {', '.join(afields)} WHERE id = ?",
+                                   aparams + [cur.lastrowid])
                     ac.commit()
                 finally:
                     ac.close()

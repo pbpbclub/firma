@@ -274,8 +274,11 @@ export const mastersApi = {
   list: () => api.get("/masters").then((r) => r.data),
   wikiOnly: () => api.get("/masters/wiki-only").then((r) => r.data),
   get: (id: string) => api.get(`/masters/${id}`).then((r) => r.data),
-  create: (data: { name: string; role?: string; specialization?: string; work_type_id?: string }) =>
+  create: (data: { name: string; role?: string; specialization?: string; work_type_id?: string; contractor_id?: number }) =>
     api.post("/masters", data).then((r) => r.data),
+  // Привязать запись вики к существующему подрядчику (вместо создания дубля)
+  wikiLink: (data: { contractor_id: number; master_id: string }) =>
+    api.post("/masters/wiki-link", data).then((r) => r.data),
   update: (id: string, data: Record<string, any>) => api.patch(`/masters/${id}`, data).then((r) => r.data),
   delete: (id: string) => api.delete(`/masters/${id}`).then((r) => r.data),
 };

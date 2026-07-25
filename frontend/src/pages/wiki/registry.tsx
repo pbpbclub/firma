@@ -1,6 +1,7 @@
+import { useState } from "react";
 import type { ComponentType, ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { User, Wrench, Truck, Palette, Buildings, Plus } from "@phosphor-icons/react";
+import { User, Wrench, Truck, Palette, Buildings, Plus, LinkSimple, X } from "@phosphor-icons/react";
 import { customersApi, mastersApi, suppliersApi, brandsApi, businessUnitsApi, financeApi } from "../../api";
 import { MONO } from "../../components/ui/Num";
 import { T } from "../../components/ui/type";
@@ -73,12 +74,26 @@ export type WikiCategory = {
 function WikiOnlyContractors() {
   const qc = useQueryClient();
   const { data: items = [] } = useQuery({ queryKey: ["wiki-only"], queryFn: mastersApi.wikiOnly });
+  const { data: masters = [] } = useQuery({ queryKey: ["wiki", "contractors"], queryFn: () => mastersApi.list() });
+  const [linkFor, setLinkFor] = useState<number | null>(null);   // contractor_id, для которого открыт селект
+  const [pick, setPick] = useState("");
+  const done = () => {
+    qc.invalidateQueries({ queryKey: ["wiki-only"] });
+    qc.invalidateQueries({ queryKey: ["wiki", "contractors"] });
+    setLinkFor(null); setPick("");
+  };
+  // Создаём мастера: contractor_id — чтобы привязка легла в ЭТУ строку вики,
+  // а не в совпадение по имени (имена как раз и расходятся).
   const add = useMutation({
-    mutationFn: (w: any) => mastersApi.create({ name: w.name, specialization: w.specialization || undefined }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["wiki-only"] });
-      qc.invalidateQueries({ queryKey: ["wiki", "contractors"] });
-    },
+    mutationFn: (w: any) => mastersApi.create({
+      name: w.name, specialization: w.specialization || undefined, contractor_id: w.contractor_id,
+    }),
+    onSuccess: done,
+  });
+  // Привязка к уже существующему подрядчику — вместо создания дубля.
+  const link = useMutation({
+    mutationFn: (p: { contractor_id: number; master_id: string }) => mastersApi.wikiLink(p),
+    onSuccess: done,
   });
   const list = items as any[];
   if (!list.length) return null;
@@ -91,6 +106,7 @@ function WikiOnlyContractors() {
       </div>
       <div style={{ fontSize: 11, color: "#A89070", marginBottom: 12 }}>
         Есть в вики фин-агента, но нет в картотеке — поэтому не видны в списках выше.
+        Если такой подрядчик уже заведён под другим именем — привяжите, а не создавайте заново.
       </div>
       {list.map((w: any) => (
         <div key={w.contractor_id || w.name}
@@ -98,13 +114,52 @@ function WikiOnlyContractors() {
           <span style={{ ...T.body, fontWeight: 500, ...ell }}>{w.name}</span>
           <span style={{ ...T.body, color: "#6B6355", ...ell }}>{w.specialization || "—"}</span>
           <span style={{ ...T.body, color: w.pay_label ? "#1A1A1A" : "#C8C0B0", ...ell }}>{w.pay_label || "—"}</span>
-          <button
-            onClick={() => add.mutate(w)} disabled={add.isPending}
-            style={{ fontSize: 11, fontWeight: 600, color: "#E8592A", background: "transparent", border: "1px solid #E8592A", padding: "5px 12px", cursor: add.isPending ? "default" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}
-            onMouseEnter={e => { if (!add.isPending) { e.currentTarget.style.background = "#E8592A"; e.currentTarget.style.color = "#fff"; } }}
-            onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#E8592A"; }}>
-            <Plus size={11} /> В картотеку
-          </button>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", justifyContent: "flex-end" }}>
+            {linkFor === w.contractor_id ? (
+              <>
+                <select value={pick} onChange={e => setPick(e.target.value)} autoFocus
+                  style={{ border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 11, outline: "none", background: "#fff", fontFamily: "inherit", maxWidth: 220 }}>
+                  <option value="">— кто это в картотеке —</option>
+                  {(masters as any[]).map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </select>
+                <button disabled={!pick || link.isPending}
+                  onClick={() => link.mutate({ contractor_id: w.contractor_id, master_id: pick })}
+                  style={{ fontSize: 11, padding: "5px 10px", border: "none", background: pick ? "#E8592A" : "#EDEBE6", color: pick ? "#fff" : "#A89070", cursor: pick ? "pointer" : "default", fontFamily: "inherit", fontWeight: 600 }}>
+                  {link.isPending ? "..." : "Привязать"}
+                </button>
+                <button onClick={() => { setLinkFor(null); setPick(""); }}
+                  style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}>
+                  <X size={11} />
+                </button>
+              </>
+            ) : (
+              <>
+                {/* Кандидат из картотеки: похоже, это он же под другим именем */}
+                {w.suggested_master && (
+                  <button
+                    onClick={() => link.mutate({ contractor_id: w.contractor_id, master_id: w.suggested_master.id })}
+                    disabled={link.isPending}
+                    title={`Привязать к существующему подрядчику «${w.suggested_master.name}» — дубль не создаётся`}
+                    style={{ fontSize: 11, fontWeight: 600, color: "#4A7C59", background: "transparent", border: "1px solid #4A7C59", padding: "5px 12px", cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap", maxWidth: 260, overflow: "hidden" }}>
+                    <LinkSimple size={11} /> Это «{w.suggested_master.name}»
+                  </button>
+                )}
+                <button onClick={() => { setLinkFor(w.contractor_id); setPick(""); }}
+                  title="Привязать к существующему подрядчику"
+                  style={{ fontSize: 11, color: "#6B6355", background: "#fff", border: "1px solid #EDEBE6", padding: "5px 10px", cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}>
+                  <LinkSimple size={11} /> Привязать
+                </button>
+                <button
+                  onClick={() => add.mutate(w)} disabled={add.isPending}
+                  title="Завести нового подрядчика в картотеке"
+                  style={{ fontSize: 11, fontWeight: 600, color: "#E8592A", background: "transparent", border: "1px solid #E8592A", padding: "5px 12px", cursor: add.isPending ? "default" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}
+                  onMouseEnter={e => { if (!add.isPending) { e.currentTarget.style.background = "#E8592A"; e.currentTarget.style.color = "#fff"; } }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#E8592A"; }}>
+                  <Plus size={11} /> В картотеку
+                </button>
+              </>
+            )}
+          </div>
         </div>
       ))}
     </div>
