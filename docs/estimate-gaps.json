@@ -1,0 +1,557 @@
+{
+  "generated_at": "2026-07-27",
+  "source": "firma /api/estimates/readiness + cost-check по каждой смете",
+  "totals": {
+    "orders_with_duplicates": 2,
+    "stub_items": 10,
+    "sum_only_items": 9,
+    "rate_holes": 10,
+    "suspicious_rates": 2
+  },
+  "orders": [
+    {
+      "number": "ORD-002",
+      "title": "MIRRA",
+      "brand": "MeRA",
+      "status": "estimate",
+      "order_id": "4434f6c8-998b-426b-8406-948e7de65482",
+      "price_plan": 516900.0,
+      "cost_plan": 327352.0,
+      "sets_live": 1,
+      "questions": [
+        {
+          "type": "ask_price",
+          "ask": "Работа «—»: Сколько в этот раз, ₽/шт?",
+          "set_id": "c3c63b50-a1c1-4c9a-8f8e-89d383cc2997",
+          "line_id": "ff00f076-fad0-4301-b821-27622f17cede",
+          "title": "",
+          "context": {
+            "qty": 1.0,
+            "unit": "шт",
+            "type": "labor"
+          },
+          "write": {
+            "method": "PUT",
+            "path": "/api/estimates/lines/ff00f076-fad0-4301-b821-27622f17cede",
+            "body": {
+              "unit_price": "<цена за единицу, ₽>"
+            }
+          }
+        },
+        {
+          "type": "stub",
+          "ask": "Позиция «Доставка»: себестоимость 3 600 ₽ — это просто цена ÷ наценка, а не расчёт. Сколько она стоит на самом деле?",
+          "set_id": "c3c63b50-a1c1-4c9a-8f8e-89d383cc2997",
+          "item_id": "48e99e5b-85ba-4ed1-aa81-e14ade042d2d",
+          "title": "Доставка",
+          "context": {
+            "sale_price": 7200.0,
+            "current_cost": 3600.0
+          },
+          "write": {
+            "method": "PUT",
+            "path": "/api/estimates/items/48e99e5b-85ba-4ed1-aa81-e14ade042d2d",
+            "body": {
+              "cost_total": "<реальная себестоимость, ₽>"
+            }
+          }
+        }
+      ],
+      "state": "нужны ответы"
+    },
+    {
+      "number": "ORD-007",
+      "title": "Mirra летка",
+      "brand": "MeRA",
+      "status": "completed",
+      "order_id": "6da91066-34d3-4ec2-bd46-8bd6cfa05bad",
+      "price_plan": 326490.0,
+      "cost_plan": 204831.0,
+      "sets_live": 3,
+      "questions": [
+        {
+          "type": "duplicate_sets",
+          "ask": "На заказе 3 живых сметы. Какая актуальная? Варианты: 2026-05-20 — 1 поз., 10000 ₽; 2026-05-15 — 3 поз., 47382 ₽; 2026-05-15 — 4 поз., 73394 ₽",
+          "variants": [
+            {
+              "set_id": "91c3d83f-bdff-4042-924c-3cf22d13e44f",
+              "created_at": "2026-05-20",
+              "status": "draft",
+              "items": 1,
+              "lines": 1,
+              "sale_total": 10000.0
+            },
+            {
+              "set_id": "e5d2faea-274e-4eb8-a977-40a3d40968ce",
+              "created_at": "2026-05-15",
+              "status": "draft",
+              "items": 3,
+              "lines": 10,
+              "sale_total": 47382.0
+            },
+            {
+              "set_id": "9d6f1e99-3d25-422e-9210-58721b4fa152",
+              "created_at": "2026-05-15",
+              "status": "draft",
+              "items": 4,
+              "lines": 10,
+              "sale_total": 73394.0
+            }
+          ],
+          "write": {
+            "method": "POST",
+            "path": "/api/estimates/sets/{set_id}/keep-actual",
+            "note": "set_id выбранной сметы; остальные станут superseded"
+          }
+        }
+      ],
+      "state": "нужны ответы"
+    },
+    {
+      "number": "ORD-016",
+      "title": "Каркасы для нержавейки",
+      "brand": "MeRA",
+      "status": "draft",
+      "order_id": "247c0034-c98e-4b30-83cc-64538b98fd62",
+      "price_plan": 0.0,
+      "cost_plan": 0.0,
+      "sets_live": 1,
+      "questions": [
+        {
+          "type": "no_material_match",
+          "ask": "Цена «Труба 25х25», ₽/м п?",
+          "set_id": "1202accd-3451-44a4-9ec0-72929ad4834c",
+          "line_id": "3695a689-caf9-41c4-a9dd-f7a4b0b09189",
+          "title": "Труба 25х25",
+          "context": {
+            "qty": 1.0,
+            "unit": "м п",
+            "type": "material"
+          },
+          "write": {
+            "method": "PUT",
+            "path": "/api/estimates/lines/3695a689-caf9-41c4-a9dd-f7a4b0b09189",
+            "body": {
+              "unit_price": "<цена за единицу, ₽>"
+            }
+          }
+        }
+      ],
+      "state": "нужны ответы"
+    },
+    {
+      "number": "ORD-015",
+      "title": "Кафе Ануш — скамейки и столы Border",
+      "brand": "MeRA",
+      "status": "completed",
+      "order_id": "dcb292c3-8e82-4a30-bc27-34c8169bc79e",
+      "price_plan": 159600.0,
+      "cost_plan": 79800.0,
+      "sets_live": 1,
+      "questions": [],
+      "state": "система считает заполненным — подтвердить цифры"
+    },
+    {
+      "number": "ORD-024",
+      "title": "Полотно для шезлонга «Маяк» — 8 шт",
+      "brand": "MeRA",
+      "status": "estimate",
+      "order_id": "8f19a74b-928c-4879-a56a-289d95086730",
+      "price_plan": 22400.0,
+      "cost_plan": 16000.0,
+      "sets_live": 1,
+      "questions": [],
+      "state": "система считает заполненным — подтвердить цифры"
+    },
+    {
+      "number": "ORD-022",
+      "title": "Проспект Революции JUST FMLY",
+      "brand": "MeRA",
+      "status": "draft",
+      "order_id": "72717fee-cb29-49bb-baa7-b51dceefd176",
+      "price_plan": 0.0,
+      "cost_plan": 0.0,
+      "sets_live": 1,
+      "questions": [
+        {
+          "type": "empty_set",
+          "set_id": "e1540a53-0342-4520-89e3-efa060682b78",
+          "ask": "Смета пустая — из каких позиций состоит заказ (название, количество, цена клиенту)?",
+          "write": {
+            "steps": [
+              {
+                "method": "POST",
+                "path": "/api/estimates/sets/{set_id}/items",
+                "body": {
+                  "title": "<название позиции>",
+                  "quantity": 1,
+                  "markup": 2.0
+                },
+                "note": "создаёт позицию; цену/себестоимость задаём следующим шагом"
+              },
+              {
+                "method": "PUT",
+                "path": "/api/estimates/items/{item_id}",
+                "body": {
+                  "sale_price": "<цена клиенту, ₽>",
+                  "cost_total": "<себестоимость, ₽>"
+                }
+              },
+              {
+                "method": "POST",
+                "path": "/api/estimates/items/{item_id}/lines",
+                "body": {
+                  "type": "material|labor|delivery",
+                  "title": "…",
+                  "qty": 1,
+                  "unit": "шт",
+                  "unit_price": 0
+                },
+                "note": "по желанию — состав позиции построчно"
+              }
+            ]
+          }
+        }
+      ],
+      "state": "нужны ответы"
+    },
+    {
+      "number": "ORD-005",
+      "title": "Ресторан Горбачева",
+      "brand": "MeRA",
+      "status": "estimate",
+      "order_id": "6fc88e90-29f7-44b8-b3af-4148ae69d8d4",
+      "price_plan": 212300.0,
+      "cost_plan": 111035.71,
+      "sets_live": 2,
+      "questions": [
+        {
+          "type": "duplicate_sets",
+          "ask": "На заказе 2 живых сметы. Какая актуальная? Варианты: 2026-06-29 — 6 поз., 212300 ₽; 2026-05-15 — 2 поз., 88000 ₽",
+          "variants": [
+            {
+              "set_id": "d56f953d-f5f7-4c5a-9269-93d4abe5c7bb",
+              "created_at": "2026-06-29",
+              "status": "draft",
+              "items": 6,
+              "lines": 0,
+              "sale_total": 212300.0
+            },
+            {
+              "set_id": "59daf11c-f839-4375-bc89-820ec31fc164",
+              "created_at": "2026-05-15",
+              "status": "approved",
+              "items": 2,
+              "lines": 2,
+              "sale_total": 88000.0
+            }
+          ],
+          "write": {
+            "method": "POST",
+            "path": "/api/estimates/sets/{set_id}/keep-actual",
+            "note": "set_id выбранной сметы; остальные станут superseded"
+          }
+        },
+        {
+          "type": "no_material_match",
+          "ask": "Цена «материал», ₽/шт?",
+          "set_id": "59daf11c-f839-4375-bc89-820ec31fc164",
+          "line_id": "1af24e7c-5d06-4595-96f5-826a12e33d8a",
+          "title": "",
+          "context": {
+            "qty": 1.0,
+            "unit": "шт",
+            "type": "material"
+          },
+          "write": {
+            "method": "PUT",
+            "path": "/api/estimates/lines/1af24e7c-5d06-4595-96f5-826a12e33d8a",
+            "body": {
+              "unit_price": "<цена за единицу, ₽>"
+            }
+          }
+        },
+        {
+          "type": "stub",
+          "ask": "Позиция «Столешница нерж 1875*550»: себестоимость 9 200 ₽ — это просто цена ÷ наценка, а не расчёт. Сколько она стоит на самом деле?",
+          "set_id": "d56f953d-f5f7-4c5a-9269-93d4abe5c7bb",
+          "item_id": "d4e5510a-8341-4de7-a68f-7336811f3db9",
+          "title": "Столешница нерж 1875*550",
+          "context": {
+            "sale_price": 18400.0,
+            "current_cost": 9200.0
+          },
+          "write": {
+            "method": "PUT",
+            "path": "/api/estimates/items/d4e5510a-8341-4de7-a68f-7336811f3db9",
+            "body": {
+              "cost_total": "<реальная себестоимость, ₽>"
+            }
+          }
+        },
+        {
+          "type": "stub",
+          "ask": "Позиция «Столешница нерж кривая»: себестоимость 12 450 ₽ — это просто цена ÷ наценка, а не расчёт. Сколько она стоит на самом деле?",
+          "set_id": "d56f953d-f5f7-4c5a-9269-93d4abe5c7bb",
+          "item_id": "944744ad-e9a0-4cae-b7b3-1ecbedb44e2c",
+          "title": "Столешница нерж кривая",
+          "context": {
+            "sale_price": 24900.0,
+            "current_cost": 12450.0
+          },
+          "write": {
+            "method": "PUT",
+            "path": "/api/estimates/items/944744ad-e9a0-4cae-b7b3-1ecbedb44e2c",
+            "body": {
+              "cost_total": "<реальная себестоимость, ₽>"
+            }
+          }
+        },
+        {
+          "type": "stub",
+          "ask": "Позиция «Мойка с изгибом по лекалу»: себестоимость 66 100 ₽ — это просто цена ÷ наценка, а не расчёт. Сколько она стоит на самом деле?",
+          "set_id": "d56f953d-f5f7-4c5a-9269-93d4abe5c7bb",
+          "item_id": "47652288-08fe-4d7a-ace1-ce638824135f",
+          "title": "Мойка с изгибом по лекалу",
+          "context": {
+            "sale_price": 132200.0,
+            "current_cost": 66100.0
+          },
+          "write": {
+            "method": "PUT",
+            "path": "/api/estimates/items/47652288-08fe-4d7a-ace1-ce638824135f",
+            "body": {
+              "cost_total": "<реальная себестоимость, ₽>"
+            }
+          }
+        },
+        {
+          "type": "stub",
+          "ask": "Позиция «Каркас стальной 30*30 порошок»: себестоимость 13 000 ₽ — это просто цена ÷ наценка, а не расчёт. Сколько она стоит на самом деле?",
+          "set_id": "d56f953d-f5f7-4c5a-9269-93d4abe5c7bb",
+          "item_id": "8d5d5992-4209-4c99-a2e6-8b7cecd17f4a",
+          "title": "Каркас стальной 30*30 порошок",
+          "context": {
+            "sale_price": 26000.0,
+            "current_cost": 13000.0
+          },
+          "write": {
+            "method": "PUT",
+            "path": "/api/estimates/items/8d5d5992-4209-4c99-a2e6-8b7cecd17f4a",
+            "body": {
+              "cost_total": "<реальная себестоимость, ₽>"
+            }
+          }
+        }
+      ],
+      "state": "нужны ответы"
+    },
+    {
+      "number": "ORD-020",
+      "title": "Спираль",
+      "brand": "MeRA",
+      "status": "in_production",
+      "order_id": "b4892615-8dc3-4fab-a61d-6cf2018952b1",
+      "price_plan": 280000.0,
+      "cost_plan": 128200.0,
+      "sets_live": 1,
+      "questions": [],
+      "state": "система считает заполненным — подтвердить цифры"
+    },
+    {
+      "number": "ORD-019",
+      "title": "Стол с выемкой и креплением (счёт 3666218220)",
+      "brand": "MeRA",
+      "status": "estimate",
+      "order_id": "f2a94f67-f059-4ef7-947e-f7b94cb0c9fe",
+      "price_plan": 14300.0,
+      "cost_plan": 7550.0,
+      "sets_live": 1,
+      "questions": [],
+      "state": "система считает заполненным — подтвердить цифры"
+    },
+    {
+      "number": "ORD-023",
+      "title": "Outdoor Border — Ильинский (Воронеж)",
+      "brand": "pbpb",
+      "status": "project",
+      "order_id": "2bed643b-df55-4d55-b60d-5f59635b60d1",
+      "price_plan": 230000.0,
+      "cost_plan": 115000.0,
+      "sets_live": 1,
+      "questions": [
+        {
+          "type": "stub",
+          "ask": "Позиция «Скамья Outdoor Border 03  RAL 3016 красный»: себестоимость 40 500 ₽ — это просто цена ÷ наценка, а не расчёт. Сколько она стоит на самом деле?",
+          "set_id": "5472bbcc-c6b8-4d15-a779-8787ae590a4f",
+          "item_id": "62d3b40d-eb07-4145-9069-e04369313416",
+          "title": "Скамья Outdoor Border 03, RAL 3016 красный",
+          "context": {
+            "sale_price": 81000.0,
+            "current_cost": 40500.0
+          },
+          "write": {
+            "method": "PUT",
+            "path": "/api/estimates/items/62d3b40d-eb07-4145-9069-e04369313416",
+            "body": {
+              "cost_total": "<реальная себестоимость, ₽>"
+            }
+          }
+        },
+        {
+          "type": "stub",
+          "ask": "Позиция «Стол Outdoor Border 08 (1300×700×450)  белый»: себестоимость 40 500 ₽ — это просто цена ÷ наценка, а не расчёт. Сколько она стоит на самом деле?",
+          "set_id": "5472bbcc-c6b8-4d15-a779-8787ae590a4f",
+          "item_id": "43401325-37e6-4c86-b0cb-6d8e9c41037d",
+          "title": "Стол Outdoor Border 08 (1300×700×450), белый",
+          "context": {
+            "sale_price": 81000.0,
+            "current_cost": 40500.0
+          },
+          "write": {
+            "method": "PUT",
+            "path": "/api/estimates/items/43401325-37e6-4c86-b0cb-6d8e9c41037d",
+            "body": {
+              "cost_total": "<реальная себестоимость, ₽>"
+            }
+          }
+        },
+        {
+          "type": "stub",
+          "ask": "Позиция «Стул Shelti  RAL 3016 красный»: себестоимость 24 000 ₽ — это просто цена ÷ наценка, а не расчёт. Сколько она стоит на самом деле?",
+          "set_id": "5472bbcc-c6b8-4d15-a779-8787ae590a4f",
+          "item_id": "bcd608f2-f06f-4df8-b762-4d54c495c930",
+          "title": "Стул Shelti, RAL 3016 красный",
+          "context": {
+            "sale_price": 48000.0,
+            "current_cost": 24000.0
+          },
+          "write": {
+            "method": "PUT",
+            "path": "/api/estimates/items/bcd608f2-f06f-4df8-b762-4d54c495c930",
+            "body": {
+              "cost_total": "<реальная себестоимость, ₽>"
+            }
+          }
+        },
+        {
+          "type": "stub",
+          "ask": "Позиция «Подушка для скамьи 1500×500»: себестоимость 10 000 ₽ — это просто цена ÷ наценка, а не расчёт. Сколько она стоит на самом деле?",
+          "set_id": "5472bbcc-c6b8-4d15-a779-8787ae590a4f",
+          "item_id": "fc360eb1-6df3-48b0-9bc9-6ea9f37dae15",
+          "title": "Подушка для скамьи 1500×500",
+          "context": {
+            "sale_price": 20000.0,
+            "current_cost": 10000.0
+          },
+          "write": {
+            "method": "PUT",
+            "path": "/api/estimates/items/fc360eb1-6df3-48b0-9bc9-6ea9f37dae15",
+            "body": {
+              "cost_total": "<реальная себестоимость, ₽>"
+            }
+          }
+        }
+      ],
+      "state": "нужны ответы"
+    },
+    {
+      "number": "ORD-017",
+      "title": "Суздаль",
+      "brand": "pbpb",
+      "status": "in_production",
+      "order_id": "9d8d5b24-12f5-4809-904f-79f108ca8de9",
+      "price_plan": 242100.0,
+      "cost_plan": 157860.0,
+      "sets_live": 1,
+      "questions": [],
+      "state": "система считает заполненным — подтвердить цифры"
+    },
+    {
+      "number": "ORD-021",
+      "title": "Дизайн-проект (Власов)",
+      "brand": "Транзит",
+      "status": "in_production",
+      "order_id": "847c8f85-9036-4e5e-830e-e02540e443dd",
+      "price_plan": 94900.0,
+      "cost_plan": 82500.0,
+      "sets_live": 1,
+      "questions": [],
+      "state": "система считает заполненным — подтвердить цифры"
+    },
+    {
+      "number": "ORD-027",
+      "title": "Мягкие элементы мебели 60 шт — Верёвкина (счёт 073-Н/26)",
+      "brand": "Транзит",
+      "status": "estimate",
+      "order_id": "014b0309-306a-4a0b-a3af-6e3ef00f9df5",
+      "price_plan": 51000.0,
+      "cost_plan": 44370.0,
+      "sets_live": 1,
+      "questions": [],
+      "state": "система считает заполненным — подтвердить цифры"
+    },
+    {
+      "number": "ORD-026",
+      "title": "Мягкие элементы мебели — Культурно Коротко (счёт 071-Н/26)",
+      "brand": "Транзит",
+      "status": "estimate",
+      "order_id": "7632a35b-fe5c-4c3c-a401-86a54406a226",
+      "price_plan": 185000.0,
+      "cost_plan": 160950.0,
+      "sets_live": 1,
+      "questions": [],
+      "state": "система считает заполненным — подтвердить цифры"
+    },
+    {
+      "number": "ORD-025",
+      "title": "Тестовый",
+      "brand": null,
+      "status": "draft",
+      "order_id": "d0223228-3d22-4abc-b208-b29b7e1bc97f",
+      "price_plan": 0.0,
+      "cost_plan": 0.0,
+      "sets_live": 1,
+      "questions": [
+        {
+          "type": "ask_price",
+          "ask": "Работа «—»: Сколько в этот раз, ₽/ч?",
+          "set_id": "ba14c7e2-84a9-42b4-b9d8-fd13c63ecd6c",
+          "line_id": "01b4acc9-1999-4136-abe5-18c7db400f34",
+          "title": "",
+          "context": {
+            "qty": 1.0,
+            "unit": "ч",
+            "type": "labor"
+          },
+          "write": {
+            "method": "PUT",
+            "path": "/api/estimates/lines/01b4acc9-1999-4136-abe5-18c7db400f34",
+            "body": {
+              "unit_price": "<цена за единицу, ₽>"
+            }
+          }
+        },
+        {
+          "type": "stub",
+          "ask": "Позиция «Тестовая»: себестоимость 2 000 ₽ — это просто цена ÷ наценка, а не расчёт. Сколько она стоит на самом деле?",
+          "set_id": "ba14c7e2-84a9-42b4-b9d8-fd13c63ecd6c",
+          "item_id": "a11a9da4-dd74-4333-8e1f-e7df839f09e3",
+          "title": "Тестовая",
+          "context": {
+            "sale_price": 4000.0,
+            "current_cost": 2000.0
+          },
+          "write": {
+            "method": "PUT",
+            "path": "/api/estimates/items/a11a9da4-dd74-4333-8e1f-e7df839f09e3",
+            "body": {
+              "cost_total": "<реальная себестоимость, ₽>"
+            }
+          }
+        }
+      ],
+      "state": "нужны ответы"
+    }
+  ]
+}
