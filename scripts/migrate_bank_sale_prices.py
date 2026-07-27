@@ -105,6 +105,8 @@ def allocate(items, set_pct: float, target: float):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true", help="записать изменения")
+    ap.add_argument("--include-approved", action="store_true",
+                    help="править и утверждённые сметы: снять заморозку, записать, утвердить обратно")
     ap.add_argument("--token-file", default=".token")
     args = ap.parse_args()
 
@@ -133,12 +135,12 @@ def main():
         if target <= 0:
             skipped.append((o, s, now, "у заказа не проставлена сумма счёта"))
             continue
+        if abs(now - target) < 0.01:
+            continue          # уже сходится (в т.ч. после миграции) — не трогаем и не жалуемся
         shares = allocate(items, set_pct, target)
         if shares is None:
             skipped.append((o, s, now, "смета не сходилась со счётом ещё до правки"))
             continue
-        if abs(now - target) < 0.01:
-            continue                            # уже сходится — не трогаем
         skew = positional_pct_skew(items, set_pct)
         if skew:
             skipped.append((o, s, now,
@@ -191,7 +193,17 @@ def main():
 
     print("\nЗАПИСЬ")
     ok = fail = 0
-    for o, s, now, target, changes in plans:
+    todo = list(plans)
+    if args.include_approved:
+        todo += frozen
+    for o, s, now, target, changes in todo:
+        thaw = s["status"] == "approved"
+        if thaw:
+            # Утверждённую смету API не даёт править. Снимаем заморозку, пишем,
+            # утверждаем обратно: _approve_set идемпотентна (обязательства
+            # дедуплицируются по estimate_line_id), суммы заказа пересинкаются сами.
+            obl_before = len(api("GET", f"/orders/{o['id']}/obligations", token) or [])
+            api("PUT", f"/estimates/sets/{s['id']}", token, {"status": "draft"})
         for it, share, patch in changes:
             try:
                 api("PUT", f"/estimates/items/{it['id']}", token, patch)
@@ -199,9 +211,16 @@ def main():
             except urllib.error.HTTPError as e:
                 print(f"  ! {o['number']} «{it['title'][:30]}»: {e.code} {e.read().decode()[:120]}")
                 fail += 1
+        note = ""
+        if thaw:
+            api("PUT", f"/estimates/sets/{s['id']}", token, {"status": "approved"})
+            back = api("GET", f"/orders/{o['id']}/estimate", token)
+            st = next((x["status"] for x in back if x["id"] == s["id"]), "?")
+            obl_after = len(api("GET", f"/orders/{o['id']}/obligations", token) or [])
+            note = f"  [смета снова {st}, обязательств {obl_before} → {obl_after}]"
         after = api("GET", f"/orders/{o['id']}", token).get("price_plan")
         mark = "✓" if abs((after or 0) - target) < 0.01 else "✗"
-        print(f"  {mark} {o['number']}: счёт {target:,.0f} → система {after:,.0f}")
+        print(f"  {mark} {o['number']}: счёт {target:,.0f} → система {after:,.0f}{note}")
     print(f"\nпозиций записано {ok}, ошибок {fail}")
 
 
