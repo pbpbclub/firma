@@ -21,7 +21,7 @@
 | Свод пробелов по всем сметам | `GET /api/estimates/readiness` | — |
 | Записать реальную себестоимость позиции | `PUT /api/estimates/items/{item_id}` | `{"cost_total": 90000}` |
 | Записать цену строки (материал/работа) | `PUT /api/estimates/lines/{line_id}` | `{"unit_price": 3500}` |
-| Выбрать актуальную смету из дублей | `POST /api/estimates/sets/{set_id}/keep-actual` | `{}` |
+| Выбрать актуальную смету из дублей | `POST /api/estimates/sets/{set_id}/keep-actual` | без тела |
 | Добавить позицию в пустую смету | `POST /api/estimates/sets/{set_id}/items` | `{"title":"…","quantity":1,"markup":2.0}` |
 | Добавить строку состава | `POST /api/estimates/items/{item_id}/lines` | `{"type":"material","title":"…","qty":1,"unit":"шт","unit_price":0}` |
 

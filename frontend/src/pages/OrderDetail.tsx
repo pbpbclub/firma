@@ -9,6 +9,7 @@ import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { Loading } from "../components/ui/Loading";
 import { Button } from "../components/ui/Button";
 import { fmtMoney, fmtDate } from "../components/ui/format";
+import { clientPrice } from "../components/ui/priceMath";
 import { ESTIMATE_STATUS } from "../components/domain";
 import { ordersApi, customersApi, estimatesApi, expensesApi } from "../api";
 import { Plus, CaretRight, Trash, LinkSimple, PencilSimple, Warning, ArrowsSplit } from "@phosphor-icons/react";
@@ -387,7 +388,7 @@ export default function OrderDetail() {
                 const isBank = s.payment_type === "bank";
                 const bpct = s.bank_pct ?? 13;
                 const cost = items.reduce((a: number, it: any) => a + (it.cost_total || 0), 0);
-                const sale = items.reduce((a: number, it: any) => a + (isBank ? Math.round((it.sale_price || 0) * (1 + (it.bank_pct ?? bpct) / 100)) : (it.sale_price || 0)), 0);
+                const sale = items.reduce((a: number, it: any) => a + clientPrice(it.sale_price || 0, isBank, bpct), 0);
                 const delta = sale - cost;
                 const st = ESTIMATE_STATUS[s.status];
                 const metric = (label: string, value: string, color: string) => (

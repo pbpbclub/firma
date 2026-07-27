@@ -78,6 +78,9 @@ def list_orders(
             m = _margin(conn, r["id"], r["price_plan"], r["cost_plan"])
             out.append({
                 **dict(r),
+                # см. карточку заказа: цифры берём из активной сметы, поля — кэш
+                "price_plan": m["revenue"],
+                "cost_plan": m["cost"],
                 "status_label": STATUS_LABELS.get(r["status"], r["status"]),
                 "priority_label": PRIORITY_LABELS.get(r["priority"], r["priority"]),
                 # Долг — от той же выручки, что и лестница (для draft-смет это сет, не поле заказа).
@@ -132,6 +135,10 @@ def suggest_orders(counterparty: str = "", amount: float = 0, limit: int = Query
         scored = []
         for r in rows:
             row = dict(r)
+            # Цена — из активной сметы (у черновиков поле заказа устаревшее), чтобы
+            # подсказка по сумме и долг совпадали с карточкой.
+            m = _margin(conn, row["id"], row.get("price_plan") or 0, row.get("cost_plan") or 0)
+            row["price_plan"] = m["revenue"]
             ns = _name_score(counterparty, (row.get("customer_name") or "") + " " + (row.get("title") or ""))
             as_ = _amount_score(amount, row.get("price_plan") or 0)
             row["score"] = round(0.6 * ns + 0.4 * as_, 3)
@@ -447,6 +454,12 @@ def get_order(order_id: str):
 
         return {
             **order,
+            # Цена/себестоимость — из активной сметы, а не из полей заказа: они синкаются
+            # только при approve, и у черновика карточка показывала одновременно старое
+            # число (price_plan) и новое (долг, маржа). Поля таблицы остаются кэшем.
+            "price_plan": m["revenue"],
+            "cost_plan": m["cost"],
+            "price_plan_stored": order.get("price_plan"),   # что лежит в таблице
             "status_label": STATUS_LABELS.get(order["status"], order["status"]),
             "priority_label": PRIORITY_LABELS.get(order["priority"], order["priority"]),
             "paid_total": paid_total,

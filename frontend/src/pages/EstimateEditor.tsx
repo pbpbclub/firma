@@ -8,7 +8,7 @@ import { CostingBlock } from "../components/CostingBlock";
 import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { CalcHeader, CalcSection, CalcRow, CalcFooter } from "../components/ui/Calc";
 import { BrandSelect, EditableText } from "../components/ui/Selects";
-import { markupToPct, pctToMarkup } from "../components/ui/priceMath";
+import { markupToPct, pctToMarkup, clientPrice, cashFromClient } from "../components/ui/priceMath";
 import { Breadcrumbs } from "../components/ui/Breadcrumbs";
 import { MONO } from "../components/ui/Num";
 
@@ -479,8 +479,9 @@ export default function EstimateEditor() {
   const avgMarkup   = totalCost > 0 ? totalSale / totalCost : 0;
   const bankPct    = activeSet?.bank_pct ?? 13;
   const isBank     = activeSet?.payment_type === "bank";
-  const clientPriceForItem = (it: any) =>
-    isBank ? Math.round((it.sale_price || 0) * (1 + (it.bank_pct ?? bankPct) / 100)) : (it.sale_price || 0);
+  // Удержание банка — свойство сметы (см. money.py): позиционный bank_pct в расчёте
+  // не участвует, там в данных мусор.
+  const clientPriceForItem = (it: any) => clientPrice(it.sale_price || 0, isBank, bankPct);
   const totalClient  = items.reduce((s: number, it: any) => s + clientPriceForItem(it), 0);
   const grandTotal   = isBank ? totalClient : totalSale;
   const taxes        = isBank ? Math.round(grandTotal * 0.06) : 0;
@@ -665,6 +666,14 @@ export default function EstimateEditor() {
                   >{pt.l}</button>
                 ))}
               </div>
+
+              {/* Признак расчёта словами: раньше «нал/безнал» был виден только чипом,
+                  и расхождение сметы со счётом ловилось вручную (ТЗ 27.07, п.2.2) */}
+              <span style={{ fontSize: 10, color: isBank ? "#E8592A" : "#A89070", whiteSpace: "nowrap" }}>
+                {isBank
+                  ? `безнал — из суммы счёта удерживается ${bankPct}%`
+                  : "цены за наличный расчёт"}
+              </span>
 
               {/* Банк % */}
               {isBank && (
@@ -1048,7 +1057,7 @@ export default function EstimateEditor() {
                             // банковский % — производная (sale без округления до рубля).
                             const clientTotal = newPriceUnit * qty;
                             const sale_new = isBank
-                              ? round2(clientTotal / (1 + (item.bank_pct ?? bankPct) / 100))
+                              ? round2(cashFromClient(clientTotal, true, bankPct))
                               : round2(clientTotal);
                             const cost = item.cost_total || 0;
                             const payload: any = { sale_price: sale_new };

@@ -21,6 +21,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from db import get_production, get_materials
+from money import client_price
 from routers.estimates import (
     _lookup_cheapest, _recalc_item, _touch_set, _assert_set_editable, _now,
 )
@@ -154,9 +155,9 @@ def _is_sum_without_breakdown(item) -> bool:
 def _client_price_per_unit(item, set_row) -> float:
     """Клиентская цена одного изделия позиции (та же формула, что set_totals)."""
     sale = item["sale_price"] or 0
-    if (set_row["payment_type"] or "cash") == "bank":
-        pct = item["bank_pct"] if item["bank_pct"] is not None else (set_row["bank_pct"] or 13)
-        sale = sale * (1 + pct / 100)
+    pct = set_row["bank_pct"]   # удержание — свойство сметы, см. money.py
+    # rounded=False: округление до 100 ₽ — свойство ИТОГА счёта, а не цены за единицу
+    sale = client_price(sale, set_row["payment_type"] or "cash", pct, rounded=False)
     qty = item["quantity"] or 1
     return sale / qty if qty else sale
 
@@ -560,12 +561,8 @@ def readiness():
         conn.close()
 
 
-class SupersedeIn(BaseModel):
-    keep_set_id: str
-
-
 @router.post("/sets/{set_id}/keep-actual")
-def keep_actual(set_id: str, body: Optional[SupersedeIn] = None):
+def keep_actual(set_id: str):
     """Оставить эту смету актуальной: остальные не-superseded сметы заказа помечаются
     заменёнными. Раньше superseded ставился только автоматически при approve соседней —
     у Юры из-за этого копились по три черновика на заказ."""

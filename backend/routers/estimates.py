@@ -3,6 +3,7 @@ from fastapi.responses import FileResponse
 from typing import Optional, List
 from pydantic import BaseModel
 from db import get_production, get_materials
+from money import client_price, cash_from_client, DEFAULT_BANK_PCT
 from routers.materials import cheapest_price
 from routers.rates import find_work_rate, upsert_work_rate, upsert_price_book
 import uuid, subprocess, glob, os
@@ -73,11 +74,12 @@ def totals_from_items(items, payment_type, bank_pct) -> dict:
     """Формула себестоимости/цены по уже загруженным позициям сета. Чистая (без БД) —
     чтобы очередь ревью считала пачкой, а set_totals не дублировал выражение."""
     total_cost = sum((it["cost_total"] or 0) for it in items)
-    set_bank_pct = bank_pct or 13
+    set_bank_pct = bank_pct if bank_pct is not None else DEFAULT_BANK_PCT
     if payment_type == "bank":
+        # Безнал: 13% удерживаются ИЗ суммы счёта, поэтому делим, а не умножаем,
+        # и округляем итог вверх до 100 ₽ (правило Юры, см. money.py).
         total_price = sum(
-            round((it["sale_price"] or 0) * (1 + (it["bank_pct"] or set_bank_pct) / 100))
-            for it in items
+            client_price(it["sale_price"] or 0, "bank", set_bank_pct) for it in items
         )
     else:
         total_price = sum((it["sale_price"] or 0) for it in items)
