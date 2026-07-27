@@ -192,13 +192,19 @@ TAX_PCT = 6.0
 
 
 def _active_set(conn, oid: str):
-    """Активная смета заказа: approved, иначе последняя не-superseded.
+    """Активная смета заказа: approved → помеченная основной → последняя не-superseded.
+
+    Флаг is_primary — ручной выбор Юры («утверждать буду ту, которую выберет заказчик»);
+    он перебивает дату, но уступает утверждённой смете.
 
     Именно «иначе», а не «только approved»: у заказа может не быть утверждённой сметы
     (ORD-024 — draft), и тогда считать всё равно надо."""
     return conn.execute(
-        """SELECT id, payment_type, bank_pct, status FROM estimate_sets WHERE order_id = ?
-           ORDER BY CASE status WHEN 'approved' THEN 0 WHEN 'superseded' THEN 2 ELSE 1 END, created_at DESC
+        """SELECT id, payment_type, bank_pct, status, COALESCE(is_primary,0) AS is_primary
+           FROM estimate_sets WHERE order_id = ?
+           ORDER BY CASE status WHEN 'approved' THEN 0 WHEN 'superseded' THEN 2 ELSE 1 END,
+                    COALESCE(is_primary,0) DESC,
+                    created_at DESC
            LIMIT 1""", (oid,)
     ).fetchone()
 

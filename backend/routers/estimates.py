@@ -142,6 +142,10 @@ def _approve_set(conn, set_id: str) -> dict:
         "UPDATE estimate_sets SET status = 'superseded', updated_at = ? WHERE order_id = ? AND id != ? AND status != 'superseded'",
         (_now(), es["order_id"], set_id)
     ).rowcount
+    # Утверждённая становится и основной: выбор заказчика зафиксирован в данных,
+    # а не выведен из даты (см. _active_set).
+    conn.execute("UPDATE estimate_sets SET is_primary = 0 WHERE order_id = ?", (es["order_id"],))
+    conn.execute("UPDATE estimate_sets SET is_primary = 1 WHERE id = ?", (set_id,))
     _sync_order_from_set(conn, set_id)
     # Обязательства по строкам — чтобы разноска сразу могла привязывать оплату
     # к плановым позициям. Идемпотентно (дедуп по estimate_line_id).

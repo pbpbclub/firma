@@ -138,6 +138,23 @@ def ensure_estimate_items_schema():
         conn.close()
 
 
+def ensure_estimate_primary_schema():
+    """Основная смета заказа — выбор Юры, а не дата.
+
+    Раньше активной считалась последняя по created_at, и у «Mirra летка» карточка
+    показывала смету на 10 000 вместо 326 490. Флаг перебивает дату; альтернативные
+    сметы при этом остаются живыми черновиками (заказчик ещё выбирает), в отличие
+    от keep-actual, который отправляет их в superseded."""
+    conn = get_production()
+    try:
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(estimate_sets)").fetchall()}
+        if existing and "is_primary" not in existing:
+            conn.execute("ALTER TABLE estimate_sets ADD COLUMN is_primary INTEGER DEFAULT 0")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_estimate_bank_pct_schema():
     conn = get_production()
     try:

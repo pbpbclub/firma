@@ -222,6 +222,16 @@ export default function OrderDetail() {
     qc.invalidateQueries({ queryKey: ["orders-v2"] });
     qc.invalidateQueries({ queryKey: ["free-cash"] });
   };
+  // Основная смета — ручной выбор Юры: остальные варианты остаются живыми черновиками
+  const setPrimary = useMutation({
+    mutationFn: (setId: string) => estimatesApi.setPrimary(setId),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["order", id] }); qc.invalidateQueries({ queryKey: ["order-estimate", id] }); },
+  });
+  const unsetPrimary = useMutation({
+    mutationFn: (setId: string) => estimatesApi.unsetPrimary(setId),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["order", id] }); qc.invalidateQueries({ queryKey: ["order-estimate", id] }); },
+  });
+
   const setReserve = useMutation({
     mutationFn: (amount: number) => ordersApi.reserve(id!, amount),
     onSuccess: () => { invalidateReserve(); setReserveEdit(null); },
@@ -261,9 +271,11 @@ export default function OrderDetail() {
   const field = (f: Partial<OrderFormState>) => { setForm(prev => prev ? { ...prev, ...f } : prev); setIsDirty(true); };
 
   const paidTotal = order?.payments?.reduce((s: number, p: any) => s + p.amount, 0) ?? 0;
-  // Активный черновик (план считается по нему): последний не-superseded draft.
+  // Активный черновик (план считается по нему): помеченный основным, иначе последний
+  // не-superseded draft. Тот же порядок, что у _active_set на бэке.
+  const drafts = (estimates as any[]).filter((s: any) => s.status === "draft");
   const activeDraft = order?.plan_source === "draft"
-    ? [...(estimates as any[])].reverse().find((s: any) => s.status === "draft")
+    ? (drafts.find((s: any) => s.is_primary) ?? [...drafts].reverse()[0] ?? null)
     : null;
 
   if (isLoading || !form) {
@@ -412,6 +424,26 @@ export default function OrderDetail() {
                     <span style={{ fontSize: 10, color: st?.color ?? "#A89070", fontWeight: 500 }}>
                       {st?.label ?? s.status}
                     </span>
+                    {!!s.is_primary && s.status !== "approved" && (
+                      <span title="Показывать эту смету как основную — план заказа считается по ней"
+                        style={{ fontSize: 9, letterSpacing: "0.06em", color: "#E8592A", border: "1px solid #E8592A", padding: "2px 6px", whiteSpace: "nowrap" }}>
+                        ОСНОВНАЯ
+                      </span>
+                    )}
+                    {s.status === "draft" && !s.is_primary && (estimates as any[]).length > 1 && (
+                      <Button size="sm" variant="ghost" disabled={setPrimary.isPending}
+                        onClick={e => { e.stopPropagation(); setPrimary.mutate(s.id); }}
+                        style={{ fontSize: 10, padding: "3px 10px" }}>
+                        Сделать основной
+                      </Button>
+                    )}
+                    {!!s.is_primary && s.status === "draft" && (
+                      <Button size="sm" variant="ghost" disabled={unsetPrimary.isPending}
+                        onClick={e => { e.stopPropagation(); unsetPrimary.mutate(s.id); }}
+                        style={{ fontSize: 10, padding: "3px 10px", color: "#A89070" }}>
+                        Снять
+                      </Button>
+                    )}
                     {s.status === "draft" && (
                       <Button size="sm" variant="primary" disabled={approveSet.isPending}
                         onClick={e => { e.stopPropagation(); approveSet.mutate(s.id); }}

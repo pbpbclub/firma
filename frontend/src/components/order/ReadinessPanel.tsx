@@ -102,8 +102,15 @@ export function ReadinessPanel() {
     mutationFn: (id: string) => ratesApi.delete(id),
     onSuccess: refresh,
   });
+  // Два разных действия с дублями: мягкое — просто показывать эту (варианты живы),
+  // жёсткое — остальные в архив. Раньше было только жёсткое, и черновики,
+  // которые заказчик ещё смотрит, хоронились одним кликом.
   const keep = useMutation({
     mutationFn: (setId: string) => estimatesApi.keepActual(setId),
+    onSuccess: refresh,
+  });
+  const primary = useMutation({
+    mutationFn: (setId: string) => estimatesApi.setPrimary(setId),
     onSuccess: refresh,
   });
 
@@ -133,25 +140,37 @@ export function ReadinessPanel() {
 
       {!!data?.duplicate_sets?.length && (
         <Section label="ДУБЛИ СМЕТ" count={data.duplicate_sets.length}
-          hint="На заказе больше одной живой сметы — план-факт считается по одной из них. Оставь актуальную, остальные уйдут в «Заменена».">
+          hint="На заказе больше одной живой сметы — план-факт считается по одной из них. «Показывать эту» помечает основную, остальные варианты остаются черновиками. «Остальные в архив» помечает их «Заменена».">
           {data.duplicate_sets.map((o: any) => (
             <div key={o.order_id} style={{ marginBottom: 14 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A", marginBottom: 4 }}>
                 {o.order_title} <span style={{ color: "#A89070", fontWeight: 400 }}>· {o.brand || "без бренда"}</span>
               </div>
               {o.sets.map((st: any) => (
-                <div key={st.set_id} style={{ display: "grid", gridTemplateColumns: "90px 110px 1fr 120px 110px",
-                       gap: 10, alignItems: "center", padding: "7px 0", borderBottom: "1px solid #F2EFE9" }}>
+                <div key={st.set_id} style={{ display: "grid", gridTemplateColumns: "90px 110px 1fr 120px 130px 130px",
+                       gap: 10, alignItems: "center", padding: "7px 0", borderBottom: "1px solid #F2EFE9",
+                       background: st.is_primary ? "#FFF4EE" : undefined }}>
                   <span style={{ fontSize: 12, color: "#A89070", fontFamily: MONO }}>{(st.created_at || "").slice(0, 10)}</span>
                   <span style={{ fontSize: 11, color: st.status === "approved" ? "#4A7C59" : "#A89070" }}>
                     {st.status === "approved" ? "Согласована" : "Черновик"}
                   </span>
                   <span style={{ fontSize: 12, color: "#6B6355" }}>позиций {st.items} · строк {st.lines}</span>
                   <span style={{ fontSize: 13, fontWeight: 600, textAlign: "right", fontFamily: MONO }}>{fmt(st.sale_total)}</span>
-                  <button onClick={() => keep.mutate(st.set_id)} disabled={keep.isPending}
-                    style={{ fontSize: 11, padding: "4px 10px", border: "1px solid #E8592A", background: "#fff",
-                             color: "#E8592A", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
-                    оставить эту
+                  {st.is_primary ? (
+                    <span style={{ fontSize: 10, letterSpacing: "0.06em", color: "#E8592A", textAlign: "center",
+                                   border: "1px solid #E8592A", padding: "4px 6px", fontWeight: 600 }}>ОСНОВНАЯ</span>
+                  ) : (
+                    <button onClick={() => primary.mutate(st.set_id)} disabled={primary.isPending}
+                      style={{ fontSize: 11, padding: "4px 10px", border: "1px solid #E8592A", background: "#fff",
+                               color: "#E8592A", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
+                      показывать эту
+                    </button>
+                  )}
+                  <button onClick={() => { if (confirm(`Пометить остальные сметы заказа «${o.order_title}» заменёнными? Варианты пропадут из работы.`)) keep.mutate(st.set_id); }}
+                    disabled={keep.isPending}
+                    style={{ fontSize: 11, padding: "4px 10px", border: "1px solid #EDEBE6", background: "#fff",
+                             color: "#6B6355", cursor: "pointer", fontFamily: "inherit" }}>
+                    остальные в архив
                   </button>
                 </div>
               ))}

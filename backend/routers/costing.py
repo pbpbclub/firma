@@ -482,7 +482,8 @@ def readiness():
         duplicate_sets, stub_items, sum_only_items = [], [], []
         for o in orders:
             sets = conn.execute(
-                """SELECT id, title, status, created_at, updated_at FROM estimate_sets
+                """SELECT id, title, status, created_at, updated_at,
+                          COALESCE(is_primary,0) AS is_primary FROM estimate_sets
                    WHERE order_id = ? AND COALESCE(status,'') != 'superseded'
                    ORDER BY created_at DESC""", (o["id"],)
             ).fetchall()
@@ -498,6 +499,7 @@ def readiness():
                 enriched.append({
                     "set_id": s["id"], "title": s["title"], "status": s["status"],
                     "created_at": s["created_at"], "updated_at": s["updated_at"],
+                    "is_primary": bool(s["is_primary"]),
                     "items": len(items), "lines": lines_n,
                     "sale_total": round(sum((i["sale_price"] or 0) for i in items), 2),
                     "cost_total": round(sum((i["cost_total"] or 0) for i in items), 2),
@@ -557,6 +559,40 @@ def readiness():
                 "suspicious_rates": len(suspicious_rates),
             },
         }
+    finally:
+        conn.close()
+
+
+@router.post("/sets/{set_id}/primary")
+def set_primary(set_id: str):
+    """Показывать эту смету как основную. Мягкий выбор: остальные сметы заказа
+    остаются живыми черновиками — заказчик ещё может выбрать другой вариант.
+    Жёсткий вариант «остальные в архив» — keep-actual ниже."""
+    conn = get_production()
+    try:
+        es = conn.execute("SELECT id, order_id FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
+        if not es:
+            raise HTTPException(status_code=404, detail="Смета не найдена")
+        conn.execute("UPDATE estimate_sets SET is_primary = 0 WHERE order_id = ?", (es["order_id"],))
+        conn.execute(
+            "UPDATE estimate_sets SET is_primary = 1, updated_at = datetime('now') WHERE id = ?",
+            (set_id,))
+        conn.commit()
+        return {"ok": True, "primary": set_id}
+    finally:
+        conn.close()
+
+
+@router.delete("/sets/{set_id}/primary")
+def unset_primary(set_id: str):
+    """Снять ручной выбор — активной снова станет последняя по дате."""
+    conn = get_production()
+    try:
+        conn.execute(
+            "UPDATE estimate_sets SET is_primary = 0, updated_at = datetime('now') WHERE id = ?",
+            (set_id,))
+        conn.commit()
+        return {"ok": True}
     finally:
         conn.close()
 

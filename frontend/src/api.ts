@@ -244,7 +244,10 @@ export const estimatesApi = {
   costCheck:   (setId: string)              => api.get(`/estimates/sets/${setId}/cost-check`).then(r => r.data),
   // Готовность к заполнению: дубли смет, заглушки себестоимости, дыры в ставках
   readiness:   ()                           => api.get("/estimates/readiness").then(r => r.data),
-  keepActual:  (setId: string)              => api.post(`/estimates/sets/${setId}/keep-actual`, {}).then(r => r.data),
+  keepActual:  (setId: string)              => api.post(`/estimates/sets/${setId}/keep-actual`).then(r => r.data),
+  // Основная смета — ручной выбор Юры; альтернативы остаются живыми черновиками
+  setPrimary:  (setId: string)              => api.post(`/estimates/sets/${setId}/primary`).then(r => r.data),
+  unsetPrimary:(setId: string)              => api.delete(`/estimates/sets/${setId}/primary`).then(r => r.data),
   costFill:    (setId: string, opts?: { expand_items?: boolean; refresh_materials?: boolean; only?: string[] }) =>
     api.post(`/estimates/sets/${setId}/cost-fill`, opts ?? {}).then(r => r.data),
 };
