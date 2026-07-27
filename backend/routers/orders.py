@@ -2,7 +2,7 @@ from fastapi import APIRouter, Query, HTTPException, Body, Depends
 from pydantic import BaseModel
 from typing import Optional, List
 from uuid import uuid4
-from db import get_production
+from db import get_production, get_zenmoney
 from auth import get_current_user
 from routers.estimates import set_totals
 
@@ -73,9 +73,12 @@ def list_orders(
         params.append(limit)
 
         rows = conn.execute(sql, params).fetchall()
+        # Факты транзита — одним проходом на весь список: иначе на каждый заказ
+        # открывалась бы zenmoney.db, а список и карточка показали бы разные числа.
+        tfacts = _transit_facts(conn)
         out = []
         for r in rows:
-            m = _margin(conn, r["id"], r["price_plan"], r["cost_plan"])
+            m = _margin(conn, r["id"], r["price_plan"], r["cost_plan"], transit_facts=tfacts)
             out.append({
                 **dict(r),
                 # см. карточку заказа: цифры берём из активной сметы, поля — кэш
@@ -92,6 +95,8 @@ def list_orders(
                 "tax_pct": m["tax_pct"],
                 "net_profit": m["net_profit"],
                 "payment_type": m["payment_type"],
+                # Транзит: счёт / план выплаты / факт / удержание — только у транзитных заказов
+                "transit": m.get("transit"),
                 "has_estimate": m["has_estimate"],
                 "plan_source": m["plan_source"],
             })
@@ -209,11 +214,104 @@ def _active_set(conn, oid: str):
     ).fetchone()
 
 
-def _margin(conn, oid: str, price_plan, cost_plan, est=None) -> dict:
+def _transit_facts(conn) -> dict:
+    """Фактические выплаты контрагентам по транзитным заказам — одним проходом.
+
+    Возвращает {order_id: {"fact": ₽, "contractor": имя|None, "sources": [...]}}.
+
+    Три источника, и все три могут описывать ОДИН перевод:
+      * expenses — родной механизм Firma, «Разноска» пишет сюда;
+      * creditors.paid — оплаченные обязательства;
+      * zm_links в zenmoney.db — привязки фин-агента (выплаты Юра делает с личных
+        карт, в выписке ИП их нет вообще).
+
+    ИНВАРИАНТ «одна оплата = один факт» распространяется и на zm_links: привязка
+    фин-агента идёт в факт, только если тот же перевод не разнесён расходом и не
+    закрыт обязательством. Без дедупа выплата 44 370 по ORD-027 превратилась бы
+    в 88 740, а себестоимость транзита — вдвое.
+
+    zenmoney.db недоступна — считаем по своим источникам, без падения."""
+    facts = {}
+
+    def bucket(oid):
+        return facts.setdefault(oid, {"fact": 0.0, "contractor": None, "sources": []})
+
+    zm_seen = set()      # zenmoney_tx_id, уже учтённые своими источниками
+    fin_seen = set()
+
+    for r in conn.execute(
+        """SELECT order_id, id, amount, title, supplier, zenmoney_tx_id, finance_tx_id
+           FROM expenses WHERE order_id IS NOT NULL"""
+    ):
+        b = bucket(r["order_id"])
+        b["fact"] += r["amount"] or 0
+        b["sources"].append({"kind": "expense", "amount": r["amount"] or 0,
+                             "title": r["title"], "payee": r["supplier"]})
+        if r["supplier"] and not b["contractor"]:
+            b["contractor"] = r["supplier"]
+        if r["zenmoney_tx_id"]:
+            zm_seen.add(str(r["zenmoney_tx_id"]))
+        if r["finance_tx_id"]:
+            fin_seen.add(str(r["finance_tx_id"]))
+
+    # Обязательство — в факт, только если не покрыто расходом (то же условие, что в _plan_fact).
+    for r in conn.execute(
+        """SELECT c.order_id, c.name, c.paid, c.zenmoney_tx_id, c.finance_tx_id
+           FROM creditors c
+           WHERE c.order_id IS NOT NULL AND COALESCE(c.paid, 0) > 0
+             AND NOT EXISTS (
+               SELECT 1 FROM expenses e WHERE e.order_id = c.order_id AND (
+                    e.creditor_id = c.id
+                 OR (e.finance_tx_id  IS NOT NULL AND e.finance_tx_id  = c.finance_tx_id)
+                 OR (e.zenmoney_tx_id IS NOT NULL AND e.zenmoney_tx_id = c.zenmoney_tx_id)))"""
+    ):
+        b = bucket(r["order_id"])
+        b["fact"] += r["paid"] or 0
+        b["sources"].append({"kind": "creditor", "amount": r["paid"] or 0,
+                             "title": r["name"], "payee": r["name"]})
+        if r["name"] and not b["contractor"]:
+            b["contractor"] = r["name"]
+        if r["zenmoney_tx_id"]:
+            zm_seen.add(str(r["zenmoney_tx_id"]))
+        if r["finance_tx_id"]:
+            fin_seen.add(str(r["finance_tx_id"]))
+
+    try:
+        zconn = get_zenmoney()
+        try:
+            rows = zconn.execute(
+                """SELECT l.zm_tx_id, l.order_id, l.contractor_name, l.note,
+                          t.date, t.payee, COALESCE(t.outcome, 0) AS outcome
+                   FROM zm_links l JOIN zm_transactions t ON t.id = l.zm_tx_id
+                   WHERE l.order_id IS NOT NULL AND COALESCE(t.outcome, 0) > 0"""
+            ).fetchall()
+        finally:
+            zconn.close()
+    except Exception:
+        rows = []                     # базы нет или схема другая — работаем без неё
+
+    for r in rows:
+        if str(r["zm_tx_id"]) in zm_seen:
+            continue                  # тот же перевод уже учтён расходом/обязательством
+        b = bucket(r["order_id"])
+        b["fact"] += r["outcome"]
+        b["sources"].append({"kind": "zm_link", "amount": r["outcome"],
+                             "title": r["note"], "payee": r["contractor_name"] or r["payee"],
+                             "date": r["date"]})
+        if not b["contractor"]:
+            b["contractor"] = r["contractor_name"] or r["payee"]
+
+    for b in facts.values():
+        b["fact"] = round(b["fact"], 2)
+    return facts
+
+
+def _margin(conn, oid: str, price_plan, cost_plan, est=None, transit_facts=None) -> dict:
     """Лестница прибыли по заказу. Единый источник правды — не дублировать выражением."""
     if est is None:
         est = _active_set(conn, oid)
     is_bank = bool(est and est["payment_type"] == "bank")
+    is_transit = bool(est and est["payment_type"] == "transit")
     revenue = round(price_plan or 0, 2)
     cost = round(cost_plan or 0, 2)
     plan_source = "manual"
@@ -229,15 +327,47 @@ def _margin(conn, oid: str, price_plan, cost_plan, est=None) -> dict:
                 revenue = t["price"]
             if t["cost"] > 0:
                 cost = t["cost"]
+    transit = None
+    if is_transit:
+        # Транзит: выручка — сумма счёта как есть (не делим на 0,87, см. money.py),
+        # себестоимость — выплата контрагенту. ПЛАН до факта, факт замещает план:
+        # пустой себестоимость не бывает, иначе маржа незакрытого транзита равна
+        # всему счёту (на ORD-026 это 185 000 вместо 24 050).
+        if transit_facts is None:
+            transit_facts = _transit_facts(conn)
+        tf = transit_facts.get(oid) or {}
+        plan = cost
+        fact = round(tf.get("fact") or 0, 2)
+        if fact > 0:
+            cost = fact
+        pct = (est["bank_pct"] if est and est["bank_pct"] is not None else 13.0)
+        # Расхождение план/факт — сигнал, а не ошибка ввода (заплатил другую сумму,
+        # частями или часть с р/с). Молча подменять план фактом без отметки нельзя.
+        state = "no_fact" if fact <= 0 else ("matched" if abs(fact - plan) < 1 else "mismatch")
+        transit = {
+            "invoice": revenue,
+            "plan": plan,
+            "fact": fact,
+            "rest": round(plan - fact, 2),
+            "hold": round(revenue - cost, 2),
+            "payout_pct": round(100 - pct, 2),
+            "hold_pct": pct,
+            "contractor": tf.get("contractor"),
+            "state": state,
+            "sources": tf.get("sources") or [],
+        }
     gross = round(revenue - cost, 2)
-    # УСН платится с того, что прошло через счёт → только безнал.
-    tax = round(revenue * TAX_PCT / 100, 2) if is_bank else 0.0
-    return {
+    # УСН платится с того, что прошло через расчётный счёт. У транзита деньги клиента
+    # тоже приходят на р/с, поэтому налог берётся со ВСЕЙ суммы счёта, а не с удержания
+    # (94 900 × 6% = 5 694 при удержании 12 400 — реальный доход 6 706, а не 12 400).
+    taxable = is_bank or is_transit
+    tax = round(revenue * TAX_PCT / 100, 2) if taxable else 0.0
+    out = {
         "revenue": revenue,
         "cost": cost,
         "gross_profit": gross,
         "tax": tax,
-        "tax_pct": TAX_PCT if is_bank else 0.0,
+        "tax_pct": TAX_PCT if taxable else 0.0,
         "net_profit": round(gross - tax, 2),
         "payment_type": (est["payment_type"] if est else None) or "cash",
         "has_estimate": est is not None,
@@ -245,6 +375,9 @@ def _margin(conn, oid: str, price_plan, cost_plan, est=None) -> dict:
         # UI обязан помечать draft — эти числа ещё не согласованы с клиентом.
         "plan_source": plan_source,
     }
+    if transit:
+        out["transit"] = transit
+    return out
 
 
 def _reserve_suggested(pf: dict, cost_plan) -> float:
@@ -478,6 +611,8 @@ def get_order(order_id: str):
             "tax_pct": m["tax_pct"],
             "net_profit": m["net_profit"],
             "payment_type": m["payment_type"],
+                # Транзит: счёт / план выплаты / факт / удержание — только у транзитных заказов
+                "transit": m.get("transit"),
             "has_estimate": m["has_estimate"],
             "plan_source": m["plan_source"],
             # Резерв под материалы (ТЗ-1 задача 1). reserved_amount/reserve_released_at

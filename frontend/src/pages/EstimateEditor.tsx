@@ -479,6 +479,7 @@ export default function EstimateEditor() {
   const avgMarkup   = totalCost > 0 ? totalSale / totalCost : 0;
   const bankPct    = activeSet?.bank_pct ?? 13;
   const isBank     = activeSet?.payment_type === "bank";
+  const isTransit  = activeSet?.payment_type === "transit";
   // Удержание банка — свойство сметы (см. money.py): позиционный bank_pct в расчёте
   // не участвует, там в данных мусор.
   const clientPriceForItem = (it: any) => clientPrice(it.sale_price || 0, isBank, bankPct);
@@ -650,7 +651,7 @@ export default function EstimateEditor() {
             <>
               {/* Нал/Безнал — только в режиме редактирования */}
               <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
-                {[{ v: "cash", l: "Нал" }, { v: "bank", l: "Безнал" }].map(pt => (
+                {[{ v: "cash", l: "Нал" }, { v: "bank", l: "Безнал" }, { v: "transit", l: "Транзит" }].map(pt => (
                   <button
                     key={pt.v}
                     onClick={() => editMode && updateSet({ payment_type: pt.v })}
@@ -669,8 +670,10 @@ export default function EstimateEditor() {
 
               {/* Признак расчёта словами: раньше «нал/безнал» был виден только чипом,
                   и расхождение сметы со счётом ловилось вручную (ТЗ 27.07, п.2.2) */}
-              <span style={{ fontSize: 10, color: isBank ? "#E8592A" : "#A89070", whiteSpace: "nowrap" }}>
-                {isBank
+              <span style={{ fontSize: 10, color: isBank || isTransit ? "#E8592A" : "#A89070", whiteSpace: "nowrap" }}>
+                {isTransit
+                  ? `транзит — счёт не пересчитывается, ${bankPct}% удерживаются, остальное уходит контрагенту`
+                  : isBank
                   ? `безнал — из суммы счёта удерживается ${bankPct}%`
                   : "цены за наличный расчёт"}
               </span>
@@ -956,7 +959,9 @@ export default function EstimateEditor() {
 
                 {/* Наценка — производная (sale/cost). Красная + ⚠, если ниже 1.8 */}
                 {(() => {
-                  const lowMargin = (item.cost_total || 0) > 0 && (item.markup || 0) < LOW_MARKUP;
+                  // У транзита низкая наценка — норма, а не тревога: удержание Юры
+                  // и есть 13%, наценка тут производная и ни о чём не сигналит.
+                  const lowMargin = !isTransit && (item.cost_total || 0) > 0 && (item.markup || 0) < LOW_MARKUP;
                   const col = lowMargin ? "#8B3A3A" : "#6B6355";
                   return (
                     <div style={{ fontSize: 12, color: col }} title={lowMargin ? `Наценка ниже ×${LOW_MARKUP} — тонкая маржа` : undefined}>
@@ -1147,7 +1152,7 @@ export default function EstimateEditor() {
               <div style={{ fontSize: 12, color: "#6B6355" }}>{totalQty}</div>
               <div style={{ fontSize: 12, color: avgMarkup > 0 && avgMarkup < LOW_MARKUP ? "#8B3A3A" : "#6B6355" }}
                 title={avgMarkup > 0 && avgMarkup < LOW_MARKUP ? `Средняя наценка ниже ×${LOW_MARKUP}` : undefined}>
-                {(() => { const p = markupToPct(avgMarkup); const low = avgMarkup > 0 && avgMarkup < LOW_MARKUP; return `${low ? "⚠ " : ""}${p >= 0 ? "+" : ""}${p}%`; })()}
+                {(() => { const p = markupToPct(avgMarkup); const low = !isTransit && avgMarkup > 0 && avgMarkup < LOW_MARKUP; return `${low ? "⚠ " : ""}${p >= 0 ? "+" : ""}${p}%`; })()}
               </div>
               <div style={{ fontSize: 11, color: "#A89070", textAlign: "right" }}>{totalQty > 1 ? fmt(Math.round(totalCost / totalQty)) : "—"}</div>
               <div style={{ fontSize: 12, color: "#6B6355", textAlign: "right" }}>{fmt(totalCost)}</div>

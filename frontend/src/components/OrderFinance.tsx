@@ -15,7 +15,9 @@ export function ProfitLadder({ order, paidTotal }: { order: any; paidTotal: numb
   const gross = order.gross_profit ?? order.margin ?? 0;
   const tax = order.tax ?? 0;
   const net = order.net_profit ?? gross;
-  const isBank = order.payment_type === "bank";
+  // УСН показываем и у транзита: деньги клиента тоже проходят через р/с,
+  // налог берётся со всей суммы счёта, а не с удержания.
+  const taxed = order.payment_type === "bank" || order.payment_type === "transit";
   // Выручка из план-факта: для draft-смет бэк берёт её из сета, а поле заказа устарело.
   const revenue = order.plan_fact?.revenue ?? order.price_plan;
   const items = [
@@ -23,7 +25,7 @@ export function ProfitLadder({ order, paidTotal }: { order: any; paidTotal: numb
     { label: "Оплачено",  value: fmt(paidTotal),        color: "#4A7C59" },
     { label: "Долг",      value: order.debt > 0 ? fmt(order.debt) : "Оплачено", color: order.debt > 0 ? "#E8592A" : "#4A7C59" },
     { label: "Валовая",   value: fmt(gross),            color: "#1A1A1A" },
-    ...(isBank ? [{ label: `УСН ${order.tax_pct ?? 6}%`, value: `−${fmt(tax)}`, color: "#8B3A3A" }] : []),
+    ...(taxed ? [{ label: `УСН ${order.tax_pct ?? 6}%`, value: `−${fmt(tax)}`, color: "#8B3A3A" }] : []),
     { label: "Чистая",    value: fmt(net),              color: net > 0 ? "#4A7C59" : "#8B3A3A" },
   ];
   return (

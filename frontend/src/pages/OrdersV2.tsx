@@ -980,9 +980,24 @@ export default function OrdersV2() {
                     >
                       {o.title}
                     </span>
-                    {o.brand && (
-                      <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.05em", marginTop: 2, color: isActive ? "rgba(255,255,255,0.75)" : (BRAND_COLOR[o.brand] || "#A89070"), fontFamily: MONO }}>
-                        {o.brand}
+                    {(o.brand || o.payment_type === "transit") && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
+                        {o.brand && (
+                          <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.05em", color: isActive ? "rgba(255,255,255,0.75)" : (BRAND_COLOR[o.brand] || "#A89070"), fontFamily: MONO }}>
+                            {o.brand}
+                          </span>
+                        )}
+                        {/* Транзит — про экономику заказа (себестоимость = выплата контрагенту),
+                            а бренд только про оформление документов. Видно должно быть и то, и то. */}
+                        {o.payment_type === "transit" && o.brand !== "Транзит" && (
+                          <span title="Транзит: счёт проходит через р/с, себестоимость — выплата контрагенту"
+                            style={{ fontSize: 8, fontWeight: 700, letterSpacing: "0.06em", fontFamily: MONO,
+                                     padding: "1px 4px", whiteSpace: "nowrap",
+                                     border: `1px solid ${isActive ? "rgba(255,255,255,0.6)" : "#E8592A"}`,
+                                     color: isActive ? "rgba(255,255,255,0.9)" : "#E8592A" }}>
+                            ТРАНЗИТ
+                          </span>
+                        )}
                       </div>
                     )}
                   </div>

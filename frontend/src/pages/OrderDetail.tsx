@@ -15,6 +15,7 @@ import { ordersApi, customersApi, estimatesApi, expensesApi } from "../api";
 import { Plus, CaretRight, Trash, LinkSimple, PencilSimple, Warning, ArrowsSplit } from "@phosphor-icons/react";
 import { ExpenseModal, EXPENSE_CATEGORIES } from "../components/ExpenseModal";
 import { ProfitLadder, PlanFactDuel } from "../components/OrderFinance";
+import { TransitPanel } from "../components/order/TransitPanel";
 import { OrderSummaryStrip } from "../components/order/OrderSummaryStrip";
 import { OrderParams } from "../components/order/OrderParams";
 import type { OrderFormState } from "../components/order/OrderParams";
@@ -462,8 +463,9 @@ export default function OrderDetail() {
             )}
           </div>
 
-          {/* Резерв под материалы */}
-          {order && (
+          {/* Резерв под материалы. У транзита материалов нет: себестоимость — это
+              выплата контрагенту, откладывать «под закупку» нечего. */}
+          {order && !order.transit && (
             <div style={{ paddingTop: 18, marginBottom: 8 }}>
               <div style={{ marginBottom: 12 }}><SectionLabel>РЕЗЕРВ ПОД МАТЕРИАЛЫ</SectionLabel></div>
               {(() => {
@@ -720,7 +722,12 @@ export default function OrderDetail() {
                   )}
                 </div>
               )}
-              <PlanFactDuel planFact={order.plan_fact} />
+              {/* У транзита разбивки по материалам/работам нет — себестоимость это
+                  выплата контрагенту, поэтому дуэль по категориям заменяется своим блоком */}
+              {order.transit
+                ? <TransitPanel transit={order.transit} tax={order.tax}
+                    taxPct={order.tax_pct} netProfit={order.net_profit} />
+                : <PlanFactDuel planFact={order.plan_fact} />}
               <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid #EDEBE6" }}>
                 <div style={{ marginBottom: 12 }}><SectionLabel>ЛЕСТНИЦА ПРИБЫЛИ</SectionLabel></div>
                 <ProfitLadder order={order} paidTotal={paidTotal} />

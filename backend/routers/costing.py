@@ -156,8 +156,13 @@ def _is_stub_cost(item) -> bool:
     return abs(markup - STUB_MARKUP) < 0.001 and abs(cost * markup - sale) < 1.0
 
 
-def _is_sum_without_breakdown(item) -> bool:
-    """Себестоимость введена одной суммой, состава нет — не тревожно, но видеть полезно."""
+def _is_sum_without_breakdown(item, payment_type: str | None = None) -> bool:
+    """Себестоимость введена одной суммой, состава нет — не тревожно, но видеть полезно.
+
+    У транзита это норма, а не пробел: себестоимость там и есть одно число —
+    выплата контрагенту. В список вопросов такие позиции не попадают."""
+    if (payment_type or "") == "transit":
+        return False
     return (item["cost_total"] or 0) > 0 and not _is_stub_cost(item)
 
 
@@ -279,6 +284,15 @@ def _cost_report(conn, set_id: str) -> dict:
     out_items, missing = [], []
     counts = {"ok": 0, "proposed": 0, "refresh": 0, "missing": 0}
     lines_total = 0
+
+    if (es["payment_type"] or "") == "transit":
+        # Транзиту состав не нужен: себестоимость — одно число, выплата контрагенту.
+        # Спрашивать про материалы и работы тут нечего (ТЗ транзита, п.2.1).
+        return {
+            "set_id": set_id, "payment_type": "transit",
+            "items": [], "missing": [], "counts": counts, "lines_total": 0,
+            "note": "Транзит: себестоимость — выплата контрагенту, состав не требуется.",
+        }
 
     for item in items:
         lines = conn.execute(
@@ -490,9 +504,10 @@ def readiness():
         ).fetchall()
 
         duplicate_sets, stub_items, sum_only_items, invoice_drift = [], [], [], []
+        transit_as_bank = []
         for o in orders:
             sets = conn.execute(
-                """SELECT id, title, status, created_at, updated_at,
+                """SELECT id, title, status, created_at, updated_at, payment_type,
                           COALESCE(is_primary,0) AS is_primary FROM estimate_sets
                    WHERE order_id = ? AND COALESCE(status,'') != 'superseded'
                    ORDER BY created_at DESC""", (o["id"],)
@@ -530,8 +545,21 @@ def readiness():
                     }
                     if _is_stub_cost(it):
                         stub_items.append(entry)
-                    elif _is_sum_without_breakdown(it):
+                    elif _is_sum_without_breakdown(it, s["payment_type"]):
                         sum_only_items.append(entry)
+            # Транзит с признаком «безнал» — ошибка: формула безнала делит сумму счёта
+            # на 0,87, а у транзита счёт задан и пересчёту не подлежит. Это разные 13%
+            # (ТЗ транзита, п.5.4): у безнала надбавка сверх цены, у транзита —
+            # удержание Юры ИЗ суммы счёта.
+            if o["brand"] == "Транзит":
+                for st in sets:
+                    if st["payment_type"] == "bank":
+                        transit_as_bank.append({
+                            "order_id": o["id"], "order_number": o["number"],
+                            "order_title": o["title"], "set_id": st["id"],
+                            "set_status": st["status"], "price_plan": o["price_plan"] or 0,
+                        })
+
             # Смета против выставленного счёта. orders.price_plan — сумма, которую
             # клиент уже видел; живой итог активной сметы должен ей равняться.
             # Смена денежной формулы 27.07.2026 разъехалась с данными молча —
@@ -579,6 +607,7 @@ def readiness():
         return {
             "duplicate_sets": duplicate_sets,
             "invoice_drift": invoice_drift,
+            "transit_as_bank": transit_as_bank,
             "stub_items": stub_items,
             "sum_only_items": sum_only_items,
             "rate_holes": rate_holes,
@@ -586,6 +615,7 @@ def readiness():
             "summary": {
                 "orders_with_duplicates": len(duplicate_sets),
                 "invoice_drift": len(invoice_drift),
+                "transit_as_bank": len(transit_as_bank),
                 "stub_items": len(stub_items),
                 "sum_only_items": len(sum_only_items),
                 "rate_holes": len(rate_holes),

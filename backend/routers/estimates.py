@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
-from typing import Optional, List
+from typing import Optional, List, Literal
 from pydantic import BaseModel
 from db import get_production, get_materials
 from money import client_price, cash_from_client, DEFAULT_BANK_PCT
@@ -204,17 +204,26 @@ def _assert_item_editable(conn, item_id: str):
 
 # ─── Models ─────────────────────────────────────────────────────────────────
 
+# Тип расчёта — закрытый список. Раньше поле было свободной строкой, и опечатка
+# молча означала «не безнал»: сумма считалась бы как за наличку.
+#   cash    — цены за наличный расчёт
+#   bank    — 13% удерживаются ИЗ суммы счёта (счёт = цена ÷ 0,87, см. money.py)
+#   transit — деньги клиента проходят через р/с, себестоимость = выплата контрагенту,
+#             сумма счёта НЕ пересчитывается
+PAYMENT_TYPES = ("cash", "bank", "transit")
+
+
 class SetCreate(BaseModel):
     order_id: str
     title: Optional[str] = None
-    payment_type: str = "cash"
+    payment_type: Literal["cash", "bank", "transit"] = "cash"
     bank_pct: float = 13.0
     notes: Optional[str] = None
 
 
 class SetUpdate(BaseModel):
     title: Optional[str] = None
-    payment_type: Optional[str] = None
+    payment_type: Optional[Literal["cash", "bank", "transit"]] = None
     bank_pct: Optional[float] = None
     status: Optional[str] = None
     notes: Optional[str] = None

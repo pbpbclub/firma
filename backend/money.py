@@ -33,10 +33,38 @@ def round_up_money(amount: float, step: int = ROUND_STEP) -> float:
     return float(math.ceil(amount / step) * step)
 
 
+def round_down_money(amount: float, step: int = ROUND_STEP) -> float:
+    """Округление вниз до шага — зеркало round_up_money. Тоже «в пользу Юры»:
+    счёт клиенту округляем вверх, выплату контрагенту — вниз, остаток идёт
+    в удержание. 82 563 → 82 500."""
+    if not amount or amount <= 0:
+        return round(amount or 0, 2)
+    return float(math.floor(amount / step) * step)
+
+
+def transit_payout(invoice: float, pct: float | None = None) -> float:
+    """Предложение суммы выплаты контрагенту по транзиту: счёт минус удержание,
+    округлённое вниз до 100 ₽.
+
+    Это ПРЕДЛОЖЕНИЕ при заведении заказа, а не источник истины. План хранится
+    в estimate_items.cost_total и правится руками (это предмет договорённости
+    Юры с мастером), а окончательная себестоимость приходит из факта выплаты —
+    поэтому шаг округления здесь значения не имеет."""
+    invoice = invoice or 0
+    p = DEFAULT_BANK_PCT if pct is None else pct
+    if invoice <= 0 or p >= 100:
+        return round(invoice, 2)
+    return round_down_money(invoice * (1 - p / 100))
+
+
 def client_price(sale: float, payment_type: str, pct: float | None = None,
                  rounded: bool = True) -> float:
     """Сумма к оплате клиентом. Для нала — цена как есть; для безнала — цена, из которой
     после удержания pct% останется исходная сумма (делим, а не умножаем).
+
+    ТРАНЗИТ намеренно попадает в ветку «вернуть как есть»: там задана сама сумма
+    счёта, делить её на 0,87 нельзя — это второе, чужое 13% (удержание Юры из счёта,
+    а не надбавка банка сверх цены). Не «чинить» это условие на `== "cash"`.
 
     rounded=False — без округления до 100 ₽ (нужно для промежуточных расчётов,
     например цены за единицу внутри позиции)."""
