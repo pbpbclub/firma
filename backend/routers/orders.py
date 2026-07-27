@@ -137,12 +137,17 @@ def suggest_orders(counterparty: str = "", amount: float = 0, limit: int = Query
                GROUP BY o.id
                ORDER BY o.created_at DESC LIMIT 200"""
         ).fetchall()
+        # Транзитные факты — одним проходом на весь список (как в list_orders): иначе
+        # _margin на каждый транзитный заказ заново сканировал бы expenses/creditors
+        # и открывал бы zenmoney.db (N+1).
+        tfacts = _transit_facts(conn)
         scored = []
         for r in rows:
             row = dict(r)
             # Цена — из активной сметы (у черновиков поле заказа устаревшее), чтобы
             # подсказка по сумме и долг совпадали с карточкой.
-            m = _margin(conn, row["id"], row.get("price_plan") or 0, row.get("cost_plan") or 0)
+            m = _margin(conn, row["id"], row.get("price_plan") or 0, row.get("cost_plan") or 0,
+                        transit_facts=tfacts)
             row["price_plan"] = m["revenue"]
             ns = _name_score(counterparty, (row.get("customer_name") or "") + " " + (row.get("title") or ""))
             as_ = _amount_score(amount, row.get("price_plan") or 0)
@@ -237,10 +242,9 @@ def _transit_facts(conn) -> dict:
         return facts.setdefault(oid, {"fact": 0.0, "contractor": None, "sources": []})
 
     zm_seen = set()      # zenmoney_tx_id, уже учтённые своими источниками
-    fin_seen = set()
 
     for r in conn.execute(
-        """SELECT order_id, id, amount, title, supplier, zenmoney_tx_id, finance_tx_id
+        """SELECT order_id, id, amount, title, supplier, zenmoney_tx_id
            FROM expenses WHERE order_id IS NOT NULL"""
     ):
         b = bucket(r["order_id"])
@@ -251,30 +255,33 @@ def _transit_facts(conn) -> dict:
             b["contractor"] = r["supplier"]
         if r["zenmoney_tx_id"]:
             zm_seen.add(str(r["zenmoney_tx_id"]))
-        if r["finance_tx_id"]:
-            fin_seen.add(str(r["finance_tx_id"]))
 
     # Обязательство — в факт, только если не покрыто расходом (то же условие, что в _plan_fact).
+    # covered считаем флагом (а не отсекаем WHERE): покрытую строку в факт не берём,
+    # но её zenmoney_tx_id всё равно кладём в zm_seen — иначе тот же перевод всплывёт
+    # из zm_links и задвоит факт (обязательство, привязанное к расходу через creditor_id
+    # без переноса tx_id на покрывающую запись, из суммы исключено, но перевод один).
     for r in conn.execute(
-        """SELECT c.order_id, c.name, c.paid, c.zenmoney_tx_id, c.finance_tx_id
+        """SELECT c.order_id, c.name, c.paid, c.zenmoney_tx_id,
+                  EXISTS (
+                    SELECT 1 FROM expenses e WHERE e.order_id = c.order_id AND (
+                         e.creditor_id = c.id
+                      OR (e.finance_tx_id  IS NOT NULL AND e.finance_tx_id  = c.finance_tx_id)
+                      OR (e.zenmoney_tx_id IS NOT NULL AND e.zenmoney_tx_id = c.zenmoney_tx_id))
+                  ) AS covered
            FROM creditors c
-           WHERE c.order_id IS NOT NULL AND COALESCE(c.paid, 0) > 0
-             AND NOT EXISTS (
-               SELECT 1 FROM expenses e WHERE e.order_id = c.order_id AND (
-                    e.creditor_id = c.id
-                 OR (e.finance_tx_id  IS NOT NULL AND e.finance_tx_id  = c.finance_tx_id)
-                 OR (e.zenmoney_tx_id IS NOT NULL AND e.zenmoney_tx_id = c.zenmoney_tx_id)))"""
+           WHERE c.order_id IS NOT NULL AND COALESCE(c.paid, 0) > 0"""
     ):
+        if r["zenmoney_tx_id"]:
+            zm_seen.add(str(r["zenmoney_tx_id"]))
+        if r["covered"]:
+            continue          # покрыто расходом — факт уже учтён через expenses
         b = bucket(r["order_id"])
         b["fact"] += r["paid"] or 0
         b["sources"].append({"kind": "creditor", "amount": r["paid"] or 0,
                              "title": r["name"], "payee": r["name"]})
         if r["name"] and not b["contractor"]:
             b["contractor"] = r["name"]
-        if r["zenmoney_tx_id"]:
-            zm_seen.add(str(r["zenmoney_tx_id"]))
-        if r["finance_tx_id"]:
-            fin_seen.add(str(r["finance_tx_id"]))
 
     try:
         zconn = get_zenmoney()
