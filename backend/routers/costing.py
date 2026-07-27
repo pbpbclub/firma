@@ -24,6 +24,7 @@ from db import get_production, get_materials
 from money import client_price
 from routers.estimates import (
     _lookup_cheapest, _recalc_item, _touch_set, _assert_set_editable, _now,
+    totals_from_items,
 )
 from routers.rates import norm_title, find_work_rate, find_price_book, find_costing_rule
 
@@ -132,6 +133,14 @@ def _history_hint(h: dict) -> str:
 
 
 STUB_MARKUP = 2.0   # дефолт `production.py estimate-create --markup`
+
+
+def _active_set_row(conn, order_id: str):
+    """Активная смета заказа — тот же порядок, что orders._active_set."""
+    return conn.execute(
+        """SELECT id, status, payment_type, bank_pct FROM estimate_sets WHERE order_id = ?
+           ORDER BY CASE status WHEN 'approved' THEN 0 WHEN 'superseded' THEN 2 ELSE 1 END,
+                    COALESCE(is_primary,0) DESC, created_at DESC LIMIT 1""", (order_id,)).fetchone()
 
 
 def _is_stub_cost(item) -> bool:
@@ -476,10 +485,11 @@ def readiness():
     conn = get_production()
     try:
         orders = conn.execute(
-            "SELECT id, number, title, brand, status FROM orders WHERE COALESCE(archived,0) = 0"
+            "SELECT id, number, title, brand, status, price_plan FROM orders "
+            "WHERE COALESCE(archived,0) = 0"
         ).fetchall()
 
-        duplicate_sets, stub_items, sum_only_items = [], [], []
+        duplicate_sets, stub_items, sum_only_items, invoice_drift = [], [], [], []
         for o in orders:
             sets = conn.execute(
                 """SELECT id, title, status, created_at, updated_at,
@@ -522,6 +532,27 @@ def readiness():
                         stub_items.append(entry)
                     elif _is_sum_without_breakdown(it):
                         sum_only_items.append(entry)
+            # Смета против выставленного счёта. orders.price_plan — сумма, которую
+            # клиент уже видел; живой итог активной сметы должен ей равняться.
+            # Смена денежной формулы 27.07.2026 разъехалась с данными молча —
+            # эта проверка не даёт такому повториться (см. scripts/migrate_bank_sale_prices.py).
+            act = _active_set_row(conn, o["id"])
+            if act and (o["price_plan"] or 0) > 0:
+                act_items = conn.execute(
+                    "SELECT cost_total, sale_price FROM estimate_items WHERE set_id = ?",
+                    (act["id"],)).fetchall()
+                if act_items:
+                    live = totals_from_items(act_items, act["payment_type"], act["bank_pct"])["price"]
+                    if abs(live - o["price_plan"]) >= 1:
+                        invoice_drift.append({
+                            "order_id": o["id"], "order_number": o["number"],
+                            "order_title": o["title"], "brand": o["brand"],
+                            "set_id": act["id"], "set_status": act["status"],
+                            "payment_type": act["payment_type"],
+                            "invoice": round(o["price_plan"], 2), "live": round(live, 2),
+                            "drift": round(live - o["price_plan"], 2),
+                        })
+
             if len(enriched) > 1:
                 duplicate_sets.append({
                     "order_id": o["id"], "order_number": o["number"],
@@ -547,12 +578,14 @@ def readiness():
 
         return {
             "duplicate_sets": duplicate_sets,
+            "invoice_drift": invoice_drift,
             "stub_items": stub_items,
             "sum_only_items": sum_only_items,
             "rate_holes": rate_holes,
             "suspicious_rates": suspicious_rates,
             "summary": {
                 "orders_with_duplicates": len(duplicate_sets),
+                "invoice_drift": len(invoice_drift),
                 "stub_items": len(stub_items),
                 "sum_only_items": len(sum_only_items),
                 "rate_holes": len(rate_holes),

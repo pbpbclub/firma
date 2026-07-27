@@ -1,6 +1,8 @@
 // «Готовность» — один экран вместо обхода каждой сметы руками: дубли смет,
-// себестоимость-заглушка (цена÷наценка вместо расчёта), дыры и мусор в ставках.
+// расхождение сметы с выставленным счётом, себестоимость-заглушка
+// (цена÷наценка вместо расчёта), дыры и мусор в ставках.
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { estimatesApi, ratesApi } from "../../api";
 import { MONO } from "../ui/Num";
@@ -97,6 +99,7 @@ function WorkPrices() {
 export function ReadinessPanel() {
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({ queryKey: ["readiness"], queryFn: estimatesApi.readiness });
+  const navigate = useNavigate();
   const refresh = () => qc.invalidateQueries({ queryKey: ["readiness"] });
   const delRate = useMutation({
     mutationFn: (id: string) => ratesApi.delete(id),
@@ -116,12 +119,14 @@ export function ReadinessPanel() {
 
   if (isLoading) return <Loading />;
   const s = data?.summary ?? {};
-  const clean = !s.orders_with_duplicates && !s.stub_items && !s.rate_holes && !s.suspicious_rates;
+  const clean = !s.orders_with_duplicates && !s.invoice_drift && !s.stub_items
+    && !s.rate_holes && !s.suspicious_rates;
 
   return (
     <div style={{ padding: "20px 28px 40px", overflow: "auto" }}>
       <div style={{ display: "flex", gap: 28, marginBottom: 26, flexWrap: "wrap" }}>
         {[["Дубли смет", s.orders_with_duplicates, "#8B3A3A"],
+          ["Расходятся со счётом", s.invoice_drift, "#8B3A3A"],
           ["Себестоимость-заглушка", s.stub_items, "#8B3A3A"],
           ["Подозрительные ставки", s.suspicious_rates, "#E8592A"],
           ["Суммы без состава", s.sum_only_items, "#A89070"]].map(([l, v, c]: any) => (
@@ -174,6 +179,47 @@ export function ReadinessPanel() {
                   </button>
                 </div>
               ))}
+            </div>
+          ))}
+        </Section>
+      )}
+
+      {!!data?.invoice_drift?.length && (
+        <Section label="СМЕТА РАСХОДИТСЯ СО СЧЁТОМ" count={data.invoice_drift.length}
+          hint="Сумма счёта у заказа и живой итог активной сметы разошлись — клиент видел одну цифру, система считает по другой. Открой смету и сведи, либо поправь сумму заказа.">
+          <div style={{ display: "grid", gridTemplateColumns: "1.4fr 120px 120px 120px 110px",
+                        gap: 10, padding: "0 0 6px", borderBottom: "1px solid #EDEBE6" }}>
+            {["", "", "СЧЁТ", "СМЕТА", "РАЗНИЦА"].map((h, i) => (
+              <span key={i} style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em",
+                                     textAlign: i >= 2 ? "right" : "left" }}>{h}</span>
+            ))}
+          </div>
+          {data.invoice_drift.map((d: any) => (
+            <div key={d.order_id}
+              onClick={() => navigate(`/orders/${d.order_id}/estimate?set=${d.set_id}`)}
+              style={{ display: "grid", gridTemplateColumns: "1.4fr 120px 120px 120px 110px",
+                       gap: 10, alignItems: "center", padding: "9px 0", borderBottom: "1px solid #F2EFE9",
+                       cursor: "pointer" }}
+              onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")}
+              onMouseLeave={e => (e.currentTarget.style.background = "")}>
+              <span style={{ fontSize: 13, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {d.order_title}
+                <span style={{ color: "#A89070", fontSize: 11 }}> · {d.brand || "без бренда"}</span>
+              </span>
+              <span style={{ fontSize: 11, color: d.set_status === "approved" ? "#4A7C59" : "#A89070" }}>
+                {d.set_status === "approved" ? "Согласована" : "Черновик"}
+                {d.payment_type === "bank" ? " · безнал" : ""}
+              </span>
+              <span style={{ fontSize: 13, textAlign: "right", fontFamily: MONO }} title="сумма счёта у заказа">
+                {fmt(d.invoice)}
+              </span>
+              <span style={{ fontSize: 13, textAlign: "right", fontFamily: MONO }} title="живой итог сметы">
+                {fmt(d.live)}
+              </span>
+              <span style={{ fontSize: 13, fontWeight: 600, textAlign: "right", fontFamily: MONO,
+                             color: d.drift > 0 ? "#8B3A3A" : "#E8592A" }}>
+                {d.drift > 0 ? "+" : "−"}{fmt(Math.abs(d.drift)).replace(" ₽", "")} ₽
+              </span>
             </div>
           ))}
         </Section>
