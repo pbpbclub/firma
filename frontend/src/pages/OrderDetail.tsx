@@ -223,6 +223,13 @@ export default function OrderDetail() {
     qc.invalidateQueries({ queryKey: ["orders-v2"] });
     qc.invalidateQueries({ queryKey: ["free-cash"] });
   };
+  // Смена статуса из баннеров «ждёт оплаты» / «оплата пришла». Оба перехода —
+  // только по клику Юры: система подсказывает, но не переводит сама.
+  const setStatusMutation = useMutation({
+    mutationFn: (st: string) => ordersApi.updateStatus(id!, st),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["order", id] }); qc.invalidateQueries({ queryKey: ["orders"] }); },
+  });
+
   // Основная смета — ручной выбор Юры: остальные варианты остаются живыми черновиками
   const setPrimary = useMutation({
     mutationFn: (setId: string) => estimatesApi.setPrimary(setId),
@@ -707,6 +714,36 @@ export default function OrderDetail() {
             </div>
           ) : (
             <>
+              {/* Подсказка: счёт/цена есть, оплат нет — похоже, заказчик тянет.
+                  Статус НЕ ставим сами — только предлагаем (решение Юры 28.07.2026). */}
+              {order?.awaiting_hint && (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+                  background: "#FAF8F5", border: "1px solid #EDEBE6", padding: "10px 14px", marginBottom: 14 }}>
+                  <Warning size={13} style={{ color: "#B8860B", flexShrink: 0 }} />
+                  <span style={{ fontSize: 11, color: "#6B6355", flex: 1, minWidth: 160 }}>
+                    Счёт есть, оплат нет — похоже, заказ <b>ждёт оплаты</b>.
+                  </span>
+                  <Button size="sm" disabled={setStatusMutation.isPending}
+                    onClick={() => setStatusMutation.mutate("awaiting_payment")} style={{ fontSize: 11 }}>
+                    {setStatusMutation.isPending ? "..." : "Пометить «Ждёт оплаты»"}
+                  </Button>
+                </div>
+              )}
+              {/* Оплата по «ждущему» пришла — сигнал, не автопереход: частичная
+                  предоплата ещё не значит, что работа началась. */}
+              {order?.awaiting_paid_signal && (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+                  background: "#F3F7F4", border: "1px solid #DCE8DF", padding: "10px 14px", marginBottom: 14 }}>
+                  <Warning size={13} style={{ color: "#4A7C59", flexShrink: 0 }} />
+                  <span style={{ fontSize: 11, color: "#6B6355", flex: 1, minWidth: 160 }}>
+                    <b>Оплата пришла</b> ({fmtMoney(paidTotal)}) — запускаем в производство?
+                  </span>
+                  <Button size="sm" variant="primary" disabled={setStatusMutation.isPending}
+                    onClick={() => setStatusMutation.mutate("in_production")} style={{ fontSize: 11 }}>
+                    {setStatusMutation.isPending ? "..." : "В производство"}
+                  </Button>
+                </div>
+              )}
               {order?.plan_source === "draft" && (
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
                   background: "#FAF8F5", border: "1px solid #EDEBE6", padding: "10px 14px", marginBottom: 14 }}>

@@ -25,6 +25,7 @@ const STATUS_MAP: Record<string, { label: string; color: string }> = {
   estimate:      { label: "Смета",          color: "#E8592A" },
   project:       { label: "Проект",         color: "#E8592A" },
   in_production: { label: "В производстве", color: "#1A1A1A" },
+  awaiting_payment: { label: "Ждёт оплаты", color: "#B8860B" },
   completed:     { label: "Завершён",       color: "#4A7C59" },
   cancelled:     { label: "Отменён",        color: "#8B3A3A" },
 };
@@ -32,6 +33,8 @@ const STATUS_MAP: Record<string, { label: string; color: string }> = {
 const STATUSES = [
   { value: "in_production", label: "В работе" },
   { value: "draft,estimate", label: "Смета" },
+  // Отдельная вкладка: без неё статус был бы недостижим из UI (как сейчас project)
+  { value: "awaiting_payment", label: "Ждут оплату" },
   { value: "completed", label: "Завершён" },
 ];
 
@@ -59,6 +62,7 @@ const ALL_STATUSES = [
   { value: "estimate",      label: "Смета",            color: "#E8592A" },
   { value: "project",       label: "Проект",           color: "#E8592A" },
   { value: "in_production", label: "В производстве",   color: "#1A1A1A" },
+  { value: "awaiting_payment", label: "Ждёт оплаты",    color: "#B8860B" },
   { value: "completed",     label: "Завершён",         color: "#4A7C59" },
   { value: "cancelled",     label: "Отменён",          color: "#8B3A3A" },
 ];
@@ -889,6 +893,13 @@ export default function OrdersV2() {
                   {selectedIds.size > 0 && <span style={{ color: "#E8592A", fontWeight: 600 }}>Выбрано {selectedIds.size}</span>}
                   {selectedIds.size > 0 && selSum > 0 && <span>{fmt(selSum)}</span>}
                   {selectedIds.size === 0 && <span>{filteredData.length} заказов</span>}
+                  {/* Ориентир Юры: сколько можно получить, если дожать эти заказы по оплате.
+                      Не дебиторка — сознательно (решение 28.07.2026). */}
+                  {selectedIds.size === 0 && status === "awaiting_payment" && filteredData.length > 0 && (
+                    <span style={{ color: "#B8860B", fontWeight: 600 }}>
+                      потенциальная выручка {fmt(filteredData.reduce((a: number, o: any) => a + Math.max(0, o.debt || 0), 0))}
+                    </span>
+                  )}
                   {selectedIds.size === 0 && hasFilters && sum > 0 && <span>{fmt(sum)}</span>}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>

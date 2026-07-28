@@ -660,7 +660,9 @@ def get_debtors():
             LEFT JOIN customers c ON c.id = o.customer_id
             LEFT JOIN payments p ON p.order_id = o.id
             WHERE o.archived = 0
-              AND o.status NOT IN ('cancelled', 'completed')
+              -- «Ждёт оплаты» — не дебиторка (решение Юры 28.07.2026): счёт выставлен,
+              -- но работа не началась; это потенциальная выручка, блок potential ниже.
+              AND o.status NOT IN ('cancelled', 'completed', 'awaiting_payment')
               AND EXISTS (
                   SELECT 1 FROM estimate_sets es
                   WHERE es.order_id = o.id AND es.status = 'approved'
@@ -683,7 +685,8 @@ def get_debtors():
 
         STATUS_LABELS = {
             "draft": "Черновик", "estimate": "Смета", "project": "Проект",
-            "in_production": "В производстве", "completed": "Завершён", "cancelled": "Отменён",
+            "in_production": "В производстве", "awaiting_payment": "Ждёт оплаты",
+            "completed": "Завершён", "cancelled": "Отменён",
         }
 
         result = []
@@ -703,11 +706,40 @@ def get_debtors():
         total_plan = sum(r["price_plan"] or 0 for r in result)
         total_paid = sum(r["paid_total"] for r in result)
 
+        # Потенциальная выручка — заказы «Ждёт оплаты»: ориентир, который Юра может
+        # получить, если дожмёт оплату. Отдельно от дебиторки, утверждённая смета
+        # не требуется: сам статус — подтверждение Юры, что счёт выставлен.
+        # Цена — живая, из активной сметы (_margin), а не хранимое поле заказа:
+        # у draft-смет поле синкается только при approve и врёт (ORD-005: 212 300
+        # в поле против 195 600 по смете) — список заказов показывает живую,
+        # potential обязан совпадать с ним. Ленивый импорт против циклического.
+        from routers.orders import _margin
+        potential = []
+        for r in prod.execute(
+            """SELECT o.id, o.number, o.title, o.deadline, o.price_plan, o.cost_plan,
+                      c.name AS customer_name,
+                      COALESCE(SUM(p.amount), 0) AS paid_total
+               FROM orders o
+               LEFT JOIN customers c ON c.id = o.customer_id
+               LEFT JOIN payments p ON p.order_id = o.id
+               WHERE o.archived = 0 AND o.status = 'awaiting_payment'
+               GROUP BY o.id"""
+        ).fetchall():
+            row = dict(r)
+            m = _margin(prod, row["id"], row["price_plan"], row["cost_plan"])
+            row["price_plan"] = m["revenue"]
+            row.pop("cost_plan", None)
+            row["rest"] = round((m["revenue"] or 0) - (row["paid_total"] or 0), 2)
+            potential.append(row)
+        potential.sort(key=lambda x: x["rest"], reverse=True)
+
         return {
             "items": result,
             "total": round(total_debt, 2),
             "total_plan": round(total_plan, 2),
             "total_paid": round(total_paid, 2),
+            "potential": potential,
+            "potential_total": round(sum(x["rest"] for x in potential), 2),
         }
     finally:
         prod.close()

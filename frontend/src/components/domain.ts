@@ -13,6 +13,8 @@ export const ORDER_STATUSES = [
   { value: "estimate",      label: "Смета",          color: "#E8592A" },
   { value: "project",       label: "Проект",         color: "#E8592A" },
   { value: "in_production", label: "В производстве", color: "#1A1A1A" },
+  // Счёт выставлен, работа не началась — заказчик тянет. Ставится только вручную.
+  { value: "awaiting_payment", label: "Ждёт оплаты", color: "#B8860B" },
   { value: "completed",     label: "Завершён",       color: "#4A7C59" },
   { value: "cancelled",     label: "Отменён",        color: "#8B3A3A" },
 ];

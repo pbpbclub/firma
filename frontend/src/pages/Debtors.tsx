@@ -486,6 +486,39 @@ function DebtorsTab() {
           </div>
         </>
       )}
+
+      {/* Потенциальная выручка — заказы «Ждёт оплаты». Сознательно НЕ дебиторка
+          (решение Юры 28.07.2026): счёт выставлен, но работа не началась — это
+          ориентир «сколько получу, если дожму», а не долг клиента. */}
+      {!!data?.potential?.length && (
+        <div style={{ marginTop: 28, padding: "0 28px" }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 4 }}>
+            <span style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.06em" }}>ПОТЕНЦИАЛЬНАЯ ВЫРУЧКА</span>
+            <span style={{ fontSize: 11, color: "#C8C0B0" }}>· {data.potential.length}</span>
+          </div>
+          <div style={{ fontSize: 11, color: "#A89070", marginBottom: 10 }}>
+            Заказы со статусом «Ждёт оплаты»: счёт выставлен, работа не началась. Ориентир, а не долг — в дебиторку не входит.
+          </div>
+          {data.potential.map((p: any) => (
+            <div key={p.id} onClick={() => navigate(`/orders/${p.id}`)}
+              style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr 120px 120px 130px", gap: 12,
+                       alignItems: "center", padding: "9px 0", borderBottom: "1px solid #F2EFE9",
+                       cursor: "pointer", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}
+              onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")}
+              onMouseLeave={e => (e.currentTarget.style.background = "")}>
+              <span style={{ fontSize: 13, color: "#1A1A1A", fontFamily: SANS, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title}</span>
+              <span style={{ fontSize: 12, color: "#6B6355", fontFamily: SANS, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.customer_name || "—"}</span>
+              <span style={{ fontSize: 13, textAlign: "right" }}>{fmt(p.price_plan)}</span>
+              <span style={{ fontSize: 12, textAlign: "right", color: p.paid_total ? "#4A7C59" : "#C8C0B0" }}>{p.paid_total ? fmt(p.paid_total) : "—"}</span>
+              <span style={{ fontSize: 13, fontWeight: 600, textAlign: "right", color: "#B8860B" }}>{fmt(p.rest)}</span>
+            </div>
+          ))}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, padding: "10px 0", alignItems: "baseline" }}>
+            <span style={{ fontSize: 11, color: "#A89070" }}>если дожать по оплате</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: "#B8860B", fontFamily: MONO }}>{fmt(data.potential_total)}</span>
+          </div>
+        </div>
+      )}
     </>
   );
 }

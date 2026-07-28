@@ -24,7 +24,7 @@ export const customerStatusLabel = (s?: string) => (s ? (CUSTOMER_STATUS_LABELS[
 
 const ORDER_STATUS_LABELS: Record<string, string> = {
   draft: "Черновик", estimate: "Смета", project: "Проект",
-  in_production: "В производстве", completed: "Завершён", cancelled: "Отменён",
+  in_production: "В производстве", awaiting_payment: "Ждёт оплаты", completed: "Завершён", cancelled: "Отменён",
 };
 
 export const CLIENT_FIELDS: FieldDef[] = [

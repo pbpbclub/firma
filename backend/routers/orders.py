@@ -13,6 +13,9 @@ STATUS_LABELS = {
     "estimate": "Смета",
     "project": "Проект",
     "in_production": "В производстве",
+    # Смета/счёт есть, работа не началась — заказчик тянет с оплатой. Ставится
+    # ТОЛЬКО вручную (решение Юры 28.07.2026): система лишь подсказывает.
+    "awaiting_payment": "Ждёт оплаты",
     "completed": "Завершён",
     "cancelled": "Отменён",
 }
@@ -99,6 +102,7 @@ def list_orders(
                 "transit": m.get("transit"),
                 "has_estimate": m["has_estimate"],
                 "plan_source": m["plan_source"],
+                **_awaiting_flags(r["status"], m["revenue"], r["paid_total"]),
             })
         return out
     finally:
@@ -217,6 +221,20 @@ def _active_set(conn, oid: str):
                     created_at DESC
            LIMIT 1""", (oid,)
     ).fetchone()
+
+
+def _awaiting_flags(status: str, price_plan, paid_total) -> dict:
+    """Подсказки вокруг «Ждёт оплаты» — производные, в схеме ничего не храним.
+
+    awaiting_hint: счёт/цена есть, оплат нет — похоже, заказ ждёт оплату; предлагаем
+    Юре пометить (сам статус НЕ ставим — ручное решение).
+    awaiting_paid_signal: по «ждущему» пришли деньги — сигнал «запускаем?», тоже без
+    автоперехода: частичная предоплата ещё не значит, что работа началась."""
+    return {
+        "awaiting_hint": status in ("estimate", "project")
+                         and (price_plan or 0) > 0 and (paid_total or 0) <= 0,
+        "awaiting_paid_signal": status == "awaiting_payment" and (paid_total or 0) > 0,
+    }
 
 
 def _transit_facts(conn) -> dict:
@@ -618,10 +636,11 @@ def get_order(order_id: str):
             "tax_pct": m["tax_pct"],
             "net_profit": m["net_profit"],
             "payment_type": m["payment_type"],
-                # Транзит: счёт / план выплаты / факт / удержание — только у транзитных заказов
-                "transit": m.get("transit"),
+            # Транзит: счёт / план выплаты / факт / удержание — только у транзитных заказов
+            "transit": m.get("transit"),
             "has_estimate": m["has_estimate"],
             "plan_source": m["plan_source"],
+            **_awaiting_flags(order["status"], m["revenue"], paid_total),
             # Резерв под материалы (ТЗ-1 задача 1). reserved_amount/reserve_released_at
             # льются через **order; сюда — производные для UI.
             "reserve_suggested": _reserve_suggested(pf, order.get("cost_plan") or 0),
@@ -689,7 +708,7 @@ class StatusUpdate(BaseModel):
     status: str
 
 
-VALID_STATUSES = {"draft", "estimate", "project", "in_production", "completed", "cancelled"}
+VALID_STATUSES = set(STATUS_LABELS)   # один источник: ярлык есть — статус валиден
 
 
 @router.patch("/{order_id}/status")

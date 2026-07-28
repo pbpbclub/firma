@@ -37,7 +37,8 @@ function fmt(n: number) {
 const _num: React.CSSProperties = { fontFamily: MONO, fontVariantNumeric: "tabular-nums" };
 const _STATUS_RU: Record<string, string> = {
   draft: "Черновик", estimate: "Смета", project: "Проект",
-  in_production: "В производстве", completed: "Завершён", cancelled: "Отменён",
+  in_production: "В производстве", awaiting_payment: "Ждёт оплаты",
+  completed: "Завершён", cancelled: "Отменён",
 };
 
 function CostHistorySection({ data, onOpenOrder }: { data: any; onOpenOrder: (orderId: string) => void }) {
