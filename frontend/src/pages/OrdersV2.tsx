@@ -32,8 +32,10 @@ const STATUS_MAP: Record<string, { label: string; color: string }> = {
 
 const STATUSES = [
   { value: "in_production", label: "В работе" },
-  { value: "draft,estimate", label: "Смета" },
-  // Отдельная вкладка: без неё статус был бы недостижим из UI (как сейчас project)
+  // project — предпроизводственная стадия, живёт в «Смете»: отдельная вкладка ради
+  // редкого статуса раздувала бы навигацию, а без вкладки он был вовсе недостижим.
+  { value: "draft,estimate,project", label: "Смета" },
+  // Отдельная вкладка: без неё статус был бы недостижим из UI
   { value: "awaiting_payment", label: "Ждут оплату" },
   { value: "completed", label: "Завершён" },
 ];
@@ -577,7 +579,9 @@ export default function OrdersV2() {
     queryKey: ["orders-v2", status, search, archiveMode],
     queryFn: () => {
       const params: Record<string, string | boolean> = {};
-      if (status && !archiveMode) params.status = status;
+      // Поиск — глобальный: при непустом запросе статус вкладки снимается,
+      // иначе «Ильинский» с вкладки «В работе» не находился, хотя заказ есть.
+      if (status && !archiveMode && !search) params.status = status;
       if (search) params.search = search;
       if (archiveMode) params.archived = true;
       return ordersApi.list(params);
