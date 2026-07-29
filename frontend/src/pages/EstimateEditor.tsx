@@ -8,7 +8,7 @@ import { CostingBlock } from "../components/CostingBlock";
 import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { CalcHeader, CalcSection, CalcRow, CalcFooter } from "../components/ui/Calc";
 import { BrandSelect, EditableText } from "../components/ui/Selects";
-import { markupToPct, pctToMarkup, clientPrice, cashFromClient } from "../components/ui/priceMath";
+import { markupToPct, pctToMarkup, clientPrice, cashFromClient, taxFor } from "../components/ui/priceMath";
 import { Breadcrumbs } from "../components/ui/Breadcrumbs";
 import { MONO } from "../components/ui/Num";
 
@@ -485,7 +485,10 @@ export default function EstimateEditor() {
   const clientPriceForItem = (it: any) => clientPrice(it.sale_price || 0, isBank, bankPct);
   const totalClient  = items.reduce((s: number, it: any) => s + clientPriceForItem(it), 0);
   const grandTotal   = isBank ? totalClient : totalSale;
-  const taxes        = isBank ? Math.round(grandTotal * 0.06) : 0;
+  // УСН и у транзита: деньги проходят через р/с, налог со всей суммы счёта —
+  // та же логика, что orders._margin. Раньше редактор считал транзит без налога
+  // и показывал прибыль выше, чем карточка того же заказа.
+  const taxes        = taxFor(activeSet?.payment_type, grandTotal);
 
   const createSet = async () => {
     const s = await estimatesApi.createSet(orderId!);
@@ -686,7 +689,7 @@ export default function EstimateEditor() {
                     <input
                       key={activeSet.bank_pct}
                       defaultValue={activeSet.bank_pct ?? 13}
-                      onBlur={e => updateSet({ bank_pct: parseFloat(e.target.value) || 13 })}
+                      onBlur={e => updateSet({ bank_pct: Number.isFinite(parseFloat(e.target.value)) ? parseFloat(e.target.value) : 13 })}
                       style={{ width: 30, border: "1px solid #EDEBE6", background: "transparent", fontSize: 11, textAlign: "center", padding: "3px 2px", outline: "none" }}
                     />
                   ) : (

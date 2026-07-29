@@ -5,9 +5,49 @@
 вынесены в отдельные тесты — задвоение покрытого обязательства и схлопывание
 плана при частичной разбивке позиций по строкам.
 """
+import sqlite3
+
 import pytest
 
+import routers.orders as orders_mod
 from routers.orders import _bucket, _plan_fact, _transit_facts
+
+
+class _NoClose:
+    """sqlite3.Connection с заглушенным close() — _transit_facts закрывает
+    zenmoney-соединение сам, а фикстуре оно нужно на несколько вызовов."""
+    def __init__(self, conn): self._c = conn
+    def __getattr__(self, name): return getattr(self._c, name)
+    def close(self): pass
+
+
+@pytest.fixture
+def zm(monkeypatch):
+    """In-memory zenmoney.db (боевая схема, mode=ro) — для дедупа с zm_links."""
+    src = sqlite3.connect("file:/opt/fin-agent/data/zenmoney.db?mode=ro", uri=True, timeout=15)
+    try:
+        stmts = [r[0] for r in src.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND sql IS NOT NULL "
+            "AND name NOT LIKE 'sqlite_%'")]
+    finally:
+        src.close()
+    c = sqlite3.connect(":memory:")
+    c.row_factory = sqlite3.Row
+    for stmt in stmts:
+        c.execute(stmt)
+    wrapped = _NoClose(c)
+    monkeypatch.setattr(orders_mod, "get_zenmoney", lambda: wrapped)
+    yield c
+    c.close()
+
+
+def _zm_link(zm, oid, tx_id, outcome, payee="Карина Х."):
+    zm.execute(
+        "INSERT INTO zm_transactions (id, date, payee, outcome, income) VALUES (?,?,?,?,0)",
+        (tx_id, "2026-07-20", payee, outcome))
+    zm.execute(
+        "INSERT INTO zm_links (zm_tx_id, order_id, contractor_name) VALUES (?,?,?)",
+        (tx_id, oid, "Кебра"))
 
 
 def _order(conn, oid="ORD-T01", price=100_000.0, cost=60_000.0):
@@ -207,6 +247,41 @@ class TestТранзитныйФакт:
         _expense(conn, oid, 10_000, "labor", eid="E1")
         _creditor(conn, oid, "C1", 5_000)
         assert _transit_facts(conn)[oid]["fact"] == 15_000
+
+    def test_zm_link_гасится_расходом_с_тем_же_tx(self, conn, zm):
+        """Штатная связка: разнесённый расход несёт zenmoney_tx_id привязки."""
+        oid = _order(conn)
+        _zm_link(zm, oid, "ZM-1", 44_370)
+        _expense(conn, oid, 44_370, "labor", eid="E1", zenmoney_tx_id="ZM-1")
+        assert _transit_facts(conn)[oid]["fact"] == 44_370
+
+    def test_zm_link_не_задваивает_ручной_расход_без_tx(self, conn, zm):
+        """Инцидент-кандидат: Юра внёс выплату руками (без tx_id), фин-агент
+        привязал ТОТ ЖЕ перевод через zm_links — факт не должен удвоиться."""
+        oid = _order(conn)
+        _zm_link(zm, oid, "ZM-1", 44_370)
+        _expense(conn, oid, 44_370, "labor", eid="E1")   # ручной, tx_id пуст
+        assert _transit_facts(conn)[oid]["fact"] == 44_370
+
+    def test_zm_link_не_задваивает_обязательство_без_tx(self, conn, zm):
+        oid = _order(conn)
+        _zm_link(zm, oid, "ZM-1", 44_370)
+        _creditor(conn, oid, "C1", 44_370)               # закрыто руками, tx_id пуст
+        assert _transit_facts(conn)[oid]["fact"] == 44_370
+
+    def test_zm_link_на_другую_сумму_добавляется(self, conn, zm):
+        """Дедуп по сумме не должен гасить НАСТОЯЩУЮ вторую выплату."""
+        oid = _order(conn)
+        _zm_link(zm, oid, "ZM-1", 20_000)
+        _expense(conn, oid, 44_370, "labor", eid="E1")
+        assert _transit_facts(conn)[oid]["fact"] == 64_370
+
+    def test_два_расхода_с_одним_tx_считаются_раз(self, conn):
+        """Дубль внутри expenses (например после деградации инбокса)."""
+        oid = _order(conn)
+        _expense(conn, oid, 5_000, "labor", eid="E1", finance_tx_id="F1")
+        _expense(conn, oid, 5_000, "labor", eid="E2", finance_tx_id="F1")
+        assert _transit_facts(conn)[oid]["fact"] == 5_000
 
 
 class TestПрогноз:

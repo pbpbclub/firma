@@ -330,12 +330,15 @@ def update_set(set_id: str, body: SetUpdate):
                 "UPDATE estimate_items SET bank_pct = ? WHERE set_id = ?",
                 (body.bank_pct, set_id)
             )
-        conn.commit()
+        # Коммит ОДИН и в самом конце: если сюда пришёл status='approved', то
+        # supersede прочих смет, is_primary, синк заказа и обязательства должны
+        # зафиксироваться вместе со сменой статуса. Ранний commit оставлял после
+        # падения _approve_set заказ с двумя активными сметами и старым планом.
         updated = conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
         if updated["status"] == "approved":
             # Одна активная смета на заказ: supersede прочих + синк заказа + обязательства.
             _approve_set(conn, set_id)
-            conn.commit()
+        conn.commit()
         return dict(conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (set_id,)).fetchone())
     finally:
         conn.close()

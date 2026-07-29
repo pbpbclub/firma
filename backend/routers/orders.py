@@ -261,11 +261,26 @@ def _transit_facts(conn) -> dict:
         return facts.setdefault(oid, {"fact": 0.0, "contractor": None, "sources": []})
 
     zm_seen = set()      # zenmoney_tx_id, уже учтённые своими источниками
+    tx_seen = set()      # (вид, tx_id) — ловим дубли внутри самих expenses
+    # Третий контур дедупа — по СУММЕ. Ручной расход (или закрытое руками
+    # обязательство) не несёт tx_id, и zm_link того же перевода не гасился по
+    # zm_seen — факт задваивался (44 370 → 88 740). Совпадение суммы ±1 ₽ по тому
+    # же заказу считаем тем же переводом; каждая сумма гасит только ОДНУ привязку,
+    # чтобы настоящая вторая выплата той же суммы не потерялась.
+    untied = {}          # order_id -> [суммы источников без zenmoney_tx_id]
 
     for r in conn.execute(
-        """SELECT order_id, id, amount, title, supplier, zenmoney_tx_id
+        """SELECT order_id, id, amount, title, supplier, zenmoney_tx_id, finance_tx_id
            FROM expenses WHERE order_id IS NOT NULL"""
     ):
+        keys = [(k, str(tx)) for k, tx in (("fin", r["finance_tx_id"]),
+                                           ("zm", r["zenmoney_tx_id"])) if tx]
+        if any(k in tx_seen for k in keys):
+            # одна транзакция разнесена дважды (например, до и после деградации
+            # инбокса) — в факт идёт только первый расход
+            tx_seen.update(keys)
+            continue
+        tx_seen.update(keys)
         b = bucket(r["order_id"])
         b["fact"] += r["amount"] or 0
         b["sources"].append({"kind": "expense", "amount": r["amount"] or 0,
@@ -274,6 +289,8 @@ def _transit_facts(conn) -> dict:
             b["contractor"] = r["supplier"]
         if r["zenmoney_tx_id"]:
             zm_seen.add(str(r["zenmoney_tx_id"]))
+        else:
+            untied.setdefault(r["order_id"], []).append(r["amount"] or 0)
 
     # Обязательство — в факт, только если не покрыто расходом (то же условие, что в _plan_fact).
     # covered считаем флагом (а не отсекаем WHERE): покрытую строку в факт не берём,
@@ -301,6 +318,8 @@ def _transit_facts(conn) -> dict:
                              "title": r["name"], "payee": r["name"]})
         if r["name"] and not b["contractor"]:
             b["contractor"] = r["name"]
+        if not r["zenmoney_tx_id"]:
+            untied.setdefault(r["order_id"], []).append(r["paid"] or 0)
 
     try:
         zconn = get_zenmoney()
@@ -316,9 +335,20 @@ def _transit_facts(conn) -> dict:
     except Exception:
         rows = []                     # базы нет или схема другая — работаем без неё
 
+    def _consume_untied(order_id, outcome) -> bool:
+        """Есть ли по заказу свой источник той же суммы без tx_id — и погасить его."""
+        amounts = untied.get(order_id) or []
+        for i, a in enumerate(amounts):
+            if abs(a - outcome) <= 1:
+                amounts.pop(i)
+                return True
+        return False
+
     for r in rows:
         if str(r["zm_tx_id"]) in zm_seen:
             continue                  # тот же перевод уже учтён расходом/обязательством
+        if _consume_untied(r["order_id"], r["outcome"]):
+            continue                  # ручной источник той же суммы — тот же перевод
         b = bucket(r["order_id"])
         b["fact"] += r["outcome"]
         b["sources"].append({"kind": "zm_link", "amount": r["outcome"],

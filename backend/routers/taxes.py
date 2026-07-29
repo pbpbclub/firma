@@ -34,12 +34,15 @@ def tax_summary():
         year = datetime.now().year
         quarter = current_quarter()
 
-        # Доходы за текущий год (только входящие транзакции)
+        # Доходы за текущий год — ТОЛЬКО поступления. В finance.db суммы
+        # положительны у обеих ног (direction различает in/out), поэтому фильтр
+        # amount > 0 без direction считал доходом и списания: база УСН за 2026
+        # удваивалась (8,47 млн вместо 4,23 млн), фантомный налог +254 тыс.
         income_year = conn.execute(
             """
             SELECT COALESCE(SUM(amount), 0) as total
             FROM transactions
-            WHERE strftime('%Y', date) = ? AND amount > 0
+            WHERE strftime('%Y', date) = ? AND direction = 'in' AND amount > 0
             """,
             (str(year),),
         ).fetchone()["total"]
@@ -51,7 +54,7 @@ def tax_summary():
             """
             SELECT COALESCE(SUM(amount), 0) as total
             FROM transactions
-            WHERE date >= ? AND strftime('%Y', date) = ? AND amount > 0
+            WHERE date >= ? AND strftime('%Y', date) = ? AND direction = 'in' AND amount > 0
             """,
             (q_start, str(year)),
         ).fetchone()["total"]

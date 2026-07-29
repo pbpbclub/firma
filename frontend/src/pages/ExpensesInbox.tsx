@@ -703,7 +703,7 @@ export default function ExpensesInbox() {
   const items: any[] = cpFilter ? allItems.filter((t: any) => t.counterparty === cpFilter) : allItems;
   // degraded: набор «уже разнесённых» неполон (сбой БД) — разноска отключена, иначе
   // риск двойного платежа. truncated: показаны не все неразнесённые — уточни фильтры.
-  const degraded = isIncoming && !!data?.degraded;
+  const degraded = !!data?.degraded;
   const truncated = !!data?.truncated;
   const pager = usePager(items.length, "inbox_page_size");
   const pageItems = pager.slice(items);
@@ -809,12 +809,12 @@ export default function ExpensesInbox() {
          ) :
          pageItems.map((t: any) => (
           <div key={t.id}>
-            <div onClick={() => { if (!(isIncoming && degraded)) setOpenId(openId === t.id ? null : t.id); }}
+            <div onClick={() => { if (!degraded) setOpenId(openId === t.id ? null : t.id); }}
               style={{
                 display: "grid", gridTemplateColumns: "80px 1fr 130px", gap: 12, padding: "11px 28px",
-                borderBottom: "1px solid #F7F5F1", cursor: (isIncoming && degraded) ? "default" : "pointer", alignItems: "center",
+                borderBottom: "1px solid #F7F5F1", cursor: degraded ? "default" : "pointer", alignItems: "center",
                 background: openId === t.id ? "#FFF8F5" : "transparent",
-                opacity: t.dismissed_reason ? 0.55 : (isIncoming && degraded ? 0.6 : 1),
+                opacity: t.dismissed_reason ? 0.55 : (degraded ? 0.6 : 1),
               }}
               onMouseEnter={e => { if (openId !== t.id) e.currentTarget.style.background = "#FAF8F5"; }}
               onMouseLeave={e => { if (openId !== t.id) e.currentTarget.style.background = "transparent"; }}>

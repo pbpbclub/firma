@@ -53,3 +53,12 @@ export function cashFromClient(clientTotal: number, isBank: boolean, pct = DEFAU
   const c = clientTotal || 0;
   return !isBank || c <= 0 ? c : Math.round(c * (1 - pct / 100) * 100) / 100;
 }
+
+/** УСН к показу. Налог берётся у всего, что прошло через р/с: и безнал, и транзит
+ *  (у транзита — со ВСЕЙ суммы счёта, не с удержания). Та же логика, что
+ *  orders.py::_margin (taxable = is_bank or is_transit); ставка 6% — одна на систему. */
+export const TAX_PCT = 6;
+export function taxFor(paymentType: string | null | undefined, clientTotal: number) {
+  const taxed = paymentType === "bank" || paymentType === "transit";
+  return taxed ? Math.round((clientTotal || 0) * TAX_PCT / 100) : 0;
+}

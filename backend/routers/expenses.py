@@ -5,6 +5,8 @@
 производный признак: id транзакции встречается в expenses / creditors / zm_links.
 Три разных файла БД, ATTACH в проекте не используется → анти-джойн делаем в Python.
 """
+import sqlite3
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional, List
@@ -62,24 +64,34 @@ def _guess_category(hint: Optional[str]) -> str:
     return _CATEGORY_GUESS.get((hint or "").strip().lower(), "other")
 
 
-def _allocated_ids() -> tuple[set, set]:
-    """id уже разнесённых транзакций: (банк, zenmoney).
+def _allocated_ids() -> tuple[set, set, bool]:
+    """id уже разнесённых транзакций: (банк, zenmoney, degraded).
 
     Источники: expenses (наша разноска), creditors (привязка обязательств),
     accountable_ops (выдачи под отчёт — учтены, разносить нельзя),
-    zm_links (разноска фин-агента, expenses не создаёт)."""
+    zm_links (разноска фин-агента, expenses не создаёт).
+
+    degraded=True — какой-то источник прочитать не удалось, набор НЕПОЛНЫЙ.
+    Молчать об этом нельзя: инбокс покажет уже разнесённую транзакцию как
+    свежую, а from-tx заведёт второй расход на тот же перевод. Отсутствие
+    колонки на старой схеме деградацией не считается."""
     bank, zen = set(), set()
-    conn = get_production()
+    degraded = False
     try:
-        for tbl in ("expenses", "creditors", "accountable_ops"):
-            for col, dest in (("finance_tx_id", bank), ("zenmoney_tx_id", zen)):
-                try:
-                    for r in conn.execute(f"SELECT DISTINCT {col} FROM {tbl} WHERE {col} IS NOT NULL AND {col} != ''"):
-                        dest.add(str(r[0]))
-                except Exception:
-                    pass  # колонки может не быть на старой схеме
-    finally:
-        conn.close()
+        conn = get_production()
+        try:
+            for tbl in ("expenses", "creditors", "accountable_ops"):
+                for col, dest in (("finance_tx_id", bank), ("zenmoney_tx_id", zen)):
+                    try:
+                        for r in conn.execute(f"SELECT DISTINCT {col} FROM {tbl} WHERE {col} IS NOT NULL AND {col} != ''"):
+                            dest.add(str(r[0]))
+                    except sqlite3.OperationalError as e:
+                        if "no such column" not in str(e) and "no such table" not in str(e):
+                            degraded = True
+        finally:
+            conn.close()
+    except Exception:
+        degraded = True
     try:
         zc = get_zenmoney()
         try:
@@ -87,9 +99,12 @@ def _allocated_ids() -> tuple[set, set]:
                 zen.add(str(r[0]))
         finally:
             zc.close()
+    except sqlite3.OperationalError as e:
+        if "no such table" not in str(e):
+            degraded = True
     except Exception:
-        pass
-    return bank, zen
+        degraded = True
+    return bank, zen, degraded
 
 
 # Скрытие списаний из инбокса (внутренние переводы между своими счетами, возвраты).
@@ -124,7 +139,7 @@ def inbox(
     limit: int = Query(100, le=2000),
 ):
     """Неразнесённые списания. payee_hint — подсказка поставщика/категории."""
-    bank_done, zen_done = _allocated_ids()
+    bank_done, zen_done, degraded = _allocated_ids()
     dismissed = _dismissed_out_map(source)
     rules = _load_payee_rules()
     masters_match, name_to_id = _load_masters_matching()
@@ -246,7 +261,10 @@ def inbox(
         finally:
             conn.close()
 
-    return {"items": out, "count": len(out), "truncated": truncated, "source": source}
+    # degraded: набор «уже разнесённых» неполный — часть строк может быть
+    # ложно-свежей. UI обязан показать предупреждение вместо тихого списка.
+    return {"items": out, "count": len(out), "truncated": truncated, "source": source,
+            "degraded": degraded}
 
 
 class Allocation(BaseModel):
@@ -289,7 +307,11 @@ def create_from_tx(body: FromTxIn):
             raise HTTPException(status_code=400, detail=f"category must be one of {'|'.join(EXPENSE_CATEGORIES)}")
 
     # Транзакция должна существовать и быть ещё не разнесённой
-    bank_done, zen_done = _allocated_ids()
+    bank_done, zen_done, degraded = _allocated_ids()
+    if degraded:
+        # Набор «уже разнесённых» неполный — создание расхода сейчас рискует
+        # дублем на тот же перевод. Тот же паттерн, что в payments.py.
+        raise HTTPException(status_code=503, detail="Список разнесённых транзакций прочитан не полностью — попробуй ещё раз через минуту")
     if body.source == "bank":
         if str(body.tx_id) in bank_done:
             raise HTTPException(status_code=409, detail="Транзакция уже разнесена")

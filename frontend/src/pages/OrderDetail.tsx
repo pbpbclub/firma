@@ -227,17 +227,17 @@ export default function OrderDetail() {
   // только по клику Юры: система подсказывает, но не переводит сама.
   const setStatusMutation = useMutation({
     mutationFn: (st: string) => ordersApi.updateStatus(id!, st),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["order", id] }); qc.invalidateQueries({ queryKey: ["orders"] }); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["order-detail", id] }); qc.invalidateQueries({ queryKey: ["orders-v2"] }); },
   });
 
   // Основная смета — ручной выбор Юры: остальные варианты остаются живыми черновиками
   const setPrimary = useMutation({
     mutationFn: (setId: string) => estimatesApi.setPrimary(setId),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["order", id] }); qc.invalidateQueries({ queryKey: ["order-estimate", id] }); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["order-detail", id] }); qc.invalidateQueries({ queryKey: ["order-estimates", id] }); },
   });
   const unsetPrimary = useMutation({
     mutationFn: (setId: string) => estimatesApi.unsetPrimary(setId),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["order", id] }); qc.invalidateQueries({ queryKey: ["order-estimate", id] }); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["order-detail", id] }); qc.invalidateQueries({ queryKey: ["order-estimates", id] }); },
   });
 
   const setReserve = useMutation({
@@ -384,7 +384,7 @@ export default function OrderDetail() {
               // Статус уже записан пилюлей (PATCH) — форму синхронизируем БЕЗ isDirty,
               // иначе NavigationGuard посчитает страницу несохранённой.
               setForm(prev => prev ? { ...prev, status: st } : prev);
-              qc.invalidateQueries({ queryKey: ["order", id] });
+              qc.invalidateQueries({ queryKey: ["order-detail", id] });
               qc.invalidateQueries({ queryKey: ["orders-v2"] });
             }} />
 
