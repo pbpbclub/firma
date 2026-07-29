@@ -90,8 +90,10 @@ export function PlanFactDuel({ planFact }: { planFact: any }) {
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 12 }}>
         <div>
           <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.08em" }}>ПЛАН ⇄ ФАКТ</div>
-          {!pf.detailed && (
-            <div style={{ fontSize: 10, color: "#A89070", marginTop: 3 }}>смета без детализации, план в «Прочее»</div>
+          {(pf.plan_unbroken ?? 0) > 0 && (
+            <div style={{ fontSize: 10, color: "#A89070", marginTop: 3 }}>
+              {fmt(pf.plan_unbroken)} в смете {pf.detailed ? "не разбиты" : "не разбито"} по категориям — {pf.detailed ? "они" : "весь план"} в «Прочее»
+            </div>
           )}
         </div>
         {coveragePct != null && pf.has_facts && (
@@ -107,6 +109,7 @@ export function PlanFactDuel({ planFact }: { planFact: any }) {
         <div>
           <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em" }}>ПЛАН</div>
           <div style={{ fontSize: 15, fontWeight: 700, color: "#6B6355", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(pf.cost_plan)}</div>
+          <div style={{ fontSize: 9, color: "#A89070" }}>себестоимость по смете</div>
         </div>
         <div style={{ textAlign: "center", flex: 1 }}>
           {pf.has_facts ? (
@@ -129,6 +132,7 @@ export function PlanFactDuel({ planFact }: { planFact: any }) {
             color: !pf.has_facts ? "#C8C0B0" : pf.cost_fact > pf.cost_plan ? "#8B3A3A" : "#1A1A1A" }}>
             {pf.has_facts ? fmt(pf.cost_fact) : "—"}
           </div>
+          <div style={{ fontSize: 9, color: "#A89070" }}>внесённые расходы</div>
         </div>
       </div>
 
@@ -138,7 +142,9 @@ export function PlanFactDuel({ planFact }: { planFact: any }) {
       {/* Финал: маржа */}
       <div style={{ borderTop: "1px solid #EDEBE6", paddingTop: 10, marginTop: 2 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-          <span style={{ fontSize: 11, color: "#6B6355" }}>Чистая: план → прогноз</span>
+          <span style={{ fontSize: 11, color: "#6B6355" }}
+            title="Выручка − себестоимость − УСН. Прогноз берёт большее из плана и факта, поэтому не завышает, пока расходы внесены не все.">
+            Чистая: план → прогноз{pf.tax > 0 ? " · после УСН" : ""}</span>
           <span style={{ fontSize: 13, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
             <span style={{ color: "#A89070" }}>{fmt(pf.net_plan)}</span>
             <span style={{ color: "#C8C0B0" }}> → </span>

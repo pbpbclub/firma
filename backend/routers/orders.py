@@ -451,15 +451,32 @@ def _plan_fact(conn, oid: str, cost_plan: float, paid_total: float, price_plan: 
     est = _active_set(conn, oid)
 
     plan_by = {b: 0.0 for b in _CAT_BUCKETS}
+    plan_detail_sum = 0.0     # часть плана, разбитая строками состава
+    plan_unbroken = 0.0       # позиции «одной суммой» — без состава
     if est:
-        # cost_total позиции = Σ(line_total) × quantity → план по категории = Σ line_total×qty
-        rows = conn.execute(
-            """SELECT el.type AS t, COALESCE(SUM(el.line_total * ei.quantity), 0) AS s
-               FROM estimate_lines el JOIN estimate_items ei ON ei.id = el.item_id
-               WHERE ei.set_id = ? GROUP BY el.type""", (est["id"],)
-        ).fetchall()
-        for r in rows:
-            plan_by[_bucket(r["t"])] += r["s"] or 0
+        # План — ПО КАЖДОЙ позиции: со строками — её строки по типам (cost_total
+        # позиции = Σ line_total × qty, см. _recalc_item), без строк — её cost_total
+        # в категорию позиции. Раньше выбор был «всё или ничего» на весь сет:
+        # одна разобранная позиция из шести выключала фолбэк, и у Горбачёва план
+        # заказа схлопывался со 149 867 до 19 267 — «чистый прогноз» врал вчетверо.
+        for it in conn.execute(
+            "SELECT id, category, quantity, cost_total FROM estimate_items WHERE set_id = ?",
+            (est["id"],)
+        ).fetchall():
+            rows = conn.execute(
+                "SELECT type, COALESCE(SUM(line_total), 0) AS s FROM estimate_lines "
+                "WHERE item_id = ? GROUP BY type", (it["id"],)
+            ).fetchall()
+            if rows:
+                qty = it["quantity"] or 1
+                for r in rows:
+                    v = (r["s"] or 0) * qty
+                    plan_by[_bucket(r["type"])] += v
+                    plan_detail_sum += v
+            else:
+                v = it["cost_total"] or 0
+                plan_by[_bucket(it["category"])] += v
+                plan_unbroken += v
 
     fact_by = {b: 0.0 for b in _CAT_BUCKETS}
     for r in conn.execute("SELECT category AS c, COALESCE(SUM(amount),0) AS s FROM expenses WHERE order_id = ? GROUP BY category", (oid,)):
@@ -488,24 +505,15 @@ def _plan_fact(conn, oid: str, cost_plan: float, paid_total: float, price_plan: 
     for r in cred_rows:
         fact_by[_bucket(r["cat"])] += r["s"] or 0
 
-    plan_detail_sum = round(sum(plan_by.values()), 2)
-    # Фолбэки плана: строки → позиции сета (сметы финагента без строк) → cost_plan заказа.
-    items_plan = 0.0
-    if plan_detail_sum == 0 and est:
-        for r in conn.execute(
-            "SELECT category AS c, COALESCE(SUM(cost_total), 0) AS s FROM estimate_items WHERE set_id = ? GROUP BY category",
-            (est["id"],)
-        ):
-            plan_by[_bucket(r["c"])] += r["s"] or 0
-        items_plan = round(sum(plan_by.values()), 2)
-    if plan_detail_sum > 0:
-        plan_total = plan_detail_sum
-    elif items_plan > 0:
-        plan_total = items_plan
-    else:
+    plan_detail_sum = round(plan_detail_sum, 2)
+    plan_unbroken = round(plan_unbroken, 2)
+    plan_total = round(sum(plan_by.values()), 2)
+    if plan_total == 0:
+        # сет пуст или сметы нет вовсе — последний фолбэк: план заказа одной суммой
         plan_total = round(cost_plan or 0, 2)
         if plan_total > 0:
             plan_by["Прочее"] += plan_total
+            plan_unbroken = plan_total
 
     categories = []
     for b in _CAT_BUCKETS:
@@ -533,6 +541,9 @@ def _plan_fact(conn, oid: str, cost_plan: float, paid_total: float, price_plan: 
         "has_estimate": est is not None,
         "plan_source": m["plan_source"],
         "detailed": plan_detail_sum > 0,
+        # Сколько плана — позиции «одной суммой», без состава: UI подписывает,
+        # что эта часть «Прочего» — «не разбито», а не реальная категория трат.
+        "plan_unbroken": plan_unbroken,
         # Внесена ли хоть одна фактическая трата и какая доля плана закрыта фактом.
         # UI обязан смотреть сюда, прежде чем выдавать факт за полную картину.
         "has_facts": cost_fact > 0,
