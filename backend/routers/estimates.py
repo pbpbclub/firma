@@ -313,7 +313,7 @@ def update_set(set_id: str, body: SetUpdate):
         row = conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Not found")
-        fields = {k: v for k, v in body.model_dump().items() if v is not None}
+        fields = body.model_dump(exclude_unset=True)   # присланный null очищает поле
         if not fields:
             return dict(row)
         # У утверждённой сметы суммы согласованы с клиентом: менять payment_type/bank_pct нельзя.
@@ -635,7 +635,7 @@ def update_item(item_id: str, body: ItemUpdate):
         if not row:
             raise HTTPException(status_code=404, detail="Not found")
         _assert_item_editable(conn, item_id)
-        fields = {k: v for k, v in body.model_dump().items() if v is not None}
+        fields = body.model_dump(exclude_unset=True)   # присланный null очищает поле
         if fields:
             set_clause = ", ".join(f"{k} = ?" for k in fields)
             conn.execute(
@@ -777,10 +777,12 @@ def update_line(line_id: str, body: LineUpdate):
         if not row:
             raise HTTPException(status_code=404, detail="Not found")
         _assert_item_editable(conn, row["item_id"])
-        fields = {k: v for k, v in body.model_dump().items() if v is not None}
-        no_learn = bool(fields.pop("no_learn", False))   # не колонка — только флаг поведения
+        # exclude_unset: обновляются только присланные поля, присланный null пишется
+        # как NULL — можно ОТВЯЗАТЬ мастера/вид работ/материал, а не только заменить.
+        fields = body.model_dump(exclude_unset=True)
+        no_learn = bool(fields.pop("no_learn", False) or False)   # не колонка — только флаг поведения
         # If work_type chosen, sync title to its name
-        if "work_type_id" in fields:
+        if fields.get("work_type_id"):
             wt = conn.execute("SELECT name FROM work_types WHERE id = ?", (fields["work_type_id"],)).fetchone()
             if wt:
                 fields["title"] = wt["name"]
@@ -792,8 +794,8 @@ def update_line(line_id: str, body: LineUpdate):
                 fields.setdefault("price_supplier", best["supplier"])
                 fields.setdefault("price_date", best["price_date"])
         # recalc line_total
-        qty = fields.get("qty", row["qty"])
-        unit_price = fields.get("unit_price", row["unit_price"])
+        qty = fields.get("qty", row["qty"]) or 0
+        unit_price = fields.get("unit_price", row["unit_price"]) or 0
         fields["line_total"] = round(qty * unit_price, 2)
         set_clause = ", ".join(f"{k} = ?" for k in fields)
         conn.execute(

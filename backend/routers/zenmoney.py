@@ -113,7 +113,7 @@ def get_balance_at_date(date: str):
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": str(e), "accounts": [], "total": 0}
+        raise HTTPException(status_code=503, detail=f"zenmoney.db недоступна: {e}")
     finally:
         conn.close()
 

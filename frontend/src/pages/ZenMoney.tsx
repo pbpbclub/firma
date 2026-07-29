@@ -9,6 +9,7 @@ import { Modal } from "../components/ui/Modal";
 import { MONO } from "../components/ui/Num";
 import { IconButton } from "../components/ui/IconButton";
 
+// abs намеренный: направление операции показывают цвет/колонка, не знак
 const fmt = (n: number) =>
   new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(Math.abs(n));
 

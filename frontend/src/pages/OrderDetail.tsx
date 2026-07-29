@@ -434,7 +434,7 @@ export default function OrderDetail() {
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0 }}>
                     <span style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>
-                      {s.name || `Смета ${i + 1}`}
+                      {s.title || `Смета ${i + 1}`}
                     </span>
                     <span style={{ fontSize: 10, color: st?.color ?? "#A89070", fontWeight: 500 }}>
                       {st?.label ?? s.status}

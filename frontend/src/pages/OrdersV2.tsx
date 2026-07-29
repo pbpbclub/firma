@@ -1,3 +1,5 @@
+import { fmtMoneyDash as fmt } from "../components/ui/format";
+import { QueryError } from "../components/ui/QueryError";
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { Loading } from "../components/ui/Loading";
@@ -5,7 +7,7 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { MONO } from "../components/ui/Num";
 import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { useNavigate } from "react-router-dom";
-import { ordersApi, customersApi, brandsApi, estimatesApi } from "../api";
+import { ordersApi, customersApi, brandsApi, estimatesApi, financeApi } from "../api";
 import { MagnifyingGlass, DotsThree, Plus, Files, CaretRight, Archive, ArrowCounterClockwise, CaretDown, X, Trash, UserCircle } from "@phosphor-icons/react";
 import { ColumnFilter, AmountFilter } from "../components/TableFilters";
 import { ProfitLadder, PlanFactDuel } from "../components/OrderFinance";
@@ -14,22 +16,8 @@ import { StatusPicker } from "../components/order/StatusPicker";
 import { EstimateReviewQueue } from "../components/EstimateReviewQueue";
 import { Breadcrumbs } from "../components/ui/Breadcrumbs";
 
-const BRANDS: { value: string; color: string }[] = [
-  { value: "MeRA",    color: "#2E6DA4" },
-  { value: "pbpb",    color: "#7B4F9E" },
-  { value: "Транзит", color: "#3D8C6B" },
-];
-const BRAND_COLOR: Record<string, string> = Object.fromEntries(BRANDS.map(b => [b.value, b.color]));
-
-const STATUS_MAP: Record<string, { label: string; color: string }> = {
-  draft:         { label: "Черновик",       color: "#A89070" },
-  estimate:      { label: "Смета",          color: "#E8592A" },
-  project:       { label: "Проект",         color: "#E8592A" },
-  in_production: { label: "В производстве", color: "#1A1A1A" },
-  awaiting_payment: { label: "Ждёт оплаты", color: "#B8860B" },
-  completed:     { label: "Завершён",       color: "#4A7C59" },
-  cancelled:     { label: "Отменён",        color: "#8B3A3A" },
-};
+// Статусы и бренды — из domain.ts (аудит 29.07: локальные копии разъезжались).
+import { ORDER_STATUS_MAP as STATUS_MAP, BRANDS, BRAND_COLOR, ESTIMATE_STATUS } from "../components/domain";
 
 const STATUSES = [
   { value: "in_production", label: "В работе" },
@@ -43,10 +31,6 @@ const STATUSES = [
 
 const PAGE_SIZE = 10;
 
-function fmt(n: number) {
-  if (!n) return "—";
-  return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) + " ₽";
-}
 
 function fmtDate(s: string) {
   if (!s) return "—";
@@ -179,8 +163,6 @@ function EstimatesDropdown({ orderId, sets }: { orderId: string; sets: any[] }) 
     return () => document.removeEventListener("mousedown", h);
   }, []);
 
-  const STATUS_LABEL: Record<string, string> = { approved: "Согласована", draft: "Черновик" };
-
   return (
     <div ref={ref} style={{ position: "relative" }}>
       <button
@@ -207,7 +189,7 @@ function EstimatesDropdown({ orderId, sets }: { orderId: string; sets: any[] }) 
               onMouseLeave={e => (e.currentTarget.style.background = "")}
             >
               <span style={{ color: "#1A1A1A", fontWeight: 500 }}>Смета {i + 1}</span>
-              <span style={{ fontSize: 10, color: s.status === "approved" ? "#4A7C59" : "#A89070" }}>{STATUS_LABEL[s.status] ?? s.status}</span>
+              <span style={{ fontSize: 10, color: s.status === "approved" ? "#4A7C59" : "#A89070" }}>{(ESTIMATE_STATUS[s.status]?.label ?? s.status) ?? s.status}</span>
             </div>
           ))}
         </div>
@@ -496,7 +478,16 @@ export default function OrdersV2() {
   });
   const reviewCount = reviewQueue?.sets?.length ?? 0;
 
-  const { data = [], isLoading } = useQuery({
+  // «Потенциальная выручка» — тот же источник, что секция в «Обязательствах»
+  // (finance/debtors → potential_total): формула живёт в одном месте, на бэке.
+  const { data: debtorsData } = useQuery({
+    queryKey: ["debtors"],
+    queryFn: financeApi.debtors,
+    enabled: status === "awaiting_payment",
+  });
+  const potentialTotal = debtorsData?.potential_total ?? null;
+
+  const { data = [], isLoading, isError: listError, error: listErr } = useQuery({
     queryKey: ["orders-v2", status, search, archiveMode],
     queryFn: () => {
       const params: Record<string, string | boolean> = {};
@@ -820,9 +811,9 @@ export default function OrdersV2() {
                   {selectedIds.size === 0 && <span>{filteredData.length} заказов</span>}
                   {/* Ориентир Юры: сколько можно получить, если дожать эти заказы по оплате.
                       Не дебиторка — сознательно (решение 28.07.2026). */}
-                  {selectedIds.size === 0 && status === "awaiting_payment" && filteredData.length > 0 && (
+                  {selectedIds.size === 0 && status === "awaiting_payment" && potentialTotal != null && (
                     <span style={{ color: "#B8860B", fontWeight: 600 }}>
-                      потенциальная выручка {fmt(filteredData.reduce((a: number, o: any) => a + Math.max(0, o.debt || 0), 0))}
+                      потенциальная выручка {fmt(potentialTotal)}
                     </span>
                   )}
                   {selectedIds.size === 0 && hasFilters && sum > 0 && <span>{fmt(sum)}</span>}
@@ -878,7 +869,9 @@ export default function OrdersV2() {
 
         {/* Rows */}
         <div style={{ flex: 1, overflow: "auto" }}>
-          {isLoading ? (
+          {listError ? (
+            <QueryError error={listErr} what="список заказов" />
+          ) : isLoading ? (
             <Loading compact />
           ) : pageData.length === 0 ? (
             <EmptyState compact title="Заказов нет" />

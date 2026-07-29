@@ -276,6 +276,26 @@ class TestТранзитныйФакт:
         _expense(conn, oid, 44_370, "labor", eid="E1")
         assert _transit_facts(conn)[oid]["fact"] == 64_370
 
+    def test_сводка_видит_факт_транзита_из_привязок(self, conn, zm):
+        """_plan_fact у транзитного заказа обязан брать факт из _transit_facts
+        (включая zm_links) — иначе сводка П/Ф показывает нули при живой выплате."""
+        oid = _order(conn)
+        sid = _set(conn, oid, payment_type="transit")
+        _item(conn, sid, "I1", category="work", cost_total=44_370, sale=51_000)
+        _zm_link(zm, oid, "ZM-1", 44_370)
+        res = _plan_fact(conn, oid, 44_370, 0, 51_000)
+        assert res["cost_fact"] == 44_370
+        assert res["has_facts"] is True
+
+    def test_транзит_не_задваивает_свои_источники_в_сводке(self, conn, zm):
+        oid = _order(conn)
+        sid = _set(conn, oid, payment_type="transit")
+        _item(conn, sid, "I1", category="work", cost_total=44_370, sale=51_000)
+        _zm_link(zm, oid, "ZM-1", 44_370)
+        _expense(conn, oid, 44_370, "work", eid="E1", zenmoney_tx_id="ZM-1")
+        res = _plan_fact(conn, oid, 44_370, 0, 51_000)
+        assert res["cost_fact"] == 44_370
+
     def test_два_расхода_с_одним_tx_считаются_раз(self, conn):
         """Дубль внутри expenses (например после деградации инбокса)."""
         oid = _order(conn)

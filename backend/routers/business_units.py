@@ -18,8 +18,8 @@ def _bank_balances() -> dict:
                FROM transactions GROUP BY account"""
         ).fetchall()
         return {r["account"]: round(r["bal"] or 0, 2) for r in rows}
-    except Exception:
-        return {}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"finance.db недоступна: {e}")
     finally:
         conn.close()
 
@@ -29,8 +29,8 @@ def _zenmoney_total() -> float:
     try:
         row = conn.execute("SELECT COALESCE(SUM(balance), 0) AS s FROM zm_accounts WHERE archive=0").fetchone()
         return round(row["s"] or 0, 2)
-    except Exception:
-        return 0.0
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"zenmoney.db недоступна: {e}")
     finally:
         conn.close()
 
@@ -134,7 +134,7 @@ def update_unit(unit_id: str, body: UnitUpdate):
     try:
         if not conn.execute("SELECT id FROM business_units WHERE id = ?", (unit_id,)).fetchone():
             raise HTTPException(status_code=404, detail="Not found")
-        fields = {k: v for k, v in body.model_dump().items() if v is not None}
+        fields = body.model_dump(exclude_unset=True)   # присланный null очищает поле
         if fields:
             sc = ", ".join(f"{k} = ?" for k in fields)
             conn.execute(f"UPDATE business_units SET {sc} WHERE id = ?", list(fields.values()) + [unit_id])

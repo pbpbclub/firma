@@ -458,6 +458,11 @@ def delete_group(group_id: str):
     """Откат всей разноски одной поездки/платежа."""
     conn = get_production()
     try:
+        # Касса фондов: снять связанные движения, иначе после отката группы
+        # в кассе остаются фантомные списания (образец — delete_expense).
+        conn.execute(
+            "DELETE FROM fund_transactions WHERE expense_id IN (SELECT id FROM expenses WHERE group_id = ?)",
+            (group_id,))
         cur = conn.execute("DELETE FROM expenses WHERE group_id = ?", (group_id,))
         conn.commit()
         if not cur.rowcount:

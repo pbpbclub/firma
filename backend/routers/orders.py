@@ -509,8 +509,17 @@ def _plan_fact(conn, oid: str, cost_plan: float, paid_total: float, price_plan: 
                 plan_unbroken += v
 
     fact_by = {b: 0.0 for b in _CAT_BUCKETS}
-    for r in conn.execute("SELECT category AS c, COALESCE(SUM(amount),0) AS s FROM expenses WHERE order_id = ? GROUP BY category", (oid,)):
-        fact_by[_bucket(r["c"])] += r["s"] or 0
+    is_transit_pf = bool(est and est["payment_type"] == "transit")
+    if is_transit_pf:
+        # Транзит: факт — целиком из _transit_facts (тот же источник, что панель
+        # «Транзит»: expenses + creditors + zm_links фин-агента, с полным дедупом).
+        # Свой подсчёт ниже не выполняем: он не видит zm_links — сводка П/Ф
+        # показывала нули при живой выплате, — а вместе с ним задвоил бы факт.
+        tf = _transit_facts(conn).get(oid) or {}
+        fact_by["Работы"] = round(tf.get("fact") or 0, 2)   # выплата мастеру и есть работа
+    if not is_transit_pf:
+        for r in conn.execute("SELECT category AS c, COALESCE(SUM(amount),0) AS s FROM expenses WHERE order_id = ? GROUP BY category", (oid,)):
+            fact_by[_bucket(r["c"])] += r["s"] or 0
     # ИНВАРИАНТ: одна оплата = один факт. Обязательство попадает в факт, только если
     # оно НЕ покрыто расходом — иначе тот же платёж считался бы дважды (как expense
     # и как creditors.paid). Расход знает о покрытии через creditor_id либо через
@@ -531,7 +540,7 @@ def _plan_fact(conn, oid: str, cost_plan: float, paid_total: float, price_plan: 
                  OR (e.zenmoney_tx_id IS NOT NULL AND e.zenmoney_tx_id = c.zenmoney_tx_id)))
            GROUP BY COALESCE(el.type, ei.category, 'other')""",
         (oid,)
-    ).fetchall()
+    ).fetchall() if not is_transit_pf else []
     for r in cred_rows:
         fact_by[_bucket(r["cat"])] += r["s"] or 0
 
@@ -905,6 +914,11 @@ def delete_order(order_id: str):
         conn.execute("DELETE FROM payments WHERE order_id = ?", (oid,))
         conn.execute("DELETE FROM stages WHERE order_id = ?", (oid,))
         conn.execute("DELETE FROM events WHERE order_id = ?", (oid,))
+        # Касса фондов: движение связано fund_transactions.expense_id — иначе после
+        # удаления расходов в кассе остаются фантомные списания (как в delete_expense).
+        conn.execute(
+            "DELETE FROM fund_transactions WHERE expense_id IN (SELECT id FROM expenses WHERE order_id = ?)",
+            (oid,))
         conn.execute("DELETE FROM expenses WHERE order_id = ?", (oid,))  # legacy MES, FK на orders
         # Порядок важен: FK включены (estimate_lines → estimate_items → estimate_sets),
         # удаляем от листьев к корню, иначе IntegrityError и заказ не удаляется.

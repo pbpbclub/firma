@@ -1,3 +1,4 @@
+import { ORDER_STATUS_MAP } from "../../components/domain";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { MONO } from "../../components/ui/Num";
@@ -22,10 +23,6 @@ export const CUSTOMER_STATUS_LABELS: Record<string, string> = {
 };
 export const customerStatusLabel = (s?: string) => (s ? (CUSTOMER_STATUS_LABELS[s] ?? s) : "");
 
-const ORDER_STATUS_LABELS: Record<string, string> = {
-  draft: "Черновик", estimate: "Смета", project: "Проект",
-  in_production: "В производстве", awaiting_payment: "Ждёт оплаты", completed: "Завершён", cancelled: "Отменён",
-};
 
 export const CLIENT_FIELDS: FieldDef[] = [
   { key: "name",      label: "Название" },
@@ -214,7 +211,7 @@ export function ClientDetail({ id, onClose }: { id: string; onClose: () => void 
               <div key={o.id} style={{ padding: "9px 0", borderBottom: "1px solid #F2EFE9" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A" }}>{o.title || o.number || "—"}</div>
-                  <div style={{ fontSize: 11, color: "#A89070" }}>{ORDER_STATUS_LABELS[o.status] || o.status}</div>
+                  <div style={{ fontSize: 11, color: "#A89070" }}>{(ORDER_STATUS_MAP[o.status]?.label) || o.status}</div>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#6B6355" }}>
                   <span style={{ fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(o.price_plan)}</span>

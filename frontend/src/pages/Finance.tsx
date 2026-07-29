@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loading } from "../components/ui/Loading";
+import { QueryError } from "../components/ui/QueryError";
 import { EmptyState } from "../components/ui/EmptyState";
 import { financeApi, zenmoneyApi, ordersApi } from "../api";
 import { MagnifyingGlass, X, LinkSimple } from "@phosphor-icons/react";
@@ -40,6 +41,7 @@ function BankBadge({ bank }: { bank: string }) {
   );
 }
 
+// abs намеренный: направление операции показывают цвет/колонка, не знак
 function fmt(n: number) {
   return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(Math.abs(n)) + " ₽";
 }
@@ -345,7 +347,7 @@ const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
   const { data: balance } = useQuery({ queryKey: ["fin-bal-at", asOf], queryFn: () => financeApi.balanceAtDate(asOf) });
   const { data: zmBal } = useQuery({ queryKey: ["zm-bal-at", asOf], queryFn: () => zenmoneyApi.balanceAtDate(asOf) });
   const { data: summary } = useQuery({ queryKey: ["dds-summary"], queryFn: financeApi.summary });
-  const { data: txs = [], isLoading } = useQuery({
+  const { data: txs = [], isLoading, isError: txError, error: txErr } = useQuery({
     queryKey: ["transactions", direction, search],
     queryFn: () => {
       const p: Record<string, string> = {};
@@ -486,7 +488,9 @@ const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
 
         {/* Rows */}
         <div style={{ flex: 1, overflowY: "auto" }}>
-          {isLoading ? (
+          {txError ? (
+            <QueryError error={txErr} what="движение денег" />
+          ) : isLoading ? (
             <Loading />
           ) : filteredTxs.length === 0 ? (
             <EmptyState title="Транзакций нет" />

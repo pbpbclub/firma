@@ -12,11 +12,9 @@ export const selectStyle: React.CSSProperties = {
 
 export const UNIT_OPTIONS = ["шт", "м.п.", "м²", "м³", "кг", "л", "компл.", "услуга", "ч"];
 
-export const BRANDS = [
-  { value: "MeRA", color: "#2E6DA4" },
-  { value: "pbpb", color: "#7B4F9E" },
-  { value: "Транзит", color: "#3D8C6B" },
-];
+// Бренды — из domain.ts; реэкспорт сохраняет старые импорты из этого файла.
+import { BRANDS } from "../domain";
+export { BRANDS };
 
 // ── Редактируемая ячейка (commit на blur/Enter) ───────────────────────────────
 export function EditableText({

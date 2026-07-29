@@ -1,3 +1,5 @@
+import { fmtMoneyDash as fmt } from "../components/ui/format";
+import { QueryError } from "../components/ui/QueryError";
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loading } from "../components/ui/Loading";
@@ -36,10 +38,6 @@ function Checkbox({ checked, indeterminate = false, onChange }: {
   );
 }
 
-function fmt(n: number) {
-  if (!n) return "—";
-  return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) + " ₽";
-}
 
 function fmtDate(s: string) {
   if (!s) return "—";
@@ -323,7 +321,7 @@ const debtorCols = "28px 2fr 1fr 130px 150px 130px 100px 28px";
 function DebtorsTab() {
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const { data, isLoading } = useQuery({ queryKey: ["debtors"], queryFn: financeApi.debtors });
+  const { data, isLoading, isError, error } = useQuery({ queryKey: ["debtors"], queryFn: financeApi.debtors });
   const [statusFilter, setStatusFilter] = useState("");
   const [clientFilter, setClientFilter] = useState("");
   const [orderFilter, setOrderFilter] = useState("");
@@ -371,6 +369,7 @@ function DebtorsTab() {
   });
 
   if (isLoading) return <Loading />;
+  if (isError) return <QueryError error={error} what="дебиторку" />;
 
   return (
     <>

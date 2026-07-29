@@ -469,7 +469,7 @@ def update_master(master_id: str, body: MasterUpdate):
         prod_fields = ["name", "role", "phone", "telegram", "email", "specialization", "notes", "status",
                        "inn", "full_name", "contact", "website", "price_supplier"]
         fields, params = [], []
-        data = body.model_dump(exclude_none=True)
+        data = body.model_dump(exclude_unset=True)   # присланный null очищает поле
         for f in prod_fields:
             if f in data:
                 fields.append(f"{f} = ?")

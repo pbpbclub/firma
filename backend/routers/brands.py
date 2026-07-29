@@ -71,7 +71,7 @@ def update_brand(brand_id: str, body: BrandUpdate):
         existing = conn.execute("SELECT * FROM brands WHERE id = ?", (brand_id,)).fetchone()
         if not existing:
             raise HTTPException(status_code=404, detail="Not found")
-        fields = {k: v for k, v in body.model_dump().items() if v is not None}
+        fields = body.model_dump(exclude_unset=True)   # присланный null очищает поле
         if fields:
             set_clause = ", ".join(f"{k} = ?" for k in fields)
             conn.execute(f"UPDATE brands SET {set_clause} WHERE id = ?", list(fields.values()) + [brand_id])

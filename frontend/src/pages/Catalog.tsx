@@ -1,3 +1,5 @@
+import { ORDER_STATUS_MAP } from "../components/domain";
+import { fmtMoneyDash as fmt } from "../components/ui/format";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -29,17 +31,8 @@ function Checkbox({ checked, indeterminate = false, onChange }: {
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-function fmt(n: number) {
-  if (!n) return "—";
-  return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) + " ₽";
-}
 
 const _num: React.CSSProperties = { fontFamily: MONO, fontVariantNumeric: "tabular-nums" };
-const _STATUS_RU: Record<string, string> = {
-  draft: "Черновик", estimate: "Смета", project: "Проект",
-  in_production: "В производстве", awaiting_payment: "Ждёт оплаты",
-  completed: "Завершён", cancelled: "Отменён",
-};
 
 function CostHistorySection({ data, onOpenOrder }: { data: any; onOpenOrder: (orderId: string) => void }) {
   const etalon: number = data.etalon_unit || 0;
@@ -117,7 +110,7 @@ function CostHistorySection({ data, onOpenOrder }: { data: any; onOpenOrder: (or
                   {h.title}
                 </div>
                 <div style={{ ..._num, textAlign: "right" }}>{h.qty}</div>
-                <div style={{ textAlign: "right", fontSize: 10, color: "#6B6355" }}>{_STATUS_RU[h.status] || h.status}</div>
+                <div style={{ textAlign: "right", fontSize: 10, color: "#6B6355" }}>{(ORDER_STATUS_MAP[h.status]?.label) || h.status}</div>
                 <div style={{ ..._num, textAlign: "right", color: "#A89070" }}>{fmt(h.plan_unit)}</div>
                 <div style={{ ..._num, textAlign: "right" }}>{h.has_fact ? fmt(h.actual_unit) : "—"}</div>
                 <div style={{ ..._num, textAlign: "right", color: delta == null ? "#A89070" : delta > 0 ? "#8B3A3A" : "#4A7C59" }}>

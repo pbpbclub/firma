@@ -1,3 +1,4 @@
+import { fmtMoneyDash as fmt } from "../components/ui/format";
 import { useState, type ReactNode } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { MONO } from "../components/ui/Num";
@@ -11,10 +12,6 @@ import { PayeePicker, CustomerPicker } from "../components/ui/PayeePicker";
 import { Pager, usePager } from "../components/ui/Pager";
 import { MagnifyingGlass, X, Check, ArrowCounterClockwise, EyeSlash, HandCoins, User, FloppyDisk } from "@phosphor-icons/react";
 
-function fmt(n: number | null | undefined) {
-  if (!n) return "—";
-  return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) + " ₽";
-}
 function fmtDate(s: string) {
   if (!s) return "—";
   return new Date(s).toLocaleDateString("ru-RU", { day: "numeric", month: "short" });

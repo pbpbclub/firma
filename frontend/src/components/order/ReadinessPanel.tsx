@@ -1,6 +1,8 @@
 // «Готовность» — один экран вместо обхода каждой сметы руками: дубли смет,
 // расхождение сметы с выставленным счётом, себестоимость-заглушка
 // (цена÷наценка вместо расчёта), дыры и мусор в ставках.
+import { ESTIMATE_STATUS } from "../domain";
+import { fmtMoneyDash as fmt } from "../ui/format";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
@@ -9,8 +11,6 @@ import { MONO } from "../ui/Num";
 import { Loading } from "../ui/Loading";
 import { Check, Warning } from "@phosphor-icons/react";
 
-const fmt = (n: number | null | undefined) =>
-  !n ? "—" : new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) + " ₽";
 
 function Section({ label, count, hint, children }: {
   label: string; count?: number; hint?: string; children: React.ReactNode;
@@ -157,7 +157,7 @@ export function ReadinessPanel() {
                        background: st.is_primary ? "#FFF4EE" : undefined }}>
                   <span style={{ fontSize: 12, color: "#A89070", fontFamily: MONO }}>{(st.created_at || "").slice(0, 10)}</span>
                   <span style={{ fontSize: 11, color: st.status === "approved" ? "#4A7C59" : "#A89070" }}>
-                    {st.status === "approved" ? "Согласована" : "Черновик"}
+                    {ESTIMATE_STATUS[st.status]?.label ?? st.status}
                   </span>
                   <span style={{ fontSize: 12, color: "#6B6355" }}>позиций {st.items} · строк {st.lines}</span>
                   <span style={{ fontSize: 13, fontWeight: 600, textAlign: "right", fontFamily: MONO }}>{fmt(st.sale_total)}</span>
@@ -207,7 +207,7 @@ export function ReadinessPanel() {
                 <span style={{ color: "#A89070", fontSize: 11 }}> · {d.brand || "без бренда"}</span>
               </span>
               <span style={{ fontSize: 11, color: d.set_status === "approved" ? "#4A7C59" : "#A89070" }}>
-                {d.set_status === "approved" ? "Согласована" : "Черновик"}
+                {ESTIMATE_STATUS[d.set_status]?.label ?? d.set_status}
                 {d.payment_type === "bank" ? " · безнал" : ""}
               </span>
               <span style={{ fontSize: 13, textAlign: "right", fontFamily: MONO }} title="сумма счёта у заказа">

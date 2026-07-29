@@ -28,7 +28,9 @@ def get_balance():
         total = round(sum(a["balance"] for a in accounts), 2)
         return {"accounts": accounts, "total": total}
     except Exception as e:
-        return {"error": str(e), "accounts": [], "total": 0}
+        # 503, а не 200-с-нулями: «на счетах 0 ₽» и «база недоступна» — разные вещи,
+        # фронт обязан их различать (экран покажет ошибку, а не враньё).
+        raise HTTPException(status_code=503, detail=f"База недоступна: {e}")
     finally:
         conn.close()
 
@@ -131,7 +133,7 @@ def get_balance_at_date(date: str):
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": str(e), "accounts": [], "total": 0}
+        raise HTTPException(status_code=503, detail=f"База недоступна: {e}")
     finally:
         conn.close()
 
@@ -295,7 +297,8 @@ def list_transactions(
             "is_accountable_issue": str(r["id"]) in accountable_issues,
         } for r in rows]
     except Exception as e:
-        bank_rows = []
+        # Без банковских строк ДДС выглядит как «операций не было» — врать нельзя.
+        raise HTTPException(status_code=503, detail=f"finance.db недоступна: {e}")
     finally:
         conn.close()
 
@@ -338,9 +341,10 @@ def list_transactions(
                     "fund_name": r["fund_name"],
                     "source": "fund",
                 })
+        except Exception as e:
+            raise HTTPException(status_code=503, detail=f"production.db недоступна: {e}")
+        finally:
             prod.close()
-        except Exception:
-            pass
 
     all_rows = bank_rows + fund_rows
     all_rows.sort(key=lambda x: (x.get("date") or "", x.get("id") or ""), reverse=True)
@@ -400,7 +404,7 @@ def get_summary():
             "monthly_chart": [dict(r) for r in monthly],
         }
     except Exception as e:
-        return {"error": str(e)}
+        raise HTTPException(status_code=503, detail=f"База недоступна: {e}")
     finally:
         conn.close()
 
@@ -683,11 +687,7 @@ def get_debtors():
         except Exception:
             pass
 
-        STATUS_LABELS = {
-            "draft": "Черновик", "estimate": "Смета", "project": "Проект",
-            "in_production": "В производстве", "awaiting_payment": "Ждёт оплаты",
-            "completed": "Завершён", "cancelled": "Отменён",
-        }
+        from routers.orders import STATUS_LABELS   # один словарь на систему
 
         result = []
         for r in orders:
@@ -989,7 +989,7 @@ def update_fixed_obligation(fixed_id: str, body: FixedObligationPatch):
         if not conn.execute("SELECT id FROM fixed_obligations WHERE id = ?", (fixed_id,)).fetchone():
             raise HTTPException(status_code=404, detail="Not found")
         fields, params = [], []
-        for field, val in body.model_dump(exclude_none=True).items():
+        for field, val in body.model_dump(exclude_unset=True).items():   # null очищает поле
             fields.append(f"{field} = ?")
             params.append(val)
         if fields:
@@ -1161,12 +1161,11 @@ def update_receivable(rec_id: int, body: ReceivablePatch):
             if not row:
                 raise HTTPException(status_code=404, detail="Not found")
             fields, params = [], []
-            if body.paid is not None:
-                fields.append("paid = ?"); params.append(body.paid)
-            if body.note is not None:
-                fields.append("note = ?"); params.append(body.note)
-            if "finance_tx_id" in body.model_fields_set:
-                fields.append("finance_tx_id = ?"); params.append(body.finance_tx_id)
+            # model_fields_set для всех трёх полей: присланный null очищает
+            # (снять оплату, стереть заметку, отвязать транзакцию)
+            for f in ("paid", "note", "finance_tx_id"):
+                if f in body.model_fields_set:
+                    fields.append(f"{f} = ?"); params.append(getattr(body, f))
             if fields:
                 params.append(rec_id)
                 conn.execute(f"UPDATE receivables SET {', '.join(fields)} WHERE id = ?", params)

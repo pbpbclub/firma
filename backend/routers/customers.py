@@ -229,7 +229,7 @@ def update_customer(customer_id: str, payload: CustomerUpdateRequest):
             raise HTTPException(status_code=404, detail="Customer not found")
         updates = []
         params = []
-        for field in payload.__fields_set__:
+        for field in payload.model_fields_set:
             updates.append(f"{field} = ?")
             params.append(getattr(payload, field))
         if not updates:

@@ -1,3 +1,4 @@
+import { fmtMoneyDash as fmt } from "../components/ui/format";
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -18,10 +19,6 @@ import {
   FileText, DotsSixVertical, PencilSimple, FloppyDisk, ListChecks, CheckCircle, Circle,
 } from "@phosphor-icons/react";
 
-function fmt(n: number | null | undefined) {
-  if (!n) return "—";
-  return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) + " ₽";
-}
 
 // sale_price храним с копейками: введённое клиентское «к оплате» первично, и
 // round(sale × (1+банк%)) обязан воспроизводить его точно. Округление sale до

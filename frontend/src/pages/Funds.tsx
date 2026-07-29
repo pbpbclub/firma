@@ -1,3 +1,4 @@
+import { fmtMoney as fmt } from "../components/ui/format";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loading } from "../components/ui/Loading";
@@ -14,10 +15,6 @@ const PRESET_COLORS = [
   "#8B3A3A", "#6B6355", "#3A5F8B", "#7C4A7C",
 ];
 
-function fmt(n: number) {
-  if (!n) return "0 ₽";
-  return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) + " ₽";
-}
 
 function fmtDate(s: string) {
   if (!s) return "—";

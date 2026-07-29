@@ -1,3 +1,5 @@
+import { fmtMoney as fmt } from "../components/ui/format";
+import { QueryError } from "../components/ui/QueryError";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
@@ -7,10 +9,6 @@ import { DeadlinePill } from "../components/ui/Pill";
 import { POLARITY } from "../components/ui/type";
 import { CircleProgress } from "../components/ui/CircleProgress";
 
-function fmt(n: number) {
-  if (!n && n !== 0) return "—";
-  return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) + " ₽";
-}
 
 function ThinBar({ pct, color = "#E8592A" }: { pct: number; color?: string }) {
   return (
@@ -34,6 +32,10 @@ export default function Dashboard() {
   });
   const byBrand = useQuery({ queryKey: ["finance-by-brand"], queryFn: financeApi.byBrand });
 
+  // Любой упавший денежный запрос → баннер: раньше блоки просто исчезали
+  // по одному и дашборд выглядел как «всё по нулям».
+  const failed = [freeCash, balance, taxes, debtors, dds, orders].find(q => q.isError);
+
   const balanceTotal = balance.data?.total ?? 0;
   const taxToPay = taxes.data?.tax_to_pay ?? 0;
   const debtTotal = debtors.data?.total ?? 0;
@@ -52,6 +54,9 @@ export default function Dashboard() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column" }}>
+      {/* Любой упавший денежный запрос → баннер: раньше блоки просто исчезали
+          по одному, и дашборд выглядел как «всё по нулям» */}
+      {failed && <QueryError error={(failed as any).error} what="часть сводки" />}
 
       {/* Header */}
       <div style={{ padding: "24px 28px 20px", borderBottom: "1px solid #EDEBE6" }}>

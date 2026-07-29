@@ -1,3 +1,4 @@
+import { fmtMoneyDash as fmt } from "./ui/format";
 import { MONO } from "./ui/Num";
 import { CircleProgress } from "./ui/CircleProgress";
 
@@ -5,10 +6,6 @@ import { CircleProgress } from "./ui/CircleProgress";
 // ВАЖНО: лестница и прогноз считаются на бэке (_margin / _plan_fact). Здесь ничего
 // не досчитываем — иначе на нал попадёт фантомный УСН, а прогноз завысит маржу.
 
-function fmt(n: number | null | undefined) {
-  if (!n) return "—";
-  return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) + " ₽";
-}
 
 // ── Лестница прибыли: Стоимость · Оплачено · Долг · Валовая · [УСН] · Чистая ──
 export function ProfitLadder({ order, paidTotal }: { order: any; paidTotal: number }) {

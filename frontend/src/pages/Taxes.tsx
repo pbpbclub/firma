@@ -1,11 +1,10 @@
+import { fmtMoney as fmt } from "../components/ui/format";
+import { QueryError } from "../components/ui/QueryError";
 import { useQuery } from "@tanstack/react-query";
 import { MONO } from "../components/ui/Num";
 import { taxApi } from "../api";
 import { WarningCircle, CheckCircle } from "@phosphor-icons/react";
 
-function fmt(n: number) {
-  return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) + " ₽";
-}
 
 function ThinBar({ pct, color = "#E8592A" }: { pct: number; color?: string }) {
   return (
@@ -16,9 +15,10 @@ function ThinBar({ pct, color = "#E8592A" }: { pct: number; color?: string }) {
 }
 
 export default function Taxes() {
-  const { data, isLoading } = useQuery({ queryKey: ["taxes"], queryFn: taxApi.summary });
+  const { data, isLoading, isError, error } = useQuery({ queryKey: ["taxes"], queryFn: taxApi.summary });
 
   if (isLoading) return <div style={{ padding: 48, color: "#A89070", fontSize: 13 }}>Загружаем...</div>;
+  if (isError) return <QueryError error={error} what="налоговую сводку" />;
   if (!data) return null;
 
   const threshold300k = Math.min(100, (data.income_year / 300000) * 100);
