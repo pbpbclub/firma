@@ -50,6 +50,18 @@ find "$ROOT/backend" -mindepth 1 -maxdepth 1 ! -name '.env*' -print0 \
 echo "=== Sync frontend source ==="
 sudo -n /bin/cp -r "$ROOT/frontend/src/." /opt/firma/frontend/src/
 
+# Предохранитель перед рестартом: боевой .env должен быть цел. Проверять ПОСЛЕ
+# рестарта поздно — 29.07.2026 затёртый секрет увёл сервис в рестарт-луп, и Фирма
+# лежала до ручного восстановления. Здесь падаем, не трогая работающий сервис.
+echo "=== Проверка боевого .env ==="
+for key in FIRMA_SECRET_KEY TELEGRAM_BOT_TOKEN OWNER_CHAT_ID DADATA_TOKEN; do
+  grep -q "^${key}=." /opt/firma/backend/.env || {
+    echo "В /opt/firma/backend/.env нет ${key} — рестарт отменён, Фирма продолжает работать." >&2
+    exit 1
+  }
+done
+echo "  ok  4 ключа на месте"
+
 echo "=== Restart backend service ==="
 sudo -n /bin/systemctl restart firma
 
