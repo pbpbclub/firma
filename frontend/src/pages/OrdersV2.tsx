@@ -10,6 +10,7 @@ import { MagnifyingGlass, DotsThree, Plus, Files, CaretRight, Archive, ArrowCoun
 import { ColumnFilter, AmountFilter } from "../components/TableFilters";
 import { ProfitLadder, PlanFactDuel } from "../components/OrderFinance";
 import { ReadinessPanel } from "../components/order/ReadinessPanel";
+import { StatusPicker } from "../components/order/StatusPicker";
 import { EstimateReviewQueue } from "../components/EstimateReviewQueue";
 import { Breadcrumbs } from "../components/ui/Breadcrumbs";
 
@@ -59,16 +60,6 @@ function initials(name: string | undefined) {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-const ALL_STATUSES = [
-  { value: "draft",         label: "Черновик",        color: "#A89070" },
-  { value: "estimate",      label: "Смета",            color: "#E8592A" },
-  { value: "project",       label: "Проект",           color: "#E8592A" },
-  { value: "in_production", label: "В производстве",   color: "#1A1A1A" },
-  { value: "awaiting_payment", label: "Ждёт оплаты",    color: "#B8860B" },
-  { value: "completed",     label: "Завершён",         color: "#4A7C59" },
-  { value: "cancelled",     label: "Отменён",          color: "#8B3A3A" },
-];
-
 function Checkbox({ checked, indeterminate = false, onChange }: {
   checked: boolean; indeterminate?: boolean; onChange: () => void;
 }) {
@@ -81,76 +72,6 @@ function Checkbox({ checked, indeterminate = false, onChange }: {
     }}>
       {checked && <svg width="8" height="6" viewBox="0 0 8 6" fill="none"><path d="M1 3L3 5.5L7 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
       {!checked && indeterminate && <div style={{ width: 8, height: 1.5, background: "#E8592A" }} />}
-    </div>
-  );
-}
-
-function StatusPicker({ orderId, current, onChange }: { orderId: string; current: string; onChange: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
-
-  const st = ALL_STATUSES.find(s => s.value === current) || { label: current, color: "#A89070" };
-
-  const pick = async (value: string) => {
-    if (value === current) { setOpen(false); return; }
-    setSaving(true);
-    try {
-      await ordersApi.updateStatus(orderId, value);
-      onChange();
-    } finally {
-      setSaving(false);
-      setOpen(false);
-    }
-  };
-
-  return (
-    <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
-      <button
-        onClick={() => setOpen(o => !o)}
-        disabled={saving}
-        style={{
-          display: "flex", alignItems: "center", gap: 5,
-          padding: "5px 10px", border: "1px solid #EDEBE6", background: "none",
-          fontSize: 11, cursor: "pointer", color: st.color, fontWeight: 600,
-        }}
-      >
-        {saving ? "..." : st.label}
-        <CaretDown size={10} style={{ color: "#A89070" }} />
-      </button>
-      {open && (
-        <div style={{
-          position: "absolute", top: "100%", left: 0, marginTop: 2,
-          background: "#fff", border: "1px solid #EDEBE6", zIndex: 100,
-          boxShadow: "0 4px 16px rgba(0,0,0,0.12)", minWidth: 160,
-        }}>
-          {ALL_STATUSES.map(s => (
-            <div
-              key={s.value}
-              onClick={() => pick(s.value)}
-              style={{
-                padding: "8px 14px", fontSize: 12, cursor: "pointer",
-                color: s.value === current ? "#1A1A1A" : s.color,
-                fontWeight: s.value === current ? 700 : 400,
-                background: s.value === current ? "#FAF8F5" : "transparent",
-              }}
-              onMouseEnter={(e) => { if (s.value !== current) (e.currentTarget as HTMLElement).style.background = "#FAF8F5"; }}
-              onMouseLeave={(e) => { if (s.value !== current) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
-            >
-              {s.label}
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

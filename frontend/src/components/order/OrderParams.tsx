@@ -7,6 +7,7 @@ import { CaretDown, CaretRight, Phone, EnvelopeSimple } from "@phosphor-icons/re
 import { customersApi } from "../../api";
 import { contactHref } from "../ui/ContactLinks";
 import { MONO } from "../ui/Num";
+import { StatusPicker } from "./StatusPicker";
 import { fmtDate } from "../ui/format";
 import { BRANDS, ORDER_STATUSES } from "../domain";
 
@@ -17,11 +18,14 @@ export type OrderFormState = {
 
 const PRIORITY_LABELS: Record<string, string> = { low: "Низкий", normal: "Обычный", high: "Высокий", urgent: "Срочный" };
 
-export function OrderParams({ order, form, field, customers }: {
+export function OrderParams({ order, form, field, customers, onStatusChanged }: {
   order: any;
   form: OrderFormState;
   field: (f: Partial<OrderFormState>) => void;
   customers: any[];
+  // Мгновенная смена статуса пилюлей (мимо формы): обновить form.status БЕЗ isDirty,
+  // иначе NavigationGuard начнёт ругаться на «несохранённые» правки.
+  onStatusChanged?: (status: string) => void;
 }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -48,22 +52,30 @@ export function OrderParams({ order, form, field, customers }: {
 
   return (
     <div style={{ borderTop: "1px solid #EDEBE6", marginBottom: 8 }}>
-      {/* Шапка-свёртка: закрытая показывает выжимку значений */}
-      <button onClick={() => setOpen(o => !o)}
-        style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "14px 0",
-          background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
-        {open ? <CaretDown size={11} style={{ color: "#A89070" }} /> : <CaretRight size={11} style={{ color: "#A89070" }} />}
-        <span style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>ПАРАМЕТРЫ</span>
+      {/* Шапка-свёртка. Выжимка живёт РЯДОМ с кнопкой, а не внутри: в выжимке
+          кликабельная пилюля статуса, а button внутри button — невалидный HTML. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", minHeight: 46 }}>
+        <button onClick={() => setOpen(o => !o)}
+          style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0",
+            background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+          {open ? <CaretDown size={11} style={{ color: "#A89070" }} /> : <CaretRight size={11} style={{ color: "#A89070" }} />}
+          <span style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>ПАРАМЕТРЫ</span>
+        </button>
         {!open && (
-          <span style={{ fontSize: 11, color: "#6B6355", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            <span style={{ color: statusMeta?.color, fontWeight: 600 }}>{statusMeta?.label ?? form.status}</span>
+          <span style={{ fontSize: 11, color: "#6B6355", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 6 }}>
+            {/* Статус — кликабельная пилюля: смена в один клик, без раскрытия секции
+                и без «Сохранить». Юра искал «кнопку перенести в ожидание оплаты» —
+                текстовый статус кнопкой не выглядел. */}
+            {onStatusChanged
+              ? <StatusPicker orderId={order.id} current={form.status} onChange={onStatusChanged} />
+              : <span style={{ color: statusMeta?.color, fontWeight: 600 }}>{statusMeta?.label ?? form.status}</span>}
             {form.brand && <> · <span style={{ color: brandColor, fontWeight: 600 }}>{form.brand}</span></>}
             {customerName && <> · {customerName}</>}
             {form.deadline && <> · до <span style={{ fontFamily: MONO }}>{fmtDate(form.deadline)}</span></>}
             {form.priority !== "normal" && <> · {PRIORITY_LABELS[form.priority] ?? form.priority}</>}
           </span>
         )}
-      </button>
+      </div>
 
       {open && (
         <div style={{ paddingBottom: 20 }}>

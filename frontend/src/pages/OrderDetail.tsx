@@ -379,7 +379,14 @@ export default function OrderDetail() {
           />
 
           {/* Параметры (статус/бренд/клиент/дедлайн) — под катом; сводка деньгами — в табло справа */}
-          <OrderParams order={order} form={form} field={field} customers={customers as any[]} />
+          <OrderParams order={order} form={form} field={field} customers={customers as any[]}
+            onStatusChanged={(st) => {
+              // Статус уже записан пилюлей (PATCH) — форму синхронизируем БЕЗ isDirty,
+              // иначе NavigationGuard посчитает страницу несохранённой.
+              setForm(prev => prev ? { ...prev, status: st } : prev);
+              qc.invalidateQueries({ queryKey: ["order", id] });
+              qc.invalidateQueries({ queryKey: ["orders-v2"] });
+            }} />
 
           {/* ═══ СТАДИЯ 1: ПЛАН ═══ */}
           <StageHeader n="01" title="ПЛАН" hint="смета и обещания клиенту" />
