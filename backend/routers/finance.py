@@ -652,26 +652,29 @@ def get_debtors():
     prod = get_production()
     fin = get_finance()
     try:
-        # Orders with at least one approved estimate_set + manual payments
+        # Правило дебиторки (Юра, 30.07.2026): «смета-черновик — просто смета,
+        # которую я собрал; что с ней будет — вопрос переговоров». Долг существует,
+        # когда договорённость состоялась:
+        #   * заказ В ПРОИЗВОДСТВЕ или ЗАВЕРШЁН (работа идёт/сдана), либо
+        #   * клиент НАЧАЛ ПЛАТИТЬ (paid > 0) — даже если статус ещё «проект».
+        # «Ждёт оплаты» — не дебиторка, а потенциальная выручка (блок potential ниже).
+        # Требования approved-сметы больше нет: у завершённых заказов со сметой-
+        # черновиком (Кафе Ануш, Mirra летка) долг реален — цена подтверждена делом.
         orders = prod.execute(
             """
             SELECT
                 o.id, o.number, o.title, o.status, o.deadline,
                 c.name AS customer_name,
-                o.price_plan, o.finance_tx_id,
+                o.price_plan, o.cost_plan, o.finance_tx_id,
                 COALESCE(SUM(p.amount), 0) AS paid_manual
             FROM orders o
             LEFT JOIN customers c ON c.id = o.customer_id
             LEFT JOIN payments p ON p.order_id = o.id
             WHERE o.archived = 0
-              -- «Ждёт оплаты» — не дебиторка (решение Юры 28.07.2026): счёт выставлен,
-              -- но работа не началась; это потенциальная выручка, блок potential ниже.
-              AND o.status NOT IN ('cancelled', 'completed', 'awaiting_payment')
-              AND EXISTS (
-                  SELECT 1 FROM estimate_sets es
-                  WHERE es.order_id = o.id AND es.status = 'approved'
-              )
+              AND o.status NOT IN ('cancelled', 'awaiting_payment')
             GROUP BY o.id
+            HAVING o.status IN ('in_production', 'completed')
+                OR COALESCE(SUM(p.amount), 0) > 0
             ORDER BY o.price_plan DESC
             """
         ).fetchall()
@@ -687,13 +690,18 @@ def get_debtors():
         except Exception:
             pass
 
-        from routers.orders import STATUS_LABELS   # один словарь на систему
+        from routers.orders import STATUS_LABELS, _margin   # один словарь/формула на систему
 
         result = []
         for r in orders:
             row = dict(r)
             paid_total = row["paid_manual"]
-            debt = round((row["price_plan"] or 0) - paid_total, 2)
+            # Долг — от ЖИВОЙ выручки активной сметы (та же цифра, что колонка
+            # «К получению» в списке заказов): хранимый price_plan у черновиков — кэш.
+            m = _margin(prod, row["id"], row["price_plan"], row["cost_plan"])
+            row["price_plan"] = m["revenue"]
+            row.pop("cost_plan", None)
+            debt = round((m["revenue"] or 0) - paid_total, 2)
             row["paid_total"] = round(paid_total, 2)
             row["paid_bank"] = 0
             row["debt"] = debt
