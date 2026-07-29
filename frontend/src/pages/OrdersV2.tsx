@@ -556,7 +556,7 @@ export default function OrdersV2() {
 
   const cols = selected
     ? "28px 2fr 1.2fr 100px 120px 40px"
-    : "28px 2fr 1.5fr 120px 130px 120px 40px";
+    : "28px 2fr 1.5fr 120px 130px 120px 110px 40px";
 
   function renderPageNums() {
     const pages: (number | "…")[] = [];
@@ -872,6 +872,7 @@ export default function OrdersV2() {
           <div><ColumnFilter label="СТАТУС" options={uniqueStatuses} value={statusFilter} onChange={(v) => { setStatusFilter(v); setPage(0); }} /></div>
           <div><AmountFilter label="СУММА" min={amountMin} max={amountMax} onChange={(mn, mx) => { setAmountMin(mn); setAmountMax(mx); setPage(0); }} /></div>
           {!selected && <div><AmountFilter label="К ПОЛУЧЕНИЮ" min={debtMin} max={debtMax} onChange={(mn, mx) => { setDebtMin(mn); setDebtMax(mx); setPage(0); }} /></div>}
+          {!selected && <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", textAlign: "right" }} title="Чистая после УСН: план у смет и ждущих, прогноз в работе, факт у завершённых">Δ</div>}
           <div />
         </div>
 
@@ -958,6 +959,21 @@ export default function OrdersV2() {
                   {!selected && (
                     <div style={{ fontSize: 13, fontWeight: 600, color: isActive ? "#FFFFFF" : (o.debt > 0 ? "#E8592A" : "#C8C0B0"), lineHeight: 1.4, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
                       {o.debt > 0 ? fmt(o.debt) : "—"}
+                    </div>
+                  )}
+                  {/* Дельта — ориентир Юры: план/прогноз/факт считает бэк (_order_delta),
+                      здесь только цвет и подпись источника. «по плану» у завершённых —
+                      предупреждение: траты не внесены, плюс не подтверждён. */}
+                  {!selected && (
+                    <div style={{ textAlign: "right", lineHeight: 1.3 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, fontFamily: MONO, fontVariantNumeric: "tabular-nums",
+                        color: isActive ? "#FFFFFF" : !o.delta ? "#C8C0B0" : o.delta > 0 ? "#4A7C59" : "#8B3A3A" }}>
+                        {o.delta ? (o.delta > 0 ? "+" : "−") + fmt(Math.abs(o.delta)) : "—"}
+                      </div>
+                      <div style={{ fontSize: 9, color: isActive ? "rgba(255,255,255,0.7)" : "#A89070" }}>
+                        {o.delta_source === "fact" ? "факт" : o.delta_source === "forecast" ? "прогноз"
+                          : o.status === "completed" ? "по плану" : "план"}
+                      </div>
                     </div>
                   )}
                   <div style={{ display: "flex", justifyContent: "flex-end" }}>

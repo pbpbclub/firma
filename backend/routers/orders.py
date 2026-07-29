@@ -103,6 +103,7 @@ def list_orders(
                 "has_estimate": m["has_estimate"],
                 "plan_source": m["plan_source"],
                 **_awaiting_flags(r["status"], m["revenue"], r["paid_total"]),
+                **_order_delta(conn, r, m),
             })
         return out
     finally:
@@ -329,6 +330,32 @@ def _transit_facts(conn) -> dict:
     for b in facts.values():
         b["fact"] = round(b["fact"], 2)
     return facts
+
+
+def _order_delta(conn, r, m) -> dict:
+    """«Дельта» — один ориентир Юры в таблице заказов, смысл зависит от стадии
+    (решение 29.07.2026): план для сметы/ждущих, прогноз в работе, факт у завершённых.
+    Всегда чистая, после УСН — та же цифра, что «Чистая · прогноз» в карточке.
+
+    Транзит считается через _margin: там себестоимость уже замещена фактом выплаты
+    (включая привязки фин-агента из zenmoney), о которых _plan_fact не знает."""
+    status = r["status"]
+    if m.get("transit"):
+        src = "plan" if m["transit"]["state"] == "no_fact" else "fact"
+        return {"delta": m["net_profit"], "delta_source": src}
+    if status in ("completed", "in_production"):
+        pf = _plan_fact(conn, r["id"], r["cost_plan"] or 0, r["paid_total"] or 0,
+                        r["price_plan"] or 0)
+        if status == "completed":
+            if pf["has_facts"]:
+                # Итог закрытого заказа: выручка минус реальные траты минус налог.
+                # net_forecast здесь не годится — его max(план, факт) занизил бы
+                # прибыль заказа, закрытого дешевле плана.
+                return {"delta": round(pf["revenue"] - pf["cost_fact"] - pf["tax"], 2),
+                        "delta_source": "fact"}
+            return {"delta": pf["net_plan"], "delta_source": "plan"}
+        return {"delta": pf["net_forecast"], "delta_source": "forecast"}
+    return {"delta": m["net_profit"], "delta_source": "plan"}
 
 
 def _margin(conn, oid: str, price_plan, cost_plan, est=None, transit_facts=None) -> dict:
