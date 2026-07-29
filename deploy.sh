@@ -1,8 +1,24 @@
 #!/bin/bash
+# Деплой Фирмы: тесты → сборка → выкладка → рестарт → smoke.
+#
+# Скрипт обязан целиком отрабатывать под claude-runner, без ввода пароля.
+# Поэтому каждый вызов sudo — с `-n` (не спрашивать, а падать) и ТОЧНЫМ путём
+# из /etc/sudoers.d/claude-runner:
+#     /bin/cp, /bin/rm — любые аргументы
+#     /bin/systemctl restart firma, /bin/systemctl status firma — ровно эти,
+#     без лишних флагов: `status firma --no-pager` уже НЕ подходит под правило.
+# `sudo mkdir`, `sudo chown` и `sudo cp` (без /bin/) требуют пароля, которого у
+# инженера нет — 29.07.2026 из-за них скрипт приходилось прогонять руками.
+# mkdir не нужен: каталоги существуют, а их отсутствие — повод остановиться, а не
+# чинить на ходу. chown не нужен: `sudo /bin/cp` копирует от root, файлы и так root.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")" && pwd)
 cd "$ROOT"
+
+for d in /opt/firma/frontend /opt/firma/backend; do
+  [ -d "$d" ] || { echo "Нет каталога $d — деплой остановлен (создать может только root)." >&2; exit 1; }
+done
 
 # Деньги проверяем до сборки: тесты дешевле, чем откат задеплоенной формулы.
 # Пропустить осознанно — SKIP_TESTS=1 ./deploy.sh (в норме не нужно).
@@ -16,24 +32,26 @@ cd frontend
 npm run build
 
 echo "=== Deploy frontend dist ==="
-sudo rm -rf /opt/firma/frontend/dist
-sudo mkdir -p /opt/firma/frontend
-sudo cp -r dist /opt/firma/frontend/
+# rm обязателен: без него старые бандлы остаются рядом с новыми.
+sudo -n /bin/rm -rf /opt/firma/frontend/dist
+sudo -n /bin/cp -r dist /opt/firma/frontend/
 
-# Optional: keep deployed source in /opt/firma for easier troubleshooting
+# Исходники в /opt/firma держим для разбора инцидентов — приложение работает
+# из dist и backend/, эти копии только для чтения глазами.
+#
+# `cp -r backend/.` копировал и точечные файлы, в том числе локальный backend/.env
+# (он в .gitignore и в репозитории лежит старый, без FIRMA_SECRET_KEY). 29.07.2026
+# так был затёрт боевой .env и Фирма ушла в рестарт-луп: auth.py падает без секрета.
+# Поэтому копируем поимённо всё, кроме .env* — секреты живут только в /opt/firma.
 echo "=== Sync backend source ==="
-sudo mkdir -p /opt/firma/backend
-sudo cp -r "$ROOT/backend/"* /opt/firma/backend/
+find "$ROOT/backend" -mindepth 1 -maxdepth 1 ! -name '.env*' -print0 \
+  | xargs -0 -r -I{} sudo -n /bin/cp -r {} /opt/firma/backend/
 
-# Optional: sync frontend source too, if needed
-sudo mkdir -p /opt/firma/frontend/src
-sudo cp -r "$ROOT/frontend/src/"* /opt/firma/frontend/src/
-
-# Ensure permissions are consistent
-sudo chown -R root:root /opt/firma/backend /opt/firma/frontend
+echo "=== Sync frontend source ==="
+sudo -n /bin/cp -r "$ROOT/frontend/src/." /opt/firma/frontend/src/
 
 echo "=== Restart backend service ==="
-sudo systemctl restart firma
+sudo -n /bin/systemctl restart firma
 
 echo "=== Smoke ==="
 # systemctl status покажет только «процесс жив». Падение миграции или роутера
@@ -47,4 +65,6 @@ if ! python3 "$ROOT/scripts/smoke.py"; then
 fi
 
 echo "=== Deployment complete ==="
-sudo systemctl status firma --no-pager | sed -n '1,5p'
+# Пайп важен: без него systemctl зовёт пейджер и скрипт зависает. --no-pager
+# добавить нельзя — правило sudoers задано без аргументов и лишний флаг его ломает.
+sudo -n /bin/systemctl status firma | sed -n '1,5p' || true
