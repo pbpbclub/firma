@@ -40,8 +40,10 @@ ENDPOINTS = ["/api/orders", "/api/customers", "/api/masters", "/api/suppliers",
 REQUIRED_COLUMNS = {
     "orders": ["reserved_amount", "reserve_released_at"],
     "estimate_sets": ["payment_type", "bank_pct", "is_primary"],
-    "expenses": ["creditor_id", "finance_tx_id", "zenmoney_tx_id", "payment_source"],
+    "expenses": ["creditor_id", "finance_tx_id", "zenmoney_tx_id", "payment_source", "master_id"],
     "creditors": ["estimate_line_id", "amount_plan", "kind"],
+    # клиент ↔ подрядчик: один человек в двух картотеках (мердж Пинчука, 26.07)
+    "customers": ["telegram", "whatsapp", "master_id"],
 }
 
 
