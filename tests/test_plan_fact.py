@@ -323,3 +323,62 @@ class TestПрогноз:
         res = _plan_fact(conn, oid, 60_000, 0, 100_000)
         assert res["gross_forecast"] < res["gross_plan"]
         assert res["gross_forecast"] == 100_000 - 80_000
+
+
+def _payment(conn, oid, amount, bank_tx_id=None, zenmoney_tx_id=None):
+    conn.execute(
+        "INSERT INTO payments (id, order_id, amount, paid_at, bank_tx_id, zenmoney_tx_id) "
+        "VALUES (?,?,?,'2026-07-03',?,?)",
+        (f"PAY-{amount}-{bank_tx_id or zenmoney_tx_id or 'cash'}", oid, amount,
+         bank_tx_id, zenmoney_tx_id))
+
+
+class TestСкидкаИСмешаннаяОплата:
+    """Скидка — договорённость в конце (Спираль: «22 500 он не будет доплачивать»),
+    смешанная оплата — часть по безналу, часть налом/на личную карту. УСН платится
+    только с того, что прошло через р/с."""
+
+    def test_скидка_уменьшает_выручку_и_долг(self, conn):
+        from routers.orders import _margin
+        oid = _order(conn, price=280_000, cost=128_200)
+        sid = _set(conn, oid, payment_type="cash", status="approved")
+        _item(conn, sid, "I1", cost_total=128_200, sale=280_000)
+        conn.execute("UPDATE orders SET discount = ? WHERE id = ?", (52_500, oid))
+        m = _margin(conn, oid, 280_000, 128_200)
+        assert m["revenue"] == 227_500
+        assert m["price_before_discount"] == 280_000
+
+    def test_усн_только_с_банковской_части_когда_заказ_закрыт(self, conn):
+        from routers.orders import _margin
+        oid = _order(conn, price=280_000, cost=128_200)
+        sid = _set(conn, oid, payment_type="bank", status="approved")
+        _item(conn, sid, "I1", cost_total=128_200, sale=243_600)   # 243600/0.87=280000
+        conn.execute("UPDATE orders SET discount = ? WHERE id = ?", (52_500, oid))
+        _payment(conn, oid, 125_000, bank_tx_id="1647")   # р/с
+        _payment(conn, oid, 80_000, zenmoney_tx_id="ZM-A")  # личная карта
+        _payment(conn, oid, 22_500, zenmoney_tx_id="ZM-B")
+        m = _margin(conn, oid, 280_000, 128_200)
+        assert m["revenue"] == 227_500        # 280 000 − скидка
+        assert m["tax_base"] == 125_000       # заказ закрыт: налог только с р/с
+        assert m["tax"] == 7_500
+
+    def test_недоплаченный_остаток_считается_будущим_безналом(self, conn):
+        from routers.orders import _margin
+        oid = _order(conn, price=100_000, cost=50_000)
+        sid = _set(conn, oid, payment_type="bank", status="approved")
+        _item(conn, sid, "I1", cost_total=50_000, sale=87_000)
+        _payment(conn, oid, 30_000, bank_tx_id="F1")
+        _payment(conn, oid, 20_000)                       # нал
+        m = _margin(conn, oid, 100_000, 50_000)
+        # 30 000 пришло на р/с + 50 000 остатка ещё придёт (консервативно безналом)
+        assert m["tax_base"] == 80_000
+        assert m["tax"] == 4_800
+
+    def test_без_оплат_налог_как_раньше_от_всей_выручки(self, conn):
+        from routers.orders import _margin
+        oid = _order(conn, price=100_000, cost=50_000)
+        sid = _set(conn, oid, payment_type="bank", status="approved")
+        _item(conn, sid, "I1", cost_total=50_000, sale=87_000)
+        m = _margin(conn, oid, 100_000, 50_000)
+        assert m["tax_base"] == 100_000
+        assert m["tax"] == 6_000

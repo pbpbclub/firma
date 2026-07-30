@@ -138,6 +138,37 @@ def ensure_estimate_items_schema():
         conn.close()
 
 
+def ensure_order_discount_schema():
+    """Скидка — договорённость в конце сделки (Спираль: «22 500 он не будет
+    доплачивать»). Живёт на заказе, смету-документ не перекраивает:
+    к оплате = живая цена сметы − discount."""
+    conn = get_production()
+    try:
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(orders)").fetchall()}
+        if existing:
+            if "discount" not in existing:
+                conn.execute("ALTER TABLE orders ADD COLUMN discount REAL DEFAULT 0")
+            if "discount_note" not in existing:
+                conn.execute("ALTER TABLE orders ADD COLUMN discount_note TEXT")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_payment_zenmoney_schema():
+    """Платёж на личную карту связывается с транзакцией ZenMoney, как банковский
+    с finance (bank_tx_id): происхождение видно, дедуп с zm_links работает,
+    и УСН считается только с банковской части смешанной оплаты."""
+    conn = get_production()
+    try:
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(payments)").fetchall()}
+        if existing and "zenmoney_tx_id" not in existing:
+            conn.execute("ALTER TABLE payments ADD COLUMN zenmoney_tx_id TEXT")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_estimate_primary_schema():
     """Основная смета заказа — выбор Юры, а не дата.
 

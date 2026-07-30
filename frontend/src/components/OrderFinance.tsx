@@ -17,12 +17,21 @@ export function ProfitLadder({ order, paidTotal }: { order: any; paidTotal: numb
   const taxed = order.payment_type === "bank" || order.payment_type === "transit";
   // Выручка из план-факта: для draft-смет бэк берёт её из сета, а поле заказа устарело.
   const revenue = order.plan_fact?.revenue ?? order.price_plan;
+  // Скидка — договорённость в конце сделки: показываем цену до неё и саму скидку,
+  // «Стоимость» дальше по лестнице — уже к оплате (revenue после скидки).
+  const hasDiscount = (order.discount ?? 0) > 0;
+  // УСН при смешанной оплате берётся только с банковской части (tax_base с бэка)
+  const mixedTax = taxed && order.tax_base != null && Math.abs(order.tax_base - revenue) > 0.5;
   const items = [
-    { label: "Стоимость", value: fmt(revenue), color: "#1A1A1A" },
+    ...(hasDiscount ? [
+      { label: "По смете", value: fmt(order.price_before_discount), color: "#6B6355" },
+      { label: "Скидка", value: `−${fmt(order.discount)}`, color: "#B8860B" },
+    ] : []),
+    { label: hasDiscount ? "К оплате" : "Стоимость", value: fmt(revenue), color: "#1A1A1A" },
     { label: "Оплачено",  value: fmt(paidTotal),        color: "#4A7C59" },
     { label: "Долг",      value: order.debt > 0 ? fmt(order.debt) : "Оплачено", color: order.debt > 0 ? "#E8592A" : "#4A7C59" },
     { label: "Валовая",   value: fmt(gross),            color: "#1A1A1A" },
-    ...(taxed ? [{ label: `УСН ${order.tax_pct ?? 6}%`, value: `−${fmt(tax)}`, color: "#8B3A3A" }] : []),
+    ...(taxed ? [{ label: `УСН ${order.tax_pct ?? 6}%${mixedTax ? " · с безнал. части" : ""}`, value: `−${fmt(tax)}`, color: "#8B3A3A" }] : []),
     { label: "Чистая",    value: fmt(net),              color: net > 0 ? "#4A7C59" : "#8B3A3A" },
   ];
   return (

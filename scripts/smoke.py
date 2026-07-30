@@ -38,7 +38,8 @@ ENDPOINTS = ["/api/orders", "/api/customers", "/api/masters", "/api/suppliers",
 # Колонки, добавленные ALTER-миграциями: их отсутствие означает, что стартовая
 # миграция не прошла, а сервис при этом живой. Пополнять при новых миграциях.
 REQUIRED_COLUMNS = {
-    "orders": ["reserved_amount", "reserve_released_at"],
+    "orders": ["reserved_amount", "reserve_released_at", "discount", "discount_note"],
+    "payments": ["zenmoney_tx_id"],
     "estimate_sets": ["payment_type", "bank_pct", "is_primary"],
     "expenses": ["creditor_id", "finance_tx_id", "zenmoney_tx_id", "payment_source", "master_id"],
     "creditors": ["estimate_line_id", "amount_plan", "kind"],

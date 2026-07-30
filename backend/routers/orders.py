@@ -96,6 +96,9 @@ def list_orders(
                 "gross_profit": m["gross_profit"],
                 "tax": m["tax"],
                 "tax_pct": m["tax_pct"],
+                "tax_base": m["tax_base"],
+                "discount": m["discount"],
+                "price_before_discount": m["price_before_discount"],
                 "net_profit": m["net_profit"],
                 "payment_type": m["payment_type"],
                 # Транзит: счёт / план выплаты / факт / удержание — только у транзитных заказов
@@ -395,6 +398,12 @@ def _margin(conn, oid: str, price_plan, cost_plan, est=None, transit_facts=None)
     is_bank = bool(est and est["payment_type"] == "bank")
     is_transit = bool(est and est["payment_type"] == "transit")
     revenue = round(price_plan or 0, 2)
+    # Скидка — договорённость в конце сделки; смета-документ не перекраивается,
+    # к оплате = цена − discount. Читается здесь, а не передаётся: пять мест
+    # вызова _margin не должны помнить про неё каждое.
+    drow = conn.execute("SELECT discount, discount_note FROM orders WHERE id = ?", (oid,)).fetchone()
+    discount = round((drow["discount"] if drow else 0) or 0, 2)
+    discount_note = (drow["discount_note"] if drow else None)
     cost = round(cost_plan or 0, 2)
     plan_source = "manual"
     if est:
@@ -438,14 +447,38 @@ def _margin(conn, oid: str, price_plan, cost_plan, est=None, transit_facts=None)
             "state": state,
             "sources": tf.get("sources") or [],
         }
+    price_before_discount = revenue
+    if discount:
+        revenue = round(max(0.0, revenue - discount), 2)
     gross = round(revenue - cost, 2)
     # УСН платится с того, что прошло через расчётный счёт. У транзита деньги клиента
     # тоже приходят на р/с, поэтому налог берётся со ВСЕЙ суммы счёта, а не с удержания
     # (94 900 × 6% = 5 694 при удержании 12 400 — реальный доход 6 706, а не 12 400).
+    #
+    # Смешанная оплата (Спираль, 30.07.2026): часть безналом, часть налом/на личную
+    # карту. Налом полученное через р/с не проходило — база УСН для bank-заказов:
+    # банковские платежи + недоплаченный остаток (консервативно считаем, что остаток
+    # придёт безналом). Закрытый заказ → налог только с реально прошедшего через р/с.
     taxable = is_bank or is_transit
-    tax = round(revenue * TAX_PCT / 100, 2) if taxable else 0.0
+    if is_bank:
+        prow = conn.execute(
+            """SELECT COALESCE(SUM(amount), 0) AS total,
+                      COALESCE(SUM(CASE WHEN bank_tx_id IS NOT NULL THEN amount ELSE 0 END), 0) AS bank_paid
+               FROM payments WHERE order_id = ?""", (oid,)).fetchone()
+        bank_paid = round(prow["bank_paid"] or 0, 2)
+        paid_total_m = round(prow["total"] or 0, 2)
+        tax_base = round(bank_paid + max(0.0, revenue - paid_total_m), 2)
+    elif is_transit:
+        tax_base = revenue
+    else:
+        tax_base = 0.0
+    tax = round(tax_base * TAX_PCT / 100, 2) if taxable else 0.0
     out = {
         "revenue": revenue,
+        "price_before_discount": price_before_discount,
+        "discount": discount,
+        "discount_note": discount_note,
+        "tax_base": tax_base,
         "cost": cost,
         "gross_profit": gross,
         "tax": tax,
@@ -711,6 +744,10 @@ def get_order(order_id: str):
             "gross_profit": m["gross_profit"],
             "tax": m["tax"],
             "tax_pct": m["tax_pct"],
+            "tax_base": m["tax_base"],
+            "discount": m["discount"],
+            "discount_note": m["discount_note"],
+            "price_before_discount": m["price_before_discount"],
             "net_profit": m["net_profit"],
             "payment_type": m["payment_type"],
             # Транзит: счёт / план выплаты / факт / удержание — только у транзитных заказов
@@ -872,7 +909,7 @@ async def update_order(order_id: str, body: dict = Body(...)):
         if not r:
             raise HTTPException(status_code=404, detail="Not found")
 
-        allowed = {"title", "priority", "deadline", "customer_id", "price_plan", "cost_plan", "brand", "status", "finance_tx_id"}
+        allowed = {"title", "priority", "deadline", "customer_id", "price_plan", "cost_plan", "brand", "status", "finance_tx_id", "discount", "discount_note"}
         fields, values = [], []
         for key in allowed:
             if key not in body:
@@ -975,9 +1012,11 @@ class PaymentCreate(BaseModel):
     paid_at: str
     note: Optional[str] = None
     bank_tx_id: Optional[str] = None
+    zenmoney_tx_id: Optional[str] = None   # платёж на личную карту → транзакция ZenMoney
+    source: Optional[str] = None           # manual | personal (нал/личная карта)
 
 
-def _create_payment(conn, order_row, amount, paid_at, note=None, *, source, bank_tx_id=None) -> dict:
+def _create_payment(conn, order_row, amount, paid_at, note=None, *, source, bank_tx_id=None, zenmoney_tx_id=None) -> dict:
     """Единая точка вставки платежа: валидация + INSERT + возврат строки.
 
     Оба входа (ручной add_payment, разноска поступлений payments.from_tx) обязаны
@@ -990,9 +1029,9 @@ def _create_payment(conn, order_row, amount, paid_at, note=None, *, source, bank
         raise HTTPException(status_code=400, detail="paid_at required")
     pid = str(uuid4())
     conn.execute(
-        """INSERT INTO payments (id, order_id, amount, paid_at, note, bank_tx_id, source, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
-        (pid, order_row["id"], round(amount, 2), paid_at, note, bank_tx_id, source),
+        """INSERT INTO payments (id, order_id, amount, paid_at, note, bank_tx_id, zenmoney_tx_id, source, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+        (pid, order_row["id"], round(amount, 2), paid_at, note, bank_tx_id, zenmoney_tx_id, source),
     )
     return dict(conn.execute("SELECT * FROM payments WHERE id = ?", (pid,)).fetchone())
 
@@ -1019,7 +1058,8 @@ def add_payment(order_id: str, body: PaymentCreate):
         if not r:
             raise HTTPException(status_code=404, detail="Not found")
         payment = _create_payment(conn, r, body.amount, body.paid_at, body.note,
-                                  source="manual", bank_tx_id=body.bank_tx_id)
+                                  source=body.source or "manual", bank_tx_id=body.bank_tx_id,
+                                  zenmoney_tx_id=body.zenmoney_tx_id)
         conn.commit()
         payment.update(_reserve_hint(conn, r))
         payment["order_id"] = r["id"]

@@ -14,6 +14,7 @@ import { BRANDS, ORDER_STATUSES } from "../domain";
 export type OrderFormState = {
   title: string; status: string; brand: string; priority: string;
   deadline: string; customer_id: string; price_plan: string; cost_plan: string;
+  discount: string; discount_note: string;
 };
 
 const PRIORITY_LABELS: Record<string, string> = { low: "Низкий", normal: "Обычный", high: "Высокий", urgent: "Срочный" };
@@ -107,6 +108,21 @@ export function OrderParams({ order, form, field, customers, onStatusChanged }: 
               <input type="date" value={form.deadline} onChange={e => field({ deadline: e.target.value })}
                 style={{ border: "1px solid #EDEBE6", padding: "5px 10px", fontSize: 12, outline: "none", fontFamily: "inherit" }} />
             </div>
+            <div>
+              <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}
+                title="Договорённость в конце сделки: к оплате = цена сметы − скидка. Смету не перекраивает.">СКИДКА, ₽</div>
+              <input type="number" min="0" value={form.discount} placeholder="0"
+                onChange={e => field({ discount: e.target.value })}
+                style={{ width: 110, border: "1px solid #EDEBE6", padding: "5px 10px", fontSize: 12, outline: "none", fontFamily: MONO, textAlign: "right" }} />
+            </div>
+            {(parseFloat(form.discount) > 0 || form.discount_note) && (
+              <div style={{ flex: 1, minWidth: 220 }}>
+                <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>ПРИЧИНА СКИДКИ</div>
+                <input value={form.discount_note} placeholder="почему и с кем договорились"
+                  onChange={e => field({ discount_note: e.target.value })}
+                  style={{ width: "100%", border: "1px solid #EDEBE6", padding: "5px 10px", fontSize: 12, outline: "none", fontFamily: "inherit" }} />
+              </div>
+            )}
           </div>
 
           <div style={{ maxWidth: 420 }}>

@@ -142,6 +142,8 @@ export default function OrderDetail() {
         brand: order.brand || "",
         priority: order.priority || "normal",
         deadline: order.deadline ? order.deadline.split("T")[0] : "",
+        discount: order.discount ? String(order.discount) : "",
+        discount_note: order.discount_note || "",
         customer_id: order.customer_id ? String(order.customer_id) : "",
         price_plan: order.price_plan != null ? String(order.price_plan) : "",
         cost_plan: order.cost_plan != null ? String(order.cost_plan) : "",
@@ -272,6 +274,8 @@ export default function OrderDetail() {
       brand: form.brand || null,
       priority: form.priority,
       deadline: form.deadline || null,
+      discount: parseFloat(form.discount) || 0,
+      discount_note: form.discount_note || null,
       customer_id: form.customer_id && form.customer_id !== "__new__" ? form.customer_id : null,
     });
   };
