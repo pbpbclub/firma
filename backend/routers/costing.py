@@ -528,10 +528,17 @@ def readiness():
                 items = conn.execute(
                     "SELECT * FROM estimate_items WHERE set_id = ?", (s["id"],)
                 ).fetchall()
-                lines_n = conn.execute(
-                    """SELECT COUNT(*) FROM estimate_lines el JOIN estimate_items ei ON ei.id = el.item_id
-                       WHERE ei.set_id = ?""", (s["id"],)
-                ).fetchone()[0]
+                # Строки — одним запросом на сет, с разбивкой по позициям: и общий
+                # счётчик, и «есть ли строки у позиции» берутся отсюда. Отдельный
+                # COUNT в цикле по позициям давал N+1 на каждой смете каждого заказа.
+                lines_by_item = {
+                    r["item_id"]: r["n"] for r in conn.execute(
+                        """SELECT el.item_id AS item_id, COUNT(*) AS n
+                           FROM estimate_lines el JOIN estimate_items ei ON ei.id = el.item_id
+                           WHERE ei.set_id = ? GROUP BY el.item_id""", (s["id"],)
+                    ).fetchall()
+                }
+                lines_n = sum(lines_by_item.values())
                 enriched.append({
                     "set_id": s["id"], "title": s["title"], "status": s["status"],
                     "created_at": s["created_at"], "updated_at": s["updated_at"],
@@ -541,10 +548,7 @@ def readiness():
                     "cost_total": round(sum((i["cost_total"] or 0) for i in items), 2),
                 })
                 for it in items:
-                    has_lines = conn.execute(
-                        "SELECT COUNT(*) FROM estimate_lines WHERE item_id = ?", (it["id"],)
-                    ).fetchone()[0]
-                    if has_lines:
+                    if lines_by_item.get(it["id"], 0):
                         continue
                     entry = {
                         "order_id": o["id"], "order_number": o["number"],

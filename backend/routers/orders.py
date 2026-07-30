@@ -79,9 +79,11 @@ def list_orders(
         # Факты транзита — одним проходом на весь список: иначе на каждый заказ
         # открывалась бы zenmoney.db, а список и карточка показали бы разные числа.
         tfacts = _transit_facts(conn)
+        discounts = _discounts(conn)   # тем же приёмом: скидка иначе читалась бы на строку
         out = []
         for r in rows:
-            m = _margin(conn, r["id"], r["price_plan"], r["cost_plan"], transit_facts=tfacts)
+            m = _margin(conn, r["id"], r["price_plan"], r["cost_plan"],
+                        transit_facts=tfacts, discounts=discounts)
             out.append({
                 **dict(r),
                 # см. карточку заказа: цифры берём из активной сметы, поля — кэш
@@ -149,13 +151,14 @@ def suggest_orders(counterparty: str = "", amount: float = 0, limit: int = Query
         # _margin на каждый транзитный заказ заново сканировал бы expenses/creditors
         # и открывал бы zenmoney.db (N+1).
         tfacts = _transit_facts(conn)
+        discounts = _discounts(conn)
         scored = []
         for r in rows:
             row = dict(r)
             # Цена — из активной сметы (у черновиков поле заказа устаревшее), чтобы
             # подсказка по сумме и долг совпадали с карточкой.
             m = _margin(conn, row["id"], row.get("price_plan") or 0, row.get("cost_plan") or 0,
-                        transit_facts=tfacts)
+                        transit_facts=tfacts, discounts=discounts)
             row["price_plan"] = m["revenue"]
             ns = _name_score(counterparty, (row.get("customer_name") or "") + " " + (row.get("title") or ""))
             as_ = _amount_score(amount, row.get("price_plan") or 0)
@@ -407,7 +410,21 @@ def _order_delta(conn, r, m) -> dict:
     return {"delta": m["net_profit"], "delta_source": "plan"}
 
 
-def _margin(conn, oid: str, price_plan, cost_plan, est=None, transit_facts=None) -> dict:
+def _discounts(conn) -> dict:
+    """Скидки по всем заказам одним запросом — предрасчёт для списков (как
+    _transit_facts). Заказы без скидки в словарь не попадают: отсутствие ключа
+    и есть «скидки нет»."""
+    return {
+        r["id"]: (r["discount"] or 0, r["discount_note"])
+        for r in conn.execute(
+            """SELECT id, discount, discount_note FROM orders
+               WHERE COALESCE(discount,0) != 0 OR discount_note IS NOT NULL"""
+        ).fetchall()
+    }
+
+
+def _margin(conn, oid: str, price_plan, cost_plan, est=None, transit_facts=None,
+            discounts=None) -> dict:
     """Лестница прибыли по заказу. Единый источник правды — не дублировать выражением."""
     if est is None:
         est = _active_set(conn, oid)
@@ -415,11 +432,16 @@ def _margin(conn, oid: str, price_plan, cost_plan, est=None, transit_facts=None)
     is_transit = bool(est and est["payment_type"] == "transit")
     revenue = round(price_plan or 0, 2)
     # Скидка — договорённость в конце сделки; смета-документ не перекраивается,
-    # к оплате = цена − discount. Читается здесь, а не передаётся: пять мест
-    # вызова _margin не должны помнить про неё каждое.
-    drow = conn.execute("SELECT discount, discount_note FROM orders WHERE id = ?", (oid,)).fetchone()
-    discount = round((drow["discount"] if drow else 0) or 0, 2)
-    discount_note = (drow["discount_note"] if drow else None)
+    # к оплате = цена − discount. В списках передаётся предрасчётом _discounts
+    # (иначе запрос на строку), для одиночных вызовов остаётся SELECT по заказу.
+    if discounts is not None:
+        d_val, discount_note = discounts.get(oid, (0, None))
+    else:
+        drow = conn.execute(
+            "SELECT discount, discount_note FROM orders WHERE id = ?", (oid,)).fetchone()
+        d_val = (drow["discount"] if drow else 0)
+        discount_note = (drow["discount_note"] if drow else None)
+    discount = round(d_val or 0, 2)
     cost = round(cost_plan or 0, 2)
     plan_source = "manual"
     if est:

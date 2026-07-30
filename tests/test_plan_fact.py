@@ -349,6 +349,29 @@ class TestСкидкаИСмешаннаяОплата:
         assert m["revenue"] == 227_500
         assert m["price_before_discount"] == 280_000
 
+    def test_предрасчёт_скидок_даёт_то_же_что_запрос_по_заказу(self, conn):
+        """Списки передают скидку батчем (_discounts), одиночные вызовы читают
+        её SELECT'ом. Оба пути обязаны давать одну цифру — иначе список заказов
+        и карточка разойдутся."""
+        from routers.orders import _margin, _discounts
+        with_d = _order(conn, price=280_000, cost=128_200)
+        sid = _set(conn, with_d, payment_type="cash", status="approved")
+        _item(conn, sid, "I1", cost_total=128_200, sale=280_000)
+        conn.execute("UPDATE orders SET discount = ?, discount_note = ? WHERE id = ?",
+                     (52_500, "договорились", with_d))
+        without_d = _order(conn, oid="ORD-T02", price=100_000, cost=50_000)
+        sid2 = _set(conn, without_d, sid="SET-2", payment_type="cash", status="approved")
+        _item(conn, sid2, "I2", cost_total=50_000, sale=100_000)
+
+        d = _discounts(conn)
+        assert without_d not in d          # заказы без скидки в словарь не попадают
+        for oid, price, cost in ((with_d, 280_000, 128_200), (without_d, 100_000, 50_000)):
+            solo = _margin(conn, oid, price, cost)
+            batch = _margin(conn, oid, price, cost, discounts=d)
+            assert batch["discount"] == solo["discount"]
+            assert batch["discount_note"] == solo["discount_note"]
+            assert batch["revenue"] == solo["revenue"]
+
     def test_усн_только_с_банковской_части_когда_заказ_закрыт(self, conn):
         from routers.orders import _margin
         oid = _order(conn, price=280_000, cost=128_200)
