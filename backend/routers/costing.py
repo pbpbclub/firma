@@ -14,6 +14,7 @@ Missing идёт списком с готовой формулировкой в�
 
 Монтируется с prefix /api/estimates (rядом с estimates.router — тот и так ~1000 строк).
 """
+import sqlite3
 import uuid
 from typing import List, Optional
 
@@ -63,16 +64,19 @@ def _match_material_code(conn, title: str):
     t = norm_title(title)
     if not t:
         return None, None
+    # Недоступную базу прайсов НЕ глушим: «не смогли посмотреть» ≠ «не нашли».
+    # Заглушенная ошибка уводила строку в смету с нулём или лишним вопросом Юре.
+    mconn = None
     try:
         mconn = get_materials()
-        try:
-            for r in mconn.execute("SELECT code, title FROM catalog"):
-                if norm_title(r["title"]) == t:
-                    return r["code"], "exact"
-        finally:
+        for r in mconn.execute("SELECT code, title FROM catalog"):
+            if norm_title(r["title"]) == t:
+                return r["code"], "exact"
+    except sqlite3.Error as e:
+        raise HTTPException(status_code=503, detail=f"Прайсы недоступны (materials.db): {e}")
+    finally:
+        if mconn is not None:
             mconn.close()
-    except Exception:
-        pass
     return None, None
 
 
@@ -177,13 +181,20 @@ def _client_price_per_unit(item, set_row) -> float:
 
 
 def _rate_price(rate, item, set_row, line_qty: float) -> float:
-    """Цена строки по ставке. Все схемы кроме percent кладутся как unit_price=rate:
-    fixed ₽/изделие ложится в qty=1 (умножение на кол-во изделий делает _recalc_item),
-    per_unit/hourly — цена за единицу/час. percent — % от клиентской цены изделия."""
+    """Цена строки по ставке (unit_price; line_total = qty × unit_price считает вызывающий).
+
+    per_unit/hourly — цена за единицу/час, умножается на qty честно.
+    fixed ₽/изделие и percent — величина ИТОГА строки, а не цены за единицу,
+    поэтому делятся на qty: при qty=3 фиксированные 5 000 ₽ должны остаться
+    5 000 ₽ на изделие, а не превратиться в 15 000. Умножение на количество
+    ИЗДЕЛИЙ (не строк) делает _recalc_item — оно к qty строки отношения не имеет."""
     if rate["scheme"] == "percent":
         per_unit_client = _client_price_per_unit(item, set_row)
         q = line_qty or 1
         return round(rate["rate"] / 100.0 * per_unit_client / q, 2)
+    if rate["scheme"] == "fixed":
+        q = line_qty or 1
+        return round(rate["rate"] / q, 2)
     return round(rate["rate"], 2)
 
 

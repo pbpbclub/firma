@@ -7,6 +7,15 @@ ANALYTICS_DB = Path("/opt/fin-agent/data/analytics.db")
 ZENMONEY_DB = Path("/opt/fin-agent/data/zenmoney.db")
 MATERIALS_DB = Path("/opt/ai-os/data/materials.db")
 
+# Канонический состав catalog_item_lines: сюда сходятся оба пути создания таблицы —
+# миграции (ensure_catalog_material_fk / ensure_catalog_lines_costing_schema) и ленивый
+# CREATE в routers/catalog.py::_ensure_tables. Пересоздание таблицы копирует только
+# эти колонки, поэтому список должен оставаться полным.
+CATALOG_LINE_COLUMNS = (
+    "id", "item_id", "type", "title", "qty", "unit", "unit_price", "line_total",
+    "material_id", "sort_order", "material_code", "work_type_id", "master_id",
+)
+
 
 def get_production():
     conn = sqlite3.connect(PRODUCTION_DB)
@@ -72,6 +81,8 @@ def ensure_customer_schema():
     conn = get_production()
     try:
         existing = {r[1] for r in conn.execute("PRAGMA table_info(customers)").fetchall()}
+        if not existing:
+            return          # таблицы нет (чистая база) — ALTER'ить нечего
         # master_id — тот же человек в картотеке подрядчиков (клиент бывает и мастером).
         for column in ("wiki_ref", "finagent_ref", "source", "status", "telegram", "instagram",
                        "whatsapp", "master_id"):
@@ -86,6 +97,8 @@ def ensure_orders_schema():
     conn = get_production()
     try:
         existing = {r[1] for r in conn.execute("PRAGMA table_info(orders)").fetchall()}
+        if not existing:
+            return
         if "brand" not in existing:
             conn.execute("ALTER TABLE orders ADD COLUMN brand TEXT")
         conn.commit()
@@ -103,6 +116,8 @@ def ensure_order_reserve_schema():
     conn = get_production()
     try:
         existing = {r[1] for r in conn.execute("PRAGMA table_info(orders)").fetchall()}
+        if not existing:
+            return
         for col in ("reserved_amount REAL DEFAULT 0", "reserve_released_at TEXT"):
             name = col.split()[0]
             if name not in existing:
@@ -225,7 +240,7 @@ def ensure_estimate_bank_pct_schema():
     conn = get_production()
     try:
         existing = {r[1] for r in conn.execute("PRAGMA table_info(estimate_items)").fetchall()}
-        if "bank_pct" not in existing:
+        if existing and "bank_pct" not in existing:
             conn.execute("ALTER TABLE estimate_items ADD COLUMN bank_pct REAL DEFAULT 13")
             conn.commit()
     finally:
@@ -242,21 +257,38 @@ def ensure_catalog_material_fk():
             return
         if "REFERENCES materials" in (schema_row[0] or ""):
             return
-        conn.executescript("""
+        if not conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='materials'"
+        ).fetchone():
+            # Номенклатуру в production.db заводит production-агент. Пока её нет,
+            # вешать FK нельзя: с PRAGMA foreign_keys=ON (см. get_production) ссылка
+            # на отсутствующую таблицу роняет любой INSERT в catalog_item_lines.
+            return
+        # Перенос идёт ПОИМЕНОВАННО, а не `SELECT *`: позиционная копия верна только
+        # для ровно той старой схемы, из которой миграция родилась. Таблица, созданная
+        # роутером каталога на чистой базе, шире (material_code/work_type_id/master_id)
+        # и в другом порядке — `SELECT *` там падает «10 columns but 13 values».
+        existing = [r[1] for r in conn.execute("PRAGMA table_info(catalog_item_lines)").fetchall()]
+        carried = [c for c in existing if c in CATALOG_LINE_COLUMNS]
+        cols = ", ".join(carried)
+        conn.executescript(f"""
             PRAGMA foreign_keys=OFF;
             CREATE TABLE catalog_item_lines_new (
-                id          TEXT PRIMARY KEY,
-                item_id     TEXT NOT NULL REFERENCES catalog_items(id) ON DELETE CASCADE,
-                type        TEXT NOT NULL,
-                title       TEXT NOT NULL,
-                qty         REAL DEFAULT 1,
-                unit        TEXT DEFAULT 'шт',
-                unit_price  REAL DEFAULT 0,
-                line_total  REAL DEFAULT 0,
-                material_id TEXT REFERENCES materials(id),
-                sort_order  INTEGER DEFAULT 0
+                id            TEXT PRIMARY KEY,
+                item_id       TEXT NOT NULL REFERENCES catalog_items(id) ON DELETE CASCADE,
+                type          TEXT NOT NULL,
+                title         TEXT NOT NULL,
+                qty           REAL DEFAULT 1,
+                unit          TEXT DEFAULT 'шт',
+                unit_price    REAL DEFAULT 0,
+                line_total    REAL DEFAULT 0,
+                material_id   TEXT REFERENCES materials(id),
+                sort_order    INTEGER DEFAULT 0,
+                material_code TEXT,
+                work_type_id  TEXT,
+                master_id     TEXT
             );
-            INSERT INTO catalog_item_lines_new SELECT * FROM catalog_item_lines;
+            INSERT INTO catalog_item_lines_new ({cols}) SELECT {cols} FROM catalog_item_lines;
             DROP TABLE catalog_item_lines;
             ALTER TABLE catalog_item_lines_new RENAME TO catalog_item_lines;
             PRAGMA foreign_keys=ON;
@@ -270,6 +302,8 @@ def ensure_creditor_tx_link_schema():
     conn = get_production()
     try:
         existing = {r[1] for r in conn.execute("PRAGMA table_info(creditors)").fetchall()}
+        if not existing:
+            return
         for col in ("finance_tx_id", "zenmoney_tx_id"):
             if col not in existing:
                 conn.execute(f"ALTER TABLE creditors ADD COLUMN {col} TEXT")
@@ -286,6 +320,8 @@ def ensure_expenses_schema():
     conn = get_production()
     try:
         existing = {r[1] for r in conn.execute("PRAGMA table_info(expenses)").fetchall()}
+        if not existing:
+            return
         cols = {
             "source": "TEXT DEFAULT 'manual'",   # manual|bank|zenmoney
             "creditor_id": "TEXT",               # покрытое обязательство (дедуп факта)
@@ -369,7 +405,7 @@ def ensure_creditor_estimate_item_schema():
     conn = get_production()
     try:
         existing = {r[1] for r in conn.execute("PRAGMA table_info(creditors)").fetchall()}
-        if "estimate_item_id" not in existing:
+        if existing and "estimate_item_id" not in existing:
             conn.execute("ALTER TABLE creditors ADD COLUMN estimate_item_id TEXT")
             conn.commit()
     finally:
@@ -380,7 +416,7 @@ def ensure_payee_rules_category_schema():
     conn = get_production()
     try:
         existing = {r[1] for r in conn.execute("PRAGMA table_info(payee_rules)").fetchall()}
-        if "category" not in existing:
+        if existing and "category" not in existing:
             conn.execute("ALTER TABLE payee_rules ADD COLUMN category TEXT")
             conn.commit()
     finally:
@@ -391,7 +427,7 @@ def ensure_order_tx_link_schema():
     conn = get_production()
     try:
         existing = {r[1] for r in conn.execute("PRAGMA table_info(orders)").fetchall()}
-        if "finance_tx_id" not in existing:
+        if existing and "finance_tx_id" not in existing:
             conn.execute("ALTER TABLE orders ADD COLUMN finance_tx_id TEXT")
             conn.commit()
     finally:
@@ -402,7 +438,7 @@ def ensure_receivable_tx_link_schema():
     conn = get_finance()
     try:
         existing = {r[1] for r in conn.execute("PRAGMA table_info(receivables)").fetchall()}
-        if "finance_tx_id" not in existing:
+        if existing and "finance_tx_id" not in existing:
             conn.execute("ALTER TABLE receivables ADD COLUMN finance_tx_id TEXT")
             conn.commit()
     finally:
@@ -447,6 +483,8 @@ def ensure_creditors_plan_schema():
     conn = get_production()
     try:
         existing = {r[1] for r in conn.execute("PRAGMA table_info(creditors)").fetchall()}
+        if not existing:
+            return
         for col in ("estimate_line_id TEXT", "amount_plan REAL"):
             name = col.split()[0]
             if name not in existing:
@@ -463,7 +501,7 @@ def ensure_fixed_obligations_schema():
         existing = {r[1] for r in conn.execute("PRAGMA table_info(creditors)").fetchall()}
         for col in ("kind TEXT", "period TEXT", "fixed_id TEXT"):
             name = col.split()[0]
-            if name not in existing:
+            if existing and name not in existing:
                 conn.execute(f"ALTER TABLE creditors ADD COLUMN {col}")
         conn.execute(
             """
@@ -526,8 +564,13 @@ def ensure_work_types_schema():
                 )
             conn.commit()
             # Auto-link masters to work types by specialization keyword match
+            # (картотеку мастеров ведёт production-агент: на чистой базе её ещё нет)
             wt_rows = conn.execute("SELECT id, name FROM work_types").fetchall()
-            masters = conn.execute("SELECT id, specialization FROM masters WHERE specialization IS NOT NULL AND specialization != ''").fetchall()
+            has_masters = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='masters'").fetchone()
+            masters = conn.execute(
+                "SELECT id, specialization FROM masters WHERE specialization IS NOT NULL AND specialization != ''"
+            ).fetchall() if has_masters else []
             for m in masters:
                 spec = (m["specialization"] or "").lower()
                 for wt in wt_rows:
@@ -832,6 +875,11 @@ def ensure_catalog_lines_costing_schema():
     conn = get_production()
     try:
         existing = {r[1] for r in conn.execute("PRAGMA table_info(catalog_item_lines)").fetchall()}
+        if not existing:
+            # Таблицы ещё нет: PRAGMA по несуществующей молчит вместо ошибки, и без
+            # этой проверки ALTER падает `no such table` прямо в startup. Таблицу
+            # создаст роутер каталога — уже со всеми колонками (catalog.py::_ensure_tables).
+            return
         cols = {
             "material_code": "TEXT",   # код номенклатуры materials.db
             "work_type_id": "TEXT",    # вид работ (labor/service)

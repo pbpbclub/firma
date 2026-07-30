@@ -146,16 +146,20 @@ def inbox(
         # Разнесённые/скрытые отсеиваются в Python (три файла БД) → читаем страницами,
         # пока не набрали limit или не кончились строки. «Запас limit*N» терял бы
         # старые неразнесённые, когда разнесённых большинство.
+        # Читаем CHUNK+1: лишняя строка — факт «дальше данные ещё есть», а не догадка.
+        # Без неё лимит, набранный ровно на последней строке полной страницы, давал
+        # truncated=true, когда показывать больше было нечего.
         CHUNK = 300
         offset = 0
         done = False
         while not done and len(out) < limit:
-            page = fin.execute(
+            fetched = fin.execute(
                 f"SELECT * FROM transactions {where} ORDER BY date DESC, id DESC LIMIT ? OFFSET ?",
-                params + [CHUNK, offset],
+                params + [CHUNK + 1, offset],
             ).fetchall()
-            if len(page) < CHUNK:
-                done = True  # последняя страница
+            page = fetched[:CHUNK]
+            if len(fetched) <= CHUNK:
+                done = True  # последняя страница: строки за её краем не существует
             offset += CHUNK
             for r in page:
                 tid = str(r["id"])

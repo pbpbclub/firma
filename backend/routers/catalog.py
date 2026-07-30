@@ -2,6 +2,7 @@ from fastapi import APIRouter, Query, HTTPException, Body
 from typing import Optional, List
 from pydantic import BaseModel
 from db import get_production
+import sqlite3
 import uuid
 from datetime import datetime
 
@@ -11,11 +12,25 @@ BOM_LINE_TYPES = ("material", "labor", "service", "delivery")
 
 
 def _ensure_tables(conn):
+    """Ленивое создание таблиц каталога.
+
+    Схема здесь обязана совпадать с итогом миграций db.py (ensure_catalog_schema,
+    ensure_catalog_lines_costing_schema): на боевой базе таблицы давно есть и CREATE
+    ничего не делает, а на чистой — создаёт их именно этот код, уже после того как
+    startup-миграции отработали вхолостую. Разъедется — INSERT'ы ниже поймают
+    `no such column` при развёртывании с нуля.
+
+    material_id идёт БЕЗ `REFERENCES materials(id)`: таблицу materials в production.db
+    заводит production-агент, и на чистой базе её ещё нет — FK на несуществующую
+    таблицу роняет первый же INSERT («no such table: main.materials»). Ссылку
+    навесит ensure_catalog_material_fk, когда materials появится.
+    Состав колонок здесь и в db.CATALOG_LINE_COLUMNS — один."""
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS catalog_items (
             id          TEXT PRIMARY KEY,
             title       TEXT NOT NULL,
             category    TEXT,
+            brand       TEXT,
             markup_pct  REAL DEFAULT 30,
             cost_total  REAL DEFAULT 0,
             sale_price  REAL DEFAULT 0,
@@ -24,16 +39,19 @@ def _ensure_tables(conn):
             updated_at  TEXT DEFAULT (datetime('now'))
         );
         CREATE TABLE IF NOT EXISTS catalog_item_lines (
-            id          TEXT PRIMARY KEY,
-            item_id     TEXT NOT NULL REFERENCES catalog_items(id) ON DELETE CASCADE,
-            type        TEXT NOT NULL,
-            title       TEXT NOT NULL,
-            qty         REAL DEFAULT 1,
-            unit        TEXT DEFAULT 'шт',
-            unit_price  REAL DEFAULT 0,
-            line_total  REAL DEFAULT 0,
-            material_id TEXT,
-            sort_order  INTEGER DEFAULT 0
+            id            TEXT PRIMARY KEY,
+            item_id       TEXT NOT NULL REFERENCES catalog_items(id) ON DELETE CASCADE,
+            type          TEXT NOT NULL,
+            title         TEXT NOT NULL,
+            qty           REAL DEFAULT 1,
+            unit          TEXT DEFAULT 'шт',
+            unit_price    REAL DEFAULT 0,
+            line_total    REAL DEFAULT 0,
+            material_id   TEXT,
+            sort_order    INTEGER DEFAULT 0,
+            material_code TEXT,
+            work_type_id  TEXT,
+            master_id     TEXT
         );
     """)
     conn.commit()
@@ -371,15 +389,18 @@ def import_bom(body: BomIn):
     from routers.rates import resolve_work_type, find_work_rate, find_price_book, norm_title
 
     def _material_title(code: str):
+        # Недоступная база прайсов — явная ошибка, а не «названия нет»:
+        # молчаливый None уводил в карточку строку с кодом вместо названия.
+        mconn = None
         try:
             mconn = get_materials()
-            try:
-                r = mconn.execute("SELECT title FROM catalog WHERE code = ?", (code,)).fetchone()
-                return r["title"] if r else None
-            finally:
+            r = mconn.execute("SELECT title FROM catalog WHERE code = ?", (code,)).fetchone()
+            return r["title"] if r else None
+        except sqlite3.Error as e:
+            raise HTTPException(status_code=503, detail=f"Прайсы недоступны (materials.db): {e}")
+        finally:
+            if mconn is not None:
                 mconn.close()
-        except Exception:
-            return None
 
     title = ((body.product or {}).get("title") or "").strip()
     if not title:
@@ -454,11 +475,20 @@ def import_bom(body: BomIn):
                     line_title = line_title or wt["name"]
                     rate = find_work_rate(conn, wt_id, None)
                     if rate and rate["scheme"] != "percent":
-                        unit_price = unit_price or round(rate["rate"], 2)
+                        # fixed — ₽ за изделие: в unit_price кладём долю на единицу,
+                        # иначе qty×rate молча раздувает себестоимость (см. costing._rate_price)
+                        rate_value = round(rate["rate"] / (l.qty or 1), 2) if rate["scheme"] == "fixed" \
+                            else round(rate["rate"], 2)
+                        unit_price = unit_price or rate_value
                         matched += 1
                     elif not unit_price:
                         unmatched.append({"title": line_title,
                                           "ask": f"Ставка за «{wt['name']}»: сколько ₽/{l.unit}?"})
+                elif not unit_price:
+                    # Вид работ не разрезолвился (у строки только material_code, без
+                    # названия) — раньше она тихо уходила в карточку с нулём.
+                    unmatched.append({"title": line_title or "Работа без названия",
+                                      "ask": f"Что это за работа в BOM (строка {i + 1}) и сколько ₽/{l.unit}?"})
 
             conn.execute(
                 """INSERT INTO catalog_item_lines (id, item_id, type, title, qty, unit, unit_price, line_total,
