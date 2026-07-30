@@ -325,12 +325,13 @@ class TestПрогноз:
         assert res["gross_forecast"] == 100_000 - 80_000
 
 
-def _payment(conn, oid, amount, bank_tx_id=None, zenmoney_tx_id=None):
+def _payment(conn, oid, amount, bank_tx_id=None, zenmoney_tx_id=None, channel=None,
+             source="manual"):
     conn.execute(
-        "INSERT INTO payments (id, order_id, amount, paid_at, bank_tx_id, zenmoney_tx_id) "
-        "VALUES (?,?,?,'2026-07-03',?,?)",
-        (f"PAY-{amount}-{bank_tx_id or zenmoney_tx_id or 'cash'}", oid, amount,
-         bank_tx_id, zenmoney_tx_id))
+        "INSERT INTO payments (id, order_id, amount, paid_at, bank_tx_id, zenmoney_tx_id, "
+        "channel, source) VALUES (?,?,?,'2026-07-03',?,?,?,?)",
+        (f"PAY-{amount}-{bank_tx_id or zenmoney_tx_id or channel or 'cash'}", oid, amount,
+         bank_tx_id, zenmoney_tx_id, channel, source))
 
 
 class TestСкидкаИСмешаннаяОплата:
@@ -368,11 +369,75 @@ class TestСкидкаИСмешаннаяОплата:
         sid = _set(conn, oid, payment_type="bank", status="approved")
         _item(conn, sid, "I1", cost_total=50_000, sale=87_000)
         _payment(conn, oid, 30_000, bank_tx_id="F1")
-        _payment(conn, oid, 20_000)                       # нал
+        _payment(conn, oid, 20_000, channel="cash")        # нал — помечен ЯВНО
         m = _margin(conn, oid, 100_000, 50_000)
         # 30 000 пришло на р/с + 50 000 остатка ещё придёт (консервативно безналом)
         assert m["tax_base"] == 80_000
         assert m["tax"] == 4_800
+
+
+class TestКаналПлатежаИУСН:
+    """Канал платежа (channel) — прошли ли деньги через р/с. Раньше признаком был
+    bank_tx_id, и он врал в обе стороны: у ручных и агентских платежей он пуст
+    (4 оплаты от ООО через Т-Банк, 383 000 ₽, считались налом), а заказ со сметой
+    cash не начислял УСН вовсе на реально прошедший безнал (ORD-023, 184 000 ₽)."""
+
+    def test_усн_начисляется_на_безнал_при_смете_cash(self, conn):
+        """ORD-023: активная смета cash, деньги пришли на р/с — налог обязан быть.
+        Налогооблагаемость определяет ФАКТ поступления, а не тип сметы."""
+        from routers.orders import _margin
+        oid = _order(conn, price=230_000, cost=115_000)
+        sid = _set(conn, oid, payment_type="cash", status="approved")
+        _item(conn, sid, "I1", cost_total=115_000, sale=230_000)
+        _payment(conn, oid, 184_000, channel="bank", source="fin-agent")
+        m = _margin(conn, oid, 230_000, 115_000)
+        assert m["tax_base"] == 184_000
+        assert m["tax"] == 11_040
+        assert m["tax_pct"] == 6.0
+
+    def test_смета_cash_без_безнала_налога_не_даёт(self, conn):
+        from routers.orders import _margin
+        oid = _order(conn, price=230_000, cost=115_000)
+        sid = _set(conn, oid, payment_type="cash", status="approved")
+        _item(conn, sid, "I1", cost_total=115_000, sale=230_000)
+        _payment(conn, oid, 184_000, channel="cash")
+        m = _margin(conn, oid, 230_000, 115_000)
+        assert m["tax_base"] == 0
+        assert m["tax"] == 0
+
+    def test_безнал_без_bank_tx_id_попадает_в_базу_усн(self, conn):
+        """Обратная сторона того же бага: bank-заказ, оплата внесена руками
+        (счёт от ООО через Т-Банк), bank_tx_id пуст. Деньги на р/с — база УСН."""
+        from routers.orders import _margin
+        oid = _order(conn, price=100_000, cost=50_000)
+        sid = _set(conn, oid, payment_type="bank", status="approved")
+        _item(conn, sid, "I1", cost_total=50_000, sale=87_000)
+        _payment(conn, oid, 100_000, channel="bank")
+        m = _margin(conn, oid, 100_000, 50_000)
+        assert m["tax_base"] == 100_000
+        assert m["tax"] == 6_000
+
+    def test_канал_не_указан_считается_безналом_консервативно(self, conn):
+        """NULL-канал: недоначисленный УСН — налоговый риск, лишний резерв —
+        просто деньги в фонде. Ошибаемся в сторону резерва."""
+        from routers.orders import _margin
+        oid = _order(conn, price=100_000, cost=50_000)
+        sid = _set(conn, oid, payment_type="cash", status="approved")
+        _item(conn, sid, "I1", cost_total=50_000, sale=100_000)
+        _payment(conn, oid, 60_000)            # channel NULL
+        m = _margin(conn, oid, 100_000, 50_000)
+        assert m["tax_base"] == 60_000
+        assert m["tax"] == 3_600
+
+    def test_личная_карта_не_база_усн(self, conn):
+        from routers.orders import _margin
+        oid = _order(conn, price=100_000, cost=50_000)
+        sid = _set(conn, oid, payment_type="cash", status="approved")
+        _item(conn, sid, "I1", cost_total=50_000, sale=100_000)
+        _payment(conn, oid, 100_000, channel="personal")
+        m = _margin(conn, oid, 100_000, 50_000)
+        assert m["tax_base"] == 0
+        assert m["tax"] == 0
 
     def test_без_оплат_налог_как_раньше_от_всей_выручки(self, conn):
         from routers.orders import _margin

@@ -169,6 +169,41 @@ def ensure_payment_zenmoney_schema():
         conn.close()
 
 
+def ensure_payment_channel_schema():
+    """Канал платежа — прошли ли деньги через расчётный счёт.
+
+    До 30.07.2026 признаком безнала был `bank_tx_id`, и это врало: у платежей,
+    внесённых руками и фин-агентом, он пуст, а деньги при этом шли на р/с
+    (4 оплаты счетов от ООО через Т-Банк, 383 000 ₽ — по эвристике «нет id = нал»).
+    Обратный случай тоже: ORD-023 с активной сметой cash не начислял УСН вовсе
+    на реально прошедшие 184 000 ₽. По одному tx_id канал не восстановить —
+    нужно отдельное поле.
+
+    channel: 'bank' (р/с, база УСН) | 'cash' (нал) | 'personal' (личная карта).
+    NULL = не указан; в расчёте налога NULL трактуется КОНСЕРВАТИВНО как 'bank':
+    недоначисленный УСН — налоговый риск, лишний резерв в фонде — просто деньги
+    на счету. Бэкофилл только детерминированный (по source/tx_id); угадывать
+    канал по тексту назначения нельзя — это ставит Юра или фин-агент.
+    """
+    conn = get_production()
+    try:
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(payments)").fetchall()}
+        if existing and "channel" not in existing:
+            conn.execute("ALTER TABLE payments ADD COLUMN channel TEXT")
+            conn.execute(
+                """UPDATE payments SET channel = 'bank'
+                   WHERE bank_tx_id IS NOT NULL AND bank_tx_id <> ''
+                      OR source IN ('bank', 'sber', 'bank-in', 'fin-agent')""")
+            conn.execute(
+                """UPDATE payments SET channel = 'personal'
+                   WHERE channel IS NULL
+                     AND (source = 'personal'
+                          OR (zenmoney_tx_id IS NOT NULL AND zenmoney_tx_id <> ''))""")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_estimate_primary_schema():
     """Основная смета заказа — выбор Юры, а не дата.
 

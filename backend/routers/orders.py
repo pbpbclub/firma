@@ -208,6 +208,22 @@ def _bucket(raw: str) -> str:
 # это прибыль (подтверждено Юрой 17.07.2026), поэтому вычитаем только налог.
 TAX_PCT = 6.0
 
+# «Деньги прошли через расчётный счёт» — одно выражение на систему (SQL-условие
+# по строке payments). Признаком был bank_tx_id, и он врал в обе стороны: у оплат,
+# внесённых руками и фин-агентом, он пуст, хотя это безнал (4 счёта от ООО через
+# Т-Банк, 383 000 ₽), а заказ с активной сметой cash не начислял УСН вовсе на
+# реально прошедшие 184 000 ₽ (ORD-023, 30.07.2026).
+#
+# Порядок разбора: явный channel → zenmoney_tx_id (по построению личная карта,
+# см. ensure_payment_zenmoney_schema) → КОНСЕРВАТИВНО безнал. Консервативно,
+# потому что недоначисленный УСН — налоговый риск, а лишний резерв в фонде —
+# просто деньги на счету. Нал помечается явно: channel='cash'.
+PAYMENT_IS_BANK_SQL = """
+    COALESCE(NULLIF(channel, ''),
+             CASE WHEN zenmoney_tx_id IS NOT NULL AND zenmoney_tx_id <> ''
+                  THEN 'personal' ELSE 'bank' END) = 'bank'
+"""
+
 
 def _active_set(conn, oid: str):
     """Активная смета заказа: approved → помеченная основной → последняя не-superseded.
@@ -459,19 +475,24 @@ def _margin(conn, oid: str, price_plan, cost_plan, est=None, transit_facts=None)
     # карту. Налом полученное через р/с не проходило — база УСН для bank-заказов:
     # банковские платежи + недоплаченный остаток (консервативно считаем, что остаток
     # придёт безналом). Закрытый заказ → налог только с реально прошедшего через р/с.
-    taxable = is_bank or is_transit
+    prow = conn.execute(
+        f"""SELECT COALESCE(SUM(amount), 0) AS total,
+                   COALESCE(SUM(CASE WHEN {PAYMENT_IS_BANK_SQL}
+                                     THEN amount ELSE 0 END), 0) AS bank_paid
+            FROM payments WHERE order_id = ?""", (oid,)).fetchone()
+    bank_paid = round(prow["bank_paid"] or 0, 2)
+    paid_total_m = round(prow["total"] or 0, 2)
     if is_bank:
-        prow = conn.execute(
-            """SELECT COALESCE(SUM(amount), 0) AS total,
-                      COALESCE(SUM(CASE WHEN bank_tx_id IS NOT NULL THEN amount ELSE 0 END), 0) AS bank_paid
-               FROM payments WHERE order_id = ?""", (oid,)).fetchone()
-        bank_paid = round(prow["bank_paid"] or 0, 2)
-        paid_total_m = round(prow["total"] or 0, 2)
         tax_base = round(bank_paid + max(0.0, revenue - paid_total_m), 2)
     elif is_transit:
         tax_base = revenue
     else:
-        tax_base = 0.0
+        # Смета cash/наличная, но деньги фактически прошли через р/с (ORD-023:
+        # активной оказалась cash-смета при неснятом is_primary, УСН с реальных
+        # 184 000 ₽ не начислялся вовсе). Налогооблагаемость даёт ФАКТ поступления,
+        # а не тип сметы; остаток при cash-смете безналом НЕ прогнозируется.
+        tax_base = bank_paid
+    taxable = is_bank or is_transit or tax_base > 0
     tax = round(tax_base * TAX_PCT / 100, 2) if taxable else 0.0
     out = {
         "revenue": revenue,
@@ -1014,9 +1035,22 @@ class PaymentCreate(BaseModel):
     bank_tx_id: Optional[str] = None
     zenmoney_tx_id: Optional[str] = None   # платёж на личную карту → транзакция ZenMoney
     source: Optional[str] = None           # manual | personal (нал/личная карта)
+    channel: Optional[str] = None          # bank | cash | personal — прошло ли через р/с
 
 
-def _create_payment(conn, order_row, amount, paid_at, note=None, *, source, bank_tx_id=None, zenmoney_tx_id=None) -> dict:
+def _payment_channel(source, bank_tx_id, zenmoney_tx_id, channel=None) -> str:
+    """Канал платежа при вставке. Пишем ЯВНО, а не оставляем NULL на разбор
+    в _margin: база УСН не должна зависеть от того, кто и когда завёл строку."""
+    if channel in ("bank", "cash", "personal"):
+        return channel
+    if bank_tx_id or source in ("bank", "sber", "bank-in", "fin-agent"):
+        return "bank"
+    if zenmoney_tx_id or source == "personal":
+        return "personal"
+    return "bank"   # консервативно, см. PAYMENT_IS_BANK_SQL
+
+
+def _create_payment(conn, order_row, amount, paid_at, note=None, *, source, bank_tx_id=None, zenmoney_tx_id=None, channel=None) -> dict:
     """Единая точка вставки платежа: валидация + INSERT + возврат строки.
 
     Оба входа (ручной add_payment, разноска поступлений payments.from_tx) обязаны
@@ -1029,9 +1063,10 @@ def _create_payment(conn, order_row, amount, paid_at, note=None, *, source, bank
         raise HTTPException(status_code=400, detail="paid_at required")
     pid = str(uuid4())
     conn.execute(
-        """INSERT INTO payments (id, order_id, amount, paid_at, note, bank_tx_id, zenmoney_tx_id, source, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
-        (pid, order_row["id"], round(amount, 2), paid_at, note, bank_tx_id, zenmoney_tx_id, source),
+        """INSERT INTO payments (id, order_id, amount, paid_at, note, bank_tx_id, zenmoney_tx_id, source, channel, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+        (pid, order_row["id"], round(amount, 2), paid_at, note, bank_tx_id, zenmoney_tx_id, source,
+         _payment_channel(source, bank_tx_id, zenmoney_tx_id, channel)),
     )
     return dict(conn.execute("SELECT * FROM payments WHERE id = ?", (pid,)).fetchone())
 
@@ -1059,7 +1094,7 @@ def add_payment(order_id: str, body: PaymentCreate):
             raise HTTPException(status_code=404, detail="Not found")
         payment = _create_payment(conn, r, body.amount, body.paid_at, body.note,
                                   source=body.source or "manual", bank_tx_id=body.bank_tx_id,
-                                  zenmoney_tx_id=body.zenmoney_tx_id)
+                                  zenmoney_tx_id=body.zenmoney_tx_id, channel=body.channel)
         conn.commit()
         payment.update(_reserve_hint(conn, r))
         payment["order_id"] = r["id"]

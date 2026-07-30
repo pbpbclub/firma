@@ -690,7 +690,12 @@ def get_debtors():
         except Exception:
             pass
 
-        from routers.orders import STATUS_LABELS, _margin   # один словарь/формула на систему
+        from routers.orders import STATUS_LABELS, _margin, _transit_facts   # один словарь/формула на систему
+
+        # Транзитный факт — ОДИН раз на весь список. Без предрасчёта _margin зовёт
+        # _transit_facts на каждый заказ, а тот заново сканирует expenses/creditors
+        # и открывает zenmoney.db (третье такое место; два предыдущих закрыты так же).
+        tfacts = _transit_facts(prod)
 
         result = []
         for r in orders:
@@ -698,7 +703,8 @@ def get_debtors():
             paid_total = row["paid_manual"]
             # Долг — от ЖИВОЙ выручки активной сметы (та же цифра, что колонка
             # «К получению» в списке заказов): хранимый price_plan у черновиков — кэш.
-            m = _margin(prod, row["id"], row["price_plan"], row["cost_plan"])
+            m = _margin(prod, row["id"], row["price_plan"], row["cost_plan"],
+                        transit_facts=tfacts)
             row["price_plan"] = m["revenue"]
             row.pop("cost_plan", None)
             debt = round((m["revenue"] or 0) - paid_total, 2)
@@ -721,7 +727,7 @@ def get_debtors():
         # у draft-смет поле синкается только при approve и врёт (ORD-005: 212 300
         # в поле против 195 600 по смете) — список заказов показывает живую,
         # potential обязан совпадать с ним. Ленивый импорт против циклического.
-        from routers.orders import _margin
+        # transit_facts — тот же предрасчёт, что и выше: второй цикл по заказам.
         potential = []
         for r in prod.execute(
             """SELECT o.id, o.number, o.title, o.deadline, o.price_plan, o.cost_plan,
@@ -734,7 +740,8 @@ def get_debtors():
                GROUP BY o.id"""
         ).fetchall():
             row = dict(r)
-            m = _margin(prod, row["id"], row["price_plan"], row["cost_plan"])
+            m = _margin(prod, row["id"], row["price_plan"], row["cost_plan"],
+                        transit_facts=tfacts)
             row["price_plan"] = m["revenue"]
             row.pop("cost_plan", None)
             row["rest"] = round((m["revenue"] or 0) - (row["paid_total"] or 0), 2)
