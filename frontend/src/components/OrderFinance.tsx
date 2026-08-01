@@ -57,7 +57,17 @@ export function PlanFactDuel({ planFact }: { planFact: any }) {
   const coveragePct = pf.cost_coverage != null ? Math.round(pf.cost_coverage * 100) : null;
   const delta = pf.cost_delta || 0;            // fact − plan; <0 = факт бьёт план
   const winning = delta < 0;
-  const cats = (pf.categories || []).filter((c: any) => c.plan > 0 || c.fact > 0);
+  // Допработы — отдельной строкой, не подмешаны в категории сметы (ТЗ extra_works
+  // 01.08.2026): иначе транспорт на доработку читался бы как перерасход по заказу.
+  // Без неё сумма строк не сходилась бы с cost_plan/cost_fact панели.
+  const ex = pf.extras;
+  const cats = [
+    ...(pf.categories || []).filter((c: any) => c.plan > 0 || c.fact > 0),
+    ...(ex?.count && (ex.cost_plan > 0 || ex.cost_fact > 0)
+      ? [{ category: "Допработы", plan: ex.cost_plan, fact: ex.cost_fact,
+           delta: Math.round((ex.cost_fact - ex.cost_plan) * 100) / 100 }]
+      : []),
+  ];
 
   // Строка категории: имя + числа, под ними парный бар 7px.
   const CatRow = ({ c }: { c: any }) => {

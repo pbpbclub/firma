@@ -49,6 +49,59 @@ const SPLIT_TARGETS = [
   { v: "overhead", l: "общехоз" },
 ];
 
+// Допработа: что сделали сверх сметы, за сколько и во что обошлось.
+function ExtraModal({ extra, saving, onSave, onClose }: {
+  extra?: any; saving: boolean;
+  onSave: (d: { title: string; price: number; cost: number; note: string | null }) => void;
+  onClose: () => void;
+}) {
+  const [title, setTitle] = useState(extra?.title ?? "");
+  const [price, setPrice] = useState(extra?.price != null ? String(extra.price) : "");
+  const [cost, setCost]   = useState(extra?.cost != null ? String(extra.cost) : "");
+  const [note, setNote]   = useState(extra?.note ?? "");
+  const priceNum = parseFloat(price) || 0;
+  const costNum  = parseFloat(cost) || 0;
+  const valid = title.trim().length > 0 && priceNum >= 0 && costNum >= 0;
+  const lbl: React.CSSProperties = { fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 5 };
+  const inp: React.CSSProperties = { width: "100%", padding: "7px 9px", fontSize: 13, border: "1px solid #EDEBE6",
+                                     background: "#fff", color: "#1A1A1A", fontFamily: "inherit", boxSizing: "border-box" };
+  return (
+    <Modal size="md" eyebrow={extra ? "ДОПРАБОТА · ПРАВКА" : "НОВАЯ ДОПРАБОТА"} onClose={onClose}
+      onCancel={onClose}
+      onSave={() => valid && onSave({ title: title.trim(), price: priceNum, cost: costNum, note: note.trim() || null })}
+      saveLabel={extra ? "Сохранить" : "Добавить"} saving={saving} canSave={valid}>
+      <div style={{ padding: "16px 24px 20px" }}>
+        <div style={lbl}>ЧТО СДЕЛАЛИ</div>
+        <input style={inp} autoFocus value={title} onChange={e => setTitle(e.target.value)}
+          placeholder="Например: сверление отверстий в скамейках" />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 }}>
+          <div>
+            <div style={lbl}>ЦЕНА ДЛЯ ЗАКАЗЧИКА ₽</div>
+            <input style={{ ...inp, fontFamily: MONO, textAlign: "right" }} type="number" min="0" step="0.01"
+              value={price} onChange={e => setPrice(e.target.value)} placeholder="0" />
+          </div>
+          <div>
+            <div style={lbl}>СЕБЕСТОИМОСТЬ ₽</div>
+            <input style={{ ...inp, fontFamily: MONO, textAlign: "right" }} type="number" min="0" step="0.01"
+              value={cost} onChange={e => setCost(e.target.value)} placeholder="0" />
+          </div>
+        </div>
+        <div style={{ marginTop: 14 }}>
+          <div style={lbl}>ЗАМЕТКА</div>
+          <input style={inp} value={note} onChange={e => setNote(e.target.value)}
+            placeholder="Например: забрал с объекта, вернул на следующий день" />
+        </div>
+        <div style={{ marginTop: 14, fontSize: 11, color: "#6B6355", lineHeight: 1.5 }}>
+          Смета не меняется: доп добавляется к цене заказа отдельной строкой, поэтому оплата
+          за него не выглядит переплатой. Статус заказа тоже не меняется — доп можно завести
+          и по уже завершённому заказу. Расходы по допу отмечаются в форме расхода
+          («относится к»), чтобы не портить маржу основного заказа.
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function SplitExpenseModal({ expense, saving, onSave, onClose }: {
   expense: any; saving: boolean;
   onSave: (parts: { amount: number; category: string; title?: string | null; purpose?: string | null }[]) => void;
@@ -229,6 +282,25 @@ export default function OrderDetail() {
     onSuccess: () => { invalidateFact(); setSplitExpense(null); },
   });
 
+  // ── Допработы (ТЗ extra_works 01.08.2026) ──────────────────────────────
+  // Работы сверх утверждённой сметы: заводятся в любой момент, в том числе по
+  // завершённому заказу. Смета при этом не переписывается — цена заказа
+  // считается как «смета + допы» (бэкенд, _margin).
+  const [extraModal, setExtraModal] = useState<{ open: boolean; item?: any } | null>(null);
+  const [delExtra, setDelExtra] = useState<any>(null);
+  const extras: any[] = order?.extras ?? [];
+
+  const saveExtra = useMutation({
+    mutationFn: (d: any) => extraModal?.item
+      ? ordersApi.updateExtra(id!, extraModal.item.id, d)
+      : ordersApi.addExtra(id!, d),
+    onSuccess: () => { invalidateFact(); setExtraModal(null); },
+  });
+  const removeExtra = useMutation({
+    mutationFn: (x: any) => ordersApi.deleteExtra(id!, x.id),
+    onSuccess: () => { invalidateFact(); setDelExtra(null); },
+  });
+
   // ── Утверждение сметы (актуализация) ───────────────────────────────────
   const [approveError, setApproveError] = useState("");
   const approveSet = useMutation({
@@ -362,9 +434,29 @@ export default function OrderDetail() {
             orderId={id!}
             expense={expenseModal.item}
             existingExpenses={expensesData?.items ?? []}
+            extras={extras}
             saving={saveExpense.isPending}
             onSave={(d) => saveExpense.mutate(d)}
             onClose={() => setExpenseModal(null)}
+          />
+        )}
+
+        {/* Допработа: создание / правка */}
+        {extraModal?.open && (
+          <ExtraModal
+            extra={extraModal.item}
+            saving={saveExtra.isPending}
+            onSave={(d) => saveExtra.mutate(d)}
+            onClose={() => setExtraModal(null)}
+          />
+        )}
+
+        {delExtra && (
+          <ConfirmModal
+            message={`Удалить допработу «${delExtra.title}»? Платежи и расходы останутся — с них снимется привязка к допу.`}
+            confirmLabel={removeExtra.isPending ? "Удаляем..." : "Удалить"}
+            onConfirm={() => removeExtra.mutate(delExtra)}
+            onCancel={() => setDelExtra(null)}
           />
         )}
 
@@ -575,6 +667,81 @@ export default function OrderDetail() {
             </div>
           )}
 
+          {/* Допработы — сверх утверждённой сметы. Не версия сметы: смета остаётся
+              нетронутой, а цена заказа = смета + допы (ТЗ extra_works 01.08.2026). */}
+          <div style={{ paddingTop: 18, marginBottom: 8 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <SectionLabel>
+                ДОПРАБОТЫ
+                {extras.length > 0 && (
+                  <span style={{ color: "#1A1A1A", marginLeft: 8, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
+                    {fmtMoney(order?.extras_total?.price ?? 0)}
+                  </span>
+                )}
+              </SectionLabel>
+              <Button size="sm" onClick={() => setExtraModal({ open: true })} style={{ fontSize: 11, color: "#6B6355" }}>
+                <Plus size={11} /> Добавить доп
+              </Button>
+            </div>
+
+            {!extras.length ? (
+              <div style={{ fontSize: 12, color: "#C8C0B0" }}>
+                Допов нет. Доработка сверх сметы (доделали после сдачи) заводится сюда — смета не переписывается.
+              </div>
+            ) : (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 96px 96px 96px 30px", gap: 10,
+                              fontSize: 9, color: "#A89070", letterSpacing: "0.05em", paddingBottom: 6, borderBottom: "1px solid #EDEBE6" }}>
+                  <div>ЧТО · КОГДА</div>
+                  <div style={{ textAlign: "right" }}>ЦЕНА</div>
+                  <div style={{ textAlign: "right" }}>СЕБЕСТ.</div>
+                  <div style={{ textAlign: "right" }}>МАРЖА</div>
+                  <div />
+                </div>
+                {extras.map((x: any) => (
+                  <div key={x.id} style={{ display: "grid", gridTemplateColumns: "1fr 96px 96px 96px 30px", gap: 10,
+                                           alignItems: "center", padding: "9px 0", borderBottom: "1px solid #F2EFE9" }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 13, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {x.title}
+                      </div>
+                      <div style={{ fontSize: 10, color: "#A89070", marginTop: 2 }}>
+                        {fmtDate(x.created_at)}
+                        {x.note && <> · {x.note}</>}
+                        {" · "}
+                        оплачено <span style={{ fontFamily: MONO, color: x.rest > 0 ? "#8B3A3A" : "#4A7C59" }}>{fmtMoney(x.paid)}</span>
+                        {x.cost_fact > 0 && <> · факт затрат <span style={{ fontFamily: MONO }}>{fmtMoney(x.cost_fact)}</span></>}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 13, textAlign: "right", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmtMoney(x.price)}</div>
+                    <div style={{ fontSize: 13, textAlign: "right", color: "#6B6355", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
+                      {fmtMoney(Math.max(x.cost || 0, x.cost_fact || 0))}
+                    </div>
+                    <div style={{ fontSize: 13, fontWeight: 600, textAlign: "right", fontFamily: MONO, fontVariantNumeric: "tabular-nums",
+                                  color: x.gross >= 0 ? "#4A7C59" : "#8B3A3A" }}>{fmtMoney(x.gross)}</div>
+                    <div style={{ display: "flex", gap: 2, justifyContent: "flex-end" }}>
+                      <button onClick={() => setExtraModal({ open: true, item: x })}
+                        style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 3, display: "flex" }}
+                        onMouseEnter={ev => (ev.currentTarget.style.color = "#1A1A1A")}
+                        onMouseLeave={ev => (ev.currentTarget.style.color = "#C8C0B0")}>
+                        <PencilSimple size={13} />
+                      </button>
+                      <button onClick={() => setDelExtra(x)}
+                        style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 3, display: "flex" }}
+                        onMouseEnter={ev => (ev.currentTarget.style.color = "#8B3A3A")}
+                        onMouseLeave={ev => (ev.currentTarget.style.color = "#C8C0B0")}>
+                        <Trash size={13} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                <div style={{ fontSize: 10, color: "#A89070", marginTop: 8 }}>
+                  Цена заказа = смета + допы, поэтому оплата допа не выглядит переплатой.
+                </div>
+              </>
+            )}
+          </div>
+
           {/* ═══ СТАДИЯ 2: ФАКТ ═══ */}
           <StageHeader n="02" title="ФАКТ" hint="реальные деньги: траты и оплаты" />
 
@@ -722,6 +889,10 @@ export default function OrderDetail() {
                     <div style={{ fontSize: 13, fontWeight: 600, color: "#4A7C59", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
                       +{fmtMoney(p.amount)}
                       {p.bank_tx_id && <LinkSimple size={10} style={{ color: "#4A7C59", marginLeft: 5 }} />}
+                      {p.extra_id && (
+                        <span title="Оплата допработы, а не сметы"
+                          style={{ fontSize: 9, color: "#A89070", background: "#F2EFE9", padding: "1px 5px", marginLeft: 5 }}>доп</span>
+                      )}
                     </div>
                     {p.note && <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>{p.note}</div>}
                   </div>

@@ -29,10 +29,11 @@ const inp: React.CSSProperties = {
   padding: "7px 10px", fontSize: 12, outline: "none", background: "transparent", color: "#1A1A1A",
 };
 
-export function ExpenseModal({ orderId, expense, existingExpenses = [], onSave, onClose, saving }: {
+export function ExpenseModal({ orderId, expense, existingExpenses = [], extras = [], onSave, onClose, saving }: {
   orderId: string;
   expense?: any;               // если передан — режим правки
   existingExpenses?: any[];    // траты заказа — для предупреждения о дубле
+  extras?: any[];              // допработы заказа — трата может быть по допу, а не по смете
   onSave: (data: any) => void;
   onClose: () => void;
   saving?: boolean;
@@ -46,6 +47,7 @@ export function ExpenseModal({ orderId, expense, existingExpenses = [], onSave, 
   const [paySource, setPaySource] = useState(expense?.payment_source ?? "");
   const [accountableId, setAccountableId] = useState(expense?.accountable_person_id ?? "");
   const [dupConfirmed, setDupConfirmed] = useState(false);
+  const [extraId, setExtraId] = useState<string>(expense?.extra_id ?? "");
 
   const { data: masters = [] } = useQuery({ queryKey: ["masters"], queryFn: mastersApi.list });
   const { data: accountables = [] } = useQuery({ queryKey: ["accountable"], queryFn: accountableApi.list });
@@ -91,6 +93,7 @@ export function ExpenseModal({ orderId, expense, existingExpenses = [], onSave, 
       creditor_id: creditorId,
       payment_source: paySource || null,
       accountable_person_id: paySource === "accountable" ? accountableId : null,
+      extra_id: extraId || null,
     });
   };
 
@@ -169,6 +172,21 @@ export function ExpenseModal({ orderId, expense, existingExpenses = [], onSave, 
             <div style={{ fontSize: 10, color: "#A89070", marginTop: 5 }}>Спишется из кассы наличных — остаток виден в Фондах.</div>
           )}
         </div>
+
+        {/* Трата по допработе не идёт в план-факт основной сметы: транспорт на
+            доработку не должен занижать маржу заказа (ТЗ extra_works 01.08.2026). */}
+        {extras.length > 0 && (
+          <div style={{ marginTop: 14 }}>
+            <div style={lbl}>ОТНОСИТСЯ К</div>
+            <select style={{ ...inp, cursor: "pointer" }} value={extraId}
+              onChange={e => setExtraId(e.target.value)}>
+              <option value="">Смета заказа</option>
+              {extras.map((x: any) => (
+                <option key={x.id} value={x.id}>Доп: {x.title}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <div style={{ marginTop: 14 }}>
           <div style={lbl}>ПОДРЯДЧИК / ПОСТАВЩИК</div>

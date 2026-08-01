@@ -188,6 +188,9 @@ class PayAllocation(BaseModel):
     order_id: str
     amount: float
     note: Optional[str] = None
+    # Оплата допработы (order_extras.id, ТЗ extra_works 01.08.2026): приход по допу
+    # не должен выглядеть переплатой по смете.
+    extra_id: Optional[str] = None
 
 
 class PayFromTxIn(BaseModel):
@@ -247,7 +250,8 @@ def payments_from_tx(body: PayFromTxIn):
             # Единая точка создания платежа (валидация + INSERT): та же, что у ручного
             # add_payment. Все N платежей разноски пишутся одной транзакцией на общем conn.
             note = a.note or tx["purpose"] or tx["counterparty"]
-            _create_payment(conn, o, a.amount, tx["date"], note, source="bank", bank_tx_id=str(body.tx_id))
+            _create_payment(conn, o, a.amount, tx["date"], note, source="bank",
+                            bank_tx_id=str(body.tx_id), extra_id=a.extra_id)
             created.append({"order_id": o["id"], "order_row": o, "amount": round(a.amount, 2)})
         conn.execute(
             "DELETE FROM inbox_dismissed WHERE tx_id = ? AND source = ?",

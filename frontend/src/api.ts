@@ -44,6 +44,14 @@ export const ordersApi = {
     api.get("/orders/suggest", { params: { counterparty, amount } }).then((r) => r.data),
   paymentsMap: () => api.get("/orders/payments-map").then((r) => r.data),
   obligations: (id: string) => api.get(`/orders/${id}/obligations`).then((r) => r.data),
+  // Допработы — работы сверх утверждённой сметы (ТЗ extra_works 01.08.2026)
+  extras: (id: string) => api.get(`/orders/${id}/extras`).then((r) => r.data),
+  addExtra: (id: string, data: { title: string; price: number; cost: number; note?: string | null }) =>
+    api.post(`/orders/${id}/extras`, data).then((r) => r.data),
+  updateExtra: (id: string, extraId: string, data: { title: string; price: number; cost: number; note?: string | null }) =>
+    api.put(`/orders/${id}/extras/${extraId}`, data).then((r) => r.data),
+  deleteExtra: (id: string, extraId: string) =>
+    api.delete(`/orders/${id}/extras/${extraId}`).then((r) => r.data),
 };
 
 export const customersApi = {

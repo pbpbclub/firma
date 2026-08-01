@@ -279,6 +279,9 @@ class Allocation(BaseModel):
     master_id: Optional[str] = None
     supplier: Optional[str] = None
     creditor_id: Optional[str] = None   # какое обязательство гасит эта строка
+    # Расход по допработе заказа (order_extras.id, ТЗ extra_works 01.08.2026):
+    # «это по допу», а не по смете — в план-факт основной сметы такой расход не идёт.
+    extra_id: Optional[str] = None
 
 
 class FromTxIn(BaseModel):
@@ -415,10 +418,11 @@ def create_from_tx(body: FromTxIn):
             conn.execute(
                 """INSERT INTO expenses (id, order_id, title, amount, category, supplier, master_id,
                                          expense_date, source, creditor_id, finance_tx_id, zenmoney_tx_id,
-                                         group_id, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), ?, ?, ?, ?, ?, datetime('now'))""",
+                                         group_id, extra_id, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), ?, ?, ?, ?, ?, ?, datetime('now'))""",
                 (eid, oid, title, a.amount, row_cat, row_supplier, row_master,
-                 exp_date, src, cred, fin_id, zen_id, group_id)
+                 exp_date, src, cred, fin_id, zen_id, group_id,
+                 a.extra_id if a.extra_id else None)
             )
             created.append(eid)
         # Разнесли по-настоящему → скрытие (если было) снимаем, как в payments.

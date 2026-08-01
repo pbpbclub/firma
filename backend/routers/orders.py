@@ -80,10 +80,11 @@ def list_orders(
         # открывалась бы zenmoney.db, а список и карточка показали бы разные числа.
         tfacts = _transit_facts(conn)
         discounts = _discounts(conn)   # тем же приёмом: скидка иначе читалась бы на строку
+        extras = _extras_totals(conn)  # допработы — тоже одним запросом на весь список
         out = []
         for r in rows:
             m = _margin(conn, r["id"], r["price_plan"], r["cost_plan"],
-                        transit_facts=tfacts, discounts=discounts)
+                        transit_facts=tfacts, discounts=discounts, extras=extras)
             out.append({
                 **dict(r),
                 # см. карточку заказа: цифры берём из активной сметы, поля — кэш
@@ -152,13 +153,14 @@ def suggest_orders(counterparty: str = "", amount: float = 0, limit: int = Query
         # и открывал бы zenmoney.db (N+1).
         tfacts = _transit_facts(conn)
         discounts = _discounts(conn)
+        extras = _extras_totals(conn)
         scored = []
         for r in rows:
             row = dict(r)
             # Цена — из активной сметы (у черновиков поле заказа устаревшее), чтобы
             # подсказка по сумме и долг совпадали с карточкой.
             m = _margin(conn, row["id"], row.get("price_plan") or 0, row.get("cost_plan") or 0,
-                        transit_facts=tfacts, discounts=discounts)
+                        transit_facts=tfacts, discounts=discounts, extras=extras)
             row["price_plan"] = m["revenue"]
             ns = _name_score(counterparty, (row.get("customer_name") or "") + " " + (row.get("title") or ""))
             as_ = _amount_score(amount, row.get("price_plan") or 0)
@@ -423,8 +425,30 @@ def _discounts(conn) -> dict:
     }
 
 
+def _extras_totals(conn) -> dict:
+    """Допработы по всем заказам одним запросом — предрасчёт для списков (как
+    _discounts). Заказы без допов в словарь не попадают."""
+    return {
+        r["order_id"]: {"count": r["n"], "price": round(r["p"] or 0, 2), "cost": round(r["c"] or 0, 2)}
+        for r in conn.execute(
+            """SELECT order_id, COUNT(*) AS n, COALESCE(SUM(price),0) AS p,
+                      COALESCE(SUM(cost),0) AS c
+               FROM order_extras GROUP BY order_id"""
+        ).fetchall()
+    }
+
+
+def _order_extras(conn, oid: str) -> dict:
+    """Допы одного заказа. Отдельный запрос вместо _extras_totals по всей базе —
+    карточка заказа не должна сканировать чужие допы."""
+    r = conn.execute(
+        """SELECT COUNT(*) AS n, COALESCE(SUM(price),0) AS p, COALESCE(SUM(cost),0) AS c
+           FROM order_extras WHERE order_id = ?""", (oid,)).fetchone()
+    return {"count": r["n"] or 0, "price": round(r["p"] or 0, 2), "cost": round(r["c"] or 0, 2)}
+
+
 def _margin(conn, oid: str, price_plan, cost_plan, est=None, transit_facts=None,
-            discounts=None) -> dict:
+            discounts=None, extras=None) -> dict:
     """Лестница прибыли по заказу. Единый источник правды — не дублировать выражением."""
     if est is None:
         est = _active_set(conn, oid)
@@ -485,6 +509,16 @@ def _margin(conn, oid: str, price_plan, cost_plan, est=None, transit_facts=None,
             "state": state,
             "sources": tf.get("sources") or [],
         }
+    # Допработы (ТЗ extra_works, 01.08.2026) — работы сверх утверждённой сметы.
+    # Цена заказа = смета + допы, иначе оплата допа выглядит переплатой (Ануш: пришло
+    # 164 400 при смете 157 530). Смета при этом не переписывается: суммы допов живут
+    # в order_extras и приплюсовываются здесь, в единственном месте расчёта лестницы.
+    # В списках передаётся предрасчётом _extras_totals (иначе запрос на строку).
+    ex = (extras.get(oid) if extras is not None else _order_extras(conn, oid)) or {}
+    ex_price, ex_cost = round(ex.get("price") or 0, 2), round(ex.get("cost") or 0, 2)
+    if ex_price or ex_cost:
+        revenue = round(revenue + ex_price, 2)
+        cost = round(cost + ex_cost, 2)
     price_before_discount = revenue
     if discount:
         revenue = round(max(0.0, revenue - discount), 2)
@@ -532,6 +566,8 @@ def _margin(conn, oid: str, price_plan, cost_plan, est=None, transit_facts=None,
         # Откуда план: approved-смета / draft-смета / вручную (сметы нет).
         # UI обязан помечать draft — эти числа ещё не согласованы с клиентом.
         "plan_source": plan_source,
+        # Допработы отдельной строкой: сколько из выручки/себестоимости — сверх сметы.
+        "extras": {"count": ex.get("count") or 0, "price": ex_price, "cost": ex_cost},
     }
     if transit:
         out["transit"] = transit
@@ -594,7 +630,11 @@ def _plan_fact(conn, oid: str, cost_plan: float, paid_total: float, price_plan: 
         tf = _transit_facts(conn).get(oid) or {}
         fact_by["Работы"] = round(tf.get("fact") or 0, 2)   # выплата мастеру и есть работа
     if not is_transit_pf:
-        for r in conn.execute("SELECT category AS c, COALESCE(SUM(amount),0) AS s FROM expenses WHERE order_id = ? GROUP BY category", (oid,)):
+        # extra_id IS NULL — расходы допработ в разбивку по смете НЕ идут: у Ануша
+        # два рейса Яндекса за 2 667 ₽ занижали маржу заказа, к которому отношения
+        # не имеют. Они считаются отдельно ниже (extras) и входят в общий факт.
+        for r in conn.execute("SELECT category AS c, COALESCE(SUM(amount),0) AS s FROM expenses "
+                              "WHERE order_id = ? AND extra_id IS NULL GROUP BY category", (oid,)):
             fact_by[_bucket(r["c"])] += r["s"] or 0
     # ИНВАРИАНТ: одна оплата = один факт. Обязательство попадает в факт, только если
     # оно НЕ покрыто расходом — иначе тот же платёж считался бы дважды (как expense
@@ -637,12 +677,27 @@ def _plan_fact(conn, oid: str, cost_plan: float, paid_total: float, price_plan: 
             continue
         categories.append({"category": b, "plan": p, "fact": f, "delta": round(f - p, 2)})
 
-    cost_fact = round(sum(fact_by.values()), 2)
+    cost_fact_estimate = round(sum(fact_by.values()), 2)
 
     # Маржа — от выручки, а НЕ от оплаченного: заплатил клиент или нет,
     # прибыльность заказа от этого не меняется. Налог берём из общей лестницы.
     m = _margin(conn, oid, price_plan, plan_total, est=est)
     tax = m["tax"]
+
+    # Допработы отдельной строкой: план — order_extras.cost, факт — расходы с extra_id.
+    ex = m["extras"]
+    ex_fact = round(conn.execute(
+        "SELECT COALESCE(SUM(amount),0) FROM expenses WHERE order_id = ? AND extra_id IS NOT NULL",
+        (oid,)).fetchone()[0] or 0, 2)
+    extras_block = {
+        "count": ex["count"], "price": ex["price"],
+        "cost_plan": ex["cost"], "cost_fact": ex_fact,
+        # Маржа допов — до налога: УСН считается по заказу целиком (лестница в _margin).
+        "gross": round(ex["price"] - max(ex["cost"], ex_fact), 2),
+    }
+    cost_fact = round(cost_fact_estimate + ex_fact, 2)
+    # m["cost"] = план сметы + плановая себестоимость допов (единый источник).
+    plan_total = m["cost"]
     gross_plan = round(m["revenue"] - plan_total, 2)
 
     # Прогноз: «выручка − факт» врал бы вверх, пока расходы не внесены целиком
@@ -664,6 +719,11 @@ def _plan_fact(conn, oid: str, cost_plan: float, paid_total: float, price_plan: 
         "has_facts": cost_fact > 0,
         "cost_coverage": round(cost_fact / plan_total, 4) if plan_total > 0 else None,
         "cost_plan": plan_total,
+        # Разбивка по категориям — только смета: допы в неё не подмешиваются
+        # (ТЗ extra_works п.5). Сумма категорий = cost_plan_estimate, не cost_plan.
+        "cost_plan_estimate": round(plan_total - (ex["cost"] or 0), 2),
+        "cost_fact_estimate": cost_fact_estimate,
+        "extras": extras_block,
         "cost_fact": cost_fact,
         "cost_delta": round(cost_fact - plan_total, 2),
         "cost_expected": round(cost_expected, 2),
@@ -817,6 +877,10 @@ def get_order(order_id: str):
             "reserve_suggested": _reserve_suggested(pf, order.get("cost_plan") or 0),
             "reserve_active": bool((order.get("reserved_amount") or 0) > 0 and not order.get("reserve_released_at")),
             "plan_fact": pf,
+            # Допработы — сверх утверждённой сметы; уже учтены в price_plan/cost_plan
+            # выше (см. _margin), здесь — построчно для блока «Допработы».
+            "extras": _extras_list(conn, oid),
+            "extras_total": m["extras"],
             "payments": [dict(p) for p in payments],
             "estimate_sets": [dict(e) for e in estimate_sets],
             "stages": [dict(s) for s in stages],
@@ -1072,6 +1136,7 @@ class PaymentCreate(BaseModel):
     zenmoney_tx_id: Optional[str] = None   # платёж на личную карту → транзакция ZenMoney
     source: Optional[str] = None           # manual | personal (нал/личная карта)
     channel: Optional[str] = None          # bank | cash | personal — прошло ли через р/с
+    extra_id: Optional[str] = None         # оплата допработы (order_extras.id), а не сметы
 
 
 def _payment_channel(source, bank_tx_id, zenmoney_tx_id, channel=None) -> str:
@@ -1086,7 +1151,7 @@ def _payment_channel(source, bank_tx_id, zenmoney_tx_id, channel=None) -> str:
     return "bank"   # консервативно, см. PAYMENT_IS_BANK_SQL
 
 
-def _create_payment(conn, order_row, amount, paid_at, note=None, *, source, bank_tx_id=None, zenmoney_tx_id=None, channel=None) -> dict:
+def _create_payment(conn, order_row, amount, paid_at, note=None, *, source, bank_tx_id=None, zenmoney_tx_id=None, channel=None, extra_id=None) -> dict:
     """Единая точка вставки платежа: валидация + INSERT + возврат строки.
 
     Оба входа (ручной add_payment, разноска поступлений payments.from_tx) обязаны
@@ -1099,10 +1164,10 @@ def _create_payment(conn, order_row, amount, paid_at, note=None, *, source, bank
         raise HTTPException(status_code=400, detail="paid_at required")
     pid = str(uuid4())
     conn.execute(
-        """INSERT INTO payments (id, order_id, amount, paid_at, note, bank_tx_id, zenmoney_tx_id, source, channel, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+        """INSERT INTO payments (id, order_id, amount, paid_at, note, bank_tx_id, zenmoney_tx_id, source, channel, extra_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
         (pid, order_row["id"], round(amount, 2), paid_at, note, bank_tx_id, zenmoney_tx_id, source,
-         _payment_channel(source, bank_tx_id, zenmoney_tx_id, channel)),
+         _payment_channel(source, bank_tx_id, zenmoney_tx_id, channel), extra_id),
     )
     return dict(conn.execute("SELECT * FROM payments WHERE id = ?", (pid,)).fetchone())
 
@@ -1130,7 +1195,8 @@ def add_payment(order_id: str, body: PaymentCreate):
             raise HTTPException(status_code=404, detail="Not found")
         payment = _create_payment(conn, r, body.amount, body.paid_at, body.note,
                                   source=body.source or "manual", bank_tx_id=body.bank_tx_id,
-                                  zenmoney_tx_id=body.zenmoney_tx_id, channel=body.channel)
+                                  zenmoney_tx_id=body.zenmoney_tx_id, channel=body.channel,
+                                  extra_id=body.extra_id)
         conn.commit()
         payment.update(_reserve_hint(conn, r))
         payment["order_id"] = r["id"]
@@ -1147,6 +1213,110 @@ def delete_payment(order_id: str, payment_id: str):
         if not r:
             raise HTTPException(status_code=404, detail="Not found")
         conn.execute("DELETE FROM payments WHERE id = ?", (payment_id,))
+        conn.commit()
+        return {"ok": True}
+    finally:
+        conn.close()
+
+
+# ── Допработы (ТЗ extra_works, 01.08.2026) ───────────────────────────────────
+
+class ExtraIn(BaseModel):
+    title: str
+    price: float = 0
+    cost: float = 0
+    note: Optional[str] = None
+
+
+def _extras_list(conn, oid: str) -> list:
+    """Допы заказа с фактом: сколько по нему уже оплачено и сколько потрачено."""
+    rows = conn.execute(
+        """SELECT e.*,
+                  (SELECT COALESCE(SUM(p.amount),0) FROM payments p WHERE p.extra_id = e.id) AS paid,
+                  (SELECT COALESCE(SUM(x.amount),0) FROM expenses x WHERE x.extra_id = e.id) AS cost_fact
+           FROM order_extras e WHERE e.order_id = ? ORDER BY e.created_at""", (oid,)
+    ).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["paid"] = round(d["paid"] or 0, 2)
+        d["cost_fact"] = round(d["cost_fact"] or 0, 2)
+        # Маржа допа — по факту, если он уже есть (план себестоимости к тому моменту
+        # обычно прикидочный), иначе по плану. Налог здесь не считаем: УСН — по заказу.
+        d["gross"] = round((d["price"] or 0) - max(d["cost"] or 0, d["cost_fact"]), 2)
+        d["rest"] = round((d["price"] or 0) - d["paid"], 2)
+        out.append(d)
+    return out
+
+
+@router.get("/{order_id}/extras")
+def list_extras(order_id: str):
+    conn = get_production()
+    try:
+        return _extras_list(conn, _resolve_order(conn, order_id))
+    finally:
+        conn.close()
+
+
+@router.post("/{order_id}/extras")
+def add_extra(order_id: str, body: ExtraIn, user=Depends(get_current_user)):
+    """Завести доп. Статус заказа НЕ меняется: доработки как раз и случаются
+    после сдачи, completed-заказ остаётся завершённым."""
+    if not (body.title or "").strip():
+        raise HTTPException(status_code=400, detail="title required")
+    if (body.price or 0) < 0 or (body.cost or 0) < 0:
+        raise HTTPException(status_code=400, detail="price/cost must be >= 0")
+    conn = get_production()
+    try:
+        oid = _resolve_order(conn, order_id)
+        xid = str(uuid4())
+        conn.execute(
+            """INSERT INTO order_extras (id, order_id, title, price, cost, note, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (xid, oid, body.title.strip(), round(body.price or 0, 2), round(body.cost or 0, 2),
+             body.note, (user or {}).get("name") or (user or {}).get("email")))
+        conn.commit()
+        return dict(conn.execute("SELECT * FROM order_extras WHERE id = ?", (xid,)).fetchone())
+    finally:
+        conn.close()
+
+
+@router.put("/{order_id}/extras/{extra_id}")
+def update_extra(order_id: str, extra_id: str, body: ExtraIn):
+    if not (body.title or "").strip():
+        raise HTTPException(status_code=400, detail="title required")
+    conn = get_production()
+    try:
+        oid = _resolve_order(conn, order_id)
+        r = conn.execute("SELECT id FROM order_extras WHERE id = ? AND order_id = ?",
+                         (extra_id, oid)).fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="Not found")
+        conn.execute(
+            """UPDATE order_extras SET title = ?, price = ?, cost = ?, note = ?,
+                      updated_at = datetime('now') WHERE id = ?""",
+            (body.title.strip(), round(body.price or 0, 2), round(body.cost or 0, 2),
+             body.note, extra_id))
+        conn.commit()
+        return dict(conn.execute("SELECT * FROM order_extras WHERE id = ?", (extra_id,)).fetchone())
+    finally:
+        conn.close()
+
+
+@router.delete("/{order_id}/extras/{extra_id}")
+def delete_extra(order_id: str, extra_id: str):
+    """Удаление допа не трогает платежи и расходы — только снимает с них привязку:
+    деньги реальны, потерять их вместе со строкой допа нельзя."""
+    conn = get_production()
+    try:
+        oid = _resolve_order(conn, order_id)
+        r = conn.execute("SELECT id FROM order_extras WHERE id = ? AND order_id = ?",
+                         (extra_id, oid)).fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="Not found")
+        conn.execute("UPDATE payments SET extra_id = NULL WHERE extra_id = ?", (extra_id,))
+        conn.execute("UPDATE expenses SET extra_id = NULL WHERE extra_id = ?", (extra_id,))
+        conn.execute("DELETE FROM order_extras WHERE id = ?", (extra_id,))
         conn.commit()
         return {"ok": True}
     finally:
@@ -1220,6 +1390,8 @@ class ExpenseIn(BaseModel):
     # Наличный контур: None = безнал/банк | cash_fund (из кассы) | accountable (через подотчётника)
     payment_source: Optional[str] = None
     accountable_person_id: Optional[str] = None
+    # Расход по допработе (order_extras.id): в план-факт основной сметы не идёт
+    extra_id: Optional[str] = None
 
 
 def _resolve_order(conn, order_id: str):
@@ -1391,11 +1563,12 @@ def add_expense(order_id: str, body: ExpenseIn):
         conn.execute(
             """INSERT INTO expenses (id, order_id, title, amount, category, supplier, master_id,
                                      expense_date, source, creditor_id, finance_tx_id, zenmoney_tx_id,
-                                     payment_source, accountable_person_id, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), 'manual', ?, ?, ?, ?, ?, datetime('now'))""",
+                                     payment_source, accountable_person_id, extra_id, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), 'manual', ?, ?, ?, ?, ?, ?, datetime('now'))""",
             (eid, oid, body.title.strip(), body.amount, body.category, body.supplier, body.master_id,
              body.expense_date, _autolink_creditor(conn, oid, body), body.finance_tx_id, body.zenmoney_tx_id,
-             body.payment_source, body.accountable_person_id if body.payment_source == "accountable" else None)
+             body.payment_source, body.accountable_person_id if body.payment_source == "accountable" else None,
+             body.extra_id)
         )
         _sync_cash_fund(conn, eid, body)
         conn.commit()
@@ -1419,13 +1592,13 @@ def update_expense(order_id: str, expense_id: str, body: ExpenseIn):
             """UPDATE expenses SET title = ?, amount = ?, category = ?, supplier = ?, master_id = ?,
                       expense_date = COALESCE(?, expense_date), creditor_id = ?,
                       finance_tx_id = ?, zenmoney_tx_id = ?,
-                      payment_source = ?, accountable_person_id = ?
+                      payment_source = ?, accountable_person_id = ?, extra_id = ?
                WHERE id = ?""",
             (body.title.strip(), body.amount, body.category, body.supplier, body.master_id,
              body.expense_date, _autolink_creditor(conn, r["order_id"], body),
              body.finance_tx_id, body.zenmoney_tx_id,
              body.payment_source, body.accountable_person_id if body.payment_source == "accountable" else None,
-             expense_id)
+             body.extra_id, expense_id)
         )
         _sync_cash_fund(conn, expense_id, body)
         conn.commit()

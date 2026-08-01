@@ -962,6 +962,46 @@ def ensure_general_expenses_schema():
         conn.close()
 
 
+def ensure_order_extras_schema():
+    """Допработы по заказу — работы сверх утверждённой сметы (ТЗ extra_works, 01.08.2026).
+
+    Доп — НЕ новая версия сметы: та переписывает исходную договорённость и путает
+    историю согласований. Это дополнение к ней: заводится в любой момент, в том числе
+    по заказу в статусе completed (сдали → заказчик попросил доделать), статус заказа
+    при этом не меняется, утверждённая смета остаётся нетронутой.
+
+    price — сколько взяли с заказчика, cost — плановая себестоимость допа.
+    Цена заказа = price_plan + Σ extras.price (см. orders.py::_margin), поэтому оплата
+    допа перестаёт выглядеть переплатой, а его расходы не портят маржу основного заказа.
+    payments.extra_id / expenses.extra_id — необязательная привязка «это по допу №N»."""
+    conn = get_production()
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS order_extras (
+                id         TEXT PRIMARY KEY,
+                order_id   TEXT NOT NULL,
+                title      TEXT NOT NULL,
+                price      REAL NOT NULL DEFAULT 0,
+                cost       REAL NOT NULL DEFAULT 0,
+                note       TEXT,
+                created_by TEXT,
+                created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (order_id) REFERENCES orders(id)
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_order_extras_order ON order_extras(order_id)")
+        for table in ("payments", "expenses"):
+            info = conn.execute(f"PRAGMA table_info({table})").fetchall()
+            if info and "extra_id" not in {r[1] for r in info}:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN extra_id TEXT")
+            conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_{table}_extra ON {table}(extra_id)")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_inbox_dismissed_schema():
     """Скрытые из инбокса транзакции (переводы между своими счетами, возвраты).
 

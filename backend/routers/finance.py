@@ -690,13 +690,14 @@ def get_debtors():
         except Exception:
             pass
 
-        from routers.orders import STATUS_LABELS, _margin, _transit_facts, _discounts   # один словарь/формула на систему
+        from routers.orders import STATUS_LABELS, _margin, _transit_facts, _discounts, _extras_totals   # один словарь/формула на систему
 
         # Транзитный факт — ОДИН раз на весь список. Без предрасчёта _margin зовёт
         # _transit_facts на каждый заказ, а тот заново сканирует expenses/creditors
         # и открывает zenmoney.db (третье такое место; два предыдущих закрыты так же).
         tfacts = _transit_facts(prod)
         discounts = _discounts(prod)   # и скидки — одним запросом на оба цикла ниже
+        extras = _extras_totals(prod)  # допработы: цена заказа = смета + допы
 
         result = []
         for r in orders:
@@ -705,7 +706,7 @@ def get_debtors():
             # Долг — от ЖИВОЙ выручки активной сметы (та же цифра, что колонка
             # «К получению» в списке заказов): хранимый price_plan у черновиков — кэш.
             m = _margin(prod, row["id"], row["price_plan"], row["cost_plan"],
-                        transit_facts=tfacts, discounts=discounts)
+                        transit_facts=tfacts, discounts=discounts, extras=extras)
             row["price_plan"] = m["revenue"]
             row.pop("cost_plan", None)
             debt = round((m["revenue"] or 0) - paid_total, 2)
@@ -742,7 +743,7 @@ def get_debtors():
         ).fetchall():
             row = dict(r)
             m = _margin(prod, row["id"], row["price_plan"], row["cost_plan"],
-                        transit_facts=tfacts, discounts=discounts)
+                        transit_facts=tfacts, discounts=discounts, extras=extras)
             row["price_plan"] = m["revenue"]
             row.pop("cost_plan", None)
             row["rest"] = round((m["revenue"] or 0) - (row["paid_total"] or 0), 2)
