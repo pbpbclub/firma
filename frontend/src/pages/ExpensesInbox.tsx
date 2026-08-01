@@ -24,7 +24,15 @@ const SOURCES = [
 ] as const;
 
 // ── Строка разноски: раскрывается в форму ────────────────────────────────────
-type Alloc = { order_id: string; amount: string; category: string; master_id: string; creditor_id: string | null };
+// order_id пуст + purpose заполнен → часть перевода уходит «мимо заказов»:
+// запас / собственный образец / общехозяйственное (ТЗ stock_and_samples 01.08.2026).
+type Alloc = { order_id: string; amount: string; category: string; master_id: string; creditor_id: string | null; purpose?: string };
+
+const GENERAL_TARGETS = [
+  { v: "stock", l: "Запас" },
+  { v: "sample", l: "Образец" },
+  { v: "overhead", l: "Общехоз" },
+];
 
 // Пикер плановой строки сметы: платёж привязывается к конкретному обязательству
 // (напр. «Порошковая покраска · осталось 40 000»), а не «вообще к подрядчику».
@@ -152,7 +160,8 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
         source: tx.source, tx_id: tx.id, title: title.trim() || null, category: "other",
         expense_date: (tx.date || "").slice(0, 10) || null,
         allocations: allocs.map(a => ({
-          order_id: a.order_id, amount: parseFloat(a.amount) || 0,
+          order_id: a.order_id || null, purpose: a.purpose || null,
+          amount: parseFloat(a.amount) || 0,
           category: a.category, master_id: a.master_id || null,
           supplier: masterName(a.master_id) ?? tx.counterparty,
           creditor_id: a.creditor_id,
@@ -215,6 +224,14 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
     const other = allocs.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
     const left = Math.round((tx.amount - other) * 100) / 100;
     setAllocs([...allocs, { order_id: orderId, amount: left > 0 ? String(left) : "", category: tx.category_hint || "material", master_id: payeeMaster || "", creditor_id: null }]);
+  };
+  // Часть, которая ни к какому заказу не относится (закупка впрок, свой образец).
+  const addGeneral = (purpose: string) => {
+    if (allocs.some(a => a.purpose === purpose)) return;
+    const other = allocs.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    const left = Math.round((tx.amount - other) * 100) / 100;
+    setAllocs([...allocs, { order_id: "", purpose, amount: left > 0 ? String(left) : "",
+                            category: tx.category_hint || "material", master_id: payeeMaster || "", creditor_id: null }]);
   };
   const patch = (i: number, p: Partial<Alloc>) => setAllocs(allocs.map((x, j) => j === i ? { ...x, ...p } : x));
   const splitEvenly = () => {
@@ -293,11 +310,12 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
       {allocs.map((a, i) => {
         const o = ordersById.get(a.order_id);
         const catLabel = EXPENSE_CATEGORIES.find(c => c.v === a.category)?.l ?? "Прочее";
+        const genLabel = a.purpose ? GENERAL_TARGETS.find(t => t.v === a.purpose)?.l : null;
         return (
-          <div key={a.order_id} style={{ background: "#fff", border: "1px solid #EDEBE6", padding: "8px 10px", marginBottom: 8 }}>
+          <div key={a.order_id || "p:" + a.purpose} style={{ background: "#fff", border: "1px solid #EDEBE6", padding: "8px 10px", marginBottom: 8 }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 120px 24px", gap: 8, alignItems: "center" }}>
-              <div style={{ fontSize: 12, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {o?.title ?? a.order_id}
+              <div style={{ fontSize: 12, fontWeight: 500, color: genLabel ? "#E8592A" : "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {genLabel ? genLabel + " · без заказа" : (o?.title ?? a.order_id)}
               </div>
               <input value={a.amount} onChange={e => patch(i, { amount: e.target.value })}
                 placeholder="сумма" type="number"
@@ -324,8 +342,8 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
               <PayeePicker value={a.master_id} onChange={v => patch(i, { master_id: v })}
                 suggestName={payeeStr} style={{ flex: 1, minWidth: 220 }} />
             </div>
-            {/* Плановая строка сметы — привязка платежа к конкретному обязательству */}
-            <ObligationPicker
+            {/* Обязательства бывают только у заказов — строке «без заказа» гасить нечего */}
+            {!a.purpose && <ObligationPicker
               orderId={a.order_id}
               categoryLabel={catLabel}
               value={a.creditor_id}
@@ -342,7 +360,7 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
                 }
                 patch(i, { creditor_id: cid, amount });
               }}
-            />
+            />}
           </div>
         );
       })}
@@ -355,6 +373,15 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
             onMouseEnter={e => { e.currentTarget.style.borderColor = "#E8592A"; e.currentTarget.style.color = "#E8592A"; }}
             onMouseLeave={e => { e.currentTarget.style.borderColor = "#EDEBE6"; e.currentTarget.style.color = "#6B6355"; }}>
             + {o.title}
+          </button>
+        ))}
+        {GENERAL_TARGETS.filter(t => !allocs.some(a => a.purpose === t.v)).map(t => (
+          <button key={t.v} onClick={() => addGeneral(t.v)}
+            title="Часть перевода не относится ни к какому заказу"
+            style={{ fontSize: 11, padding: "3px 9px", border: "1px dashed #EDEBE6", background: "#fff", cursor: "pointer", color: "#A89070", fontFamily: "inherit" }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = "#E8592A"; e.currentTarget.style.color = "#E8592A"; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = "#EDEBE6"; e.currentTarget.style.color = "#A89070"; }}>
+            + {t.l}
           </button>
         ))}
       </div>

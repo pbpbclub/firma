@@ -4,9 +4,9 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
 from auth import get_current_user, init_admin
-from db import ensure_customer_schema, ensure_payee_rules_schema, ensure_orders_schema, ensure_catalog_schema, ensure_estimate_items_schema, ensure_catalog_material_fk, ensure_estimate_bank_pct_schema, ensure_order_discount_schema, ensure_payment_zenmoney_schema, ensure_payment_channel_schema, ensure_estimate_primary_schema, ensure_creditor_estimate_item_schema, ensure_creditor_tx_link_schema, ensure_order_tx_link_schema, ensure_receivable_tx_link_schema, ensure_payee_rules_category_schema, ensure_estimate_lines_contractor_schema, ensure_creditors_plan_schema, ensure_work_types_schema, ensure_brands_schema, normalize_catalog_brands, ensure_business_units_schema, ensure_fixed_obligations_schema, ensure_estimate_lines_price_schema, ensure_expenses_schema, ensure_cash_schema, ensure_order_reserve_schema, ensure_suppliers_schema, ensure_inbox_dismissed_schema, ensure_work_rates_schema, ensure_price_book_schema, ensure_costing_rules_schema, ensure_catalog_lines_costing_schema
+from db import ensure_customer_schema, ensure_payee_rules_schema, ensure_orders_schema, ensure_catalog_schema, ensure_estimate_items_schema, ensure_catalog_material_fk, ensure_estimate_bank_pct_schema, ensure_order_discount_schema, ensure_payment_zenmoney_schema, ensure_payment_channel_schema, ensure_estimate_primary_schema, ensure_creditor_estimate_item_schema, ensure_creditor_tx_link_schema, ensure_order_tx_link_schema, ensure_receivable_tx_link_schema, ensure_payee_rules_category_schema, ensure_estimate_lines_contractor_schema, ensure_creditors_plan_schema, ensure_work_types_schema, ensure_brands_schema, normalize_catalog_brands, ensure_business_units_schema, ensure_fixed_obligations_schema, ensure_estimate_lines_price_schema, ensure_expenses_schema, ensure_general_expenses_schema, ensure_cash_schema, ensure_order_reserve_schema, ensure_suppliers_schema, ensure_inbox_dismissed_schema, ensure_work_rates_schema, ensure_price_book_schema, ensure_costing_rules_schema, ensure_catalog_lines_costing_schema
 from routers import orders, finance, catalog, taxes, users, estimates, funds
-from routers import customers, masters, zenmoney, admin, payee_rules, yos, work_types, brands, business_units, materials, expenses, suppliers, payments, rates, costing, accountable
+from routers import customers, masters, zenmoney, admin, payee_rules, yos, work_types, brands, business_units, materials, expenses, general_expenses, suppliers, payments, rates, costing, accountable
 
 app = FastAPI(title="Firma API", version="1.0")
 
@@ -39,6 +39,7 @@ app.include_router(business_units.router, prefix="/api/business-units", tags=["b
 app.include_router(suppliers.router, prefix="/api/suppliers", tags=["suppliers"], **protected)
 app.include_router(materials.router, prefix="/api/materials", tags=["materials"], **protected)
 app.include_router(expenses.router, prefix="/api/expenses", tags=["expenses"], **protected)
+app.include_router(general_expenses.router, prefix="/api/general-expenses", tags=["general-expenses"], **protected)
 app.include_router(payments.router, prefix="/api/payments", tags=["payments"], **protected)
 app.include_router(accountable.router, prefix="/api/accountable", tags=["accountable"], **protected)
 app.include_router(rates.router, tags=["rates"], **protected)
@@ -85,6 +86,7 @@ def startup():
     ensure_fixed_obligations_schema()
     ensure_estimate_lines_price_schema()
     ensure_expenses_schema()
+    ensure_general_expenses_schema()
     ensure_cash_schema()
     ensure_inbox_dismissed_schema()
     ensure_work_rates_schema()

@@ -14,6 +14,7 @@ import OrderDetail from "./pages/OrderDetail";
 import Funds from "./pages/Funds";
 import ZenMoney from "./pages/ZenMoney";
 import Admin from "./pages/Admin";
+import GeneralExpenses from "./pages/GeneralExpenses";
 import ExpensesInbox from "./pages/ExpensesInbox";
 import Wiki from "./pages/Wiki";
 
@@ -51,6 +52,7 @@ const router = createBrowserRouter([
       { path: "/funds", element: <Funds /> },
       { path: "/zenmoney", element: <ZenMoney /> },
       { path: "/expenses", element: <ExpensesInbox /> },
+      { path: "/general-expenses", element: <GeneralExpenses /> },
       { path: "/admin", element: <Admin /> },
       // редиректы старых закладок
       { path: "/customers", element: <Navigate to="/wiki/clients" replace /> },

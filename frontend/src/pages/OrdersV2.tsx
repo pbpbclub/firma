@@ -785,6 +785,29 @@ export default function OrdersV2() {
                     <span style={{ textAlign: "right", color: tFact > tPlan ? "#8B3A3A" : "#4A7C59" }}>{(tFact - tPlan > 0 ? "+" : "") + fmt(tFact - tPlan)}</span>
                     <span style={{ textAlign: "right", color: tMargin >= 0 ? "#4A7C59" : "#8B3A3A" }}>{fmt(tMargin)}</span>
                   </div>
+                  {/* Траты вне клиентских заказов — отдельными строками: в себестоимость
+                      заказов выше они не входят и входить не должны (ТЗ stock_and_samples). */}
+                  {summary.general && (summary.general.stock_open || summary.general.sample || summary.general.overhead) ? (
+                    <div style={{ marginTop: 18, borderTop: "1px solid #EDEBE6", paddingTop: 10 }}>
+                      <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 6 }}>
+                        ВНЕ КЛИЕНТСКИХ ЗАКАЗОВ
+                      </div>
+                      {[
+                        { l: "Запас (не списано)", v: summary.general.stock_open,
+                          hint: "Куплено впрок, в заказ ещё не списано — лежит на балансе" },
+                        { l: "Образцы и тесты", v: summary.general.sample,
+                          hint: "Свои экземпляры и пробы: выручки не будет, это вложение в продукт" },
+                        { l: "Общехозяйственные", v: summary.general.overhead, hint: "К заказам не относится" },
+                      ].filter(x => x.v).map(x => (
+                        <div key={x.l} title={x.hint}
+                          style={{ display: "flex", justifyContent: "space-between", padding: "6px 0",
+                                   fontSize: 12, borderBottom: "1px solid #F7F5F1" }}>
+                          <span style={{ color: "#6B6355" }}>{x.l}</span>
+                          <span style={{ fontFamily: MONO, fontVariantNumeric: "tabular-nums", color: "#1A1A1A" }}>{fmt(x.v)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                   <div style={{ fontSize: 10, color: "#A89070", marginTop: 12, lineHeight: 1.5 }}>
                     Факт себестоимости — фактические траты (expenses fin-агента) + оплаченные обязательства.
                     Чистая прогноз = выручка − большее из плана и факта затрат − УСН 6% (с безнала).

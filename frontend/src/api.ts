@@ -165,8 +165,27 @@ export const expensesApi = {
     api.put(`/orders/${orderId}/expenses/${expenseId}`, data).then((r) => r.data),
   delete: (orderId: string, expenseId: string, withGroup = false) =>
     api.delete(`/orders/${orderId}/expenses/${expenseId}`, { params: withGroup ? { with_group: true } : {} }).then((r) => r.data),
-  split: (orderId: string, expenseId: string, parts: { amount: number; category: string; title?: string | null }[]) =>
+  // purpose у части — «мимо заказа»: stock (запас) | sample (образец) | overhead
+  split: (orderId: string, expenseId: string, parts: { amount: number; category: string; title?: string | null; purpose?: string | null }[]) =>
     api.post(`/orders/${orderId}/expenses/${expenseId}/split`, { parts }).then((r) => r.data),
+};
+
+// Траты без заказа: запас / собственные образцы / общехозяйственное.
+// В себестоимость клиентских заказов не входят; запас ложится в заказ только
+// операцией writeOff — датой использования, а не покупки.
+export const generalExpensesApi = {
+  list: (params: Record<string, string> = {}) =>
+    api.get("/general-expenses", { params }).then((r) => r.data),
+  summary: (params: Record<string, string> = {}) =>
+    api.get("/general-expenses/summary", { params }).then((r) => r.data),
+  create: (data: Record<string, any>) => api.post("/general-expenses", data).then((r) => r.data),
+  update: (id: string, data: Record<string, any>) =>
+    api.patch(`/general-expenses/${id}`, data).then((r) => r.data),
+  delete: (id: string) => api.delete(`/general-expenses/${id}`).then((r) => r.data),
+  writeOff: (id: string, data: { order_id: string; amount?: number | null; expense_date?: string | null; category?: string | null; title?: string | null }) =>
+    api.post(`/general-expenses/${id}/write-off`, data).then((r) => r.data),
+  undoWriteOff: (expenseId: string) =>
+    api.delete(`/general-expenses/write-offs/${expenseId}`).then((r) => r.data),
 };
 
 export const inboxApi = {
@@ -176,7 +195,7 @@ export const inboxApi = {
     source: string; tx_id: string; title?: string | null; category: string;
     supplier?: string | null; master_id?: string | null; expense_date?: string | null;
     allocations: {
-      order_id: string; amount: number;
+      order_id?: string | null; purpose?: string | null; amount: number;
       category?: string | null; master_id?: string | null; supplier?: string | null; creditor_id?: string | null;
     }[];
   }) => api.post("/expenses/from-tx", data).then((r) => r.data),

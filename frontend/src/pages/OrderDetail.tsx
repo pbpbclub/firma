@@ -39,25 +39,37 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 // Детализация расхода: разбить одну привязанную сумму на несколько категорий
 // (материалы/работы/доставка/прочее). Сумма частей должна сойтись с исходной.
+// Часть может уйти и «мимо заказа»: закупка про запас, собственный образец,
+// общехозяйственное (ТЗ stock_and_samples). Тогда она не попадёт в себестоимость
+// заказа — живой случай: 11 800 ₽ = 9 500 ₽ работы + 2 300 ₽ логотипы про запас.
+const SPLIT_TARGETS = [
+  { v: "", l: "в заказ" },
+  { v: "stock", l: "запас" },
+  { v: "sample", l: "образец" },
+  { v: "overhead", l: "общехоз" },
+];
+
 function SplitExpenseModal({ expense, saving, onSave, onClose }: {
   expense: any; saving: boolean;
-  onSave: (parts: { amount: number; category: string; title?: string | null }[]) => void;
+  onSave: (parts: { amount: number; category: string; title?: string | null; purpose?: string | null }[]) => void;
   onClose: () => void;
 }) {
-  type Part = { amount: string; category: string; title: string };
+  type Part = { amount: string; category: string; title: string; purpose: string };
   const [parts, setParts] = useState<Part[]>([
-    { amount: String(expense.amount ?? ""), category: expense.category || "material", title: "" },
-    { amount: "", category: "work", title: "" },
+    { amount: String(expense.amount ?? ""), category: expense.category || "material", title: "", purpose: "" },
+    { amount: "", category: "work", title: "", purpose: "" },
   ]);
   const patch = (i: number, p: Partial<Part>) => setParts(parts.map((x, j) => (j === i ? { ...x, ...p } : x)));
   const sum = parts.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
   const diff = Math.round(((expense.amount || 0) - sum) * 100) / 100;
   const valid = parts.length >= 2 && parts.every(p => (parseFloat(p.amount) || 0) > 0) && Math.abs(diff) < 0.01;
-  const addPart = () => setParts([...parts, { amount: diff > 0 ? String(diff) : "", category: "other", title: "" }]);
+  const addPart = () => setParts([...parts, { amount: diff > 0 ? String(diff) : "", category: "other", title: "", purpose: "" }]);
+  const outOfOrder = parts.filter(p => p.purpose).reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
   return (
     <Modal size="lg" eyebrow="ДЕТАЛИЗАЦИЯ РАСХОДА" onClose={onClose}
       onCancel={onClose} onSave={() => valid && onSave(parts.map(p => ({
         amount: parseFloat(p.amount), category: p.category, title: p.title.trim() || null,
+        purpose: p.purpose || null,
       })))}
       saveLabel={saving ? "Разбиваем..." : "Разбить"} saving={saving} canSave={valid}>
       <div style={{ padding: "18px 24px" }}>
@@ -81,8 +93,15 @@ function SplitExpenseModal({ expense, saving, onSave, onClose }: {
                 </button>
               ))}
             </div>
+            <select value={p.purpose} onChange={e => patch(i, { purpose: e.target.value })}
+              title="Куда отнести часть: в этот заказ или мимо заказов"
+              style={{ border: "1px solid #EDEBE6", padding: "6px 6px", fontSize: 11, outline: "none",
+                       fontFamily: "inherit", background: p.purpose ? "#FAF8F5" : "#fff",
+                       color: p.purpose ? "#E8592A" : "#6B6355", cursor: "pointer" }}>
+              {SPLIT_TARGETS.map(t => <option key={t.v} value={t.v}>{t.l}</option>)}
+            </select>
             <input value={p.title} onChange={e => patch(i, { title: e.target.value })} placeholder="название (опц.)"
-              style={{ flex: 1, border: "1px solid #EDEBE6", padding: "6px 8px", fontSize: 12, outline: "none" }} />
+              style={{ flex: 1, minWidth: 90, border: "1px solid #EDEBE6", padding: "6px 8px", fontSize: 12, outline: "none" }} />
             {parts.length > 2 && (
               <button onClick={() => setParts(parts.filter((_, j) => j !== i))}
                 style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 3, display: "flex" }}>
@@ -98,6 +117,11 @@ function SplitExpenseModal({ expense, saving, onSave, onClose }: {
             <Plus size={11} /> часть
           </button>
           <div style={{ fontSize: 11, fontFamily: MONO, color: Math.abs(diff) < 0.01 ? "#4A7C59" : "#8B3A3A" }}>
+            {outOfOrder > 0 && Math.abs(diff) < 0.01 && (
+              <span style={{ color: "#A89070", marginRight: 10 }}>
+                мимо заказа {fmtMoney(outOfOrder)} →
+              </span>
+            )}
             {Math.abs(diff) < 0.01 ? `✓ ${fmtMoney(sum)} — сходится` :
               diff > 0 ? `осталось распределить ${fmtMoney(diff)}` :
                          `перебор на ${fmtMoney(Math.abs(diff))}`}

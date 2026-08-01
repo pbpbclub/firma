@@ -268,7 +268,10 @@ def inbox(
 
 
 class Allocation(BaseModel):
-    order_id: str
+    # order_id пуст → строка уходит «без заказа» с назначением purpose
+    # (запас / собственный образец / общехозяйственное, ТЗ stock_and_samples 01.08.2026).
+    order_id: Optional[str] = None
+    purpose: Optional[str] = None       # stock | sample | overhead
     amount: float
     # Гранулярность по строке: своя категория/подрядчик/поставщик на каждый заказ.
     # Если не заданы — берём из тела (обратная совместимость со старым форматом).
@@ -305,6 +308,10 @@ def create_from_tx(body: FromTxIn):
     for a in body.allocations:
         if a.category and a.category not in EXPENSE_CATEGORIES:
             raise HTTPException(status_code=400, detail=f"category must be one of {'|'.join(EXPENSE_CATEGORIES)}")
+        if not a.order_id and not a.purpose:
+            raise HTTPException(status_code=400, detail="строке нужен order_id либо purpose (stock|sample|overhead)")
+        if a.purpose and a.purpose not in ("stock", "sample", "overhead"):
+            raise HTTPException(status_code=400, detail="purpose must be stock|sample|overhead")
 
     # Транзакция должна существовать и быть ещё не разнесённой
     bank_done, zen_done, degraded = _allocated_ids()
@@ -357,6 +364,20 @@ def create_from_tx(body: FromTxIn):
         col = "finance_tx_id" if body.source == "bank" else "zenmoney_tx_id"
         created = []
         for a in body.allocations:
+            if a.purpose and not a.order_id:
+                # Часть перевода не относится ни к какому заказу: запас/образец/общехоз.
+                # Обязательства не гасит (они у заказов), tx-ссылка остаётся — иначе
+                # инбокс посчитает транзакцию неразнесённой и заведёт дубль.
+                eid = str(uuid4())
+                conn.execute(
+                    """INSERT INTO expenses (id, order_id, title, amount, category, supplier, master_id,
+                                             expense_date, source, finance_tx_id, zenmoney_tx_id,
+                                             group_id, purpose, created_at)
+                       VALUES (?, NULL, ?, ?, ?, ?, ?, COALESCE(?, date('now')), ?, ?, ?, ?, ?, datetime('now'))""",
+                    (eid, title, a.amount, a.category or body.category, a.supplier or supplier,
+                     a.master_id or body.master_id, exp_date, src, fin_id, zen_id, group_id, a.purpose))
+                created.append(eid)
+                continue
             o = conn.execute("SELECT id FROM orders WHERE id = ? OR number = ?", (a.order_id, a.order_id)).fetchone()
             if not o:
                 raise HTTPException(status_code=404, detail=f"Заказ не найден: {a.order_id}")

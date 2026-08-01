@@ -33,7 +33,7 @@ EMAIL = "yuranek@pbpb.club"
 # заменяет тесты, он ловит «сервис поднялся, но не работает».
 ENDPOINTS = ["/api/orders", "/api/customers", "/api/masters", "/api/suppliers",
              "/api/estimates/review-queue", "/api/expenses/inbox",
-             "/api/payments/inbox"]
+             "/api/payments/inbox", "/api/general-expenses/summary"]
 
 # Колонки, добавленные ALTER-миграциями: их отсутствие означает, что стартовая
 # миграция не прошла, а сервис при этом живой. Пополнять при новых миграциях.
@@ -41,7 +41,9 @@ REQUIRED_COLUMNS = {
     "orders": ["reserved_amount", "reserve_released_at", "discount", "discount_note"],
     "payments": ["zenmoney_tx_id", "channel"],
     "estimate_sets": ["payment_type", "bank_pct", "is_primary"],
-    "expenses": ["creditor_id", "finance_tx_id", "zenmoney_tx_id", "payment_source", "master_id"],
+    "expenses": ["creditor_id", "finance_tx_id", "zenmoney_tx_id", "payment_source", "master_id",
+                 # траты без заказа: запас / образцы / общехоз (01.08.2026)
+                 "purpose", "stock_parent_id"],
     "creditors": ["estimate_line_id", "amount_plan", "kind"],
     # клиент ↔ подрядчик: один человек в двух картотеках (мердж Пинчука, 26.07)
     "customers": ["telegram", "whatsapp", "master_id"],

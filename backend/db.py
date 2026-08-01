@@ -893,6 +893,75 @@ def ensure_catalog_lines_costing_schema():
         conn.close()
 
 
+def ensure_general_expenses_schema():
+    """Траты без заказа: запас, собственные образцы, общехозяйственное
+    (ТЗ stock_and_samples, 01.08.2026).
+
+    До этого `expenses.order_id` был NOT NULL, и трату «про запас» (нарезали логотипы
+    впрок) записать было некуда: повесить на заказ — завысить его себестоимость,
+    не записать — потерять деньги из учёта. Поэтому колонка становится NULLABLE,
+    а назначение траты хранит `purpose`:
+      stock    — материал/заготовка впрок, потом списывается в заказ датой ИСПОЛЬЗОВАНИЯ;
+      sample   — собственный/тестовый экземпляр, выручки не будет никогда;
+      overhead — общехозяйственное.
+    `purpose` заполнен ТОЛЬКО у строк с order_id IS NULL — по этой паре и отличается
+    «общий контур» от расхода заказа. `stock_parent_id` — ссылка списанной в заказ
+    части на исходную запасовую строку (остаток запаса = amount родителя).
+
+    NOT NULL в SQLite снимается только пересборкой таблицы — делаем её один раз
+    и идемпотентно (проверка флага notnull в PRAGMA table_info)."""
+    conn = get_production()
+    try:
+        info = conn.execute("PRAGMA table_info(expenses)").fetchall()
+        if not info:
+            return
+        existing = {r[1] for r in info}
+        for col in ("purpose", "stock_parent_id"):
+            if col not in existing:
+                conn.execute(f"ALTER TABLE expenses ADD COLUMN {col} TEXT")
+                existing.add(col)
+        order_col = next((r for r in info if r[1] == "order_id"), None)
+        if order_col and order_col[3]:   # notnull == 1 → пересобрать
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(expenses)").fetchall()]
+            decls = []
+            for r in conn.execute("PRAGMA table_info(expenses)").fetchall():
+                name, typ, notnull, dflt, pk = r[1], r[2] or "TEXT", r[3], r[4], r[5]
+                d = f"{name} {typ}"
+                if pk:
+                    d += " PRIMARY KEY"
+                elif notnull and name != "order_id":
+                    d += " NOT NULL"
+                if dflt is not None:
+                    # PRAGMA отдаёт выражение без скобок ("datetime('now')"), а SQLite
+                    # принимает выражение в DEFAULT только в скобках. Литералы — как есть.
+                    lit = dflt.startswith(("'", '"')) or dflt.upper() in ("NULL", "TRUE", "FALSE")
+                    try:
+                        float(dflt)
+                        lit = True
+                    except ValueError:
+                        pass
+                    d += f" DEFAULT {dflt}" if lit else f" DEFAULT ({dflt})"
+                decls.append(d)
+            decls.append("FOREIGN KEY (order_id) REFERENCES orders(id)")
+            # PRAGMA foreign_keys переключается только вне транзакции, поэтому сначала
+            # закрываем неявную (ALTER-ы выше), а INSERT→DROP→RENAME уходят одной
+            # неявной транзакцией и коммитятся вместе: полупересобранной таблицы не будет.
+            conn.commit()
+            conn.execute("PRAGMA foreign_keys = OFF")
+            conn.execute("CREATE TABLE expenses_new (\n  " + ",\n  ".join(decls) + "\n)")
+            names = ", ".join(cols)
+            conn.execute(f"INSERT INTO expenses_new ({names}) SELECT {names} FROM expenses")
+            conn.execute("DROP TABLE expenses")
+            conn.execute("ALTER TABLE expenses_new RENAME TO expenses")
+            conn.commit()
+            conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_expenses_purpose ON expenses(purpose)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_expenses_stock_parent ON expenses(stock_parent_id)")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_inbox_dismissed_schema():
     """Скрытые из инбокса транзакции (переводы между своими счетами, возвраты).
 

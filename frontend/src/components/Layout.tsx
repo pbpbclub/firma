@@ -13,6 +13,7 @@ import {
   Vault,
   HandCoins,
   Receipt,
+  Stack,
 } from "@phosphor-icons/react";
 import { getUser, logout } from "../auth";
 
@@ -22,6 +23,7 @@ const nav = [
   { to: "/finance", icon: TrendUp, label: "ДДС" },
   { to: "/zenmoney", icon: HandCoins, label: "Личные" },
   { to: "/expenses", icon: Receipt, label: "Разноска" },
+  { to: "/general-expenses", icon: Stack, label: "Запас" },
   { to: "/debtors", icon: CurrencyDollar, label: "Обязательства" },
   { to: "/wiki", icon: BookOpen, label: "Вики" },
   { to: "/catalog", icon: Package, label: "Каталог" },

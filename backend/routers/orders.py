@@ -718,7 +718,21 @@ def plan_fact_summary():
                 "overspent": pf["cost_fact"] > pf["cost_plan"],
                 "detailed": pf["detailed"],
             })
-        return {"orders": out}
+        # Траты вне клиентских заказов — отдельными строками, а не в себестоимости
+        # заказов (ТЗ stock_and_samples 01.08.2026). В _plan_fact они не попадают
+        # по определению: order_id IS NULL.
+        gen = {r["purpose"]: round(r["s"] or 0, 2) for r in conn.execute(
+            """SELECT purpose, SUM(amount) AS s FROM expenses
+                WHERE order_id IS NULL AND purpose IS NOT NULL GROUP BY purpose""").fetchall()}
+        written_off = conn.execute(
+            "SELECT COALESCE(SUM(amount), 0) AS s FROM expenses WHERE stock_parent_id IS NOT NULL"
+        ).fetchone()["s"]
+        return {"orders": out, "general": {
+            "stock_open": gen.get("stock", 0),
+            "stock_written_off": round(written_off or 0, 2),
+            "sample": gen.get("sample", 0),
+            "overhead": gen.get("overhead", 0),
+        }}
     finally:
         conn.close()
 
@@ -1424,6 +1438,10 @@ class SplitPart(BaseModel):
     amount: float
     category: str
     title: Optional[str] = None
+    # Часть, которая к этому заказу не относится: уходит «без заказа» с назначением
+    # (ТЗ stock_and_samples 01.08.2026). purpose: stock | sample | overhead.
+    # Пример: перевод 11 800 ₽ = 9 500 ₽ работы заказа + 2 300 ₽ логотипы про запас.
+    purpose: Optional[str] = None
 
 
 class SplitIn(BaseModel):
@@ -1447,6 +1465,8 @@ def split_expense(order_id: str, expense_id: str, body: SplitIn):
             raise HTTPException(status_code=400, detail=f"category must be one of {'|'.join(EXPENSE_CATEGORIES)}")
         if p.amount <= 0:
             raise HTTPException(status_code=400, detail="Сумма части должна быть > 0")
+        if p.purpose is not None and p.purpose not in ("stock", "sample", "overhead"):
+            raise HTTPException(status_code=400, detail="purpose must be stock|sample|overhead")
     conn = get_production()
     try:
         r = conn.execute(
@@ -1463,9 +1483,19 @@ def split_expense(order_id: str, expense_id: str, body: SplitIn):
         group_id = r["group_id"] or str(uuid4())
         first = body.parts[0]
         first_title = (first.title or "").strip() or r["title"]
-        conn.execute(
-            "UPDATE expenses SET amount = ?, category = ?, title = COALESCE(?, title), group_id = ? WHERE id = ?",
-            (first.amount, first.category, (first.title or "").strip() or None, group_id, expense_id))
+        if first.purpose:
+            # Часть «в никуда»: уходит из заказа в общий контур. creditor_id снимаем —
+            # обязательство принадлежит заказу, запас его не гасит (иначе факт заказа
+            # недосчитается: покрытое обязательство исчезнет из обеих веток дедупа).
+            conn.execute(
+                """UPDATE expenses SET amount = ?, category = ?, title = COALESCE(?, title), group_id = ?,
+                          order_id = NULL, purpose = ?, creditor_id = NULL WHERE id = ?""",
+                (first.amount, first.category, (first.title or "").strip() or None, group_id,
+                 first.purpose, expense_id))
+        else:
+            conn.execute(
+                "UPDATE expenses SET amount = ?, category = ?, title = COALESCE(?, title), group_id = ? WHERE id = ?",
+                (first.amount, first.category, (first.title or "").strip() or None, group_id, expense_id))
         # Наличный контур: движение кассы пересчитываем под НОВУЮ сумму части — иначе
         # на исходной строке осталось бы списание на полную сумму (см. код-правило 2026-07-24).
         _sync_cash_fund(conn, expense_id, ExpenseIn(
@@ -1479,12 +1509,12 @@ def split_expense(order_id: str, expense_id: str, body: SplitIn):
             conn.execute(
                 """INSERT INTO expenses (id, order_id, title, amount, category, supplier, master_id,
                                          expense_date, source, creditor_id, finance_tx_id, zenmoney_tx_id,
-                                         payment_source, accountable_person_id, group_id, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
-                (eid, r["order_id"], p_title, p.amount, p.category,
+                                         payment_source, accountable_person_id, group_id, purpose, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+                (eid, None if p.purpose else r["order_id"], p_title, p.amount, p.category,
                  r["supplier"], r["master_id"], r["expense_date"], r["source"],
-                 r["creditor_id"], r["finance_tx_id"], r["zenmoney_tx_id"],
-                 r["payment_source"], r["accountable_person_id"], group_id))
+                 None if p.purpose else r["creditor_id"], r["finance_tx_id"], r["zenmoney_tx_id"],
+                 r["payment_source"], r["accountable_person_id"], group_id, p.purpose))
             # Каждая часть — своё движение кассы, а не одно на исходной строке.
             _sync_cash_fund(conn, eid, ExpenseIn(
                 title=p_title, amount=p.amount, category=p.category,
