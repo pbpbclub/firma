@@ -67,6 +67,31 @@ def add_user(body: CreateUserRequest, current=Depends(get_current_user)):
     return {"ok": True}
 
 
+class ResetPasswordRequest(BaseModel):
+    new_password: str
+
+
+@router.post("/users/{user_id}/reset-password")
+def reset_password(user_id: int, body: ResetPasswordRequest, current=Depends(get_current_user)):
+    """Админский сброс чужого пароля: bcrypt не восстанавливается, «напомнить
+    пароль» невозможно в принципе — только выдать новый."""
+    if current["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Только для администратора")
+    if len(body.new_password) < 8:
+        raise HTTPException(status_code=400, detail="Пароль короче 8 символов")
+    conn = get_db()
+    try:
+        r = conn.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+        conn.execute("UPDATE users SET password_hash = ? WHERE id = ?",
+                     (pwd_ctx.hash(body.new_password), user_id))
+        conn.commit()
+        return {"ok": True}
+    finally:
+        conn.close()
+
+
 @router.delete("/users/{user_id}")
 def delete_user(user_id: int, current=Depends(get_current_user)):
     if current["role"] != "admin":

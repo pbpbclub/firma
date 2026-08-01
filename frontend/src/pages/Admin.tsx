@@ -263,6 +263,17 @@ function UsersSection() {
     onError: (e: any) => setFormError(e?.response?.data?.detail || "Ошибка"),
   });
 
+  // Сброс пароля: генерим здесь и показываем ОДИН раз — сервер хранит только hash
+  const resetPwd = useMutation({
+    mutationFn: ({ id, pwd }: { id: number; pwd: string }) => authApi.resetPassword(id, pwd),
+  });
+  const [shownPwd, setShownPwd] = useState<{ id: number; pwd: string } | null>(null);
+  const doReset = (u: any) => {
+    if (!confirm(`Выдать новый пароль для ${u.name}? Старый перестанет работать.`)) return;
+    const pwd = Array.from(crypto.getRandomValues(new Uint8Array(9)), b => "abcdefghjkmnpqrstuvwxyz23456789ABCDEFGHJKMNPQRSTUVWXYZ"[b % 54]).join("");
+    resetPwd.mutate({ id: u.id, pwd }, { onSuccess: () => setShownPwd({ id: u.id, pwd }) });
+  };
+
   const deleteUser = useMutation({
     mutationFn: (id: number) => authApi.deleteUser(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-users"] }),
@@ -289,6 +300,13 @@ function UsersSection() {
         )}
       </div>
 
+      {shownPwd && (
+        <div style={{ border: "1px solid #B8860B", background: "#FFFBF2", padding: "10px 14px", marginBottom: 10, fontSize: 12 }}>
+          Новый пароль для {(users as any[]).find((u: any) => u.id === shownPwd.id)?.name}:
+          {" "}<b style={{ fontFamily: "monospace", fontSize: 13 }}>{shownPwd.pwd}</b>
+          <div style={{ fontSize: 10, color: "#A89070", marginTop: 3 }}>Показан один раз — скопируй и передай. После закрытия страницы восстановить нельзя.</div>
+        </div>
+      )}
       <div style={{ border: "1px solid #EDEBE6" }}>
         {(users as any[]).map((u: any, i: number) => (
           <div
@@ -316,6 +334,13 @@ function UsersSection() {
             }}>
               {u.role.toUpperCase()}
             </div>
+            <button
+              onClick={() => doReset(u)}
+              disabled={resetPwd.isPending}
+              style={{ background: "none", border: "1px solid #EDEBE6", cursor: "pointer", color: "#6B6355", padding: "3px 8px", fontSize: 10, fontFamily: "inherit" }}
+              title="Выдать новый пароль (старый восстановить нельзя — хранится только хэш)">
+              сбросить пароль
+            </button>
             <button
               onClick={() => deleteUser.mutate(u.id)}
               style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 4 }}
@@ -727,23 +752,44 @@ function PasswordSection() {
 
 // ── Main page ────────────────────────────────────────────────────────────────
 
+// Вкладки: 8 секций одним полотном не читались (просьба Юры 01.08.2026).
+const ADMIN_TABS = [
+  { id: "bank",    label: "Банк и импорт" },
+  { id: "rules",   label: "Правила платежей" },
+  { id: "costing", label: "Справочники цен" },
+  { id: "access",  label: "Доступ" },
+  { id: "system",  label: "Система" },
+] as const;
+
 export default function Admin() {
+  const [tab, setTab] = useState<(typeof ADMIN_TABS)[number]["id"]>("bank");
   return (
     <div style={{ padding: "24px 28px", maxWidth: 720, fontFamily: "inherit" }}>
-      <div style={{ marginBottom: 36 }}>
+      <div style={{ marginBottom: 20 }}>
         <div style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.03em", color: "#1A1A1A" }}>
           Настройки
         </div>
       </div>
 
-      <UploadSection />
-      <ImportsSection />
-      <ZenMoneySyncSection />
-      <PayeeRulesSection />
-      <CostingRefsSection />
-      <SystemSection />
-      <UsersSection />
-      <PasswordSection />
+      <div style={{ display: "flex", gap: 22, borderBottom: "1px solid #EDEBE6", marginBottom: 28 }}>
+        {ADMIN_TABS.map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)}
+            style={{ background: "none", border: "none", cursor: "pointer", fontFamily: "inherit",
+              padding: "0 0 10px", fontSize: 13,
+              fontWeight: tab === t.id ? 700 : 400,
+              color: tab === t.id ? "#1A1A1A" : "#A89070",
+              borderBottom: tab === t.id ? "2px solid #E8592A" : "2px solid transparent",
+              marginBottom: -1 }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "bank" && (<><UploadSection /><ImportsSection /><ZenMoneySyncSection /></>)}
+      {tab === "rules" && <PayeeRulesSection />}
+      {tab === "costing" && <CostingRefsSection />}
+      {tab === "access" && (<><UsersSection /><PasswordSection /></>)}
+      {tab === "system" && <SystemSection />}
     </div>
   );
 }

@@ -385,6 +385,9 @@ export const authApi = {
   addUser: (data: { email: string; name: string; password: string; role: string }) =>
     api.post("/auth/users", data).then((r) => r.data),
   deleteUser: (id: number) => api.delete(`/auth/users/${id}`).then((r) => r.data),
+  // Пароли-bcrypt не читаются — «напомнить» нельзя, только выдать новый (админ)
+  resetPassword: (id: number, new_password: string) =>
+    api.post(`/auth/users/${id}/reset-password`, { new_password }).then((r) => r.data),
   changePassword: (data: { current_password: string; new_password: string }) =>
     api.post("/auth/change-password", data).then((r) => r.data),
 };
