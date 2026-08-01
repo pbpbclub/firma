@@ -282,7 +282,8 @@ def _transit_facts(conn) -> dict:
     facts = {}
 
     def bucket(oid):
-        return facts.setdefault(oid, {"fact": 0.0, "contractor": None, "sources": []})
+        return facts.setdefault(oid, {"fact": 0.0, "fact_extra": 0.0,
+                                      "contractor": None, "sources": []})
 
     zm_seen = set()      # zenmoney_tx_id, уже учтённые своими источниками
     tx_seen = set()      # (вид, tx_id) — ловим дубли внутри самих expenses
@@ -294,7 +295,7 @@ def _transit_facts(conn) -> dict:
     untied = {}          # order_id -> [суммы источников без zenmoney_tx_id]
 
     for r in conn.execute(
-        """SELECT order_id, id, amount, title, supplier, zenmoney_tx_id, finance_tx_id
+        """SELECT order_id, id, amount, title, supplier, zenmoney_tx_id, finance_tx_id, extra_id
            FROM expenses WHERE order_id IS NOT NULL"""
     ):
         keys = [(k, str(tx)) for k, tx in (("fin", r["finance_tx_id"]),
@@ -306,9 +307,14 @@ def _transit_facts(conn) -> dict:
             continue
         tx_seen.update(keys)
         b = bucket(r["order_id"])
-        b["fact"] += r["amount"] or 0
+        # Расходы допработ — отдельным итогом: в _plan_fact/_margin факт допов уже
+        # приплюсовывается своей строкой (extras), и попади они сюда — транзитный
+        # заказ считал бы их дважды. Дедуп (tx_seen/zm_seen/untied) при этом общий:
+        # перевод один, каким бы контуром он ни был описан.
+        b["fact_extra" if r["extra_id"] else "fact"] += r["amount"] or 0
         b["sources"].append({"kind": "expense", "amount": r["amount"] or 0,
-                             "title": r["title"], "payee": r["supplier"]})
+                             "title": r["title"], "payee": r["supplier"],
+                             "extra": bool(r["extra_id"])})
         if r["supplier"] and not b["contractor"]:
             b["contractor"] = r["supplier"]
         if r["zenmoney_tx_id"]:
@@ -383,6 +389,7 @@ def _transit_facts(conn) -> dict:
 
     for b in facts.values():
         b["fact"] = round(b["fact"], 2)
+        b["fact_extra"] = round(b["fact_extra"], 2)
     return facts
 
 
@@ -627,6 +634,8 @@ def _plan_fact(conn, oid: str, cost_plan: float, paid_total: float, price_plan: 
         # «Транзит»: expenses + creditors + zm_links фин-агента, с полным дедупом).
         # Свой подсчёт ниже не выполняем: он не видит zm_links — сводка П/Ф
         # показывала нули при живой выплате, — а вместе с ним задвоил бы факт.
+        # tf["fact"] расходов допработ не содержит (см. _transit_facts): они идут
+        # отдельной строкой extras ниже, иначе транзит считал бы их дважды.
         tf = _transit_facts(conn).get(oid) or {}
         fact_by["Работы"] = round(tf.get("fact") or 0, 2)   # выплата мастеру и есть работа
     if not is_transit_pf:

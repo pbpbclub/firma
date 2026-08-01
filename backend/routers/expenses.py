@@ -313,6 +313,13 @@ def create_from_tx(body: FromTxIn):
             raise HTTPException(status_code=400, detail=f"category must be one of {'|'.join(EXPENSE_CATEGORIES)}")
         if not a.order_id and not a.purpose:
             raise HTTPException(status_code=400, detail="строке нужен order_id либо purpose (stock|sample|overhead)")
+        if a.order_id and a.purpose:
+            # purpose заполняется ТОЛЬКО при order_id IS NULL (см. general_expenses).
+            # Молча уронить его в заказной ветке нельзя: клиент считает, что завёл
+            # запас, а строка легла в себестоимость заказа.
+            raise HTTPException(
+                status_code=400,
+                detail="order_id и purpose взаимоисключающие: расход либо на заказ, либо общий (stock|sample|overhead)")
         if a.purpose and a.purpose not in ("stock", "sample", "overhead"):
             raise HTTPException(status_code=400, detail="purpose must be stock|sample|overhead")
 

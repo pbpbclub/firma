@@ -50,6 +50,28 @@ class GeneralExpenseIn(BaseModel):
     note: Optional[str] = None
 
 
+class GeneralExpenseUpdate(BaseModel):
+    """PATCH: все поля опциональны, непереданное сохраняет текущее значение.
+
+    Полнотельная модель здесь была ловушкой: форма правки знает только title/amount/
+    purpose/category/supplier/master_id/expense_date, а дефолты модели затирали
+    finance_tx_id и zenmoney_tx_id — «Разноска» переставала видеть перевод разнесённым
+    и заводила на него второй расход. Заодно терялся payment_source, и _sync_cash
+    молча убирал движение по кассе."""
+    title: Optional[str] = None
+    amount: Optional[float] = None
+    purpose: Optional[str] = None
+    category: Optional[str] = None
+    supplier: Optional[str] = None
+    master_id: Optional[str] = None
+    expense_date: Optional[str] = None
+    finance_tx_id: Optional[str] = None
+    zenmoney_tx_id: Optional[str] = None
+    payment_source: Optional[str] = None
+    accountable_person_id: Optional[str] = None
+    note: Optional[str] = None
+
+
 class WriteOffIn(BaseModel):
     order_id: str
     amount: Optional[float] = None       # None = списать остаток целиком
@@ -58,10 +80,13 @@ class WriteOffIn(BaseModel):
     title: Optional[str] = None
 
 
-def _validate(body: GeneralExpenseIn):
+def _validate(body: GeneralExpenseIn, check_amount: bool = True):
+    """check_amount=False — сумму не присылали (частичный PATCH): у полностью
+    списанной в заказы строки запаса остаток законно равен нулю, и требование
+    «> 0» запрещало бы поправить у неё, например, название."""
     if not (body.title or "").strip():
         raise HTTPException(status_code=400, detail="title required")
-    if body.amount is None or body.amount <= 0:
+    if check_amount and (body.amount is None or body.amount <= 0):
         raise HTTPException(status_code=400, detail="amount must be > 0")
     if body.purpose not in PURPOSES:
         raise HTTPException(status_code=400, detail=f"purpose must be one of {'|'.join(PURPOSES)}")
@@ -138,6 +163,9 @@ def summary(date_from: Optional[str] = None, date_to: Optional[str] = None):
 
     stock_open      — «Запас (не списано)»: лежит на балансе, ещё не в заказе;
     stock_written_off — уже ушло в заказы (там оно и есть себестоимость);
+                      период считается по дате СПИСАНИЯ (она же дата использования)
+                      — иначе отчёт за месяц смешивал бы списания всех времён
+                      с остатками периода;
     sample          — «Образцы и тесты»: расход периода, выручки не будет;
     overhead        — общехозяйственное.
     """
@@ -155,8 +183,16 @@ def summary(date_from: Optional[str] = None, date_to: Optional[str] = None):
               for r in conn.execute(
                   f"SELECT purpose, SUM(amount) AS total, COUNT(*) AS cnt FROM expenses WHERE {w} GROUP BY purpose",
                   params).fetchall()}
+        wo_where, wo_params = ["stock_parent_id IS NOT NULL"], []
+        if date_from:
+            wo_where.append("expense_date >= ?")
+            wo_params.append(date_from)
+        if date_to:
+            wo_where.append("expense_date <= ?")
+            wo_params.append(date_to)
         wo = conn.execute(
-            "SELECT COALESCE(SUM(amount), 0) AS total FROM expenses WHERE stock_parent_id IS NOT NULL"
+            "SELECT COALESCE(SUM(amount), 0) AS total FROM expenses WHERE "
+            + " AND ".join(wo_where), wo_params
         ).fetchone()
         stock = by.get("stock", {"amount": 0, "count": 0})
         sample = by.get("sample", {"amount": 0, "count": 0})
@@ -201,29 +237,60 @@ def create_general(body: GeneralExpenseIn):
 
 
 @router.patch("/{expense_id}")
-def update_general(expense_id: str, body: GeneralExpenseIn):
-    _validate(body)
+def update_general(expense_id: str, body: GeneralExpenseUpdate):
+    patch = body.model_dump(exclude_unset=True)
     conn = get_production()
     try:
-        r = conn.execute("SELECT id, amount FROM expenses WHERE id = ? AND order_id IS NULL", (expense_id,)).fetchone()
+        r = conn.execute("SELECT * FROM expenses WHERE id = ? AND order_id IS NULL", (expense_id,)).fetchone()
         if not r:
             raise HTTPException(status_code=404, detail="Not found")
-        # Остаток запаса не может стать меньше уже списанного в заказы.
+        cur = dict(r)
+
+        def val(key):
+            """Переданное поле — из тела (в т.ч. явный null для очистки),
+            непереданное — текущее значение строки."""
+            return patch[key] if key in patch else cur.get(key)
+
+        merged = GeneralExpenseIn(
+            title=val("title") or "",
+            amount=val("amount") or 0,
+            purpose=val("purpose") or "stock",
+            category=val("category") or "other",
+            supplier=val("supplier"),
+            master_id=val("master_id"),
+            expense_date=val("expense_date"),
+            finance_tx_id=val("finance_tx_id"),
+            zenmoney_tx_id=val("zenmoney_tx_id"),
+            payment_source=val("payment_source"),
+            accountable_person_id=val("accountable_person_id"),
+        )
+        _validate(merged, check_amount="amount" in patch)
         wo = conn.execute(
             "SELECT COALESCE(SUM(amount), 0) AS t FROM expenses WHERE stock_parent_id = ?", (expense_id,)
         ).fetchone()["t"]
+        # Из строки уже списывали в заказы — увести её из запаса нельзя: списанные части
+        # ссылаются на неё через stock_parent_id, а откат списания возвращает сумму
+        # именно в запас. Та же защита, что и в delete_general.
+        if wo and merged.purpose != "stock":
+            raise HTTPException(
+                status_code=409,
+                detail="Из этой строки уже списано в заказы — назначение остаётся «запас»")
         conn.execute(
             """UPDATE expenses SET title = ?, amount = ?, category = ?, supplier = ?, master_id = ?,
                       expense_date = COALESCE(?, expense_date), purpose = ?,
                       finance_tx_id = ?, zenmoney_tx_id = ?, payment_source = ?, accountable_person_id = ?
                WHERE id = ?""",
-            (body.title.strip(), body.amount, body.category, body.supplier, body.master_id,
-             body.expense_date, body.purpose, body.finance_tx_id, body.zenmoney_tx_id,
-             body.payment_source, body.accountable_person_id if body.payment_source == "accountable" else None,
+            (merged.title.strip(), merged.amount, merged.category, merged.supplier, merged.master_id,
+             merged.expense_date, merged.purpose, merged.finance_tx_id, merged.zenmoney_tx_id,
+             merged.payment_source,
+             merged.accountable_person_id if merged.payment_source == "accountable" else None,
              expense_id))
-        _sync_cash(conn, expense_id, body.payment_source, body.amount, body.title.strip(), body.expense_date)
+        _sync_cash(conn, expense_id, merged.payment_source, merged.amount,
+                   merged.title.strip(), merged.expense_date)
         conn.commit()
         out = _row(conn, expense_id)
+        # amount — ОСТАТОК запаса, списанное живёт отдельными строками; отдаём обе
+        # величины, чтобы «остаток + списанное» было видно целиком.
         out["written_off"] = round(wo or 0, 2)
         return out
     finally:

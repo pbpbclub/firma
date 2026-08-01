@@ -942,7 +942,43 @@ def ensure_general_expenses_schema():
                         pass
                     d += f" DEFAULT {dflt}" if lit else f" DEFAULT ({dflt})"
                 decls.append(d)
-            decls.append("FOREIGN KEY (order_id) REFERENCES orders(id)")
+            # DROP TABLE уносит ВСЁ, чего нет в PRAGMA table_info: индексы, триггеры,
+            # UNIQUE-ограничения и остальные внешние ключи. Собираем их заранее и
+            # восстанавливаем после переименования, иначе схема тихо деградирует.
+            fks = {}
+            for f in conn.execute("PRAGMA foreign_key_list(expenses)").fetchall():
+                # (id, seq, table, from, to, on_update, on_delete, match)
+                e = fks.setdefault(f[0], {"table": f[2], "from": [], "to": [],
+                                          "on_update": f[5], "on_delete": f[6]})
+                e["from"].append(f[3])
+                if f[4] is not None:
+                    e["to"].append(f[4])
+            for e in fks.values():
+                d = f"FOREIGN KEY ({', '.join(e['from'])}) REFERENCES {e['table']}"
+                if e["to"]:
+                    d += f" ({', '.join(e['to'])})"
+                for act, kw in ((e["on_update"], "ON UPDATE"), (e["on_delete"], "ON DELETE")):
+                    if act and act.upper() != "NO ACTION":
+                        d += f" {kw} {act}"
+                decls.append(d)
+            if not any(e["from"] == ["order_id"] for e in fks.values()):
+                decls.append("FOREIGN KEY (order_id) REFERENCES orders(id)")
+            # Индексы и триггеры — их текст есть в sqlite_master как есть.
+            restore = [r[0] for r in conn.execute(
+                "SELECT sql FROM sqlite_master WHERE tbl_name = 'expenses' "
+                "AND type IN ('index', 'trigger') AND sql IS NOT NULL").fetchall()]
+            # UNIQUE, объявленный в CREATE TABLE, даёт авто-индекс без sql (origin='u') —
+            # пересоздаём его явным CREATE UNIQUE INDEX по тем же колонкам.
+            # (CHECK-ограничения SQLite через PRAGMA не отдаёт вовсе — их не восстановить.)
+            for il in conn.execute("PRAGMA index_list(expenses)").fetchall():
+                iname, uniq, origin = il[1], il[2], il[3]
+                if origin != "u" or not uniq:
+                    continue
+                icols = [ii[2] for ii in conn.execute(f'PRAGMA index_info("{iname}")').fetchall()]
+                if icols:
+                    restore.append(
+                        f'CREATE UNIQUE INDEX IF NOT EXISTS "uq_expenses_{"_".join(icols)}" '
+                        f'ON expenses ({", ".join(icols)})')
             # PRAGMA foreign_keys переключается только вне транзакции, поэтому сначала
             # закрываем неявную (ALTER-ы выше), а INSERT→DROP→RENAME уходят одной
             # неявной транзакцией и коммитятся вместе: полупересобранной таблицы не будет.
@@ -953,6 +989,8 @@ def ensure_general_expenses_schema():
             conn.execute(f"INSERT INTO expenses_new ({names}) SELECT {names} FROM expenses")
             conn.execute("DROP TABLE expenses")
             conn.execute("ALTER TABLE expenses_new RENAME TO expenses")
+            for sql in restore:
+                conn.execute(sql)
             conn.commit()
             conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_expenses_purpose ON expenses(purpose)")
@@ -993,7 +1031,11 @@ def ensure_order_extras_schema():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_order_extras_order ON order_extras(order_id)")
         for table in ("payments", "expenses"):
             info = conn.execute(f"PRAGMA table_info({table})").fetchall()
-            if info and "extra_id" not in {r[1] for r in info}:
+            if not info:
+                # Таблицы ещё нет (чистая БД, порядок ensure_*): миграция обязана быть
+                # no-op целиком — CREATE INDEX по несуществующей таблице уронил бы старт.
+                continue
+            if "extra_id" not in {r[1] for r in info}:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN extra_id TEXT")
             conn.execute(
                 f"CREATE INDEX IF NOT EXISTS idx_{table}_extra ON {table}(extra_id)")
