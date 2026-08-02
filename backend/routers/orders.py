@@ -109,7 +109,7 @@ def list_orders(
                 "has_estimate": m["has_estimate"],
                 "plan_source": m["plan_source"],
                 **_awaiting_flags(r["status"], m["revenue"], r["paid_total"]),
-                **_order_delta(conn, r, m),
+                **_order_delta(conn, r, m, extras=extras),
             })
         return out
     finally:
@@ -282,8 +282,8 @@ def _transit_facts(conn) -> dict:
     facts = {}
 
     def bucket(oid):
-        return facts.setdefault(oid, {"fact": 0.0, "fact_extra": 0.0,
-                                      "contractor": None, "sources": []})
+        return facts.setdefault(oid, {"fact": 0.0, "fact_extra": 0.0, "contractor": None,
+                                      "sources": [], "sources_extra": []})
 
     zm_seen = set()      # zenmoney_tx_id, уже учтённые своими источниками
     tx_seen = set()      # (вид, tx_id) — ловим дубли внутри самих expenses
@@ -311,10 +311,13 @@ def _transit_facts(conn) -> dict:
         # приплюсовывается своей строкой (extras), и попади они сюда — транзитный
         # заказ считал бы их дважды. Дедуп (tx_seen/zm_seen/untied) при этом общий:
         # перевод один, каким бы контуром он ни был описан.
+        # Детализация идёт в тот же итог, что и сумма: sources — «чем подтверждён
+        # fact», и расход допа туда попасть не может, иначе список «чем подтверждено»
+        # в панели транзита складывается в сумму больше самого факта.
         b["fact_extra" if r["extra_id"] else "fact"] += r["amount"] or 0
-        b["sources"].append({"kind": "expense", "amount": r["amount"] or 0,
-                             "title": r["title"], "payee": r["supplier"],
-                             "extra": bool(r["extra_id"])})
+        b["sources_extra" if r["extra_id"] else "sources"].append(
+            {"kind": "expense", "amount": r["amount"] or 0,
+             "title": r["title"], "payee": r["supplier"]})
         if r["supplier"] and not b["contractor"]:
             b["contractor"] = r["supplier"]
         if r["zenmoney_tx_id"]:
@@ -393,7 +396,7 @@ def _transit_facts(conn) -> dict:
     return facts
 
 
-def _order_delta(conn, r, m) -> dict:
+def _order_delta(conn, r, m, extras=None) -> dict:
     """«Дельта» — один ориентир Юры в таблице заказов, смысл зависит от стадии
     (решение 29.07.2026): план для сметы/ждущих, прогноз в работе, факт у завершённых.
     Всегда чистая, после УСН — та же цифра, что «Чистая · прогноз» в карточке.
@@ -406,7 +409,7 @@ def _order_delta(conn, r, m) -> dict:
         return {"delta": m["net_profit"], "delta_source": src}
     if status in ("completed", "in_production"):
         pf = _plan_fact(conn, r["id"], r["cost_plan"] or 0, r["paid_total"] or 0,
-                        r["price_plan"] or 0)
+                        r["price_plan"] or 0, extras=extras)
         if status == "completed":
             if pf["has_facts"]:
                 # Итог закрытого заказа: выручка минус реальные траты минус налог.
@@ -452,6 +455,21 @@ def _order_extras(conn, oid: str) -> dict:
         """SELECT COUNT(*) AS n, COALESCE(SUM(price),0) AS p, COALESCE(SUM(cost),0) AS c
            FROM order_extras WHERE order_id = ?""", (oid,)).fetchone()
     return {"count": r["n"] or 0, "price": round(r["p"] or 0, 2), "cost": round(r["c"] or 0, 2)}
+
+
+def _check_extra(conn, oid: str, extra_id) -> Optional[str]:
+    """Доп из тела запроса обязан принадлежать ЭТОМУ заказу.
+
+    Без проверки платёж (или расход) по заказу A с extra_id допа заказа B молча
+    попадает в paid/cost_fact чужого допа — обе карточки показывают одни и те же
+    деньги как свои. Тот же контроль, что у creditor_id в expenses.create_from_tx."""
+    if not extra_id:
+        return None
+    r = conn.execute("SELECT id FROM order_extras WHERE id = ? AND order_id = ?",
+                     (extra_id, oid)).fetchone()
+    if not r:
+        raise HTTPException(status_code=400, detail="Допработа не принадлежит этому заказу")
+    return r["id"]
 
 
 def _margin(conn, oid: str, price_plan, cost_plan, est=None, transit_facts=None,
@@ -592,11 +610,15 @@ def _reserve_suggested(pf: dict, cost_plan) -> float:
     return round(cost_plan or 0, 2)
 
 
-def _plan_fact(conn, oid: str, cost_plan: float, paid_total: float, price_plan: float = 0) -> dict:
+def _plan_fact(conn, oid: str, cost_plan: float, paid_total: float, price_plan: float = 0,
+               extras=None) -> dict:
     """План (из активной сметы) / Факт (expenses + оплаченные обязательства) по категориям.
 
     План себестоимости — из строк утверждённой сметы (иначе последней не-superseded).
-    Факт — фактические траты: expenses (вносит fin-agent) + creditors.paid (обязательства)."""
+    Факт — фактические траты: expenses (вносит fin-agent) + creditors.paid (обязательства).
+
+    extras — предрасчёт _extras_totals по всем заказам: обязателен для вызовов в цикле
+    (сводка П/Ф, «дельта» в списке), иначе _margin делает свой SELECT на каждый заказ."""
     est = _active_set(conn, oid)
 
     plan_by = {b: 0.0 for b in _CAT_BUCKETS}
@@ -690,7 +712,7 @@ def _plan_fact(conn, oid: str, cost_plan: float, paid_total: float, price_plan: 
 
     # Маржа — от выручки, а НЕ от оплаченного: заплатил клиент или нет,
     # прибыльность заказа от этого не меняется. Налог берём из общей лестницы.
-    m = _margin(conn, oid, price_plan, plan_total, est=est)
+    m = _margin(conn, oid, price_plan, plan_total, est=est, extras=extras)
     tax = m["tax"]
 
     # Допработы отдельной строкой: план — order_extras.cost, факт — расходы с extra_id.
@@ -705,6 +727,11 @@ def _plan_fact(conn, oid: str, cost_plan: float, paid_total: float, price_plan: 
         "gross": round(ex["price"] - max(ex["cost"], ex_fact), 2),
     }
     cost_fact = round(cost_fact_estimate + ex_fact, 2)
+    # Итог разбивки — ровно сумма её же категорий. m["cost"] считается от сета
+    # (set_totals по позициям), и у черновика с несинхронным cost_total позиции он
+    # может разойтись с суммой строк: «m['cost'] − допы» тогда молча выдавал бы
+    # за итог категорий число, которого в них нет.
+    plan_estimate = plan_total
     # m["cost"] = план сметы + плановая себестоимость допов (единый источник).
     plan_total = m["cost"]
     gross_plan = round(m["revenue"] - plan_total, 2)
@@ -730,7 +757,7 @@ def _plan_fact(conn, oid: str, cost_plan: float, paid_total: float, price_plan: 
         "cost_plan": plan_total,
         # Разбивка по категориям — только смета: допы в неё не подмешиваются
         # (ТЗ extra_works п.5). Сумма категорий = cost_plan_estimate, не cost_plan.
-        "cost_plan_estimate": round(plan_total - (ex["cost"] or 0), 2),
+        "cost_plan_estimate": plan_estimate,
         "cost_fact_estimate": cost_fact_estimate,
         "extras": extras_block,
         "cost_fact": cost_fact,
@@ -761,9 +788,13 @@ def plan_fact_summary():
                WHERE o.status NOT IN ('completed', 'cancelled')
                GROUP BY o.id ORDER BY o.deadline IS NULL, o.deadline ASC""",
         ).fetchall()
+        # Допы — одним запросом на всю сводку: _plan_fact зовётся в цикле, и без
+        # предрасчёта _margin читал бы order_extras на каждый заказ (code_rules 27.07).
+        extras = _extras_totals(conn)
         out = []
         for r in rows:
-            pf = _plan_fact(conn, r["id"], r["cost_plan"] or 0, r["paid_total"] or 0, r["price_plan"] or 0)
+            pf = _plan_fact(conn, r["id"], r["cost_plan"] or 0, r["paid_total"] or 0,
+                            r["price_plan"] or 0, extras=extras)
             if not pf["has_estimate"]:
                 continue
             out.append({
@@ -1171,6 +1202,7 @@ def _create_payment(conn, order_row, amount, paid_at, note=None, *, source, bank
         raise HTTPException(status_code=400, detail="amount must be > 0")
     if not (str(paid_at or "").strip()):
         raise HTTPException(status_code=400, detail="paid_at required")
+    extra_id = _check_extra(conn, order_row["id"], extra_id)
     pid = str(uuid4())
     conn.execute(
         """INSERT INTO payments (id, order_id, amount, paid_at, note, bank_tx_id, zenmoney_tx_id, source, channel, extra_id, created_at)
@@ -1577,7 +1609,7 @@ def add_expense(order_id: str, body: ExpenseIn):
             (eid, oid, body.title.strip(), body.amount, body.category, body.supplier, body.master_id,
              body.expense_date, _autolink_creditor(conn, oid, body), body.finance_tx_id, body.zenmoney_tx_id,
              body.payment_source, body.accountable_person_id if body.payment_source == "accountable" else None,
-             body.extra_id)
+             _check_extra(conn, oid, body.extra_id))
         )
         _sync_cash_fund(conn, eid, body)
         conn.commit()
@@ -1592,11 +1624,17 @@ def update_expense(order_id: str, expense_id: str, body: ExpenseIn):
     conn = get_production()
     try:
         r = conn.execute(
-            "SELECT id, order_id FROM expenses WHERE id = ? AND order_id IN (SELECT id FROM orders WHERE id = ? OR number = ?)",
+            "SELECT id, order_id, extra_id FROM expenses WHERE id = ? AND order_id IN (SELECT id FROM orders WHERE id = ? OR number = ?)",
             (expense_id, order_id, order_id)
         ).fetchone()
         if not r:
             raise HTTPException(status_code=404, detail="Not found")
+        # extra_id разводит контуры учёта (смета vs доп), поэтому дефолт модели его
+        # не затирает: поле не прислали — оставляем как было, прислали null — снимаем
+        # привязку. Форма расхода шлёт его всегда, но клиент постарше (или скрипт)
+        # иначе молча вернул бы расход допа в себестоимость сметы.
+        extra_id = (_check_extra(conn, r["order_id"], body.extra_id)
+                    if "extra_id" in body.model_fields_set else r["extra_id"])
         conn.execute(
             """UPDATE expenses SET title = ?, amount = ?, category = ?, supplier = ?, master_id = ?,
                       expense_date = COALESCE(?, expense_date), creditor_id = ?,
@@ -1607,7 +1645,7 @@ def update_expense(order_id: str, expense_id: str, body: ExpenseIn):
              body.expense_date, _autolink_creditor(conn, r["order_id"], body),
              body.finance_tx_id, body.zenmoney_tx_id,
              body.payment_source, body.accountable_person_id if body.payment_source == "accountable" else None,
-             body.extra_id, expense_id)
+             extra_id, expense_id)
         )
         _sync_cash_fund(conn, expense_id, body)
         conn.commit()
@@ -1635,9 +1673,11 @@ def split_expense(order_id: str, expense_id: str, body: SplitIn):
     """Детализация: разбить один расход на несколько категорий (материалы/работы/…).
     Первая часть остаётся в исходной строке (id, ссылки целы — инвариант
     «одна оплата = один факт» не ломается), остальные — сиблинги с общим group_id.
-    creditor_id и tx-ссылки копируются на КАЖДУЮ часть (паттерн from-tx: несколько
-    строк одной транзакции), иначе привязка к обязательству теряется у сиблингов
-    (list_obligations недосчитал бы факт). Наличный контур (payment_source=cash_fund)
+    creditor_id, extra_id и tx-ссылки копируются на КАЖДУЮ часть (паттерн from-tx:
+    несколько строк одной транзакции), иначе привязка теряется у сиблингов:
+    обязательство недосчитает факт (list_obligations), а расход по допу вернётся
+    в себестоимость сметы и занизит cost_fact допа. Часть с purpose уходит из
+    заказа целиком — вместе с creditor_id снимается и extra_id. Наличный контур (payment_source=cash_fund)
     пересчитывает движение кассы для каждой части, а не оставляет одно на исходной
     строке на полную сумму — иначе касса рассинхронится при правке/удалении части."""
     if len(body.parts) < 2:
@@ -1671,7 +1711,7 @@ def split_expense(order_id: str, expense_id: str, body: SplitIn):
             # недосчитается: покрытое обязательство исчезнет из обеих веток дедупа).
             conn.execute(
                 """UPDATE expenses SET amount = ?, category = ?, title = COALESCE(?, title), group_id = ?,
-                          order_id = NULL, purpose = ?, creditor_id = NULL WHERE id = ?""",
+                          order_id = NULL, purpose = ?, creditor_id = NULL, extra_id = NULL WHERE id = ?""",
                 (first.amount, first.category, (first.title or "").strip() or None, group_id,
                  first.purpose, expense_id))
         else:
@@ -1691,12 +1731,14 @@ def split_expense(order_id: str, expense_id: str, body: SplitIn):
             conn.execute(
                 """INSERT INTO expenses (id, order_id, title, amount, category, supplier, master_id,
                                          expense_date, source, creditor_id, finance_tx_id, zenmoney_tx_id,
-                                         payment_source, accountable_person_id, group_id, purpose, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+                                         payment_source, accountable_person_id, group_id, purpose,
+                                         extra_id, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
                 (eid, None if p.purpose else r["order_id"], p_title, p.amount, p.category,
                  r["supplier"], r["master_id"], r["expense_date"], r["source"],
                  None if p.purpose else r["creditor_id"], r["finance_tx_id"], r["zenmoney_tx_id"],
-                 r["payment_source"], r["accountable_person_id"], group_id, p.purpose))
+                 r["payment_source"], r["accountable_person_id"], group_id, p.purpose,
+                 None if p.purpose else r["extra_id"]))
             # Каждая часть — своё движение кассы, а не одно на исходной строке.
             _sync_cash_fund(conn, eid, ExpenseIn(
                 title=p_title, amount=p.amount, category=p.category,

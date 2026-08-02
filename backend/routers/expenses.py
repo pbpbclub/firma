@@ -298,7 +298,7 @@ class FromTxIn(BaseModel):
 @router.post("/from-tx", status_code=201)
 def create_from_tx(body: FromTxIn):
     """Разнести транзакцию на 1..N заказов. N>1 — одна поездка на несколько заказов."""
-    from routers.orders import EXPENSE_CATEGORIES
+    from routers.orders import EXPENSE_CATEGORIES, _check_extra
 
     if body.source not in ("bank", "zen"):
         raise HTTPException(status_code=400, detail="source must be bank|zen")
@@ -429,7 +429,9 @@ def create_from_tx(body: FromTxIn):
                    VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), ?, ?, ?, ?, ?, ?, datetime('now'))""",
                 (eid, oid, title, a.amount, row_cat, row_supplier, row_master,
                  exp_date, src, cred, fin_id, zen_id, group_id,
-                 a.extra_id if a.extra_id else None)
+                 # Доп обязан быть допом ЭТОГО заказа — как и creditor_id выше:
+                 # чужой id увёл бы траты в cost_fact допа другого заказа.
+                 _check_extra(conn, oid, a.extra_id))
             )
             created.append(eid)
         # Разнесли по-настоящему → скрытие (если было) снимаем, как в payments.
