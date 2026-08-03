@@ -862,8 +862,11 @@ export default function EstimateEditor() {
 
           {/* ─ Column headers ─────────────────────────────────────────────── */}
           <div style={{ display: "grid", gridTemplateColumns: colsMain, padding: "7px 28px", gap: 12, borderBottom: "1px solid #EDEBE6", flexShrink: 0 }}>
+            {/* per-unit колонки вводятся В РЕЖИМЕ ПРАВКИ (карандаш): итог = ввод × кол-во */}
             {["", "Позиция", "Кол-во", "Наценка", "Себест./шт", "Себест.", "Факт", isBank ? "К опл./шт" : "Клиент./шт", isBank ? "К оплате" : "Клиенту", "Δ Доход", ""].map((h, i) => (
-              <div key={i} style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em", textAlign: i >= 4 ? "right" : "left" }}>{h}</div>
+              <div key={i}
+                title={i === 4 || i === 7 ? "Вводится за штуку в режиме правки (карандаш) — итог посчитается сам (× кол-во)" : undefined}
+                style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em", textAlign: i >= 4 ? "right" : "left" }}>{h}</div>
             ))}
           </div>
 
@@ -1014,9 +1017,13 @@ export default function EstimateEditor() {
                       </div>
                     );
                   }
+                  // «За штуку» определено всегда (qty=1 → равно итогу): прочерк
+                  // читался как «не указывается» и заставлял считать руками.
+                  const fromLines = (item.lines?.length ?? 0) > 0;
                   return (
-                    <div style={{ fontSize: 11, color: "#A89070", textAlign: "right" }}>
-                      {qty > 1 && costUnit > 0 ? fmt(costUnit) : <span style={{ color: "#EDEBE6" }}>—</span>}
+                    <div style={{ fontSize: 11, color: qty > 1 ? "#A89070" : "#C8C0B0", textAlign: "right" }}
+                         title={fromLines ? "Считается из состава — правь в калькуляторе (куб)" : undefined}>
+                      {costUnit > 0 ? fmt(costUnit) : <span style={{ color: "#EDEBE6" }}>—</span>}
                     </div>
                   );
                 })()}
@@ -1074,8 +1081,8 @@ export default function EstimateEditor() {
                     );
                   }
                   return (
-                    <div style={{ fontSize: 11, color: isBank ? "#E8592A" : "#A89070", textAlign: "right", opacity: 0.7 }}>
-                      {qty > 1 && priceUnit > 0 ? fmt(priceUnit) : <span style={{ color: "#EDEBE6" }}>—</span>}
+                    <div style={{ fontSize: 11, color: isBank ? "#E8592A" : (qty > 1 ? "#A89070" : "#C8C0B0"), textAlign: "right", opacity: 0.7 }}>
+                      {priceUnit > 0 ? fmt(priceUnit) : <span style={{ color: "#EDEBE6" }}>—</span>}
                     </div>
                   );
                 })()}

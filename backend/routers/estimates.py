@@ -229,6 +229,35 @@ class SetUpdate(BaseModel):
     notes: Optional[str] = None
 
 
+def _apply_unit_fields(fields: dict, *, quantity: int, payment_type: str, bank_pct) -> None:
+    """Перевести ввод «за штуку» в хранимые тоталы (запрос Юры/Елены 03.08.2026:
+    «приходится рассчитывать от общей себестоимости за штуку»).
+
+    cost_unit   → cost_total = unit × qty
+    sale_unit   → sale_price = unit × qty            (цена «за нал» за штуку)
+    client_unit → sale_price = cash_from_client(unit × qty)   (к оплате за штуку)
+
+    Одновременно unit и его total — 400: тихий выбор одного из двух чисел
+    молча исказил бы смету. Поля-униты вычищаются: это не колонки."""
+    qty = quantity or 1
+    if fields.get("cost_unit") is not None and fields.get("cost_total") is not None:
+        raise HTTPException(status_code=400, detail="Либо cost_unit, либо cost_total — не оба сразу")
+    if (fields.get("sale_unit") is not None or fields.get("client_unit") is not None)             and fields.get("sale_price") is not None:
+        raise HTTPException(status_code=400, detail="Либо цена за штуку, либо sale_price — не оба сразу")
+    if fields.get("sale_unit") is not None and fields.get("client_unit") is not None:
+        raise HTTPException(status_code=400, detail="Либо sale_unit, либо client_unit — не оба сразу")
+
+    cu = fields.pop("cost_unit", None)
+    su = fields.pop("sale_unit", None)
+    klu = fields.pop("client_unit", None)
+    if cu is not None:
+        fields["cost_total"] = round(cu * qty, 2)
+    if su is not None:
+        fields["sale_price"] = round(su * qty, 2)
+    if klu is not None:
+        fields["sale_price"] = round(cash_from_client(klu * qty, payment_type, bank_pct), 2)
+
+
 class ItemCreate(BaseModel):
     title: str = ""
     category: Optional[str] = None
@@ -248,6 +277,10 @@ class ItemUpdate(BaseModel):
     cost_total: Optional[float] = None
     sale_price: Optional[float] = None
     bank_pct: Optional[float] = None
+    # Ввод «за штуку» (виртуальные, в колонки не пишутся — см. _apply_unit_fields)
+    cost_unit: Optional[float] = None
+    sale_unit: Optional[float] = None
+    client_unit: Optional[float] = None
 
 
 class LineCreate(BaseModel):
@@ -636,6 +669,16 @@ def update_item(item_id: str, body: ItemUpdate):
             raise HTTPException(status_code=404, detail="Not found")
         _assert_item_editable(conn, item_id)
         fields = body.model_dump(exclude_unset=True)   # присланный null очищает поле
+        es = conn.execute(
+            """SELECT es.payment_type, es.bank_pct FROM estimate_sets es
+               JOIN estimate_items ei ON ei.set_id = es.id WHERE ei.id = ?""",
+            (item_id,)).fetchone()
+        _apply_unit_fields(
+            fields,
+            quantity=fields.get("quantity") or row["quantity"] or 1,
+            payment_type=(es["payment_type"] if es else "cash") or "cash",
+            bank_pct=es["bank_pct"] if es else None,
+        )
         if fields:
             set_clause = ", ".join(f"{k} = ?" for k in fields)
             conn.execute(
