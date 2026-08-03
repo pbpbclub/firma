@@ -17,7 +17,7 @@ const SANS = "inherit";
 import {
   Plus, Trash, Package, Cube,
   FileText, DotsSixVertical, PencilSimple, FloppyDisk, ListChecks, CheckCircle, Circle,
-} from "@phosphor-icons/react";
+  Article } from "@phosphor-icons/react";
 
 
 // sale_price храним с копейками: введённое клиентское «к оплате» первично, и
@@ -540,6 +540,20 @@ export default function EstimateEditor() {
     }
   };
 
+  const [kping, setKping] = useState(false);
+  const generateKp = async () => {
+    if (!activeSetId) return;
+    setKping(true);
+    try {
+      const blob = await estimatesApi.kp(activeSetId);
+      window.open(URL.createObjectURL(blob), "_blank");
+    } catch (e: any) {
+      alert("Ошибка генерации КП: " + (e?.response?.data?.detail ?? ""));
+    } finally {
+      setKping(false);
+    }
+  };
+
   const colsMain = "20px 1fr 56px 70px 90px 100px 100px 90px 100px 80px 44px";
 
   const [dragIdx, setDragIdx] = useState<number | null>(null);
@@ -745,6 +759,23 @@ export default function EstimateEditor() {
                 onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "#EDEBE6"; (e.currentTarget as HTMLElement).style.color = invoicing ? "#C8C0B0" : "#6B6355"; }}
               >
                 <FileText size={16} />
+              </button>
+
+              {/* КП — генератор фин-агента (kp.py), шаблон один на систему */}
+              <button
+                onClick={generateKp}
+                disabled={kping}
+                title="Сгенерировать КП (коммерческое предложение)"
+                style={{
+                  width: 28, height: 28, padding: 0, cursor: kping ? "default" : "pointer",
+                  border: "1px solid #EDEBE6", background: "transparent",
+                  color: kping ? "#C8C0B0" : "#6B6355",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}
+                onMouseEnter={e => { if (!kping) { (e.currentTarget as HTMLElement).style.borderColor = "#1A1A1A"; (e.currentTarget as HTMLElement).style.color = "#1A1A1A"; } }}
+                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "#EDEBE6"; (e.currentTarget as HTMLElement).style.color = kping ? "#C8C0B0" : "#6B6355"; }}
+              >
+                <Article size={16} />
               </button>
 
               <div style={{ width: 1, height: 18, background: "#EDEBE6", margin: "0 2px" }} />

@@ -263,6 +263,9 @@ export const estimatesApi = {
     api.post("/estimates/items/from-catalog", { set_id: setId, catalog_item_id: catalogItemId }).then(r => r.data),
   invoice:     (setId: string)              =>
     api.post(`/estimates/sets/${setId}/invoice`, {}, { responseType: "blob" }).then(r => r.data),
+  // КП — генератор фин-агента (kp.py), шаблон один на систему
+  kp:          (setId: string)              =>
+    api.post(`/estimates/sets/${setId}/kp`, {}, { responseType: "blob" }).then(r => r.data),
   syncToCatalog: (itemId: string)           => api.post(`/estimates/items/${itemId}/to-catalog`).then(r => r.data),
   createObligations: (setId: string)        => api.post(`/estimates/sets/${setId}/create-obligations`).then(r => r.data),
   deleteObligations: (setId: string)        => api.delete(`/estimates/sets/${setId}/obligations`).then(r => r.data),

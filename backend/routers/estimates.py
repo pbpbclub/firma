@@ -1080,6 +1080,42 @@ def delete_obligations(set_id: str):
 
 # ─── Invoice generation ──────────────────────────────────────────────────────
 
+INVOICES_DIR = "/opt/firma/data/invoices"
+KP_DIR = "/opt/firma/data/kp"
+
+
+def _extract_pdf_path(stdout: str):
+    """Путь готового PDF из вывода генератора — маркер [SEND_FILE:...].
+
+    Инцидент 03.08.2026: вместо разбора stdout результат искался глобом по
+    ахиву фин-агента (/opt/fin-agent/data/invoices) — кнопка каждый раз
+    отдавала чужой счёт от 1 июня."""
+    import re as _re
+    m = _re.search(r"\[SEND_FILE:([^\]]+)\]", stdout or "")
+    return m.group(1) if m else None
+
+
+def _kp_args(set_row, items, *, brand, title, out_path) -> list:
+    """Аргументы для генератора КП фин-агента (/opt/ai-os/tools/kp.py create).
+
+    Формат --item: name:qty:ral:material:price — цена клиенту ЗА ШТУКУ
+    (kp.py сам умножит), для безнала удержание уже в цене (client_price).
+    Двоеточия в названии заменяются на «∶», иначе ломают формат."""
+    if not items:
+        raise HTTPException(status_code=400, detail="В смете нет позиций — КП собирать не из чего")
+    args = ["create", "--subtitle", (title or "")[:120],
+            "--logo", "mera" if (brand or "").lower() in ("mera", "мера") else "pbpb"]
+    for it in items:
+        qty = it["quantity"] or 1
+        client_total = client_price(it["sale_price"] or 0, set_row["payment_type"] or "cash",
+                                    set_row["bank_pct"], rounded=False)
+        unit = round(client_total / qty)
+        name = (it["title"] or "Позиция").replace(":", "∶")
+        args += ["--item", f"{name}:{qty}:::{unit}"]
+    args += ["--output", out_path]
+    return args
+
+
 @router.post("/sets/{set_id}/invoice")
 def generate_invoice(set_id: str):
     conn = get_production()
@@ -1104,14 +1140,55 @@ def generate_invoice(set_id: str):
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=500, detail="Invoice generation timed out")
 
-    # Find the most recently generated PDF
-    pattern = f"/opt/fin-agent/data/invoices/*.pdf"
-    files = sorted(glob.glob(pattern), key=os.path.getmtime, reverse=True)
-    if not files:
-        raise HTTPException(status_code=500, detail="PDF not found after generation")
+    # Путь результата — из stdout генератора (маркер [SEND_FILE:...]).
+    # Фолбэк — glob по СВОЕМУ каталогу и ТОЛЬКО по этому заказу: глоб по всему
+    # архиву отдавал чужой счёт (инцидент 03.08.2026).
+    pdf = _extract_pdf_path(result.stdout)
+    if not pdf or not os.path.exists(pdf):
+        files = sorted(glob.glob(f"{INVOICES_DIR}/invoice_{order_number}_*.pdf"),
+                       key=os.path.getmtime, reverse=True)
+        pdf = files[0] if files else None
+    if not pdf:
+        raise HTTPException(status_code=500,
+                            detail=f"PDF не найден после генерации: {(result.stderr or result.stdout or '')[:300]}")
 
     return FileResponse(
-        files[0],
+        pdf,
         media_type="application/pdf",
         filename=f"invoice-{order_number}.pdf",
     )
+
+
+@router.post("/sets/{set_id}/kp")
+def generate_kp(set_id: str):
+    """КП по смете — генератором фин-агента (/opt/ai-os/tools/kp.py): шаблон
+    один на систему, его правки у фин-агента подхватываются автоматически."""
+    conn = get_production()
+    try:
+        es = conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
+        if not es:
+            raise HTTPException(status_code=404, detail="Set not found")
+        order = conn.execute("SELECT number, title, brand FROM orders WHERE id = ?", (es["order_id"],)).fetchone()
+        items = conn.execute(
+            "SELECT title, quantity, sale_price FROM estimate_items WHERE set_id = ? ORDER BY sort_order",
+            (set_id,)).fetchall()
+    finally:
+        conn.close()
+
+    os.makedirs(KP_DIR, exist_ok=True)
+    out_path = f"{KP_DIR}/kp_{order['number']}_{set_id[:8]}.pdf"
+    args = _kp_args(es, [dict(i) for i in items],
+                    brand=order["brand"], title=order["title"], out_path=out_path)
+    try:
+        result = subprocess.run(["python3", "/opt/ai-os/tools/kp.py"] + args,
+                                capture_output=True, text=True, timeout=60)
+        if result.returncode != 0:
+            raise HTTPException(status_code=500,
+                                detail=f"Генерация КП упала: {(result.stderr or result.stdout or '')[:300]}")
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="Генерация КП: таймаут")
+    if not os.path.exists(out_path):
+        raise HTTPException(status_code=500,
+                            detail=f"КП не найдено после генерации: {(result.stdout or '')[:300]}")
+    return FileResponse(out_path, media_type="application/pdf",
+                        filename=f"kp-{order['number']}.pdf")
