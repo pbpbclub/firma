@@ -43,6 +43,15 @@ class TestPerUnit:
                                payment_type="cash", bank_pct=0)
         assert e.value.status_code == 400
 
+    def test_явный_null_тотала_тоже_конфликт(self):
+        """PATCH-семантика: присланный null — это «очисти поле», а не «не прислали».
+        Раньше проверка была `is not None`, и очистка молча затиралась вычисленным
+        тоталом (ревью 04.08.2026)."""
+        with pytest.raises(HTTPException) as e:
+            _apply_unit_fields(_f(client_unit=100, sale_price=None), quantity=1,
+                               payment_type="cash", bank_pct=0)
+        assert e.value.status_code == 400
+
     def test_количество_один_работает(self):
         fields = _f(cost_unit=81_250)
         _apply_unit_fields(fields, quantity=1, payment_type="cash", bank_pct=0)

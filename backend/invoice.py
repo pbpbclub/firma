@@ -3,6 +3,7 @@
 
 import argparse
 import base64
+import fcntl
 import io
 import json
 import os
@@ -22,6 +23,16 @@ try:
 except ImportError:
     print("Установите: pip3 install qrcode[pil] pillow num2words --break-system-packages", file=sys.stderr)
     sys.exit(1)
+
+_RU_MONTHS = ("января", "февраля", "марта", "апреля", "мая", "июня",
+              "июля", "августа", "сентября", "октября", "ноября", "декабря")
+
+
+def ru_date(d=None) -> str:
+    """«3 августа 2026» — strftime('%B') зависит от локали и даёт латиницу."""
+    d = d or datetime.now()
+    return f"{d.day} {_RU_MONTHS[d.month - 1]} {d.year}"
+
 
 ASSET_DIR    = Path(__file__).parent.parent / "data" / "assets"
 UPLOAD_DIR   = Path(__file__).parent.parent / "data" / "uploads"
@@ -45,14 +56,32 @@ ASSET_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def next_invoice_num() -> str:
-    """Возвращает следующий номер счёта (начиная с 7001) и увеличивает счётчик."""
-    if COUNTER_FILE.exists():
-        state = json.loads(COUNTER_FILE.read_text())
-        num = state.get("last", 7000) + 1
-    else:
-        num = 7001
-    COUNTER_FILE.write_text(json.dumps({"last": num}))
-    return str(num)
+    """Следующий номер счёта (с 7001) — атомарно: блокировка + запись через rename.
+
+    Файл общий с фин-агентом, пишут в него два независимых процесса. Голый
+    read-modify-write (как было до 04.08.2026) при одновременном запуске выдаёт
+    обоим один номер — ровно та беда, ради которой счётчики и объединяли:
+    объединение без блокировки лишь переносит гонку в одно место.
+    Лок держится на отдельном .lock (не на самом файле): счётчик мы подменяем
+    через rename, и дескриптор жертвы разошёлся бы с новым inode."""
+    lock_path = COUNTER_FILE.with_suffix(COUNTER_FILE.suffix + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "a+") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            num = 7001
+            if COUNTER_FILE.exists():
+                try:
+                    num = json.loads(COUNTER_FILE.read_text()).get("last", 7000) + 1
+                except (json.JSONDecodeError, ValueError):
+                    # Битый счётчик молча обнулять нельзя: номера пойдут по второму кругу.
+                    raise SystemExit(f"Счётчик номеров повреждён: {COUNTER_FILE}")
+            tmp = COUNTER_FILE.with_suffix(COUNTER_FILE.suffix + ".tmp")
+            tmp.write_text(json.dumps({"last": num}))
+            os.replace(tmp, COUNTER_FILE)   # атомарная подмена, без окна «пустой файл»
+            return str(num)
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 # ── реквизиты ────────────────────────────────────────────────────────────────
 
@@ -449,7 +478,10 @@ def cmd_order(args):
     items = []
     if est_set:
         is_bank      = est_set["payment_type"] == "bank"
-        set_bank_pct = est_set["bank_pct"] or 13.0
+        # Дефолт как у остальной Фирмы (money.client_price, estimates.totals_from_items):
+        # пусто → 13%, а явный 0 остаётся нулём. Было `or 13.0` — смета с 0% давала
+        # в счёте +15%, хотя в самой смете и в КП удержания не было (ревью 04.08.2026).
+        set_bank_pct = est_set["bank_pct"] if est_set["bank_pct"] is not None else 13.0
 
         items_raw = mes.execute(
             "SELECT * FROM estimate_items WHERE set_id = ? ORDER BY sort_order",
@@ -488,9 +520,10 @@ def cmd_order(args):
 
     data = {
         "invoice_num":  args.num or next_invoice_num(),
-        "invoice_date": datetime.now().strftime("%-d %B %Y"),
+        "invoice_date": ru_date(),
         "bank":  args.bank,
-        "logo":  args.logo,
+        "logo":  args.logo if getattr(args, "logo_explicit", False) else
+                 ("mera" if (order["brand"] or "").lower() in ("mera", "мера") else "pbpb"),
         "buyer": {
             "name":    client_name,
             "inn":     client_inn,
@@ -510,7 +543,7 @@ def cmd_preview(args):
     """Тестовый счёт с демо-данными."""
     data = {
         "invoice_num":  "TEST-001",
-        "invoice_date": datetime.now().strftime("%-d %B %Y"),
+        "invoice_date": ru_date(),
         "bank":  args.bank,
         "logo":  args.logo,
         "buyer": {

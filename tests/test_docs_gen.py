@@ -7,6 +7,7 @@
 import pytest
 from fastapi import HTTPException
 
+from money import client_price
 from routers.estimates import _extract_pdf_path, _kp_args
 
 
@@ -57,6 +58,28 @@ class TestKpArgs:
                         brand="pbpb", title="t", out_path="/tmp/kp.pdf")
         item = args[args.index("--item") + 1]
         assert item == "Изделие:2:::50000"
+
+    def test_безнал_округляется_как_в_счёте(self):
+        """КП и счёт по одной смете обязаны показать клиенту одну сумму.
+
+        Счёт (invoice.py::cmd_order) считает round(client_price(...)) с округлением
+        вверх до 100 ₽: 195 600 / 0,87 = 224 827,59 → 224 900. КП с rounded=False
+        давало 224 828 — клиент видел два разных числа (ревью 04.08.2026)."""
+        set_row = {"payment_type": "bank", "bank_pct": 13.0}
+        args = _kp_args(set_row, [self._item("Кухня", 1, 195_600)],
+                        brand="pbpb", title="t", out_path="/tmp/kp.pdf")
+        assert args[args.index("--item") + 1] == "Кухня:1:::224900"
+
+        # то же число, что печатает счёт
+        invoice_unit = round(round(client_price(195_600, "bank", 13.0)) / 1)
+        assert invoice_unit == 224_900
+
+    def test_пустой_bank_pct_как_в_счёте_13_процентов(self):
+        # bank_pct NULL: client_price сам подставляет DEFAULT_BANK_PCT — счёт делает так же
+        args = _kp_args({"payment_type": "bank", "bank_pct": None},
+                        [self._item("Изделие", 1, 87_000)],
+                        brand="pbpb", title="t", out_path="/tmp/kp.pdf")
+        assert args[args.index("--item") + 1] == "Изделие:1:::100000"
 
     def test_пустая_смета_это_400(self):
         with pytest.raises(HTTPException) as e:

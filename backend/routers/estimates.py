@@ -238,13 +238,17 @@ def _apply_unit_fields(fields: dict, *, quantity: int, payment_type: str, bank_p
     client_unit → sale_price = cash_from_client(unit × qty)   (к оплате за штуку)
 
     Одновременно unit и его total — 400: тихий выбор одного из двух чисел
-    молча исказил бы смету. Поля-униты вычищаются: это не колонки."""
+    молча исказил бы смету. Поля-униты вычищаются: это не колонки.
+
+    Конфликт проверяется по НАЛИЧИЮ ключа (fields приходит из exclude_unset),
+    а не по `is not None`: присланный явно null — это «очисти поле», и вместе
+    с ценой за штуку он такое же противоречие, как и число."""
     qty = quantity or 1
-    if fields.get("cost_unit") is not None and fields.get("cost_total") is not None:
+    if "cost_unit" in fields and "cost_total" in fields:
         raise HTTPException(status_code=400, detail="Либо cost_unit, либо cost_total — не оба сразу")
-    if (fields.get("sale_unit") is not None or fields.get("client_unit") is not None)             and fields.get("sale_price") is not None:
+    if ("sale_unit" in fields or "client_unit" in fields) and "sale_price" in fields:
         raise HTTPException(status_code=400, detail="Либо цена за штуку, либо sale_price — не оба сразу")
-    if fields.get("sale_unit") is not None and fields.get("client_unit") is not None:
+    if "sale_unit" in fields and "client_unit" in fields:
         raise HTTPException(status_code=400, detail="Либо sale_unit, либо client_unit — не оба сразу")
 
     cu = fields.pop("cost_unit", None)
@@ -1100,15 +1104,21 @@ def _kp_args(set_row, items, *, brand, title, out_path) -> list:
 
     Формат --item: name:qty:ral:material:price — цена клиенту ЗА ШТУКУ
     (kp.py сам умножит), для безнала удержание уже в цене (client_price).
-    Двоеточия в названии заменяются на «∶», иначе ломают формат."""
+    Двоеточия в названии заменяются на «∶», иначе ломают формат.
+
+    Сумма считается ТЕМ ЖЕ вызовом, что и в счёте (invoice.py::cmd_order):
+    client_price с округлением вверх до 100 ₽. Ревью 04.08.2026: здесь стояло
+    rounded=False, и КП по той же смете показывало клиенту сумму на десятки
+    рублей меньше счёта — расхождение видно только клиенту."""
     if not items:
         raise HTTPException(status_code=400, detail="В смете нет позиций — КП собирать не из чего")
     args = ["create", "--subtitle", (title or "")[:120],
             "--logo", "mera" if (brand or "").lower() in ("mera", "мера") else "pbpb"]
     for it in items:
         qty = it["quantity"] or 1
-        client_total = client_price(it["sale_price"] or 0, set_row["payment_type"] or "cash",
-                                    set_row["bank_pct"], rounded=False)
+        client_total = round(client_price(it["sale_price"] or 0,
+                                          set_row["payment_type"] or "cash",
+                                          set_row["bank_pct"]))
         unit = round(client_total / qty)
         name = (it["title"] or "Позиция").replace(":", "∶")
         args += ["--item", f"{name}:{qty}:::{unit}"]
@@ -1169,6 +1179,8 @@ def generate_kp(set_id: str):
         if not es:
             raise HTTPException(status_code=404, detail="Set not found")
         order = conn.execute("SELECT number, title, brand FROM orders WHERE id = ?", (es["order_id"],)).fetchone()
+        if not order:
+            raise HTTPException(status_code=404, detail="Order not found")
         items = conn.execute(
             "SELECT title, quantity, sale_price FROM estimate_items WHERE set_id = ? ORDER BY sort_order",
             (set_id,)).fetchall()
@@ -1179,6 +1191,11 @@ def generate_kp(set_id: str):
     out_path = f"{KP_DIR}/kp_{order['number']}_{set_id[:8]}.pdf"
     args = _kp_args(es, [dict(i) for i in items],
                     brand=order["brand"], title=order["title"], out_path=out_path)
+    # Имя файла детерминированное: КП от прошлого запуска замаскирует провал
+    # генератора (маркера пути, как у счёта, kp.py не печатает). Сносим ДО вызова —
+    # тогда «файл есть» значит «его создал этот запуск».
+    if os.path.exists(out_path):
+        os.remove(out_path)
     try:
         result = subprocess.run(["python3", "/opt/ai-os/tools/kp.py"] + args,
                                 capture_output=True, text=True, timeout=60)
