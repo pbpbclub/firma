@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from typing import Optional, List, Literal
 from pydantic import BaseModel
+from audit import audit
 from db import get_production, get_materials
 from money import client_price, cash_from_client, DEFAULT_BANK_PCT
 from routers.materials import cheapest_price
@@ -173,6 +174,9 @@ def _approve_set(conn, set_id: str) -> dict:
     after = conn.execute(
         "SELECT price_plan, cost_plan FROM orders WHERE id = ?", (es["order_id"],)
     ).fetchone()
+    audit(conn, "estimate", set_id, "approve",
+          f"Утверждена смета «{es['title'] or es['number'] or set_id}»: "
+          f"план заказа {(before['price_plan'] or 0) if before else 0:g} → {(after['price_plan'] or 0) if after else 0:g} ₽")
     return {
         "set_id": set_id,
         "order_id": es["order_id"],
@@ -331,11 +335,14 @@ def create_set(body: SetCreate):
     try:
         set_id = str(uuid.uuid4())
         now = _now()
+        # A10: новая смета — всегда новый контур себестоимости (legacy только у
+        # созданных до запуска costing-движка 22.07.2026, их метит миграция).
         conn.execute(
-            """INSERT INTO estimate_sets (id, order_id, title, status, payment_type, bank_pct, notes, created_at, updated_at)
-               VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?)""",
+            """INSERT INTO estimate_sets (id, order_id, title, status, payment_type, bank_pct, notes, costing_version, created_at, updated_at)
+               VALUES (?, ?, ?, 'draft', ?, ?, ?, 'catalog_v1', ?, ?)""",
             (set_id, body.order_id, body.title, body.payment_type, body.bank_pct, body.notes, now, now)
         )
+        audit(conn, "estimate", set_id, "create", f"Создана смета «{body.title or '—'}»")
         conn.commit()
         row = conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
         return dict(row)
@@ -375,6 +382,10 @@ def update_set(set_id: str, body: SetUpdate):
         if updated["status"] == "approved":
             # Одна активная смета на заказ: supersede прочих + синк заказа + обязательства.
             _approve_set(conn, set_id)
+        else:
+            audit(conn, "estimate", set_id, "update",
+                  f"Правка сметы: {', '.join(k for k in fields if k != 'updated_at')}",
+                  before_row=row)
         conn.commit()
         return dict(conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (set_id,)).fetchone())
     finally:
@@ -689,6 +700,10 @@ def update_item(item_id: str, body: ItemUpdate):
                 f"UPDATE estimate_items SET {set_clause} WHERE id = ?",
                 list(fields.values()) + [item_id]
             )
+            # Журнал — только денежные правки позиции, не каждое переименование
+            if fields.keys() & {"cost_total", "sale_price", "markup", "quantity", "bank_pct"}:
+                audit(conn, "estimate_item", item_id, "update",
+                      f"Позиция «{row['title']}»: {', '.join(sorted(fields))}", before_row=row)
         if "quantity" in fields:
             _recalc_item(conn, item_id)
         _touch_set(conn, item_id)
@@ -711,8 +726,11 @@ def delete_item(item_id: str):
         set_id = item_row["set_id"]
         _assert_set_editable(conn, set_id)
         _touch_set(conn, item_id)
+        before = conn.execute("SELECT * FROM estimate_items WHERE id = ?", (item_id,)).fetchone()
         conn.execute("DELETE FROM estimate_lines WHERE item_id = ?", (item_id,))
         conn.execute("DELETE FROM estimate_items WHERE id = ?", (item_id,))
+        audit(conn, "estimate_item", item_id, "delete",
+              f"Удалена позиция «{before['title']}» ({before['sale_price'] or 0:g} ₽)", before_row=before)
         conn.commit()
         # Sync after deletion so totals exclude the removed item
         set_row = conn.execute("SELECT status FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
@@ -859,6 +877,10 @@ def update_line(line_id: str, body: LineUpdate):
         # Ставку работы из строки НЕ запоминаем: цена работы у Юры разовая (мастер
         # называет её заново каждый раз), а разовая цена в справочнике потом молча
         # подставилась бы в другую смету. Историю цен costing собирает из самих строк.
+        if fields.keys() & {"unit_price", "qty", "line_total"}:
+            audit(conn, "estimate_line", line_id, "update",
+                  f"Строка «{row['title']}»: {row['unit_price'] or 0:g} → {final['unit_price'] or 0:g} ₽/{final['unit'] or 'ед'}",
+                  before_row=row)
         _recalc_item(conn, row["item_id"])
         _touch_set(conn, row["item_id"])
         _sync_order_if_approved(conn, row["item_id"])

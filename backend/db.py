@@ -1146,6 +1146,137 @@ def ensure_updated_at_schema():
         conn.close()
 
 
+def ensure_audit_log_schema():
+    """A1: журнал изменений внутри production.db — пишет бэкенд на write-ручках
+    (backend/audit.py). Журнал агентов (tools/audit.py, отдельная база) остаётся:
+    он про их действия, этот — про правки через веб. changes — полный снимок
+    строки ДО изменения (не diff: проще код, надёжнее восстановление)."""
+    conn = get_production()
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id          TEXT PRIMARY KEY,
+                actor       TEXT NOT NULL,
+                entity_type TEXT NOT NULL,
+                entity_id   TEXT,
+                action      TEXT NOT NULL,
+                summary     TEXT NOT NULL,
+                changes     TEXT,
+                created_at  TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity_type, entity_id, created_at)")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_match_trace_schema():
+    """A4 + A3-лайт: след привязки платежа/расхода и группа разноски.
+
+    match_status: 'manual' — привязал человек (все текущие пути), 'auto' —
+    зарезервировано автопривязке фин-агента, 'confirmed' — авто, подтверждённое
+    человеком. matched_by: 'inbox' (разноска из инбокса), 'order-card' (руками в
+    карточке), 'rule:<id>' / 'suggest' — автопривязка. match_score 0..1 — если
+    алгоритм её считает. У старых строк NULL — бэкфилл не выдумываем.
+
+    payments.group_id — одна разноска from-tx на несколько заказов (у expenses
+    поле уже есть): откат разноски целиком, показ «братских» платежей."""
+    conn = get_production()
+    try:
+        for table in ("payments", "expenses"):
+            info = conn.execute(f"PRAGMA table_info({table})").fetchall()
+            if not info:
+                continue
+            existing = {r[1] for r in info}
+            for col in ("match_status TEXT", "matched_by TEXT", "match_score REAL"):
+                name = col.split()[0]
+                if name not in existing:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {col}")
+            if table == "payments" and "group_id" not in existing:
+                conn.execute("ALTER TABLE payments ADD COLUMN group_id TEXT")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_rate_history_schema():
+    """A2 (лёгкая версия): история ставок и наценок одной таблицей.
+
+    kind: work_rate | price_book | catalog_markup. Пишется в точках изменения
+    (rates.py upsert'ы, catalog.py markup) — до этого UPDATE затирал старое
+    значение безвозвратно. Пересчёт «на дату» не строим: по ТЗ хватает факта
+    «ставка менялась тогда-то», effective_from понадобится при сотнях заказов."""
+    conn = get_production()
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS rate_history (
+                id         TEXT PRIMARY KEY,
+                kind       TEXT NOT NULL,
+                target_id  TEXT NOT NULL,
+                old_value  REAL,
+                new_value  REAL NOT NULL,
+                scheme     TEXT,
+                changed_by TEXT,
+                comment    TEXT,
+                changed_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_rate_history_target ON rate_history(kind, target_id, changed_at)")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_costing_version_schema():
+    """A10: граница контуров себестоимости. Сметы до costing-движка (22.07.2026)
+    считались по ценам, которых больше нет, — их маржу нельзя смешивать с новой.
+    Бэкфилл по дате создания сета относительно запуска движка; дальше
+    cost-fill/новые сеты помечаются catalog_v1 в коде."""
+    conn = get_production()
+    try:
+        info = conn.execute("PRAGMA table_info(estimate_sets)").fetchall()
+        if not info:
+            return
+        if "costing_version" not in {r[1] for r in info}:
+            conn.execute("ALTER TABLE estimate_sets ADD COLUMN costing_version TEXT")
+            conn.execute("""
+                UPDATE estimate_sets SET costing_version =
+                    CASE WHEN COALESCE(created_at, '') < '2026-07-22' THEN 'legacy'
+                         ELSE 'catalog_v1' END
+                WHERE costing_version IS NULL
+            """)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_order_brand_id_schema():
+    """Б2-лайт: бренд как связь, а не строка. brand_id с FK (ADD COLUMN с
+    REFERENCES легален при NULL default), бэкфилл по совпадению с brands.name;
+    текстовый brand остаётся на переходный период — UI шлёт его, бэкенд резолвит
+    (orders.py). Пустой бренд (11 заказов) не выдумываем — разметит Юра."""
+    conn = get_production()
+    try:
+        info = conn.execute("PRAGMA table_info(orders)").fetchall()
+        tables = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        if not info or "brands" not in tables:
+            return
+        if "brand_id" not in {r[1] for r in info}:
+            conn.execute("ALTER TABLE orders ADD COLUMN brand_id TEXT REFERENCES brands(id)")
+            conn.execute("""
+                UPDATE orders SET brand_id =
+                    (SELECT b.id FROM brands b WHERE b.name = orders.brand COLLATE NOCASE)
+                WHERE brand IS NOT NULL AND brand != ''
+            """)
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_line_rate_snapshot_schema():
     """A9: строка работ хранит свои входные данные — применённую ставку, её схему
     и дату применения. Симметрия с price_supplier/price_date у материалов: смета

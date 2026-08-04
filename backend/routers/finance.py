@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
+from audit import audit
 from db import get_finance, get_production, get_analytics
 import uuid
 
@@ -837,6 +838,8 @@ def create_creditor(body: CreditorIn):
             (cid, body.name, body.total, body.paid,
              body.description, body.order_id, body.due_date, body.estimate_item_id),
         )
+        audit(conn, "creditor", cid, "create",
+              f"Обязательство «{body.name}»: {body.total:g} ₽")
         conn.commit()
         row = dict(conn.execute(
             """SELECT c.*, ei.title AS estimate_item_title
@@ -867,6 +870,9 @@ def update_creditor(creditor_id: str, body: CreditorPatch):
             return dict(row)
         params.append(creditor_id)
         conn.execute(f"UPDATE creditors SET {', '.join(fields)} WHERE id = ?", params)
+        audit(conn, "creditor", creditor_id, "update",
+              f"Обязательство «{row['name']}»: {', '.join(sorted(body.model_dump(exclude_unset=True)))}",
+              before_row=row)
         conn.commit()
         row = dict(conn.execute("SELECT * FROM creditors WHERE id = ?", (creditor_id,)).fetchone())
         row["debt"] = round(row["total"] - row["paid"], 2)
@@ -879,9 +885,13 @@ def update_creditor(creditor_id: str, body: CreditorPatch):
 def delete_creditor(creditor_id: str):
     conn = get_production()
     try:
-        if not conn.execute("SELECT id FROM creditors WHERE id = ?", (creditor_id,)).fetchone():
+        row = conn.execute("SELECT * FROM creditors WHERE id = ?", (creditor_id,)).fetchone()
+        if not row:
             raise HTTPException(status_code=404, detail="Not found")
         conn.execute("DELETE FROM creditors WHERE id = ?", (creditor_id,))
+        audit(conn, "creditor", creditor_id, "delete",
+              f"Удалено обязательство «{row['name']}» ({row['total']:g} ₽, оплачено {row['paid']:g})",
+              before_row=row)
         conn.commit()
         return {"ok": True}
     finally:

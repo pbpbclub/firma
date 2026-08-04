@@ -72,6 +72,31 @@ def get_system_info(_=Depends(require_admin)):
     return result
 
 
+@router.get("/audit")
+def list_audit(entity_type: str = None, entity_id: str = None, limit: int = 100,
+               _=Depends(require_admin)):
+    """Журнал изменений через веб (A1): кто, что и когда правил. changes —
+    полный снимок строки до изменения (JSON)."""
+    limit = max(1, min(int(limit or 100), 500))
+    where, params = [], []
+    if entity_type:
+        where.append("entity_type = ?")
+        params.append(entity_type)
+    if entity_id:
+        where.append("entity_id = ?")
+        params.append(entity_id)
+    sql = "SELECT * FROM audit_log"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY created_at DESC LIMIT ?"
+    params.append(limit)
+    conn = get_production()
+    try:
+        return [dict(r) for r in conn.execute(sql, params).fetchall()]
+    finally:
+        conn.close()
+
+
 @router.get("/imports")
 def list_imports(_=Depends(require_admin)):
     fin = get_finance()

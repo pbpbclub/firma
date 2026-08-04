@@ -38,19 +38,22 @@ ENDPOINTS = ["/api/orders", "/api/customers", "/api/masters", "/api/suppliers",
 # Колонки, добавленные ALTER-миграциями: их отсутствие означает, что стартовая
 # миграция не прошла, а сервис при этом живой. Пополнять при новых миграциях.
 REQUIRED_COLUMNS = {
-    "orders": ["reserved_amount", "reserve_released_at", "discount", "discount_note"],
-    # updated_at — волна ЛЕСКОВО-1 (Б7), проставляется триггерами trg_*_updated_at
-    "payments": ["zenmoney_tx_id", "channel", "updated_at"],
-    "estimate_sets": ["payment_type", "bank_pct", "is_primary"],
+    # updated_at — волна ЛЕСКОВО-1 (Б7); match_*/group_id — волна 2 (A4/A3-лайт)
+    "payments": ["zenmoney_tx_id", "channel", "updated_at", "match_status", "matched_by", "group_id"],
+    "estimate_sets": ["payment_type", "bank_pct", "is_primary", "costing_version"],
     "expenses": ["creditor_id", "finance_tx_id", "zenmoney_tx_id", "payment_source", "master_id",
                  # траты без заказа: запас / образцы / общехоз (01.08.2026)
-                 "purpose", "stock_parent_id", "updated_at"],
+                 "purpose", "stock_parent_id", "updated_at", "match_status", "matched_by"],
     "creditors": ["estimate_line_id", "amount_plan", "kind", "updated_at"],
     # клиент ↔ подрядчик: один человек в двух картотеках (мердж Пинчука, 26.07)
     "customers": ["telegram", "whatsapp", "master_id", "updated_at"],
     # A9: снимок применённой ставки в строке (волна ЛЕСКОВО-1)
     "estimate_lines": ["applied_rate", "rate_scheme", "rate_date", "updated_at"],
     "catalog_item_lines": ["applied_rate", "rate_scheme", "rate_date"],
+    "orders": ["reserved_amount", "reserve_released_at", "discount", "discount_note", "brand_id"],
+    # волна 2: журнал изменений и история ставок — целые таблицы
+    "audit_log": ["actor", "entity_type", "action", "summary", "changes"],
+    "rate_history": ["kind", "target_id", "old_value", "new_value", "changed_by"],
 }
 
 

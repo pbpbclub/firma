@@ -2,6 +2,7 @@ from fastapi import APIRouter, Query, HTTPException, Body
 from typing import Optional, List
 from pydantic import BaseModel
 from db import get_production
+from routers.rates import _log_rate_history
 import sqlite3
 import uuid
 from datetime import datetime
@@ -298,7 +299,7 @@ def update_item(item_id: str, body: ItemIn):
     conn = get_production()
     try:
         _ensure_tables(conn)
-        existing = conn.execute("SELECT id, sale_price FROM catalog_items WHERE id = ?", (item_id,)).fetchone()
+        existing = conn.execute("SELECT id, sale_price, markup_pct FROM catalog_items WHERE id = ?", (item_id,)).fetchone()
         if not existing:
             raise HTTPException(status_code=404, detail="Not found")
         cost_total = sum(l.qty * l.unit_price for l in body.lines)
@@ -313,6 +314,9 @@ def update_item(item_id: str, body: ItemIn):
                WHERE id=?""",
             (body.title, body.category, body.brand, markup_pct, cost_total, sale_price, body.notes, now, item_id)
         )
+        if (existing["markup_pct"] or 0) != (markup_pct or 0):
+            _log_rate_history(conn, "catalog_markup", item_id,
+                              existing["markup_pct"], markup_pct or 0, None, comment=body.title)
         conn.execute("DELETE FROM catalog_item_lines WHERE item_id = ?", (item_id,))
         for i, line in enumerate(body.lines):
             conn.execute(

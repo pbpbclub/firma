@@ -14,11 +14,24 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from audit import current_actor
 from db import get_production, get_analytics_ro
 
 router = APIRouter()
 
 RATE_SCHEMES = ("fixed", "per_unit", "hourly", "percent")
+
+
+def _log_rate_history(conn, kind: str, target_id: str, old_value, new_value: float,
+                      scheme: Optional[str], comment: Optional[str] = None) -> None:
+    """A2: след изменения ставки/цены (kind: work_rate | price_book | catalog_markup).
+    Пишется в транзакции вызывающего; changed_by — актор запроса (audit.py)."""
+    conn.execute(
+        """INSERT INTO rate_history (id, kind, target_id, old_value, new_value, scheme, changed_by, comment, changed_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+        (str(uuid.uuid4()), kind, target_id, old_value, new_value, scheme,
+         current_actor.get(), comment),
+    )
 
 
 def norm_title(s: str) -> str:
@@ -76,7 +89,7 @@ def upsert_work_rate(conn, work_type_id: str, master_id: Optional[str], scheme: 
     вызывающий, который о флаге не знает (rate-set финагента, learned, bootstrap),
     молча снял бы «ориентир» и cost-fill начал бы подставлять цену без вопроса."""
     existing = conn.execute(
-        "SELECT id, source FROM work_rates WHERE work_type_id = ? AND IFNULL(master_id,'') = IFNULL(?, '')",
+        "SELECT id, source, rate, scheme FROM work_rates WHERE work_type_id = ? AND IFNULL(master_id,'') = IFNULL(?, '')",
         (work_type_id, master_id),
     ).fetchone()
     if existing:
@@ -92,6 +105,11 @@ def upsert_work_rate(conn, work_type_id: str, master_id: Optional[str], scheme: 
             f"UPDATE work_rates SET {', '.join(sets)}, updated_at=datetime('now') WHERE id=?",
             params,
         )
+        # A2: до этой записи UPDATE затирал старую ставку безвозвратно —
+        # «изменил ставку сварщика → прошлые сметы объяснить нечем».
+        if (existing["rate"] or 0) != rate or (existing["scheme"] or "") != scheme:
+            _log_rate_history(conn, "work_rate", existing["id"],
+                              existing["rate"], rate, scheme, comment=source)
         return "updated"
     conn.execute(
         """INSERT INTO work_rates (id, work_type_id, master_id, scheme, rate, unit, note, source, variable)
@@ -265,7 +283,7 @@ def upsert_price_book(conn, title: str, price: float, unit: Optional[str], match
                       overwrite: bool = True) -> str:
     pat = norm_title(pattern or title)
     existing = conn.execute(
-        "SELECT id FROM price_book WHERE pattern = ? AND match_type = ?", (pat, match_type)
+        "SELECT id, price FROM price_book WHERE pattern = ? AND match_type = ?", (pat, match_type)
     ).fetchone()
     if existing:
         if not overwrite:
@@ -275,6 +293,9 @@ def upsert_price_book(conn, title: str, price: float, unit: Optional[str], match
                WHERE id=?""",
             (title, price, unit, note, source, existing["id"]),
         )
+        if (existing["price"] or 0) != price:
+            _log_rate_history(conn, "price_book", str(existing["id"]),
+                              existing["price"], price, None, comment=source)
         return "updated"
     conn.execute(
         """INSERT INTO price_book (pattern, match_type, title, unit, price, source, note)

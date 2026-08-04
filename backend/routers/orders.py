@@ -4,6 +4,7 @@ from typing import Optional, List
 from uuid import uuid4
 from db import get_production, get_zenmoney
 from auth import get_current_user
+from audit import audit
 from routers.estimates import set_totals
 
 router = APIRouter()
@@ -862,6 +863,18 @@ def get_order(order_id: str):
             "SELECT * FROM payments WHERE order_id = ? ORDER BY paid_at DESC",
             (oid,),
         ).fetchall()
+        # A3-лайт: «братские» платежи — эта же банковская транзакция разнесена
+        # ещё и на другие заказы (Суздаль/Спираль-паттерн). Видно прямо у платежа.
+        payments = [dict(p) for p in payments]
+        for p in payments:
+            if p.get("bank_tx_id"):
+                sibs = conn.execute(
+                    """SELECT o.title, p2.amount FROM payments p2
+                       JOIN orders o ON o.id = p2.order_id
+                       WHERE p2.bank_tx_id = ? AND p2.id != ? AND p2.order_id != ?""",
+                    (p["bank_tx_id"], p["id"], oid)).fetchall()
+                if sibs:
+                    p["siblings"] = [{"title": s["title"], "amount": s["amount"]} for s in sibs]
 
         estimate_sets = conn.execute(
             "SELECT * FROM estimate_sets WHERE order_id = ? ORDER BY created_at ASC",
@@ -992,10 +1005,12 @@ def update_status(order_id: str, body: StatusUpdate):
         raise HTTPException(status_code=400, detail=f"Invalid status: {body.status}")
     conn = get_production()
     try:
-        r = conn.execute("SELECT id FROM orders WHERE id = ? OR number = ?", (order_id, order_id)).fetchone()
+        r = conn.execute("SELECT * FROM orders WHERE id = ? OR number = ?", (order_id, order_id)).fetchone()
         if not r:
             raise HTTPException(status_code=404, detail="Not found")
         conn.execute("UPDATE orders SET status = ?, updated_at = datetime('now') WHERE id = ?", (body.status, r["id"]))
+        audit(conn, "order", r["id"], "status",
+              f"«{r['title']}»: {STATUS_LABELS.get(r['status'], r['status'])} → {STATUS_LABELS.get(body.status, body.status)}")
         conn.commit()
         return {"ok": True, "status": body.status}
     finally:
@@ -1055,7 +1070,9 @@ def update_brand(order_id: str, body: BrandUpdate):
         r = conn.execute("SELECT id FROM orders WHERE id = ? OR number = ?", (order_id, order_id)).fetchone()
         if not r:
             raise HTTPException(status_code=404, detail="Not found")
-        conn.execute("UPDATE orders SET brand = ?, updated_at = datetime('now') WHERE id = ?", (body.brand, r["id"]))
+        conn.execute(
+            "UPDATE orders SET brand = ?, brand_id = (SELECT id FROM brands WHERE name = ? COLLATE NOCASE), "
+            "updated_at = datetime('now') WHERE id = ?", (body.brand, body.brand, r["id"]))
         conn.commit()
         return {"ok": True, "brand": body.brand}
     finally:
@@ -1066,7 +1083,7 @@ def update_brand(order_id: str, body: BrandUpdate):
 async def update_order(order_id: str, body: dict = Body(...)):
     conn = get_production()
     try:
-        r = conn.execute("SELECT id FROM orders WHERE id = ? OR number = ?", (order_id, order_id)).fetchone()
+        r = conn.execute("SELECT * FROM orders WHERE id = ? OR number = ?", (order_id, order_id)).fetchone()
         if not r:
             raise HTTPException(status_code=404, detail="Not found")
 
@@ -1086,11 +1103,18 @@ async def update_order(order_id: str, body: dict = Body(...)):
                 val = val.strip()
             fields.append(f"{key} = ?")
             values.append(val)
+            if key == "brand":
+                # Б2-лайт: текстовый бренд остаётся на переход, связь держит brand_id
+                fields.append("brand_id = (SELECT id FROM brands WHERE name = ? COLLATE NOCASE)")
+                values.append(val)
 
         if fields:
             fields.append("updated_at = datetime('now')")
             values.append(r["id"])
             conn.execute(f"UPDATE orders SET {', '.join(fields)} WHERE id = ?", values)
+            audit(conn, "order", r["id"], "update",
+                  f"«{r['title']}»: правка {', '.join(k for k in allowed if k in body)}",
+                  before_row=r)
             conn.commit()
 
         return dict(conn.execute("SELECT * FROM orders WHERE id = ?", (r["id"],)).fetchone())
@@ -1102,7 +1126,7 @@ async def update_order(order_id: str, body: dict = Body(...)):
 def delete_order(order_id: str):
     conn = get_production()
     try:
-        r = conn.execute("SELECT id FROM orders WHERE id = ? OR number = ?", (order_id, order_id)).fetchone()
+        r = conn.execute("SELECT * FROM orders WHERE id = ? OR number = ?", (order_id, order_id)).fetchone()
         if not r:
             raise HTTPException(status_code=404, detail="Not found")
         oid = r["id"]
@@ -1127,6 +1151,8 @@ def delete_order(order_id: str):
         # только отвязываем от удаляемого заказа и его смет.
         conn.execute("UPDATE creditors SET order_id = NULL, estimate_item_id = NULL, estimate_line_id = NULL WHERE order_id = ?", (oid,))
         conn.execute("DELETE FROM orders WHERE id = ?", (oid,))
+        audit(conn, "order", oid, "delete", f"Удалён заказ «{r['title']}» ({r['number']})",
+              before_row=r)
         conn.commit()
         return {"ok": True}
     finally:
@@ -1149,8 +1175,8 @@ async def create_order(body: dict = Body(...), user=Depends(get_current_user)):
 
         new_id = str(uuid4())
         conn.execute(
-            """INSERT INTO orders (id, number, title, status, priority, deadline, customer_id, brand, created_at)
-               VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, datetime('now'))""",
+            """INSERT INTO orders (id, number, title, status, priority, deadline, customer_id, brand, brand_id, created_at)
+               VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, (SELECT id FROM brands WHERE name = ? COLLATE NOCASE), datetime('now'))""",
             (
                 new_id,
                 number,
@@ -1159,8 +1185,10 @@ async def create_order(body: dict = Body(...), user=Depends(get_current_user)):
                 body.get("deadline") or None,
                 body.get("customer_id") or None,
                 body.get("brand") or None,
+                body.get("brand") or None,
             ),
         )
+        audit(conn, "order", new_id, "create", f"Создан заказ «{title}» ({number})")
         conn.commit()
         order = dict(conn.execute("SELECT * FROM orders WHERE id = ?", (new_id,)).fetchone())
         return order
@@ -1191,13 +1219,18 @@ def _payment_channel(source, bank_tx_id, zenmoney_tx_id, channel=None) -> str:
     return "bank"   # консервативно, см. PAYMENT_IS_BANK_SQL
 
 
-def _create_payment(conn, order_row, amount, paid_at, note=None, *, source, bank_tx_id=None, zenmoney_tx_id=None, channel=None, extra_id=None) -> dict:
-    """Единая точка вставки платежа: валидация + INSERT + возврат строки.
+def _create_payment(conn, order_row, amount, paid_at, note=None, *, source, bank_tx_id=None, zenmoney_tx_id=None, channel=None, extra_id=None, matched_by=None, group_id=None) -> dict:
+    """Единая точка вставки платежа: валидация + INSERT + журнал + возврат строки.
 
     Оба входа (ручной add_payment, разноска поступлений payments.from_tx) обязаны
     идти через неё — иначе правка правил создания (валидация, аудит, лимиты) доедет
     только до одного места. НЕ коммитит и НЕ открывает соединение: разноска пишет
-    несколько платежей одной транзакцией на общем conn (см. payments.py)."""
+    несколько платежей одной транзакцией на общем conn (см. payments.py).
+
+    matched_by/group_id (A4/A3-лайт): 'inbox' — разнесли из инбокса поступлений,
+    'order-card' — завели руками в карточке; group_id связывает N платежей одной
+    разноски. match_status здесь всегда 'manual' — 'auto' пишет только
+    автопривязка фин-агента (прямо в базу, со score)."""
     if amount is None or amount <= 0:
         raise HTTPException(status_code=400, detail="amount must be > 0")
     if not (str(paid_at or "").strip()):
@@ -1205,11 +1238,15 @@ def _create_payment(conn, order_row, amount, paid_at, note=None, *, source, bank
     extra_id = _check_extra(conn, order_row["id"], extra_id)
     pid = str(uuid4())
     conn.execute(
-        """INSERT INTO payments (id, order_id, amount, paid_at, note, bank_tx_id, zenmoney_tx_id, source, channel, extra_id, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+        """INSERT INTO payments (id, order_id, amount, paid_at, note, bank_tx_id, zenmoney_tx_id, source, channel, extra_id,
+                                 match_status, matched_by, group_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
         (pid, order_row["id"], round(amount, 2), paid_at, note, bank_tx_id, zenmoney_tx_id, source,
-         _payment_channel(source, bank_tx_id, zenmoney_tx_id, channel), extra_id),
+         _payment_channel(source, bank_tx_id, zenmoney_tx_id, channel), extra_id,
+         "manual", matched_by, group_id),
     )
+    audit(conn, "payment", pid, "create",
+          f"Платёж {round(amount, 2):g} ₽ по «{order_row['title']}» ({paid_at})")
     return dict(conn.execute("SELECT * FROM payments WHERE id = ?", (pid,)).fetchone())
 
 
@@ -1237,7 +1274,7 @@ def add_payment(order_id: str, body: PaymentCreate):
         payment = _create_payment(conn, r, body.amount, body.paid_at, body.note,
                                   source=body.source or "manual", bank_tx_id=body.bank_tx_id,
                                   zenmoney_tx_id=body.zenmoney_tx_id, channel=body.channel,
-                                  extra_id=body.extra_id)
+                                  extra_id=body.extra_id, matched_by="order-card")
         conn.commit()
         payment.update(_reserve_hint(conn, r))
         payment["order_id"] = r["id"]
@@ -1250,10 +1287,12 @@ def add_payment(order_id: str, body: PaymentCreate):
 def delete_payment(order_id: str, payment_id: str):
     conn = get_production()
     try:
-        r = conn.execute("SELECT id FROM payments WHERE id = ? AND order_id IN (SELECT id FROM orders WHERE id = ? OR number = ?)", (payment_id, order_id, order_id)).fetchone()
+        r = conn.execute("SELECT * FROM payments WHERE id = ? AND order_id IN (SELECT id FROM orders WHERE id = ? OR number = ?)", (payment_id, order_id, order_id)).fetchone()
         if not r:
             raise HTTPException(status_code=404, detail="Not found")
         conn.execute("DELETE FROM payments WHERE id = ?", (payment_id,))
+        audit(conn, "payment", payment_id, "delete",
+              f"Удалён платёж {r['amount']:g} ₽ ({r['paid_at']})", before_row=r)
         conn.commit()
         return {"ok": True}
     finally:
@@ -1604,14 +1643,16 @@ def add_expense(order_id: str, body: ExpenseIn):
         conn.execute(
             """INSERT INTO expenses (id, order_id, title, amount, category, supplier, master_id,
                                      expense_date, source, creditor_id, finance_tx_id, zenmoney_tx_id,
-                                     payment_source, accountable_person_id, extra_id, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), 'manual', ?, ?, ?, ?, ?, ?, datetime('now'))""",
+                                     payment_source, accountable_person_id, extra_id, match_status, matched_by, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), 'manual', ?, ?, ?, ?, ?, ?, 'manual', 'order-card', datetime('now'))""",
             (eid, oid, body.title.strip(), body.amount, body.category, body.supplier, body.master_id,
              body.expense_date, _autolink_creditor(conn, oid, body), body.finance_tx_id, body.zenmoney_tx_id,
              body.payment_source, body.accountable_person_id if body.payment_source == "accountable" else None,
              _check_extra(conn, oid, body.extra_id))
         )
         _sync_cash_fund(conn, eid, body)
+        audit(conn, "expense", eid, "create",
+              f"Расход {body.amount:g} ₽ «{body.title.strip()}» ({body.category})")
         conn.commit()
         return dict(conn.execute("SELECT * FROM expenses WHERE id = ?", (eid,)).fetchone())
     finally:
@@ -1624,7 +1665,7 @@ def update_expense(order_id: str, expense_id: str, body: ExpenseIn):
     conn = get_production()
     try:
         r = conn.execute(
-            "SELECT id, order_id, extra_id FROM expenses WHERE id = ? AND order_id IN (SELECT id FROM orders WHERE id = ? OR number = ?)",
+            "SELECT * FROM expenses WHERE id = ? AND order_id IN (SELECT id FROM orders WHERE id = ? OR number = ?)",
             (expense_id, order_id, order_id)
         ).fetchone()
         if not r:
@@ -1648,6 +1689,8 @@ def update_expense(order_id: str, expense_id: str, body: ExpenseIn):
              extra_id, expense_id)
         )
         _sync_cash_fund(conn, expense_id, body)
+        audit(conn, "expense", expense_id, "update",
+              f"Правка расхода «{body.title.strip()}»: {body.amount:g} ₽", before_row=r)
         conn.commit()
         return dict(conn.execute("SELECT * FROM expenses WHERE id = ?", (expense_id,)).fetchone())
     finally:
@@ -1774,6 +1817,8 @@ def delete_expense(order_id: str, expense_id: str, with_group: bool = False):
         # Подчистить связанные движения кассы (наличные расходы).
         for x in ids:
             conn.execute("DELETE FROM fund_transactions WHERE expense_id = ?", (x,))
+        audit(conn, "expense", expense_id, "delete",
+              f"Удалён расход ({deleted} строк{'а' if deleted == 1 else ''})")
         conn.commit()
         return {"ok": True, "deleted": deleted}
     finally:

@@ -496,6 +496,11 @@ def cost_fill(set_id: str, body: Optional[CostFillIn] = None):
                 conn.execute("UPDATE estimate_items SET sale_price = ? WHERE id = ?",
                              (round(fresh["cost_total"] * (fresh["markup"] or 2.0), 2), iid))
             _touch_set(conn, iid)
+        # A10: смета прошла через costing-движок — фиксируем контур; отчёты по
+        # марже перестают смешивать эпохи (legacy vs catalog_v1).
+        if any(applied.values()):
+            conn.execute(
+                "UPDATE estimate_sets SET costing_version = 'catalog_v1' WHERE id = ?", (set_id,))
         conn.commit()
 
         final = _cost_report(conn, set_id)

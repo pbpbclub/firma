@@ -7,11 +7,13 @@
 Разные файлы БД, ATTACH в проекте не используется → анти-джойн делаем в Python.
 """
 import sqlite3
+import uuid
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional, List
 
+from audit import audit
 from db import get_production, get_finance
 from routers.orders import _create_payment, _reserve_hint
 from routers.zenmoney import _load_payee_rules, _resolve_payee, contractor_tokens
@@ -241,6 +243,9 @@ def payments_from_tx(body: PayFromTxIn):
     conn = get_production()
     try:
         created = []
+        # A3-лайт: N платежей одной разноски связаны group_id — откат целиком
+        # (DELETE /group/{gid}) и показ «братских» платежей в карточке заказа.
+        gid = str(uuid.uuid4())
         for a in body.allocations:
             o = conn.execute(
                 "SELECT * FROM orders WHERE id = ? OR number = ?", (a.order_id, a.order_id)
@@ -251,7 +256,8 @@ def payments_from_tx(body: PayFromTxIn):
             # add_payment. Все N платежей разноски пишутся одной транзакцией на общем conn.
             note = a.note or tx["purpose"] or tx["counterparty"]
             _create_payment(conn, o, a.amount, tx["date"], note, source="bank",
-                            bank_tx_id=str(body.tx_id), extra_id=a.extra_id)
+                            bank_tx_id=str(body.tx_id), extra_id=a.extra_id,
+                            matched_by="inbox", group_id=gid)
             created.append({"order_id": o["id"], "order_row": o, "amount": round(a.amount, 2)})
         conn.execute(
             "DELETE FROM inbox_dismissed WHERE tx_id = ? AND source = ?",
@@ -269,6 +275,26 @@ def payments_from_tx(body: PayFromTxIn):
             result.update(_reserve_hint(conn, o))
             result["order_id"] = o["id"]
         return result
+    finally:
+        conn.close()
+
+
+@router.delete("/group/{group_id}")
+def delete_payment_group(group_id: str):
+    """Откат разноски целиком: удалить все платежи одной группы from-tx.
+    Транзакция банка при этом вернётся в инбокс поступлений (паттерн
+    expenses.delete_group для списаний)."""
+    conn = get_production()
+    try:
+        rows = conn.execute("SELECT * FROM payments WHERE group_id = ?", (group_id,)).fetchall()
+        if not rows:
+            raise HTTPException(status_code=404, detail="Группа не найдена")
+        conn.execute("DELETE FROM payments WHERE group_id = ?", (group_id,))
+        total = round(sum(r["amount"] or 0 for r in rows), 2)
+        audit(conn, "payment", group_id, "delete",
+              f"Откат разноски: {len(rows)} платежей на {total:g} ₽ (tx {rows[0]['bank_tx_id']})")
+        conn.commit()
+        return {"ok": True, "deleted": len(rows)}
     finally:
         conn.close()
 

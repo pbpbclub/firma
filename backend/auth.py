@@ -66,6 +66,10 @@ def get_current_user(email: str = Depends(verify_token)):
         user = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
+        # Актор для журнала изменений (audit.py): dependency дёргается на каждом
+        # запросе — write-ручкам не нужно таскать пользователя параметром.
+        from audit import current_actor
+        current_actor.set(email)
         return dict(user)
     finally:
         conn.close()

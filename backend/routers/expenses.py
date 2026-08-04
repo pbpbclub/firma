@@ -382,8 +382,8 @@ def create_from_tx(body: FromTxIn):
                 conn.execute(
                     """INSERT INTO expenses (id, order_id, title, amount, category, supplier, master_id,
                                              expense_date, source, finance_tx_id, zenmoney_tx_id,
-                                             group_id, purpose, created_at)
-                       VALUES (?, NULL, ?, ?, ?, ?, ?, COALESCE(?, date('now')), ?, ?, ?, ?, ?, datetime('now'))""",
+                                             group_id, purpose, match_status, matched_by, created_at)
+                       VALUES (?, NULL, ?, ?, ?, ?, ?, COALESCE(?, date('now')), ?, ?, ?, ?, ?, 'manual', 'inbox', datetime('now'))""",
                     (eid, title, a.amount, a.category or body.category, a.supplier or supplier,
                      a.master_id or body.master_id, exp_date, src, fin_id, zen_id, group_id, a.purpose))
                 created.append(eid)
@@ -425,8 +425,8 @@ def create_from_tx(body: FromTxIn):
             conn.execute(
                 """INSERT INTO expenses (id, order_id, title, amount, category, supplier, master_id,
                                          expense_date, source, creditor_id, finance_tx_id, zenmoney_tx_id,
-                                         group_id, extra_id, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), ?, ?, ?, ?, ?, ?, datetime('now'))""",
+                                         group_id, extra_id, match_status, matched_by, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), ?, ?, ?, ?, ?, ?, 'manual', 'inbox', datetime('now'))""",
                 (eid, oid, title, a.amount, row_cat, row_supplier, row_master,
                  exp_date, src, cred, fin_id, zen_id, group_id,
                  # Доп обязан быть допом ЭТОГО заказа — как и creditor_id выше:
