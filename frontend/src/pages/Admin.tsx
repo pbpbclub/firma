@@ -175,6 +175,53 @@ function SystemSection() {
           ))}
         </div>
       )}
+      <AuditSection />
+    </div>
+  );
+}
+
+// ── Журнал изменений (A1, спека ЛЕСКОВО) ─────────────────────────────────────
+
+const AUDIT_ENTITY_LABELS: Record<string, string> = {
+  order: "Заказ", estimate: "Смета", estimate_item: "Позиция", estimate_line: "Строка",
+  payment: "Платёж", expense: "Расход", creditor: "Обязательство",
+};
+
+function AuditSection() {
+  const { data, isLoading } = useQuery({
+    queryKey: ["admin-audit"],
+    queryFn: () => adminApi.audit({ limit: 50 }),
+  });
+  const rows = data ?? [];
+  return (
+    <div style={{ marginTop: 32 }}>
+      <SectionLabel>ЖУРНАЛ ИЗМЕНЕНИЙ</SectionLabel>
+      <div style={{ fontSize: 11, color: "#A89070", margin: "6px 0 12px" }}>
+        Правки через веб: кто, что и когда менял. Действия агентов ведёт их собственный журнал.
+      </div>
+      {isLoading ? (
+        <div style={{ color: "#A89070", fontSize: 13 }}>Загружаем...</div>
+      ) : rows.length === 0 ? (
+        <div style={{ fontSize: 12, color: "#C8C0B0" }}>Записей пока нет — журнал включён 04.08.2026.</div>
+      ) : (
+        <div style={{ border: "1px solid #EDEBE6" }}>
+          {rows.map((r: any, i: number) => (
+            <div key={r.id} style={{
+              display: "flex", gap: 12, alignItems: "baseline", padding: "9px 16px",
+              borderBottom: i < rows.length - 1 ? "1px solid #F2EFE9" : "none",
+            }}>
+              <div style={{ fontSize: 10, color: "#A89070", fontFamily: "'JetBrains Mono', monospace", whiteSpace: "nowrap" }}>
+                {fmtDate(r.created_at)} {String(r.created_at || "").slice(11, 16)}
+              </div>
+              <div style={{ fontSize: 10, color: "#B8860B", whiteSpace: "nowrap" }}>
+                {AUDIT_ENTITY_LABELS[r.entity_type] ?? r.entity_type}
+              </div>
+              <div style={{ fontSize: 12, color: "#1A1A1A", flex: 1 }}>{r.summary}</div>
+              <div style={{ fontSize: 10, color: "#A89070", whiteSpace: "nowrap" }}>{r.actor === "system" ? "агент/система" : r.actor}</div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

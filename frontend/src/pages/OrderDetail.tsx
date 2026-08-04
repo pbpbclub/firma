@@ -895,6 +895,12 @@ export default function OrderDetail() {
                       )}
                     </div>
                     {p.note && <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>{p.note}</div>}
+                    {/* A3-лайт: этой же транзакцией банка оплачены другие заказы */}
+                    {p.siblings?.length > 0 && (
+                      <div style={{ fontSize: 10, color: "#B8860B", marginTop: 3 }}>
+                        этой же транзакцией: {p.siblings.map((s: any) => `${s.title} (${fmtMoney(s.amount)})`).join(", ")}
+                      </div>
+                    )}
                   </div>
                   <div style={{ fontSize: 11, color: "#A89070", fontFamily: MONO }}>{fmtDate(p.paid_at)}</div>
                 </div>

@@ -95,9 +95,18 @@ work_types / master_work_types            — виды работ и кто их
 это «потенциальная выручка» (блок potential в /finance/debtors).
 Статусы сметы: `draft` / `approved` / `superseded` (одна активная на заказ; approved заморожена)
 
-**Категории расхода — строго 4:** `material` / `work` / `delivery` / `other`.
-`orders.py::_bucket` тотальная: любое иное значение молча уедет в «Прочее» и потеряется
-в разбивке план-факта. Legacy-значения в данных (`labor`, `test`) она сводит сама.
+**Категории расхода — строго 4:** `material` / `work` / `delivery` / `other` — с 04.08.2026
+под **CHECK в базе** (волна ЛЕСКОВО-3): INSERT с иным значением получит IntegrityError.
+Под CHECK также `orders.status` (7 статусов) и `creditors.status` (open/partial/closed/
+cancelled); у creditors появились настоящие FK (сметные ссылки ON DELETE SET NULL).
+`orders.py::_bucket` осталась тотальной для legacy из старых бэкапов.
+
+**Накладные расходы (A8, решение Юры 04.08.2026):** факт месяца = `expenses.order_id IS
+NULL AND purpose='overhead'` + оплаченные `creditors.kind='fixed'` периода (с дедупом
+инварианта). Делятся между заказами `in_production` пропорционально их фактической
+себестоимости (`orders.py::_overhead_allocation`); второй уровень маржи
+`net_with_overhead` виден в карточке заказа в производстве и на дашборде
+(`GET /api/orders/overhead-summary`). Сметы и план-факт этим не обрастают.
 
 **`mes_id` (в 9 таблицах) — архивный идентификатор импорта из снятого MES, НЕ
 ИСПОЛЬЗОВАТЬ** (решение Юры 04.08.2026, Б6 спеки ЛЕСКОВО): не заполнять, не искать

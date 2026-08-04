@@ -25,6 +25,8 @@ export const ordersApi = {
     api.get("/orders", { params }).then((r) => r.data),
   get: (id: string) => api.get(`/orders/${id}`).then((r) => r.data),
   planFactSummary: () => api.get("/orders/plan-fact-summary").then((r) => r.data),
+  // A8: накладные месяца и их раскладка по заказам в производстве
+  overheadSummary: () => api.get("/orders/overhead-summary").then((r) => r.data),
   estimate: (id: string) => api.get(`/orders/${id}/estimate`).then((r) => r.data),
   updateStatus: (id: string, status: string) => api.patch(`/orders/${id}/status`, { status }).then((r) => r.data),
   archive: (id: string) => api.patch(`/orders/${id}/archive`).then((r) => r.data),
@@ -381,6 +383,9 @@ export const payeeRulesApi = {
 
 export const adminApi = {
   system: () => api.get("/admin/system").then((r) => r.data),
+  // A1: журнал правок через веб (кто, что и когда менял)
+  audit: (params?: Record<string, string | number>) =>
+    api.get("/admin/audit", { params }).then((r) => r.data),
   imports: () => api.get("/admin/imports").then((r) => r.data),
   deleteImport: (id: number) => api.delete(`/admin/imports/${id}`).then((r) => r.data),
   uploadSber: (file: File) => {

@@ -709,6 +709,15 @@ export default function EstimateEditor() {
                 </div>
               )}
 
+              {/* A10: контур себестоимости — legacy-сметы считались по ценам,
+                  которых больше нет; их маржу нельзя сравнивать с новой */}
+              {activeSet.costing_version === "legacy" && (
+                <span title="Смета до costing-движка (22.07.2026): цены старого образца, маржу с новыми сметами не сравнивать"
+                  style={{ fontSize: 9, color: "#8B3A3A", background: "#F7EDED", padding: "2px 6px", letterSpacing: "0.05em" }}>
+                  СТАРЫЙ КОНТУР ЦЕН
+                </span>
+              )}
+
               <div style={{ width: 1, height: 18, background: "#EDEBE6", margin: "0 2px" }} />
 
               {/* Согласовать */}

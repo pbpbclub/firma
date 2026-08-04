@@ -33,6 +33,16 @@ export function ProfitLadder({ order, paidTotal }: { order: any; paidTotal: numb
     { label: "Валовая",   value: fmt(gross),            color: "#1A1A1A" },
     ...(taxed ? [{ label: `УСН ${order.tax_pct ?? 6}%${mixedTax ? " · с безнал. части" : ""}`, value: `−${fmt(tax)}`, color: "#8B3A3A" }] : []),
     { label: "Чистая",    value: fmt(net),              color: net > 0 ? "#4A7C59" : "#8B3A3A" },
+    // A8: второй уровень маржи — доля накладных месяца (аренда, расходники),
+    // делённых по заказам в работе пропорционально их себестоимости. Бэк отдаёт
+    // блок только у in_production — сметы и завершённые этим не обрастают.
+    ...(order.overhead ? [
+      { label: `Накладные ${order.overhead.period} · ${Math.round(order.overhead.share * 100)}% цеха`,
+        value: `−${fmt(order.overhead.amount)}`, color: "#B8860B" },
+      { label: "Маржа с накладными",
+        value: fmt(order.net_with_overhead),
+        color: (order.net_with_overhead ?? 0) > 0 ? "#4A7C59" : "#8B3A3A" },
+    ] : []),
   ];
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "16px 32px" }}>

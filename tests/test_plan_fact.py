@@ -122,7 +122,7 @@ class TestФакт:
         oid = _order(conn)
         _set(conn, oid)
         _expense(conn, oid, 10_000, "material", eid="E1")
-        _expense(conn, oid, 5_000, "labor", eid="E2")
+        _expense(conn, oid, 5_000, "work", eid="E2")
         res = _plan_fact(conn, oid, 60_000, 0, 100_000)
         by = {c["category"]: c["fact"] for c in res["categories"]}
         assert by["Материалы"] == 10_000
@@ -141,7 +141,7 @@ class TestФакт:
         oid = _order(conn)
         _set(conn, oid)
         _creditor(conn, oid, "C1", 20_000)
-        _expense(conn, oid, 20_000, "labor", eid="E1", creditor_id="C1")
+        _expense(conn, oid, 20_000, "work", eid="E1", creditor_id="C1")
         res = _plan_fact(conn, oid, 60_000, 0, 100_000)
         assert sum(c["fact"] for c in res["categories"]) == 20_000
 
@@ -150,7 +150,7 @@ class TestФакт:
         oid = _order(conn)
         _set(conn, oid)
         _creditor(conn, oid, "C1", 15_000, finance_tx_id="TX-77")
-        _expense(conn, oid, 15_000, "labor", eid="E1", finance_tx_id="TX-77")
+        _expense(conn, oid, 15_000, "work", eid="E1", finance_tx_id="TX-77")
         res = _plan_fact(conn, oid, 60_000, 0, 100_000)
         assert sum(c["fact"] for c in res["categories"]) == 15_000
 
@@ -158,7 +158,7 @@ class TestФакт:
         oid = _order(conn)
         _set(conn, oid)
         _creditor(conn, oid, "C1", 12_000, zenmoney_tx_id="ZM-9")
-        _expense(conn, oid, 12_000, "labor", eid="E1", zenmoney_tx_id="ZM-9")
+        _expense(conn, oid, 12_000, "work", eid="E1", zenmoney_tx_id="ZM-9")
         res = _plan_fact(conn, oid, 60_000, 0, 100_000)
         assert sum(c["fact"] for c in res["categories"]) == 12_000
 
@@ -167,7 +167,7 @@ class TestФакт:
         oid = _order(conn)
         _set(conn, oid)
         _creditor(conn, oid, "C1", 10_000, finance_tx_id="TX-1")
-        _expense(conn, oid, 8_000, "labor", eid="E1", finance_tx_id="TX-2")
+        _expense(conn, oid, 8_000, "work", eid="E1", finance_tx_id="TX-2")
         res = _plan_fact(conn, oid, 60_000, 0, 100_000)
         assert sum(c["fact"] for c in res["categories"]) == 18_000
 
@@ -233,18 +233,18 @@ class TestТранзитныйФакт:
 
     def test_расход_учитывается_один_раз(self, conn):
         oid = _order(conn)
-        _expense(conn, oid, 44_370, "labor", eid="E1")
+        _expense(conn, oid, 44_370, "work", eid="E1")
         assert _transit_facts(conn)[oid]["fact"] == 44_370
 
     def test_покрытое_обязательство_не_задваивает_выплату(self, conn):
         oid = _order(conn)
         _creditor(conn, oid, "C1", 44_370)
-        _expense(conn, oid, 44_370, "labor", eid="E1", creditor_id="C1")
+        _expense(conn, oid, 44_370, "work", eid="E1", creditor_id="C1")
         assert _transit_facts(conn)[oid]["fact"] == 44_370
 
     def test_непокрытое_обязательство_добавляется(self, conn):
         oid = _order(conn)
-        _expense(conn, oid, 10_000, "labor", eid="E1")
+        _expense(conn, oid, 10_000, "work", eid="E1")
         _creditor(conn, oid, "C1", 5_000)
         assert _transit_facts(conn)[oid]["fact"] == 15_000
 
@@ -252,7 +252,7 @@ class TestТранзитныйФакт:
         """Штатная связка: разнесённый расход несёт zenmoney_tx_id привязки."""
         oid = _order(conn)
         _zm_link(zm, oid, "ZM-1", 44_370)
-        _expense(conn, oid, 44_370, "labor", eid="E1", zenmoney_tx_id="ZM-1")
+        _expense(conn, oid, 44_370, "work", eid="E1", zenmoney_tx_id="ZM-1")
         assert _transit_facts(conn)[oid]["fact"] == 44_370
 
     def test_zm_link_не_задваивает_ручной_расход_без_tx(self, conn, zm):
@@ -260,7 +260,7 @@ class TestТранзитныйФакт:
         привязал ТОТ ЖЕ перевод через zm_links — факт не должен удвоиться."""
         oid = _order(conn)
         _zm_link(zm, oid, "ZM-1", 44_370)
-        _expense(conn, oid, 44_370, "labor", eid="E1")   # ручной, tx_id пуст
+        _expense(conn, oid, 44_370, "work", eid="E1")   # ручной, tx_id пуст
         assert _transit_facts(conn)[oid]["fact"] == 44_370
 
     def test_zm_link_не_задваивает_обязательство_без_tx(self, conn, zm):
@@ -273,7 +273,7 @@ class TestТранзитныйФакт:
         """Дедуп по сумме не должен гасить НАСТОЯЩУЮ вторую выплату."""
         oid = _order(conn)
         _zm_link(zm, oid, "ZM-1", 20_000)
-        _expense(conn, oid, 44_370, "labor", eid="E1")
+        _expense(conn, oid, 44_370, "work", eid="E1")
         assert _transit_facts(conn)[oid]["fact"] == 64_370
 
     def test_сводка_видит_факт_транзита_из_привязок(self, conn, zm):
@@ -299,8 +299,8 @@ class TestТранзитныйФакт:
     def test_два_расхода_с_одним_tx_считаются_раз(self, conn):
         """Дубль внутри expenses (например после деградации инбокса)."""
         oid = _order(conn)
-        _expense(conn, oid, 5_000, "labor", eid="E1", finance_tx_id="F1")
-        _expense(conn, oid, 5_000, "labor", eid="E2", finance_tx_id="F1")
+        _expense(conn, oid, 5_000, "work", eid="E1", finance_tx_id="F1")
+        _expense(conn, oid, 5_000, "work", eid="E2", finance_tx_id="F1")
         assert _transit_facts(conn)[oid]["fact"] == 5_000
 
 

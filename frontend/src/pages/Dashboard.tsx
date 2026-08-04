@@ -31,6 +31,8 @@ export default function Dashboard() {
     queryFn: () => ordersApi.list({ status: "in_production" }),
   });
   const byBrand = useQuery({ queryKey: ["finance-by-brand"], queryFn: financeApi.byBrand });
+  // A8: накладные месяца (аренда, расходники) и как они ложатся на заказы в работе
+  const overhead = useQuery({ queryKey: ["overhead-summary"], queryFn: ordersApi.overheadSummary });
 
   // Любой упавший денежный запрос → баннер: раньше блоки просто исчезали
   // по одному и дашборд выглядел как «всё по нулям».
@@ -226,6 +228,35 @@ export default function Dashboard() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* A8: накладные месяца — как аренда/расходники ложатся на заказы в работе.
+          Влияние на общую экономику: маржа заказов без накладных суммарно выше
+          реальной ровно на эту сумму. */}
+      {(overhead.data?.month?.total ?? 0) > 0 && (
+        <div style={section}>
+          <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em", marginBottom: 12 }}>
+            НАКЛАДНЫЕ {overhead.data.month.period}
+            <span style={{ marginLeft: 10, color: "#B8860B", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(overhead.data.month.total)}</span>
+          </div>
+          {(overhead.data.orders || []).length === 0 ? (
+            <div style={{ fontSize: 12, color: "#6B6355" }}>
+              Заказов в производстве нет — накладные месяца не распределены и целиком уменьшают общую прибыль.
+            </div>
+          ) : (
+            (overhead.data.orders || []).map((r: any, i: number, arr: any[]) => (
+              <div key={r.order_id} style={{
+                display: "flex", alignItems: "baseline", gap: 10, paddingBottom: 8,
+                marginBottom: i < arr.length - 1 ? 8 : 0,
+                borderBottom: i < arr.length - 1 ? "1px solid #F2EFE9" : "none",
+              }}>
+                <div style={{ fontSize: 12, color: "#1A1A1A", flex: 1 }}>{r.title}</div>
+                <div style={{ fontSize: 10, color: "#A89070", fontFamily: MONO }}>{Math.round(r.share * 100)}%</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#B8860B", fontFamily: MONO, fontVariantNumeric: "tabular-nums", minWidth: 80, textAlign: "right" }}>−{fmt(r.amount)}</div>
+              </div>
+            ))
+          )}
         </div>
       )}
 
