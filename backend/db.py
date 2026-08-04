@@ -1277,6 +1277,265 @@ def ensure_order_brand_id_schema():
         conn.close()
 
 
+_DECL_KEYWORDS = ("FOREIGN", "CHECK", "PRIMARY", "UNIQUE", "CONSTRAINT")
+
+
+def _decls_from_table(conn, table: str, extra: dict | None = None,
+                      not_null: tuple = (), defaults: dict | None = None) -> list[str]:
+    """Декларации колонок из ФАКТИЧЕСКОЙ схемы таблицы (PRAGMA table_info).
+
+    Зашитым в миграции остаётся только то, что она добавляет (FK/CHECK/UNIQUE/
+    NOT NULL) — в production.db пишет не один агент, и колонка, добавленная
+    кем-то другим, обязана пережить пересборку вместе с данными: зашитый список
+    колонок молча удалил бы её (code_rules 04.08).
+
+    extra — хвост декларации по имени колонки (REFERENCES/CHECK/UNIQUE);
+    not_null/defaults — ограничения, которых в текущей схеме ещё нет."""
+    extra, defaults = extra or {}, defaults or {}
+    decls = []
+    for c in conn.execute(f"PRAGMA table_info({table})").fetchall():
+        name, ctype, notnull, dflt = c[1], c[2] or "TEXT", c[3], c[4]
+        if name == "id":
+            d = "id TEXT PRIMARY KEY"
+        else:
+            d = f"{name} {ctype}"
+            if notnull or name in not_null:
+                d += " NOT NULL"
+            dv = dflt if dflt is not None else defaults.get(name)
+            if dv is not None:
+                # выражение-default (datetime('now')) обязано быть в скобках
+                d += f" DEFAULT ({dv})" if "(" in str(dv) else f" DEFAULT {dv}"
+        if name in extra:
+            d += " " + extra[name]
+        decls.append(d)
+    return decls
+
+
+def _decl_check(decl: str) -> str | None:
+    """Выражение из CHECK(...) декларации колонки — по балансу скобок."""
+    i = decl.upper().find("CHECK")
+    if i < 0:
+        return None
+    j = decl.find("(", i)
+    if j < 0:
+        return None
+    depth = 0
+    for k in range(j, len(decl)):
+        if decl[k] == "(":
+            depth += 1
+        elif decl[k] == ")":
+            depth -= 1
+            if depth == 0:
+                return decl[j + 1:k]
+    return None
+
+
+def _rebuild_violations(conn, table: str, decls: list[str], common: list[str]) -> list[str]:
+    """Данные, которые не переживут новые NOT NULL / CHECK / UNIQUE.
+
+    Проверяем SELECT-ом по старой таблице ДО пересборки: `INSERT … SELECT` падает
+    на первой же легаси-строке, а это стартовая миграция — вместе с ней падает
+    весь сервис (code_rules 04.08). Легаси приводит к канону сама миграция;
+    остаток — повод отказаться от пересборки и сказать об этом вслух."""
+    problems = []
+    for d in decls:
+        col = d.strip().split()[0].strip('"')
+        if col.upper() in _DECL_KEYWORDS:
+            continue
+        rest = d.strip()[len(col):]
+        up = rest.upper()
+        if col not in common:
+            # новой NOT NULL-колонке INSERT … SELECT значения не даст
+            if "NOT NULL" in up and "DEFAULT" not in up:
+                problems.append(f"{col}: NOT NULL без DEFAULT, а колонки в таблице нет")
+            continue
+        if "NOT NULL" in up:
+            n = conn.execute(f'SELECT COUNT(*) FROM {table} WHERE "{col}" IS NULL').fetchone()[0]
+            if n:
+                problems.append(f"{col}: NULL в {n} строк(ах) при NOT NULL")
+        chk = _decl_check(rest)
+        if chk:
+            n = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE NOT ({chk})").fetchone()[0]
+            if n:
+                problems.append(f"{col}: {n} строк(и) вне CHECK ({chk})")
+        if "UNIQUE" in up or "PRIMARY KEY" in up:
+            n = conn.execute(
+                f'SELECT COUNT(*) FROM (SELECT "{col}" FROM {table} WHERE "{col}" IS NOT NULL '
+                f'GROUP BY "{col}" HAVING COUNT(*) > 1)').fetchone()[0]
+            if n:
+                problems.append(f"{col}: {n} повторяющихся значений при UNIQUE/PK")
+    return problems
+
+
+def _rebuild_table_with_ddl(conn, table: str, decls: list[str]) -> bool:
+    """Пересоздать таблицу с ЯВНЫМ DDL (Б1/Б8): единственный способ добавить FK
+    и CHECK в SQLite. Реконструкция схемы из PRAGMA (ensure_general_expenses_schema)
+    для этого не годится — CHECK-ограничения PRAGMA не отдаёт вовсе.
+
+    Данные переносятся по именам колонок (пересечение старых и новых — узкая
+    таблица из бэкапа доезжает); отброшенные колонки печатаются в лог. Индексы
+    и триггеры восстанавливаются из sqlite_master. foreign_keys переключается
+    вне транзакции; INSERT→DROP→RENAME коммитятся вместе — полупересобранной
+    таблицы не бывает.
+
+    Миграция стартовая, поэтому она НЕ имеет права уронить сервис: несовместимые
+    данные и любой сбой пересборки = отказ с алертом и прежняя схема, а не
+    исключение в startup(). CREATE идёт после DROP TABLE IF EXISTS {table}_new:
+    он выполняется в автокоммите, и хвост прошлого сбоя иначе делает старт
+    невозможным навсегда. Возвращает True, если таблица пересобрана."""
+    old_cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+    new_cols = []
+    for d in decls:
+        first = d.strip().split()[0].strip('"')
+        if first.upper() not in _DECL_KEYWORDS:
+            new_cols.append(first)
+    common = [c for c in old_cols if c in new_cols]
+    dropped = [c for c in old_cols if c not in new_cols]
+    if dropped:
+        print(f"[db] ВНИМАНИЕ: пересборка {table} отбрасывает колонки {dropped} с данными")
+    problems = _rebuild_violations(conn, table, decls, common)
+    if problems:
+        print(f"[db] ОТКАЗ от пересборки {table}: данные не отвечают новым ограничениям — "
+              + "; ".join(problems))
+        return False
+    restore = [r[0] for r in conn.execute(
+        "SELECT sql FROM sqlite_master WHERE tbl_name = ? "
+        "AND type IN ('index', 'trigger') AND sql IS NOT NULL", (table,)).fetchall()]
+    for il in conn.execute(f"PRAGMA index_list({table})").fetchall():
+        iname, uniq, origin = il[1], il[2], il[3]
+        if origin != "u" or not uniq:
+            continue
+        icols = [ii[2] for ii in conn.execute(f'PRAGMA index_info("{iname}")').fetchall()]
+        if icols and all(c in new_cols for c in icols):
+            restore.append(
+                f'CREATE UNIQUE INDEX IF NOT EXISTS "uq_{table}_{"_".join(icols)}" '
+                f'ON {table} ({", ".join(icols)})')
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.execute(f"DROP TABLE IF EXISTS {table}_new")
+        conn.execute(f"CREATE TABLE {table}_new (\n  " + ",\n  ".join(decls) + "\n)")
+        names = ", ".join(common)
+        conn.execute(f"INSERT INTO {table}_new ({names}) SELECT {names} FROM {table}")
+        conn.execute(f"DROP TABLE {table}")
+        conn.execute(f"ALTER TABLE {table}_new RENAME TO {table}")
+        for sql in restore:
+            conn.execute(sql)
+        conn.commit()
+    except Exception as e:
+        # Откат вернёт INSERT→DROP→RENAME, но CREATE прошёл в автокоммите:
+        # хвост {table}_new сносим руками, иначе следующий старт падает на нём.
+        conn.rollback()
+        conn.execute(f"DROP TABLE IF EXISTS {table}_new")
+        conn.commit()
+        conn.execute("PRAGMA foreign_keys = ON")
+        print(f"[db] ОШИБКА пересборки {table}: {e} — схема осталась прежней")
+        return False
+    conn.execute("PRAGMA foreign_keys = ON")
+    bad = conn.execute("PRAGMA foreign_key_check").fetchall()
+    if bad:
+        # Пересборка не должна оставлять битые ссылки: это сигнал разбираться, не глотать.
+        print(f"[db] ВНИМАНИЕ: foreign_key_check после пересборки {table}: {bad[:5]}")
+    return True
+
+
+def ensure_creditors_constraints_schema():
+    """Б1+Б8 (волна ЛЕСКОВО-3): creditors — главная денежная таблица совсем без FK
+    (4 ссылки на честном слове). Пересоздание с настоящими связями + CHECK статуса.
+
+    ON DELETE SET NULL у смет-ссылок сохраняет текущее поведение (delete_line/
+    delete_item удаляют строки, не спрашивая обязательства); заказ delete_order
+    отвязывает сам. Статусы по факту кода: open (дефолт) / closed
+    (expenses.from-tx при полном гашении) + partial/cancelled на вырост.
+
+    Легаси приводится к канону ДО пересборки и только там, где значение
+    равнозначно тому, как его уже читает код: пустой статус = open (дефолт),
+    NULL в суммах = 0 (все читатели берут их через COALESCE). Остаток —
+    отказ от пересборки с алертом, см. _rebuild_table_with_ddl."""
+    conn = get_production()
+    try:
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='creditors'").fetchone()
+        if not row or ("REFERENCES orders" in row[0] and "CHECK" in row[0]):
+            return
+        conn.execute("UPDATE creditors SET status = 'open' "
+                     "WHERE status IS NULL OR TRIM(status) = ''")
+        conn.execute("UPDATE creditors SET total = 0 WHERE total IS NULL")
+        conn.execute("UPDATE creditors SET paid = 0 WHERE paid IS NULL")
+        conn.commit()
+        decls = _decls_from_table(
+            conn, "creditors",
+            not_null=("name", "total", "paid", "status", "created_at"),
+            defaults={"total": "0", "paid": "0", "status": "'open'",
+                      "created_at": "(datetime('now'))"},
+            extra={
+                "order_id": "REFERENCES orders(id)",
+                "status": "CHECK (status IN ('open','partial','closed','cancelled'))",
+                "estimate_item_id": "REFERENCES estimate_items(id) ON DELETE SET NULL",
+                "estimate_line_id": "REFERENCES estimate_lines(id) ON DELETE SET NULL",
+                "fixed_id": "REFERENCES fixed_obligations(id) ON DELETE SET NULL",
+            })
+        _rebuild_table_with_ddl(conn, "creditors", decls)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_expense_category_check_schema():
+    """Б8: категории расхода — строго 4 (CHECK). Легаси в данных (labor→work,
+    test→other) приводится к канону ДО пересборки — ровно так их и сводит
+    orders.py::_bucket, цифры план-факта не меняются."""
+    conn = get_production()
+    try:
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='expenses'").fetchone()
+        if not row or "CHECK" in row[0]:
+            return
+        conn.execute("UPDATE expenses SET category='work' WHERE category='labor'")
+        conn.execute("UPDATE expenses SET category='other' WHERE category='test'")
+        # Пустая строка — то же «нет категории», что и NULL (_bucket сводит обе
+        # в «Прочее»), но CHECK её не пропустит и уронит стартовую миграцию.
+        conn.execute("UPDATE expenses SET category = NULL WHERE TRIM(category) = ''")
+        conn.commit()
+        # FK колонками, а не FOREIGN KEY-строками: колонки, которой в схеме нет,
+        # такая декларация просто не получит, а табличная уронила бы CREATE.
+        decls = _decls_from_table(conn, "expenses", extra={
+            "category": "CHECK (category IS NULL OR "
+                        "category IN ('material','work','delivery','other'))",
+            "order_id": "REFERENCES orders(id)",
+            "creditor_id": "REFERENCES creditors(id) ON DELETE SET NULL",
+            "master_id": "REFERENCES masters(id) ON DELETE SET NULL",
+            "extra_id": "REFERENCES order_extras(id) ON DELETE SET NULL",
+        })
+        _rebuild_table_with_ddl(conn, "expenses", decls)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_order_status_check_schema():
+    """Б8: статусы заказа под CHECK — база больше не примет опечатку скрипта.
+    Пересоздание родителя: дети (payments/expenses/estimate_sets/...) ссылаются
+    по имени, foreign_keys на время пересборки выключен, RENAME возвращает имя."""
+    conn = get_production()
+    try:
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='orders'").fetchone()
+        if not row or "CHECK" in row[0]:
+            return
+        decls = _decls_from_table(conn, "orders", extra={
+            "number": "UNIQUE",
+            "status": "CHECK (status IS NULL OR status IN ('draft','estimate','project',"
+                      "'in_production','awaiting_payment','completed','cancelled'))",
+            "customer_id": "REFERENCES customers(id)",
+            "brand_id": "REFERENCES brands(id)",
+        })
+        _rebuild_table_with_ddl(conn, "orders", decls)
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_line_rate_snapshot_schema():
     """A9: строка работ хранит свои входные данные — применённую ставку, её схему
     и дату применения. Симметрия с price_supplier/price_date у материалов: смета

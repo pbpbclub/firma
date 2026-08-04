@@ -10,6 +10,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 from passlib.context import CryptContext
+from starlette.concurrency import run_in_threadpool
 
 AUTH_DB = Path("/opt/firma/data/auth.db")
 AUTH_DB.parent.mkdir(parents=True, exist_ok=True)
@@ -60,19 +61,29 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(bearer)):
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 
-def get_current_user(email: str = Depends(verify_token)):
+def _load_user(email: str):
     conn = get_db()
     try:
-        user = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
-        if not user:
-            raise HTTPException(status_code=401, detail="User not found")
-        # Актор для журнала изменений (audit.py): dependency дёргается на каждом
-        # запросе — write-ручкам не нужно таскать пользователя параметром.
-        from audit import current_actor
-        current_actor.set(email)
-        return dict(user)
+        return conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
     finally:
         conn.close()
+
+
+async def get_current_user(email: str = Depends(verify_token)):
+    """Пользователь запроса + актор журнала изменений (audit.py).
+
+    Зависимость async НАМЕРЕННО: синхронную FastAPI исполняет в threadpool с
+    КОПИЕЙ контекста, и current_actor.set() до обработчика не доезжает — журнал
+    писал бы 'system' вместо человека (code_rules 04.08). Обращение к auth.db
+    уводим в threadpool сами, чтобы не блокировать цикл событий."""
+    user = await run_in_threadpool(_load_user, email)
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    # dependency дёргается на каждом запросе — write-ручкам не нужно таскать
+    # пользователя параметром.
+    from audit import current_actor
+    current_actor.set(email)
+    return dict(user)
 
 
 def create_user(email: str, name: str, password: str, role: str = "viewer"):

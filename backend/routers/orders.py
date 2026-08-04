@@ -473,8 +473,93 @@ def _check_extra(conn, oid: str, extra_id) -> Optional[str]:
     return r["id"]
 
 
+def _overhead_month(conn, period: str = None) -> dict:
+    """A8: накладные месяца ФАКТОМ — общехоз расходы (order_id IS NULL,
+    purpose='overhead') + оплаченные постоянные обязательства месяца (аренда),
+    не покрытые таким расходом (инвариант «одна оплата = один факт»)."""
+    if not period:
+        period = conn.execute("SELECT strftime('%Y-%m','now')").fetchone()[0]
+    exp = conn.execute(
+        """SELECT COALESCE(SUM(amount),0) FROM expenses
+           WHERE order_id IS NULL AND purpose = 'overhead'
+             AND strftime('%Y-%m', expense_date) = ?""", (period,)).fetchone()[0] or 0
+    fixed = conn.execute(
+        """SELECT COALESCE(SUM(c.paid),0) FROM creditors c
+           WHERE c.kind = 'fixed' AND c.period = ?
+             AND NOT EXISTS (SELECT 1 FROM expenses e WHERE (
+                   e.creditor_id = c.id
+                OR (e.finance_tx_id  IS NOT NULL AND e.finance_tx_id  = c.finance_tx_id)
+                OR (e.zenmoney_tx_id IS NOT NULL AND e.zenmoney_tx_id = c.zenmoney_tx_id)))""",
+        (period,)).fetchone()[0] or 0
+    return {"period": period, "total": round(exp + fixed, 2),
+            "expenses": round(exp, 2), "fixed": round(fixed, 2)}
+
+
+def _fact_costs(conn, oids: list) -> dict:
+    """Фактическая себестоимость ПАЧКОЙ заказов: расходы + непокрытые
+    обязательства (тот же инвариант, что в _plan_fact, без разбивки по категориям).
+
+    Пачкой, а не по заказу: единственный вызов — раскладка накладных по всему
+    цеху, и два запроса на каждый заказ превращали открытие одной карточки
+    в скан производственного контура (code_rules 17.07 — N+1)."""
+    out = {oid: 0.0 for oid in oids}
+    if not oids:
+        return out
+    ph = ", ".join("?" * len(oids))
+    for r in conn.execute(
+        f"SELECT order_id AS oid, COALESCE(SUM(amount),0) AS s FROM expenses "
+        f"WHERE order_id IN ({ph}) GROUP BY order_id", oids
+    ).fetchall():
+        out[r["oid"]] += r["s"] or 0
+    for r in conn.execute(
+        f"""SELECT c.order_id AS oid, COALESCE(SUM(c.paid),0) AS s FROM creditors c
+            WHERE c.order_id IN ({ph})
+              AND NOT EXISTS (SELECT 1 FROM expenses e WHERE e.order_id = c.order_id AND (
+                    e.creditor_id = c.id
+                 OR (e.finance_tx_id  IS NOT NULL AND e.finance_tx_id  = c.finance_tx_id)
+                 OR (e.zenmoney_tx_id IS NOT NULL AND e.zenmoney_tx_id = c.zenmoney_tx_id)))
+            GROUP BY c.order_id""", oids
+    ).fetchall():
+        out[r["oid"]] += r["s"] or 0
+    return {oid: round(v, 2) for oid, v in out.items()}
+
+
+def _overhead_allocation(conn) -> dict:
+    """A8 (решение Юры 04.08.2026): накладные текущего месяца делятся между
+    заказами в производстве пропорционально их фактической себестоимости
+    (база = загрузка цеха; при нулевых фактах — поровну). Считается на лету,
+    сметы не трогает. Возвращает {"month": …, "orders": {oid: {...}}}."""
+    month = _overhead_month(conn)
+    rows = conn.execute(
+        "SELECT id, title FROM orders WHERE status = 'in_production' AND COALESCE(archived,0) = 0"
+    ).fetchall()
+    out = {"month": month, "orders": {}}
+    if not rows or month["total"] <= 0:
+        return out
+    facts = _fact_costs(conn, [r["id"] for r in rows])
+    base_total = sum(facts.values())
+    shares = {r["id"]: (facts[r["id"]] / base_total) if base_total > 0 else 1 / len(rows)
+              for r in rows}
+    amounts = {oid: round(month["total"] * s, 2) for oid, s in shares.items()}
+    # Копейки независимого округления не растворяются: сумма долей обязана
+    # сходиться с итогом месяца — иначе расхождение «строки ≠ итог» видно
+    # только в UI дашборда и тестами бэкенда не ловится (code_rules 02.08).
+    residual = round(month["total"] - sum(amounts.values()), 2)
+    if abs(residual) >= 0.01:
+        top = max(amounts, key=lambda oid: amounts[oid])
+        amounts[top] = round(amounts[top] + residual, 2)
+    for r in rows:
+        out["orders"][r["id"]] = {
+            "title": r["title"],
+            "share": round(shares[r["id"]], 4),
+            "amount": amounts[r["id"]],
+            "fact_cost": facts[r["id"]],
+        }
+    return out
+
+
 def _margin(conn, oid: str, price_plan, cost_plan, est=None, transit_facts=None,
-            discounts=None, extras=None) -> dict:
+            discounts=None, extras=None, overhead_alloc=None) -> dict:
     """Лестница прибыли по заказу. Единый источник правды — не дублировать выражением."""
     if est is None:
         est = _active_set(conn, oid)
@@ -597,6 +682,19 @@ def _margin(conn, oid: str, price_plan, cost_plan, est=None, transit_facts=None,
     }
     if transit:
         out["transit"] = transit
+    # A8 — второй уровень маржи (решение Юры): чистая минус доля накладных месяца.
+    # Появляется только у заказов в производстве (overhead_alloc передаёт get_order/
+    # дашборд); сметы и план-факт этим не обрастают.
+    if overhead_alloc is not None:
+        share = (overhead_alloc.get("orders") or {}).get(oid)
+        if share:
+            out["overhead"] = {
+                "amount": share["amount"],
+                "share": share["share"],
+                "month_total": overhead_alloc["month"]["total"],
+                "period": overhead_alloc["month"]["period"],
+            }
+            out["net_with_overhead"] = round(out["net_profit"] - share["amount"], 2)
     return out
 
 
@@ -838,6 +936,23 @@ def plan_fact_summary():
         conn.close()
 
 
+@router.get("/overhead-summary")
+def overhead_summary():
+    """A8 для дашборда: накладные текущего месяца и их раскладка по заказам
+    в производстве (база — фактическая себестоимость, решение Юры 04.08.2026)."""
+    conn = get_production()
+    try:
+        alloc = _overhead_allocation(conn)
+        return {
+            "month": alloc["month"],
+            "orders": [
+                {"order_id": oid, **row} for oid, row in alloc["orders"].items()
+            ],
+        }
+    finally:
+        conn.close()
+
+
 @router.get("/{order_id}")
 def get_order(order_id: str):
     conn = get_production()
@@ -865,16 +980,22 @@ def get_order(order_id: str):
         ).fetchall()
         # A3-лайт: «братские» платежи — эта же банковская транзакция разнесена
         # ещё и на другие заказы (Суздаль/Спираль-паттерн). Видно прямо у платежа.
+        # Одним запросом на все транзакции карточки, а не по запросу на платёж.
         payments = [dict(p) for p in payments]
-        for p in payments:
-            if p.get("bank_tx_id"):
-                sibs = conn.execute(
-                    """SELECT o.title, p2.amount FROM payments p2
-                       JOIN orders o ON o.id = p2.order_id
-                       WHERE p2.bank_tx_id = ? AND p2.id != ? AND p2.order_id != ?""",
-                    (p["bank_tx_id"], p["id"], oid)).fetchall()
-                if sibs:
-                    p["siblings"] = [{"title": s["title"], "amount": s["amount"]} for s in sibs]
+        tx_ids = [p["bank_tx_id"] for p in payments if p.get("bank_tx_id")]
+        if tx_ids:
+            ph = ", ".join("?" * len(tx_ids))
+            sibs = {}
+            for s in conn.execute(
+                f"""SELECT p2.bank_tx_id AS tx, o.title, p2.amount FROM payments p2
+                    JOIN orders o ON o.id = p2.order_id
+                    WHERE p2.bank_tx_id IN ({ph}) AND p2.order_id != ?""",
+                (*tx_ids, oid)
+            ).fetchall():
+                sibs.setdefault(s["tx"], []).append({"title": s["title"], "amount": s["amount"]})
+            for p in payments:
+                if sibs.get(p.get("bank_tx_id")):
+                    p["siblings"] = sibs[p["bank_tx_id"]]
 
         estimate_sets = conn.execute(
             "SELECT * FROM estimate_sets WHERE order_id = ? ORDER BY created_at ASC",
@@ -894,7 +1015,9 @@ def get_order(order_id: str):
         paid_total = sum(p["amount"] for p in payments)
         price_plan = order.get("price_plan") or 0
         pf = _plan_fact(conn, oid, order.get("cost_plan") or 0, paid_total, price_plan)
-        m = _margin(conn, oid, price_plan, order.get("cost_plan") or 0)
+        # A8: второй уровень маржи — только у заказа в производстве (решение Юры)
+        ov = _overhead_allocation(conn) if order.get("status") == "in_production" else None
+        m = _margin(conn, oid, price_plan, order.get("cost_plan") or 0, overhead_alloc=ov)
 
         return {
             **order,
@@ -919,6 +1042,9 @@ def get_order(order_id: str):
             "discount_note": m["discount_note"],
             "price_before_discount": m["price_before_discount"],
             "net_profit": m["net_profit"],
+            # A8: доля накладных месяца и маржа с их учётом — только in_production
+            "overhead": m.get("overhead"),
+            "net_with_overhead": m.get("net_with_overhead"),
             "payment_type": m["payment_type"],
             # Транзит: счёт / план выплаты / факт / удержание — только у транзитных заказов
             "transit": m.get("transit"),
