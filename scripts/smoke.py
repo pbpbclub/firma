@@ -39,14 +39,18 @@ ENDPOINTS = ["/api/orders", "/api/customers", "/api/masters", "/api/suppliers",
 # миграция не прошла, а сервис при этом живой. Пополнять при новых миграциях.
 REQUIRED_COLUMNS = {
     "orders": ["reserved_amount", "reserve_released_at", "discount", "discount_note"],
-    "payments": ["zenmoney_tx_id", "channel"],
+    # updated_at — волна ЛЕСКОВО-1 (Б7), проставляется триггерами trg_*_updated_at
+    "payments": ["zenmoney_tx_id", "channel", "updated_at"],
     "estimate_sets": ["payment_type", "bank_pct", "is_primary"],
     "expenses": ["creditor_id", "finance_tx_id", "zenmoney_tx_id", "payment_source", "master_id",
                  # траты без заказа: запас / образцы / общехоз (01.08.2026)
-                 "purpose", "stock_parent_id"],
-    "creditors": ["estimate_line_id", "amount_plan", "kind"],
+                 "purpose", "stock_parent_id", "updated_at"],
+    "creditors": ["estimate_line_id", "amount_plan", "kind", "updated_at"],
     # клиент ↔ подрядчик: один человек в двух картотеках (мердж Пинчука, 26.07)
-    "customers": ["telegram", "whatsapp", "master_id"],
+    "customers": ["telegram", "whatsapp", "master_id", "updated_at"],
+    # A9: снимок применённой ставки в строке (волна ЛЕСКОВО-1)
+    "estimate_lines": ["applied_rate", "rate_scheme", "rate_date", "updated_at"],
+    "catalog_item_lines": ["applied_rate", "rate_scheme", "rate_date"],
 }
 
 

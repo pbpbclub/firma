@@ -400,6 +400,7 @@ def _expand_item_from_catalog(conn, item, set_row, catalog_item_id: str) -> int:
     for i, cl in enumerate(cat_lines):
         unit_price = cl["unit_price"] or 0
         price_supplier = price_date = None
+        applied_rate = rate_scheme = rate_date = None
         code = cl["material_code"]
         if code:
             best = _lookup_cheapest(code)
@@ -409,14 +410,18 @@ def _expand_item_from_catalog(conn, item, set_row, catalog_item_id: str) -> int:
             rate = find_work_rate(conn, cl["work_type_id"], cl["master_id"])
             if rate:
                 unit_price = _rate_price(rate, item, set_row, cl["qty"])
+                # A9: снимок ставки — смета read-only навсегда, строка самодостаточна
+                applied_rate, rate_scheme = rate["rate"], rate["scheme"]
+                rate_date = _now()[:10]
         conn.execute(
             """INSERT INTO estimate_lines (id, item_id, type, title, qty, unit, unit_price, line_total,
                                            sort_order, material_code, price_supplier, price_date,
-                                           work_type_id, master_id, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                           work_type_id, master_id, applied_rate, rate_scheme, rate_date, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (str(uuid.uuid4()), item["id"], cl["type"], cl["title"], cl["qty"], cl["unit"],
              unit_price, round((cl["qty"] or 0) * unit_price, 2), i,
-             code, price_supplier, price_date, cl["work_type_id"], cl["master_id"], _now()),
+             code, price_supplier, price_date, cl["work_type_id"], cl["master_id"],
+             applied_rate, rate_scheme, rate_date, _now()),
         )
     conn.execute("UPDATE estimate_items SET catalog_item_id = ? WHERE id = ?", (catalog_item_id, item["id"]))
     return len(cat_lines)

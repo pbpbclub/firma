@@ -928,6 +928,7 @@ def from_catalog(body: FromCatalog):
             # их доводит cost-fill. Статичная unit_price каталога — фолбэк.
             unit_price = cl["unit_price"] or 0
             price_supplier = price_date = None
+            applied_rate = rate_scheme = rate_date = None
             if cl["material_code"]:
                 best = _lookup_cheapest(cl["material_code"])
                 if best and best.get("price"):
@@ -936,14 +937,18 @@ def from_catalog(body: FromCatalog):
                 rate = find_work_rate(conn, cl["work_type_id"], cl["master_id"])
                 if rate and rate["scheme"] != "percent":
                     unit_price = round(rate["rate"], 2)
+                    # A9: снимок применённой ставки (симметрия price_supplier/price_date)
+                    applied_rate, rate_scheme = rate["rate"], rate["scheme"]
+                    rate_date = _now()[:10]
             line_total = round((cl["qty"] or 0) * unit_price, 2)
             conn.execute(
                 """INSERT INTO estimate_lines (id, item_id, type, title, qty, unit, unit_price, line_total,
                                                sort_order, material_code, price_supplier, price_date,
-                                               work_type_id, master_id, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                               work_type_id, master_id, applied_rate, rate_scheme, rate_date, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (line_id, item_id, cl["type"], cl["title"], cl["qty"], cl["unit"], unit_price, line_total, i,
-                 cl["material_code"], price_supplier, price_date, cl["work_type_id"], cl["master_id"], _now())
+                 cl["material_code"], price_supplier, price_date, cl["work_type_id"], cl["master_id"],
+                 applied_rate, rate_scheme, rate_date, _now())
             )
         _recalc_item(conn, item_id)
         # New item from catalog: set initial sale_price = cost × markup

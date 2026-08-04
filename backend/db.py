@@ -1064,3 +1064,105 @@ def ensure_inbox_dismissed_schema():
         conn.commit()
     finally:
         conn.close()
+
+
+# ─── Волна ЛЕСКОВО-1 (спека docs/superpowers/specs/2026-08-04-leskovo-adoption-design.md) ───
+
+def ensure_unique_business_keys():
+    """Б4: уникальные индексы на бизнес-ключи. Частичные (WHERE …) — NULL и пустая
+    строка дублем не считаются: заказ без номера и клиент без ИНН легальны.
+
+    На payments.bank_tx_id индекса НЕТ намеренно: одна банковская транзакция
+    легально разносится на несколько платежей (from-tx, Суздаль/Спираль).
+
+    Дубли в данных (например, база из старого бэкапа) не должны ронять startup:
+    индекс тогда просто не создастся, сервис поднимется — лечится руками."""
+    conn = get_production()
+    try:
+        tables = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        wanted = [
+            ("orders", ("number",), "ux_orders_number",
+             "CREATE UNIQUE INDEX IF NOT EXISTS ux_orders_number ON orders(number) "
+             "WHERE number IS NOT NULL"),
+            ("estimate_sets", ("order_id", "number"), "ux_estimate_sets_order_number",
+             "CREATE UNIQUE INDEX IF NOT EXISTS ux_estimate_sets_order_number "
+             "ON estimate_sets(order_id, number) WHERE number IS NOT NULL"),
+            ("materials", ("sku",), "ux_materials_sku",
+             "CREATE UNIQUE INDEX IF NOT EXISTS ux_materials_sku ON materials(sku) "
+             "WHERE sku IS NOT NULL AND sku != ''"),
+            ("customers", ("inn",), "ux_customers_inn",
+             "CREATE UNIQUE INDEX IF NOT EXISTS ux_customers_inn ON customers(inn) "
+             "WHERE inn IS NOT NULL AND inn != ''"),
+        ]
+        for table, cols, name, ddl in wanted:
+            if table not in tables:
+                continue
+            existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            if not all(c in existing for c in cols):
+                continue   # узкая таблица из старого бэкапа — колонку доедет её миграция
+            try:
+                conn.execute(ddl)
+            except sqlite3.IntegrityError:
+                print(f"[db] Б4: индекс {name} не создан — в {table} есть дубли, разберите руками")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# Денежные таблицы, у которых правка строки должна быть видна (Б7).
+_UPDATED_AT_TABLES = (
+    "payments", "expenses", "creditors", "estimate_items",
+    "estimate_lines", "customers", "masters",
+)
+
+
+def ensure_updated_at_schema():
+    """Б7: updated_at через триггеры AFTER UPDATE — а не проставление в ручках.
+
+    Триггер ловит ЛЮБУЮ запись, включая прямые INSERT/UPDATE агентов в базу мимо
+    веба, — ради этого и выбран. ALTER ADD COLUMN без DEFAULT: SQLite не умеет
+    неконстантный default в ADD COLUMN, поэтому у старых строк NULL = «не правили
+    с момента миграции». Рекурсии нет: recursive_triggers в SQLite по умолчанию
+    выключен. Пересборка таблиц (ensure_general_expenses_schema) триггеры
+    восстанавливает из sqlite_master."""
+    conn = get_production()
+    try:
+        for table in _UPDATED_AT_TABLES:
+            info = conn.execute(f"PRAGMA table_info({table})").fetchall()
+            if not info:
+                continue
+            if "updated_at" not in {r[1] for r in info}:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN updated_at TEXT")
+            conn.execute(f"""
+                CREATE TRIGGER IF NOT EXISTS trg_{table}_updated_at
+                AFTER UPDATE ON {table}
+                BEGIN
+                    UPDATE {table} SET updated_at = datetime('now') WHERE id = NEW.id;
+                END
+            """)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_line_rate_snapshot_schema():
+    """A9: строка работ хранит свои входные данные — применённую ставку, её схему
+    и дату применения. Симметрия с price_supplier/price_date у материалов: смета
+    read-only навсегда, строка обязана быть самодостаточной. Заполняют точки, где
+    ставка справочника реально применяется (from-catalog, cost-fill); ручной ввод
+    цены снимка не пишет — там входные данные и есть сама цена."""
+    conn = get_production()
+    try:
+        for table in ("estimate_lines", "catalog_item_lines"):
+            info = conn.execute(f"PRAGMA table_info({table})").fetchall()
+            if not info:
+                continue
+            existing = {r[1] for r in info}
+            for col in ("applied_rate REAL", "rate_scheme TEXT", "rate_date TEXT"):
+                name = col.split()[0]
+                if name not in existing:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {col}")
+        conn.commit()
+    finally:
+        conn.close()
