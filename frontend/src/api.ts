@@ -319,6 +319,17 @@ export const paymentsApi = {
     api.delete(`/payments/inbox/${txId}/dismiss`).then((r) => r.data),
 };
 
+// Лицевой счёт подрядчика: взаиморасчёты (начислено / выплачено / за него / зачёт)
+export const ledgerApi = {
+  master: (id: string, params?: { date_from?: string; date_to?: string }) =>
+    api.get(`/ledger/masters/${id}`, { params }).then((r) => r.data),
+  balances: (params?: { date_to?: string; nonzero?: boolean }) =>
+    api.get("/ledger/balances", { params }).then((r) => r.data),
+  createEntry: (data: Record<string, any>) => api.post("/ledger/entries", data).then((r) => r.data),
+  deleteEntry: (entryId: string) => api.delete(`/ledger/entries/${entryId}`).then((r) => r.data),
+  contractorPay: (data: Record<string, any>) => api.post("/ledger/contractor-pay", data).then((r) => r.data),
+};
+
 export const mastersApi = {
   list: () => api.get("/masters").then((r) => r.data),
   wikiOnly: () => api.get("/masters/wiki-only").then((r) => r.data),

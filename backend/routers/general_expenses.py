@@ -27,11 +27,17 @@ from routers.orders import EXPENSE_CATEGORIES
 
 router = APIRouter()
 
-PURPOSES = ("stock", "sample", "overhead")
+# contractor_pay / contractor_third_party — обороты лицевого счёта подрядчика
+# (ТЗ 05.08.2026, routers/ledger.py): деньги ушли, но это не наша себестоимость
+# и не накладные — это дебет лицевого счёта, гасится будущими работами мастера.
+PURPOSES = ("stock", "sample", "overhead", "contractor_pay", "contractor_third_party")
+LEDGER_PURPOSES = ("contractor_pay", "contractor_third_party")
 PURPOSE_LABELS = {
     "stock": "Запас",
     "sample": "Образцы и тесты",
     "overhead": "Общехозяйственные",
+    "contractor_pay": "Аванс подрядчику",
+    "contractor_third_party": "Оплата за подрядчика",
 }
 
 
@@ -92,6 +98,11 @@ def _validate(body: GeneralExpenseIn, check_amount: bool = True):
         raise HTTPException(status_code=400, detail=f"purpose must be one of {'|'.join(PURPOSES)}")
     if body.category not in EXPENSE_CATEGORIES:
         raise HTTPException(status_code=400, detail=f"category must be one of {'|'.join(EXPENSE_CATEGORIES)}")
+    if body.purpose in LEDGER_PURPOSES and not body.master_id:
+        # Оборот лицевого счёта без мастера повис бы в воздухе: деньги ушли,
+        # а чей это аванс — неизвестно (см. routers/ledger.py).
+        raise HTTPException(status_code=400,
+                            detail=f"purpose={body.purpose} требует master_id (чей это лицевой счёт)")
     if body.payment_source not in (None, "cash_fund", "accountable"):
         raise HTTPException(status_code=400, detail="payment_source must be cash_fund|accountable or empty")
     if body.payment_source == "accountable" and not body.accountable_person_id:
@@ -105,7 +116,7 @@ def _row(conn, eid: str) -> dict:
 
 @router.get("")
 def list_general(
-    purpose: Optional[str] = Query(None, pattern="^(stock|sample|overhead)$"),
+    purpose: Optional[str] = Query(None, pattern="^(stock|sample|overhead|contractor_pay|contractor_third_party)$"),
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     with_spent: bool = True,
@@ -194,6 +205,8 @@ def summary(date_from: Optional[str] = None, date_to: Optional[str] = None):
             "SELECT COALESCE(SUM(amount), 0) AS total FROM expenses WHERE "
             + " AND ".join(wo_where), wo_params
         ).fetchone()
+        ledger = {"amount": round(sum(by.get(p, {}).get("amount", 0) for p in LEDGER_PURPOSES), 2),
+                  "count": sum(by.get(p, {}).get("count", 0) for p in LEDGER_PURPOSES)}
         stock = by.get("stock", {"amount": 0, "count": 0})
         sample = by.get("sample", {"amount": 0, "count": 0})
         overhead = by.get("overhead", {"amount": 0, "count": 0})
@@ -205,6 +218,10 @@ def summary(date_from: Optional[str] = None, date_to: Optional[str] = None):
             "sample_count": sample["count"],
             "overhead": overhead["amount"],
             "overhead_count": overhead["count"],
+            # Лицевой счёт подрядчика — не расход периода, а выданный аванс:
+            # в total (P&L общего контура) не входит, но и не теряется из виду.
+            "contractor_ledger": ledger["amount"],
+            "contractor_ledger_count": ledger["count"],
             "total": round(stock["amount"] + sample["amount"] + overhead["amount"], 2),
         }
     finally:

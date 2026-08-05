@@ -4,13 +4,13 @@ import { MONO } from "../../components/ui/Num";
 // Общая строка «метка — значение» в карточке вики. Метка — мета 11, значение —
 // контент 13 (единый кегль контента по всей Вики). href — значение кликабельно
 // (звонок, почта, переход в мессенджер).
-export function DetailRow({ label, value, mono, href }: {
-  label: string; value?: string | null; mono?: boolean; href?: string;
+export function DetailRow({ label, value, mono, href, valueColor }: {
+  label: string; value?: string | null; mono?: boolean; href?: string; valueColor?: string;
 }) {
   const [hover, setHover] = useState(false);
   const valueStyle: React.CSSProperties = {
     fontSize: 13, fontWeight: 500,
-    color: !value ? "#C8C0B0" : href && hover ? "#E8592A" : "#1A1A1A",
+    color: !value ? "#C8C0B0" : href && hover ? "#E8592A" : valueColor || "#1A1A1A",
     textAlign: "right", maxWidth: 240, wordBreak: "break-word",
     fontFamily: mono && value ? MONO : undefined, fontVariantNumeric: mono ? "tabular-nums" : undefined,
   };

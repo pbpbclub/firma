@@ -1556,3 +1556,65 @@ def ensure_line_rate_snapshot_schema():
         conn.commit()
     finally:
         conn.close()
+
+
+def ensure_master_ledger_schema():
+    """Лицевой счёт подрядчика — регистр взаиморасчётов (ТЗ фин-агента 05.08.2026).
+
+    Расчёты с мастером не сводятся к «расходу по заказу»: Кебра просит оплатить
+    ткань для ЧУЖОГО заказа (деньги наши, себестоимость не наша), один перевод
+    уходит авансом сразу на два заказа, а «сколько мы должны мастеру на сегодня»
+    не считается вовсе — начисления живут в creditors, выплаты в expenses.
+
+    Регистр СОБИРАЕТСЯ, а не дублируется (routers/ledger.py::_entries):
+      начислено (+) — creditors по имени мастера (total);
+      выплачено (−) — expenses.master_id + creditors.paid, не покрытые расходом
+                      (тот же дедуп, что в masters._paid_total и orders._plan_fact);
+      за него третьим лицам (−) — expenses.purpose='contractor_third_party';
+      аванс без заказа (−)      — expenses.purpose='contractor_pay'.
+    Обе новые purpose живут при order_id IS NULL, поэтому в себестоимость заказов
+    и в накладные (A8 фильтрует purpose='overhead') не попадают по построению.
+
+    Эта таблица — только для того, чему нет места среди денег и обязательств:
+    зачёт встречных требований, ручное начисление, корректировка сальдо.
+    Дублировать ею expenses/creditors нельзя — задвоит оборот."""
+    conn = get_production()
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS master_ledger (
+                id             TEXT PRIMARY KEY,
+                master_id      TEXT NOT NULL,
+                kind           TEXT NOT NULL,
+                amount         REAL NOT NULL,
+                happened_at    TEXT NOT NULL,
+                order_id       TEXT,
+                note           TEXT,
+                creditor_id    TEXT,
+                expense_id     TEXT,
+                finance_tx_id  TEXT,
+                zenmoney_tx_id TEXT,
+                source         TEXT DEFAULT 'manual',
+                created_by     TEXT,
+                created_at     TEXT DEFAULT (datetime('now')),
+                updated_at     TEXT DEFAULT (datetime('now')),
+                CHECK (kind IN ('accrual', 'payment', 'third_party', 'offset', 'adjust')),
+                FOREIGN KEY (master_id) REFERENCES masters(id),
+                FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL,
+                FOREIGN KEY (creditor_id) REFERENCES creditors(id) ON DELETE SET NULL
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_master_ledger_master ON master_ledger(master_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_master_ledger_date ON master_ledger(happened_at)")
+        conn.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_master_ledger_updated_at
+            AFTER UPDATE ON master_ledger
+            BEGIN
+                UPDATE master_ledger SET updated_at = datetime('now') WHERE id = NEW.id;
+            END
+        """)
+        # Выплаты ищутся по мастеру — без индекса это скан expenses на каждую карточку.
+        if conn.execute("PRAGMA table_info(expenses)").fetchall():
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_expenses_master ON expenses(master_id)")
+        conn.commit()
+    finally:
+        conn.close()

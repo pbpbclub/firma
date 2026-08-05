@@ -271,7 +271,7 @@ class Allocation(BaseModel):
     # order_id пуст → строка уходит «без заказа» с назначением purpose
     # (запас / собственный образец / общехозяйственное, ТЗ stock_and_samples 01.08.2026).
     order_id: Optional[str] = None
-    purpose: Optional[str] = None       # stock | sample | overhead
+    purpose: Optional[str] = None       # stock | sample | overhead | contractor_pay | contractor_third_party
     amount: float
     # Гранулярность по строке: своя категория/подрядчик/поставщик на каждый заказ.
     # Если не заданы — берём из тела (обратная совместимость со старым форматом).
@@ -299,6 +299,7 @@ class FromTxIn(BaseModel):
 def create_from_tx(body: FromTxIn):
     """Разнести транзакцию на 1..N заказов. N>1 — одна поездка на несколько заказов."""
     from routers.orders import EXPENSE_CATEGORIES, _check_extra
+    from routers.general_expenses import PURPOSES, LEDGER_PURPOSES
 
     if body.source not in ("bank", "zen"):
         raise HTTPException(status_code=400, detail="source must be bank|zen")
@@ -312,16 +313,22 @@ def create_from_tx(body: FromTxIn):
         if a.category and a.category not in EXPENSE_CATEGORIES:
             raise HTTPException(status_code=400, detail=f"category must be one of {'|'.join(EXPENSE_CATEGORIES)}")
         if not a.order_id and not a.purpose:
-            raise HTTPException(status_code=400, detail="строке нужен order_id либо purpose (stock|sample|overhead)")
+            raise HTTPException(status_code=400, detail=f"строке нужен order_id либо purpose ({'|'.join(PURPOSES)})")
         if a.order_id and a.purpose:
             # purpose заполняется ТОЛЬКО при order_id IS NULL (см. general_expenses).
             # Молча уронить его в заказной ветке нельзя: клиент считает, что завёл
             # запас, а строка легла в себестоимость заказа.
             raise HTTPException(
                 status_code=400,
-                detail="order_id и purpose взаимоисключающие: расход либо на заказ, либо общий (stock|sample|overhead)")
-        if a.purpose and a.purpose not in ("stock", "sample", "overhead"):
-            raise HTTPException(status_code=400, detail="purpose must be stock|sample|overhead")
+                detail="order_id и purpose взаимоисключающие: расход либо на заказ, либо общий "
+                       f"({'|'.join(PURPOSES)})")
+        if a.purpose and a.purpose not in PURPOSES:
+            raise HTTPException(status_code=400, detail=f"purpose must be {'|'.join(PURPOSES)}")
+        if a.purpose in LEDGER_PURPOSES and not (a.master_id or body.master_id):
+            # Оборот лицевого счёта без мастера повис бы в воздухе: деньги ушли,
+            # ни заказ, ни лицевой счёт их не видят.
+            raise HTTPException(status_code=400,
+                                detail=f"purpose={a.purpose} требует master_id (чей это лицевой счёт)")
 
     # Транзакция должна существовать и быть ещё не разнесённой
     bank_done, zen_done, degraded = _allocated_ids()

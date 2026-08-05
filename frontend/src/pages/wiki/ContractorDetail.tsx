@@ -5,7 +5,7 @@ import { useNavigationGuard, NavigationGuardModal } from "../../components/Navig
 import { EditModal, type FieldDef } from "../../components/EditModal";
 import { PayeeRulesSection } from "../../components/PayeeRulesSection";
 import { useNavigate } from "react-router-dom";
-import { mastersApi, financeApi } from "../../api";
+import { mastersApi, financeApi, ledgerApi } from "../../api";
 import { ContactStrip, contactHref } from "../../components/ui/ContactLinks";
 import { PriceSync } from "./SupplierDetail";
 import { Check, User } from "@phosphor-icons/react";
@@ -71,6 +71,12 @@ export function ContractorDetail({ id, onClose }: { id: string; onClose: () => v
   const { data, isLoading } = useQuery({
     queryKey: ["master", id],
     queryFn: () => mastersApi.get(id),
+  });
+
+  // Лицевой счёт: начисления (creditors) и выплаты (expenses) сходятся в одно сальдо.
+  const { data: ledger } = useQuery({
+    queryKey: ["ledger", "master", id],
+    queryFn: () => ledgerApi.master(id),
   });
 
   const invalidate = () => {
@@ -150,7 +156,13 @@ export function ContractorDetail({ id, onClose }: { id: string; onClose: () => v
         metrics={((): DetailMetric[] | undefined => {
           const m: DetailMetric[] = [];
           if (data?.paid_total > 0) m.push({ label: "Выплачено", value: fmt(data.paid_total), color: "#4A7C59" });
-          if (totalDebt > 0) m.push({ label: "Долг", value: fmt(totalDebt), color: "#8B3A3A" });
+          // Долг берём из лицевого счёта: сумма открытых обязательств не учитывает
+          // выплаты, прошедшие расходом, и на карточке спорила бы с сальдо ниже.
+          if (ledger && Math.abs(ledger.balance) >= 1)
+            m.push({ label: ledger.balance > 0 ? "Мы должны" : "Аванс у мастера",
+                     value: fmt(Math.abs(ledger.balance)),
+                     color: ledger.balance > 0 ? "#8B3A3A" : "#4A7C59" });
+          else if (!ledger && totalDebt > 0) m.push({ label: "Долг", value: fmt(totalDebt), color: "#8B3A3A" });
           return m.length ? m : undefined;
         })()}
         onEdit={() => setEditing(true)}
@@ -192,6 +204,34 @@ export function ContractorDetail({ id, onClose }: { id: string; onClose: () => v
           <DetailSection label="ОПЛАТА">
             {wiki.pay_label && <Row label="Схема" value={wiki.pay_label} />}
             {wiki.prepay_pct > 0 && <Row label="Предоплата" value={`${wiki.prepay_pct}%`} mono />}
+          </DetailSection>
+        )}
+
+        {ledger && ledger.entries?.length > 0 && (
+          <DetailSection label="ЛИЦЕВОЙ СЧЁТ">
+            <Row label={ledger.balance >= 0 ? "Мы должны" : "Аванс у мастера"}
+                 value={fmt(Math.abs(ledger.balance))} mono
+                 valueColor={ledger.balance > 0 ? "#8B3A3A" : ledger.balance < 0 ? "#4A7C59" : undefined} />
+            <Row label="Начислено по сметам" value={fmt(ledger.accrued)} mono />
+            <Row label="Выплачено" value={fmt(ledger.paid)} mono />
+            {ledger.third_party > 0 && <Row label="Оплачено за него" value={fmt(ledger.third_party)} mono />}
+            {ledger.offset > 0 && <Row label="Зачтено" value={fmt(ledger.offset)} mono />}
+            <div style={{ marginTop: 10 }}>
+              {ledger.entries.slice(0, 8).map((e: any, i: number) => (
+                <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "6px 0",
+                                      borderBottom: "1px solid #F2EFE9" }}>
+                  <span style={{ fontFamily: MONO, fontSize: 11, color: "#A89070", minWidth: 74 }}>{fmtDate(e.date)}</span>
+                  <span style={{ fontSize: 11, color: "#A89070", minWidth: 108 }}>{e.kind_label}</span>
+                  <span style={{ fontSize: 12, color: "#1A1A1A", flex: 1, overflow: "hidden",
+                                 textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {e.order_title || e.title}
+                  </span>
+                  <span style={{ fontFamily: MONO, fontSize: 12, color: e.sign > 0 ? "#8B3A3A" : "#4A7C59" }}>
+                    {e.sign > 0 ? "+" : "−"}{fmt(e.amount)}
+                  </span>
+                </div>
+              ))}
+            </div>
           </DetailSection>
         )}
 

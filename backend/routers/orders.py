@@ -1849,6 +1849,7 @@ def split_expense(order_id: str, expense_id: str, body: SplitIn):
     заказа целиком — вместе с creditor_id снимается и extra_id. Наличный контур (payment_source=cash_fund)
     пересчитывает движение кассы для каждой части, а не оставляет одно на исходной
     строке на полную сумму — иначе касса рассинхронится при правке/удалении части."""
+    from routers.general_expenses import PURPOSES
     if len(body.parts) < 2:
         raise HTTPException(status_code=400, detail="Нужно минимум 2 части")
     for p in body.parts:
@@ -1856,8 +1857,8 @@ def split_expense(order_id: str, expense_id: str, body: SplitIn):
             raise HTTPException(status_code=400, detail=f"category must be one of {'|'.join(EXPENSE_CATEGORIES)}")
         if p.amount <= 0:
             raise HTTPException(status_code=400, detail="Сумма части должна быть > 0")
-        if p.purpose is not None and p.purpose not in ("stock", "sample", "overhead"):
-            raise HTTPException(status_code=400, detail="purpose must be stock|sample|overhead")
+        if p.purpose is not None and p.purpose not in PURPOSES:
+            raise HTTPException(status_code=400, detail=f"purpose must be {'|'.join(PURPOSES)}")
     conn = get_production()
     try:
         r = conn.execute(
