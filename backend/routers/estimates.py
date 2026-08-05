@@ -273,6 +273,19 @@ class ItemCreate(BaseModel):
     quantity: int = 1
     bank_pct: Optional[float] = None
     sort_order: int = 0
+    cost_total: Optional[float] = None
+    sale_price: Optional[float] = None
+    # Ввод «за штуку» — те же поля и те же правила, что в ItemUpdate
+    # (запрос фин-агента 05.08.2026: заводить позицию сразу с ценами, чтобы
+    # его CLI не держал собственную копию формулы безнала).
+    cost_unit: Optional[float] = None
+    sale_unit: Optional[float] = None
+    client_unit: Optional[float] = None
+
+
+class SetFullCreate(SetCreate):
+    """Смета одним запросом: шапка + позиции (см. POST /sets/full)."""
+    items: List[ItemCreate] = []
 
 
 class ItemUpdate(BaseModel):
@@ -346,6 +359,45 @@ def create_set(body: SetCreate):
         conn.commit()
         row = conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
         return dict(row)
+    finally:
+        conn.close()
+
+
+@router.post("/sets/full")
+def create_set_full(body: SetFullCreate):
+    """Смета целиком одним запросом: сет + позиции с ценами (в т.ч. «за штуку»).
+
+    Ради этого эндпоинта фин-агент отказался от прямой записи в SQLite — там
+    жила своя копия формулы безнала, которая уже разъезжалась с money.py
+    (счёт 280 800 ₽ по ART ГАММА превратился в 285 700 ₽). Единственный
+    источник расчёта — client_price/cash_from_client, здесь и нигде больше."""
+    conn = get_production()
+    try:
+        if not conn.execute("SELECT 1 FROM orders WHERE id = ?", (body.order_id,)).fetchone():
+            raise HTTPException(status_code=404, detail="Order not found")
+        set_id = str(uuid.uuid4())
+        now = _now()
+        conn.execute(
+            """INSERT INTO estimate_sets (id, order_id, title, status, payment_type, bank_pct, notes, costing_version, created_at, updated_at)
+               VALUES (?, ?, ?, 'draft', ?, ?, ?, 'catalog_v1', ?, ?)""",
+            (set_id, body.order_id, body.title, body.payment_type, body.bank_pct, body.notes, now, now)
+        )
+        for it in body.items:
+            _insert_item(conn, set_id, it, body.payment_type, body.bank_pct)
+        audit(conn, "estimate", set_id, "create",
+              f"Создана смета «{body.title or '—'}» ({len(body.items)} поз.)")
+        totals = set_totals(conn, set_id)
+        conn.commit()
+        items = [dict(r) for r in conn.execute(
+            "SELECT * FROM estimate_items WHERE set_id = ? ORDER BY sort_order", (set_id,)
+        ).fetchall()]
+        return {
+            "set_id": set_id,
+            "set": dict(conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()),
+            "items": items,
+            "cost": totals["cost"],
+            "price": totals["price"],
+        }
     finally:
         conn.close()
 
@@ -645,26 +697,46 @@ def price_check(set_id: str):
 
 # ─── estimate_items ──────────────────────────────────────────────────────────
 
+def _insert_item(conn, set_id: str, body: ItemCreate, payment_type: str, set_bank_pct) -> str:
+    """Вставка позиции сметы с ценами (в т.ч. «за штуку»). Без commit — вызывающий
+    решает, чем закрыть транзакцию. Общая точка для add_item и create_set_full."""
+    item_id = str(uuid.uuid4())
+    bank_pct = body.bank_pct if body.bank_pct is not None else (set_bank_pct or DEFAULT_BANK_PCT)
+    sort_order = body.sort_order
+    if not sort_order:
+        sort_order = conn.execute(
+            "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM estimate_items WHERE set_id = ?", (set_id,)
+        ).fetchone()[0]
+    fields = body.model_dump(exclude_unset=True)
+    # bank_pct берём эффективный (переданный в позиции важнее сетового): цена
+    # «к оплате» за штуку должна разворачиваться тем же процентом, что и хранится.
+    _apply_unit_fields(
+        fields,
+        quantity=body.quantity or 1,
+        payment_type=payment_type or "cash",
+        bank_pct=bank_pct,
+    )
+    conn.execute(
+        """INSERT INTO estimate_items (id, set_id, title, category, markup, quantity, overhead_pct, tax_pct, cost_total, sale_price, bank_pct, sort_order, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?)""",
+        (item_id, set_id, body.title, body.category, body.markup, body.quantity,
+         fields.get("cost_total") or 0, fields.get("sale_price") or 0,
+         bank_pct, sort_order, _now())
+    )
+    return item_id
+
+
 @router.post("/sets/{set_id}/items")
 def add_item(set_id: str, body: ItemCreate):
     conn = get_production()
     try:
-        set_row = conn.execute("SELECT id, bank_pct FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
+        set_row = conn.execute(
+            "SELECT id, payment_type, bank_pct FROM estimate_sets WHERE id = ?", (set_id,)
+        ).fetchone()
         if not set_row:
             raise HTTPException(status_code=404, detail="Set not found")
         _assert_set_editable(conn, set_id)
-        item_id = str(uuid.uuid4())
-        bank_pct = body.bank_pct if body.bank_pct is not None else (set_row["bank_pct"] or 13)
-        sort_order = body.sort_order
-        if not sort_order:
-            sort_order = conn.execute(
-                "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM estimate_items WHERE set_id = ?", (set_id,)
-            ).fetchone()[0]
-        conn.execute(
-            """INSERT INTO estimate_items (id, set_id, title, category, markup, quantity, overhead_pct, tax_pct, cost_total, sale_price, bank_pct, sort_order, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, 0, ?, ?, ?)""",
-            (item_id, set_id, body.title, body.category, body.markup, body.quantity, bank_pct, sort_order, _now())
-        )
+        item_id = _insert_item(conn, set_id, body, set_row["payment_type"], set_row["bank_pct"])
         conn.commit()
         set_status = conn.execute("SELECT status FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
         if set_status and set_status["status"] == "approved":
