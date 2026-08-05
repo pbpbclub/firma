@@ -161,6 +161,15 @@ costing_rules(pattern, kind material|catalog|work, target_id) -- выученн�
 - BOM из Blender: `POST /api/catalog/import-bom`, контракт в `docs/bom-contract.md`.
 - Финагент: `firma.py cost-check/cost-fill/rate-set/price-set/rates` (сценарий в его CLAUDE.md).
 
+**Сметы извне — только через API, не в SQLite.** `POST /api/estimates/sets/full` (сет +
+позиции одним запросом) — единственная точка входа для агентов; с 05.08.2026 на неё
+переведён `production.py estimate-create`, прямая запись смет в базу оттуда убрана
+(своя копия формулы безнала уже разъезжалась с `money.py`). Цены за штуку —
+`cost_unit` / `sale_unit` / `client_unit` (`client_unit` = «к оплате», безнал
+разворачивается сервером через `cash_from_client`). **`markup` сервер в цену не
+разворачивает**: `cost_total` — самостоятельное поле, и если вызывающий знает
+себестоимость, её надо слать в том же запросе, а не дописывать вторым PUT.
+
 ### finance.db (ключевые таблицы)
 ```sql
 transactions(id, bank, account, date, amount, direction, counterparty, purpose, doc_num)
