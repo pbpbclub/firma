@@ -512,8 +512,8 @@ def cost_fill(set_id: str, body: Optional[CostFillIn] = None):
 
 # ─── готовность к заполнению: что мешает доверять цифрам ────────────────────
 
-def _tx_overspread(conn) -> list:
-    """Разнесено больше, чем было в переводе.
+def _tx_overspread(conn) -> tuple[list, list]:
+    """Разнесено больше, чем было в переводе. Возвращает (список, недоступные источники).
 
     Один перевод законно кормит несколько заказов (45 500 Годнику 12.05.2026 =
     40 000 ТО систем + 5 500 рассылка), поэтому дедуп факта в orders.py::_transit_facts
@@ -539,8 +539,11 @@ def _tx_overspread(conn) -> list:
             "title": r["title"], "payee": r["supplier"],
         })
 
-    # Сумма перевода — из чужих баз, короткой транзакцией и без падения:
-    # нет базы (WAL/права) — проверку просто не показываем.
+    # Сумма перевода — из чужих баз, короткой транзакцией и без падения. Но молча
+    # вернуть пустоту нельзя: пустой список сторожа читается как «ошибок нет»
+    # (code_rules 05.08.2026) — недоступный источник отдаём отдельным признаком.
+    degraded: list[str] = []
+
     def _amounts(kind, sql, getter):
         ids = [tx for (k, tx) in parts if k == kind]
         if not ids:
@@ -555,7 +558,8 @@ def _tx_overspread(conn) -> list:
                         out[str(r["id"])] = (r["amount"] or 0, r["date"], r["payee"])
             finally:
                 c.close()
-        except Exception:
+        except Exception as e:
+            degraded.append(f"{kind}: {e}")
             return {}
         return out
 
@@ -591,7 +595,7 @@ def _tx_overspread(conn) -> list:
             "parts": sorted(p["parts"], key=lambda x: -(x["amount"] or 0)),
         })
     out.sort(key=lambda x: -x["excess"])
-    return out
+    return out, degraded
 
 
 @router.get("/readiness")
@@ -711,13 +715,15 @@ def readiness():
                ORDER BY wr.rate DESC"""
         ).fetchall()]
 
-        tx_overspread = _tx_overspread(conn)
+        tx_overspread, tx_overspread_degraded = _tx_overspread(conn)
 
         return {
             "duplicate_sets": duplicate_sets,
             "invoice_drift": invoice_drift,
             "transit_as_bank": transit_as_bank,
             "tx_overspread": tx_overspread,
+            # Пусто из-за недоступного источника — не то же самое, что «ошибок нет».
+            "tx_overspread_degraded": tx_overspread_degraded,
             "stub_items": stub_items,
             "sum_only_items": sum_only_items,
             "rate_holes": rate_holes,
@@ -727,6 +733,7 @@ def readiness():
                 "invoice_drift": len(invoice_drift),
                 "transit_as_bank": len(transit_as_bank),
                 "tx_overspread": len(tx_overspread),
+                "tx_overspread_degraded": len(tx_overspread_degraded),
                 "stub_items": len(stub_items),
                 "sum_only_items": len(sum_only_items),
                 "rate_holes": len(rate_holes),

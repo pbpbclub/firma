@@ -378,6 +378,13 @@ def create_from_tx(body: FromTxIn):
 
     conn = get_production()
     try:
+        # Мастер обязан существовать: непустой, но выдуманный id создавал расход,
+        # который не виден ни в заказе (order_id IS NULL), ни на одном лицевом счёте
+        # (_entries ищет по master_id) — ровно то, что проверка должна была исключить.
+        for mid in {a.master_id or body.master_id for a in body.allocations
+                    if a.purpose in LEDGER_PURPOSES}:
+            if not conn.execute("SELECT 1 FROM masters WHERE id = ?", (mid,)).fetchone():
+                raise HTTPException(status_code=404, detail=f"Подрядчик не найден: {mid}")
         col = "finance_tx_id" if body.source == "bank" else "zenmoney_tx_id"
         created = []
         for a in body.allocations:

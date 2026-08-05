@@ -119,8 +119,12 @@ export function ReadinessPanel() {
 
   if (isLoading) return <Loading />;
   const s = data?.summary ?? {};
+  // Проверка «разнесено сверх перевода» читает суммы из банковской/ZenMoney базы.
+  // База недоступна — список пуст, но это НЕ «ошибок нет»: говорим об этом прямо,
+  // и «Всё заполнено» не показываем.
+  const degraded: string[] = data?.tx_overspread_degraded ?? [];
   const clean = !s.orders_with_duplicates && !s.invoice_drift && !s.stub_items
-    && !s.rate_holes && !s.suspicious_rates && !s.tx_overspread;
+    && !s.rate_holes && !s.suspicious_rates && !s.tx_overspread && !degraded.length;
 
   return (
     <div style={{ padding: "20px 28px 40px", overflow: "auto" }}>
@@ -141,6 +145,15 @@ export function ReadinessPanel() {
       {clean && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#4A7C59" }}>
           <Check size={14} /> Всё заполнено — можно заводить заказы.
+        </div>
+      )}
+
+      {!!degraded.length && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13,
+                      color: "#8B3A3A", marginBottom: 18 }}>
+          <Warning size={14} style={{ flexShrink: 0 }} />
+          Проверка «разнесено сверх перевода» не отработала: суммы переводов не прочитались
+          ({degraded.join("; ")}). Пустой список здесь не значит «ошибок нет».
         </div>
       )}
 
