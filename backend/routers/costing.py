@@ -21,7 +21,7 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from db import get_production, get_materials
+from db import get_production, get_materials, get_zenmoney, get_finance
 from money import client_price
 from routers.estimates import (
     _lookup_cheapest, _recalc_item, _touch_set, _assert_set_editable, _now,
@@ -512,6 +512,88 @@ def cost_fill(set_id: str, body: Optional[CostFillIn] = None):
 
 # ─── готовность к заполнению: что мешает доверять цифрам ────────────────────
 
+def _tx_overspread(conn) -> list:
+    """Разнесено больше, чем было в переводе.
+
+    Один перевод законно кормит несколько заказов (45 500 Годнику 12.05.2026 =
+    40 000 ТО систем + 5 500 рассылка), поэтому дедуп факта в orders.py::_transit_facts
+    ключуется парой (tx_id, order_id) и такие части не глотает. Обратная сторона:
+    ошибку разноски — сумма частей больше самой транзакции — тоже никто не поймает.
+    Ловим её здесь: показываем Юре перевод, части и превышение.
+
+    Расхождение до 1 ₽ игнорируем (копейки округления). Недобор НЕ показываем:
+    перевод, разнесённый частично, — нормальная рабочая ситуация."""
+    parts = {}
+    for r in conn.execute(
+        """SELECT e.finance_tx_id, e.zenmoney_tx_id, e.amount, e.title, e.supplier,
+                  o.id AS order_id, o.number AS order_number, o.title AS order_title
+           FROM expenses e JOIN orders o ON o.id = e.order_id
+           WHERE e.finance_tx_id IS NOT NULL OR e.zenmoney_tx_id IS NOT NULL"""
+    ).fetchall():
+        kind, tx = ("zm", r["zenmoney_tx_id"]) if r["zenmoney_tx_id"] else ("fin", r["finance_tx_id"])
+        p = parts.setdefault((kind, str(tx)), {"parts": [], "total": 0.0})
+        p["total"] += r["amount"] or 0
+        p["parts"].append({
+            "order_id": r["order_id"], "order_number": r["order_number"],
+            "order_title": r["order_title"], "amount": r["amount"] or 0,
+            "title": r["title"], "payee": r["supplier"],
+        })
+
+    # Сумма перевода — из чужих баз, короткой транзакцией и без падения:
+    # нет базы (WAL/права) — проверку просто не показываем.
+    def _amounts(kind, sql, getter):
+        ids = [tx for (k, tx) in parts if k == kind]
+        if not ids:
+            return {}
+        out = {}
+        try:
+            c = getter()
+            try:
+                for chunk in (ids[i:i + 400] for i in range(0, len(ids), 400)):
+                    q = sql.format(",".join("?" * len(chunk)))
+                    for r in c.execute(q, chunk).fetchall():
+                        out[str(r["id"])] = (r["amount"] or 0, r["date"], r["payee"])
+            finally:
+                c.close()
+        except Exception:
+            return {}
+        return out
+
+    tx_amounts = {}
+    tx_amounts.update({
+        ("zm", k): v for k, v in _amounts(
+            "zm",
+            "SELECT id, COALESCE(outcome,0) AS amount, date, payee FROM zm_transactions "
+            "WHERE id IN ({})", get_zenmoney).items()})
+    tx_amounts.update({
+        ("fin", k): v for k, v in _amounts(
+            "fin",
+            "SELECT id, amount, date, counterparty AS payee FROM transactions "
+            "WHERE direction = 'out' AND CAST(id AS TEXT) IN ({})", get_finance).items()})
+
+    out = []
+    for key, p in parts.items():
+        known = tx_amounts.get(key)
+        if not known or len(p["parts"]) < 2:
+            continue
+        # Только РАЗБИТЫЕ переводы: это ровно тот риск, который открылся вместе
+        # с ключом (tx_id, order_id). Один расход, отличающийся от транзакции на
+        # копейки-комиссию (доставка 1 351 при списании 1 332), — не ошибка
+        # разноски, и в этот список ему попадать незачем.
+        tx_amount, tx_date, tx_payee = known
+        if not tx_amount or p["total"] - tx_amount <= 1:
+            continue
+        out.append({
+            "source": key[0], "tx_id": key[1], "tx_amount": round(tx_amount, 2),
+            "tx_date": tx_date, "tx_payee": tx_payee,
+            "spread": round(p["total"], 2),
+            "excess": round(p["total"] - tx_amount, 2),
+            "parts": sorted(p["parts"], key=lambda x: -(x["amount"] or 0)),
+        })
+    out.sort(key=lambda x: -x["excess"])
+    return out
+
+
 @router.get("/readiness")
 def readiness():
     """Сводка «что не заполнено» по всем живым заказам: дубли смет, позиции с
@@ -629,10 +711,13 @@ def readiness():
                ORDER BY wr.rate DESC"""
         ).fetchall()]
 
+        tx_overspread = _tx_overspread(conn)
+
         return {
             "duplicate_sets": duplicate_sets,
             "invoice_drift": invoice_drift,
             "transit_as_bank": transit_as_bank,
+            "tx_overspread": tx_overspread,
             "stub_items": stub_items,
             "sum_only_items": sum_only_items,
             "rate_holes": rate_holes,
@@ -641,6 +726,7 @@ def readiness():
                 "orders_with_duplicates": len(duplicate_sets),
                 "invoice_drift": len(invoice_drift),
                 "transit_as_bank": len(transit_as_bank),
+                "tx_overspread": len(tx_overspread),
                 "stub_items": len(stub_items),
                 "sum_only_items": len(sum_only_items),
                 "rate_holes": len(rate_holes),

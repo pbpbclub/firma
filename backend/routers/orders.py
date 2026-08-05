@@ -287,7 +287,13 @@ def _transit_facts(conn) -> dict:
                                       "sources": [], "sources_extra": []})
 
     zm_seen = set()      # zenmoney_tx_id, уже учтённые своими источниками
-    tx_seen = set()      # (вид, tx_id) — ловим дубли внутри самих expenses
+    # (вид, tx_id, order_id) — дубль ловим ВНУТРИ заказа. Ключ без order_id был
+    # глобальным и терял законный случай: один перевод оплачивает несколько заказов
+    # (45 500 Годнику 12.05.2026 = 40 000 по ТО систем + 5 500 по рассылке — второй
+    # расход отбрасывался, факт заказа занижался ровно на его долю).
+    # Страховка от настоящей ошибки разноски (сумма частей больше самого перевода) —
+    # отдельной проверкой в «Готовности» (costing.py::readiness → tx_overspread).
+    tx_seen = set()
     # Третий контур дедупа — по СУММЕ. Ручной расход (или закрытое руками
     # обязательство) не несёт tx_id, и zm_link того же перевода не гасился по
     # zm_seen — факт задваивался (44 370 → 88 740). Совпадение суммы ±1 ₽ по тому
@@ -299,11 +305,11 @@ def _transit_facts(conn) -> dict:
         """SELECT order_id, id, amount, title, supplier, zenmoney_tx_id, finance_tx_id, extra_id
            FROM expenses WHERE order_id IS NOT NULL"""
     ):
-        keys = [(k, str(tx)) for k, tx in (("fin", r["finance_tx_id"]),
-                                           ("zm", r["zenmoney_tx_id"])) if tx]
+        keys = [(k, str(tx), r["order_id"]) for k, tx in (("fin", r["finance_tx_id"]),
+                                                          ("zm", r["zenmoney_tx_id"])) if tx]
         if any(k in tx_seen for k in keys):
-            # одна транзакция разнесена дважды (например, до и после деградации
-            # инбокса) — в факт идёт только первый расход
+            # одна транзакция разнесена дважды ПО ОДНОМУ заказу (например, до и после
+            # деградации инбокса) — в факт идёт только первый расход
             tx_seen.update(keys)
             continue
         tx_seen.update(keys)

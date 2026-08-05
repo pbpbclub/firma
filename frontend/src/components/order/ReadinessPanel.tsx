@@ -120,13 +120,14 @@ export function ReadinessPanel() {
   if (isLoading) return <Loading />;
   const s = data?.summary ?? {};
   const clean = !s.orders_with_duplicates && !s.invoice_drift && !s.stub_items
-    && !s.rate_holes && !s.suspicious_rates;
+    && !s.rate_holes && !s.suspicious_rates && !s.tx_overspread;
 
   return (
     <div style={{ padding: "20px 28px 40px", overflow: "auto" }}>
       <div style={{ display: "flex", gap: 28, marginBottom: 26, flexWrap: "wrap" }}>
         {[["Дубли смет", s.orders_with_duplicates, "#8B3A3A"],
           ["Расходятся со счётом", s.invoice_drift, "#8B3A3A"],
+          ["Разнесено сверх перевода", s.tx_overspread, "#8B3A3A"],
           ["Себестоимость-заглушка", s.stub_items, "#8B3A3A"],
           ["Подозрительные ставки", s.suspicious_rates, "#E8592A"],
           ["Суммы без состава", s.sum_only_items, "#A89070"]].map(([l, v, c]: any) => (
@@ -220,6 +221,43 @@ export function ReadinessPanel() {
                              color: d.drift > 0 ? "#8B3A3A" : "#E8592A" }}>
                 {d.drift > 0 ? "+" : "−"}{fmt(Math.abs(d.drift)).replace(" ₽", "")} ₽
               </span>
+            </div>
+          ))}
+        </Section>
+      )}
+
+      {!!data?.tx_overspread?.length && (
+        <Section label="РАЗНЕСЕНО БОЛЬШЕ, ЧЕМ БЫЛО В ПЕРЕВОДЕ" count={data.tx_overspread.length}
+          hint="Один перевод может законно кормить несколько заказов — это нормально. Но здесь сумма частей больше самой транзакции: где-то расход задвоен или сумма набита руками. Открой заказ и поправь.">
+          {data.tx_overspread.map((t: any) => (
+            <div key={t.source + t.tx_id} style={{ marginBottom: 14 }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 4 }}>
+                <Warning size={13} style={{ color: "#8B3A3A", flexShrink: 0 }} />
+                <span style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A" }}>{t.tx_payee || "перевод"}</span>
+                <span style={{ fontSize: 11, color: "#A89070", fontFamily: MONO }}>{(t.tx_date || "").slice(0, 10)}</span>
+                <span style={{ fontSize: 12, color: "#6B6355", fontFamily: MONO, marginLeft: "auto" }}>
+                  перевод {fmt(t.tx_amount)} · разнесено {fmt(t.spread)}
+                </span>
+                <span style={{ fontSize: 13, fontWeight: 600, fontFamily: MONO, color: "#8B3A3A" }}>
+                  +{fmt(t.excess)}
+                </span>
+              </div>
+              {t.parts.map((p: any, i: number) => (
+                <div key={i} onClick={() => navigate(`/orders/${p.order_id}`)}
+                  style={{ display: "grid", gridTemplateColumns: "1.3fr 1.4fr 120px", gap: 10,
+                           alignItems: "center", padding: "7px 0", borderBottom: "1px solid #F2EFE9",
+                           cursor: "pointer" }}
+                  onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")}
+                  onMouseLeave={e => (e.currentTarget.style.background = "")}>
+                  <span style={{ fontSize: 13, color: "#1A1A1A", overflow: "hidden",
+                                 textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.order_title}</span>
+                  <span style={{ fontSize: 12, color: "#6B6355", overflow: "hidden",
+                                 textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {p.title || "без названия"}{p.payee ? ` · ${p.payee}` : ""}
+                  </span>
+                  <span style={{ fontSize: 13, textAlign: "right", fontFamily: MONO }}>{fmt(p.amount)}</span>
+                </div>
+              ))}
             </div>
           ))}
         </Section>
