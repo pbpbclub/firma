@@ -789,12 +789,34 @@ class CreditorPatch(BaseModel):
 
 @router.get("/creditors")
 def get_creditors(status: Optional[str] = None):
+    """Обязательства с разделением план/долг (ТЗ обязательств 04.08.2026).
+
+    Долгом считается обязательство ЖИВОГО заказа: in_production и completed
+    (пока Юра явно не закрыл расчёты), плюс ручные — заведённые без заказа.
+    Обязательства незапущенных заказов (смета, ждёт оплаты, черновик) — это план
+    закупок: подрядчикам ничего не заказано, в сальдо им делать нечего. До этой
+    правки они давали 550 158 ₽ из 812 112 ₽ «долга».
+
+    Остаток строки считается с учётом ФАКТА (obligations.coverage): деньги
+    подрядчику уходят расходами, а creditors.paid при этом чаще всего не
+    двигается — отмечено оплаченными 2% суммы.
+    """
+    from obligations import coverage, effective_debt
     conn = get_production()
     try:
         sql = """
-            SELECT c.*, ei.title AS estimate_item_title
+            SELECT c.*, ei.title AS estimate_item_title,
+                   o.number AS order_number, o.title AS order_title, o.status AS order_status,
+                   CASE
+                     WHEN c.order_id IS NULL                         THEN 'debt'
+                     WHEN o.id IS NULL                               THEN 'debt'
+                     WHEN COALESCE(o.archived, 0) = 1                THEN 'plan'
+                     WHEN o.status IN ('in_production', 'completed') THEN 'debt'
+                     ELSE 'plan'
+                   END AS scope
             FROM creditors c
             LEFT JOIN estimate_items ei ON ei.id = c.estimate_item_id
+            LEFT JOIN orders         o  ON o.id  = c.order_id
             WHERE 1=1
         """
         params = []
@@ -808,21 +830,80 @@ def get_creditors(status: Optional[str] = None):
             sql += " AND c.status = 'open' AND (c.kind IS NULL OR c.kind != 'fixed')"
         sql += " ORDER BY c.created_at DESC"
         rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
+        cov = coverage(conn)          # один вызов на весь список, без N+1
         for r in rows:
-            r["debt"] = round(r["total"] - r["paid"], 2)
-            plan = r.get("amount_plan")
-            if plan is not None and r["paid"] > 0:
-                r["variance"] = round(r["paid"] - plan, 2)
-            else:
-                r["variance"] = None
-        total_owed = sum(r["total"] for r in rows)
-        total_paid = sum(r["paid"] for r in rows)
+            c = cov.get(r["id"], {})
+            r["fact_exact"] = round(max(r["paid"] or 0, c.get("covered_exact", 0.0)), 2)
+            r["fact_by_name"] = round(c.get("covered_by_name", 0.0), 2)
+            r["fact"] = round(r["fact_exact"] + r["fact_by_name"], 2)
+            r["plan"] = round(r["amount_plan"] if r.get("amount_plan") is not None else (r["total"] or 0), 2)
+            r["debt"] = effective_debt(r, c)
+            r["cover_level"] = c.get("level")
+            r["cover_sources"] = c.get("sources", [])
+            r["bucket_hint"] = c.get("bucket_hint", 0.0)
+            r["ambiguous"] = c.get("ambiguous", False)
+            r["variance"] = round(r["fact"] - r["plan"], 2) if r["fact"] > 0 else None
+        # items остаётся ПОЛНЫМ списком: по ключу ["creditors"] его читает ExpenseModal
+        # (подсказка «это оплата обязательства?») — обрезав, сломали бы подсказку для
+        # заказов в статусе «Смета», по которым расходы заводят регулярно.
+        debt_rows = [r for r in rows if r.get("scope") == "debt"]
+        plan_rows = [r for r in rows if r.get("scope") == "plan"]
         return {
             "items": rows,
-            "total_owed": round(total_owed, 2),
-            "total_paid": round(total_paid, 2),
-            "total_debt": round(total_owed - total_paid, 2),
+            "total_owed": round(sum(r["total"] or 0 for r in debt_rows), 2),
+            "total_paid": round(sum(r["fact"] for r in debt_rows), 2),
+            "total_debt": round(sum(r["debt"] for r in debt_rows), 2),
+            "debt_count": len(debt_rows),
+            "plan_total": round(sum(r["debt"] for r in plan_rows), 2),
+            "plan_count": len(plan_rows),
+            # завершённые заказы: расчёты можно закрыть одной кнопкой
+            "closable_total": round(sum(r["debt"] for r in debt_rows
+                                        if r.get("order_status") == "completed"), 2),
+            "closable_count": sum(1 for r in debt_rows if r.get("order_status") == "completed"),
         }
+    finally:
+        conn.close()
+
+
+class CloseCompletedIn(BaseModel):
+    order_ids: Optional[list] = None    # None = все завершённые заказы с долгом
+    only_ids: Optional[list] = None     # конкретные обязательства (чекбоксы в окне)
+
+
+@router.post("/creditors/close-completed")
+def close_completed_obligations(body: Optional[CloseCompletedIn] = None):
+    """Закрыть расчёты по завершённым заказам (плашка на экране обязательств).
+
+    Тот же путь, что и завершение заказа, — не миграция: 116 200 ₽ по старым
+    заказам это молчаливое списание чужих денег при рестарте сервиса, такое
+    делается кнопкой и с полным следом в журнале."""
+    from obligations import close_for_order
+    body = body or CloseCompletedIn()
+    conn = get_production()
+    try:
+        if body.order_ids:
+            holes = ",".join("?" * len(body.order_ids))
+            rows = conn.execute(
+                f"SELECT id, number, title FROM orders WHERE id IN ({holes})", body.order_ids).fetchall()
+        else:
+            rows = conn.execute("""
+                SELECT DISTINCT o.id, o.number, o.title FROM orders o
+                  JOIN creditors c ON c.order_id = o.id
+                 WHERE o.status = 'completed' AND c.status IN ('open','partial')
+                   AND (c.kind IS NULL OR c.kind != 'fixed')""").fetchall()
+        closed, written = 0, 0.0
+        for o in rows:
+            res = close_for_order(conn, o["id"], force=True, only_ids=body.only_ids)
+            for it in res.get("items", []):
+                before = res.get("before_rows", {}).get(it["id"])
+                audit(conn, "creditor", it["id"], "close",
+                      f"Закрыто по завершённому заказу {o['number']}: «{it['name']}» "
+                      f"план {it['plan']:g} ₽, факт {it['fact']:g} ₽, списано {it['debt']:g} ₽",
+                      before_row=before)
+            closed += res.get("closed", 0)
+            written += res.get("written_off", 0.0)
+        conn.commit()
+        return {"ok": True, "closed": closed, "written_off": round(written, 2)}
     finally:
         conn.close()
 
@@ -870,6 +951,13 @@ def update_creditor(creditor_id: str, body: CreditorPatch):
             return dict(row)
         params.append(creditor_id)
         conn.execute(f"UPDATE creditors SET {', '.join(fields)} WHERE id = ?", params)
+        # Полностью погашенное не остаётся открытым: иначе строка висит в «Мы должны»
+        # с нулевым остатком и в долге подрядчика. Порог 0.01 — деньги в REAL (Б3).
+        conn.execute("""
+            UPDATE creditors SET status = 'closed', closed_at = datetime('now'),
+                                 closed_reason = COALESCE(closed_reason, 'paid_in_full')
+             WHERE id = ? AND status = 'open' AND COALESCE(total,0) > 0
+               AND COALESCE(paid,0) >= COALESCE(total,0) - 0.01""", (creditor_id,))
         audit(conn, "creditor", creditor_id, "update",
               f"Обязательство «{row['name']}»: {', '.join(sorted(body.model_dump(exclude_unset=True)))}",
               before_row=row)
@@ -1146,6 +1234,7 @@ def get_receivables():
                 row["debt"] = round(row["amount"] - (row["paid"] or 0), 2)
                 items.append(row)
             open_items = [r for r in items if r["debt"] > 0]
+            _mark_receivable_duplicates(open_items)
             return {
                 "items": items,
                 "open_items": open_items,
@@ -1156,6 +1245,43 @@ def get_receivables():
             conn.close()
     except Exception as e:
         return {"items": [], "open_items": [], "total_debt": 0, "total_amount": 0, "error": str(e)}
+
+
+def _mark_receivable_duplicates(open_items: list) -> None:
+    """Пометить счета, которые похожи на долг уже заведённого заказа.
+
+    Счета из вики (finance.db) и дебиторка по заказам — два разных учёта одних
+    и тех же денег: «Винзавод/ЛОРО/Мирра» и «Ануш ORD-015» это те же клиенты,
+    что в заказах, и в сумме «нам должны» они считались дважды. Данные не правим —
+    показываем совпадение, разносить решает Юра.
+
+    Совпадение: номер заказа в номере счёта, либо клиент похож на заказчика
+    (masters._norm_name — тот же нестрогий матч, что в картотеке) при близкой сумме."""
+    from routers.masters import _norm_name
+    prod = get_production()
+    try:
+        orders = [dict(r) for r in prod.execute("""
+            SELECT o.id, o.number, o.title, o.price_plan,
+                   c.name AS customer_name,
+                   COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id = o.id), 0) AS paid
+              FROM orders o LEFT JOIN customers c ON c.id = o.customer_id
+             WHERE o.archived = 0 AND o.status NOT IN ('cancelled')""").fetchall()]
+    except Exception:
+        return
+    finally:
+        prod.close()
+    for r in open_items:
+        inv = (r.get("invoice_num") or "").upper()
+        client = _norm_name(r.get("client"))
+        for o in orders:
+            debt = round((o["price_plan"] or 0) - (o["paid"] or 0), 2)
+            by_number = bool(o["number"]) and o["number"].upper() in inv
+            by_client = bool(client) and client == _norm_name(o["customer_name"]) and abs(debt - r["debt"]) < 1
+            if by_number or by_client:
+                r["duplicate_of"] = {"order_id": o["id"], "number": o["number"],
+                                     "title": o["title"], "debt": debt,
+                                     "match": "number" if by_number else "client"}
+                break
 
 
 @router.post("/receivables")

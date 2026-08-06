@@ -41,3 +41,38 @@ def conn(schema_sql):
             pass
     yield c
     c.close()
+
+
+def _startup_migrations() -> list[str]:
+    """Список миграций читаем из main.py::startup, а не дублируем: новая
+    миграция попадает под тесты сама, без правки фикстур."""
+    import re
+    body = (BACKEND / "main.py").read_text().split("def startup():", 1)[1]
+    return [n for n in re.findall(r"^\s{4}(\w+)\(\)", body, re.M) if n != "init_admin"]
+
+
+@pytest.fixture
+def migrated(tmp_path, monkeypatch, schema_sql):
+    """Клон боевой схемы В ФАЙЛЕ + все startup-миграции поверх.
+
+    Нужна тестам, которые опираются на колонки СВЕЖЕЙ миграции: `conn` клонирует
+    схему боевой базы, где новых колонок ещё нет (миграция доедет при рестарте
+    сервиса). Файл, а не :memory:, — миграции ходят через db.get_production()."""
+    import db
+    prod, fin = tmp_path / "production.db", tmp_path / "finance.db"
+    c = sqlite3.connect(prod)
+    for stmt in schema_sql:
+        try:
+            c.execute(stmt)
+        except sqlite3.OperationalError:
+            pass
+    c.commit()
+    c.close()
+    sqlite3.connect(fin).close()
+    monkeypatch.setattr(db, "PRODUCTION_DB", prod)
+    monkeypatch.setattr(db, "FINANCE_DB", fin)
+    for name in _startup_migrations():
+        getattr(db, name)()
+    c = db.get_production()
+    yield c
+    c.close()

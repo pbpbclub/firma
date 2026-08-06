@@ -28,7 +28,9 @@ export const ordersApi = {
   // A8: накладные месяца и их раскладка по заказам в производстве
   overheadSummary: () => api.get("/orders/overhead-summary").then((r) => r.data),
   estimate: (id: string) => api.get(`/orders/${id}/estimate`).then((r) => r.data),
-  updateStatus: (id: string, status: string) => api.patch(`/orders/${id}/status`, { status }).then((r) => r.data),
+  // opts — подтверждение закрытия обязательств при завершении заказа (409 без него)
+  updateStatus: (id: string, status: string, opts?: { close_obligations?: boolean; only_ids?: string[] }) =>
+    api.patch(`/orders/${id}/status`, { status, ...(opts || {}) }).then((r) => r.data),
   archive: (id: string) => api.patch(`/orders/${id}/archive`).then((r) => r.data),
   unarchive: (id: string) => api.patch(`/orders/${id}/unarchive`).then((r) => r.data),
   create: (data: { title: string; customer_id?: string | null; deadline?: string | null; priority?: string; brand?: string | null }) =>
@@ -111,6 +113,9 @@ export const financeApi = {
     api.patch(`/finance/creditors/${id}`, data).then((r) => r.data),
   deleteCreditor: (id: string) =>
     api.delete(`/finance/creditors/${id}`).then((r) => r.data),
+  // Закрыть расчёты по завершённым заказам (плашка на экране обязательств)
+  closeCompletedObligations: (data?: { order_ids?: string[]; only_ids?: string[] }) =>
+    api.post("/finance/creditors/close-completed", data ?? {}).then((r) => r.data),
   suggestTx: (name: string, amount: number) =>
     api.get("/finance/transactions/suggest", { params: { name, amount } }).then((r) => r.data),
   suggestInTx: (name: string, amount: number) =>

@@ -1536,6 +1536,51 @@ def ensure_order_status_check_schema():
         conn.close()
 
 
+def ensure_creditors_close_schema():
+    """След закрытия обязательства: когда и почему (ТЗ обязательств 04.08.2026).
+
+    closed_reason: order_completed — закрыто завершением заказа (только эти
+    переоткрываются при возврате заказа в работу), manual — руками, paid_in_full —
+    погашено полностью. Вызывать ПОСЛЕ ensure_creditors_constraints_schema:
+    пересборка таблицы собирает колонки из PRAGMA, порядок важен."""
+    conn = get_production()
+    try:
+        info = conn.execute("PRAGMA table_info(creditors)").fetchall()
+        if not info:
+            return
+        existing = {r[1] for r in info}
+        for col in ("closed_at TEXT", "closed_reason TEXT"):
+            if col.split()[0] not in existing:
+                conn.execute(f"ALTER TABLE creditors ADD COLUMN {col}")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_paid_obligations_closed():
+    """Полностью оплаченное обязательство не может висеть открытым: оно
+    показывалось в «Мы должны» с нулевым остатком и в долге подрядчика
+    (живой случай — «Миша Юрьев» 6 400/6 400).
+
+    Порог 0.01, а не строгое равенство: деньги в REAL (правило Б3)."""
+    conn = get_production()
+    try:
+        info = conn.execute("PRAGMA table_info(creditors)").fetchall()
+        if not info or "closed_reason" not in {r[1] for r in info}:
+            return
+        conn.execute("""
+            UPDATE creditors
+               SET status = 'closed',
+                   closed_at = COALESCE(closed_at, datetime('now')),
+                   closed_reason = COALESCE(closed_reason, 'paid_in_full')
+             WHERE status = 'open' AND COALESCE(total,0) > 0
+               AND COALESCE(paid,0) >= COALESCE(total,0) - 0.01
+        """)
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_line_rate_snapshot_schema():
     """A9: строка работ хранит свои входные данные — применённую ставку, её схему
     и дату применения. Симметрия с price_supplier/price_date у материалов: смета

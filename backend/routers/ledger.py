@@ -83,7 +83,8 @@ def _entries(conn, master: dict) -> list[dict]:
     manual = [dict(r) for r in conn.execute(
         _MANUAL_SQL + " WHERE m.master_id = ?", (mid,)).fetchall()]
 
-    return _build_entries(creditors, expenses, manual)
+    from obligations import coverage as _coverage
+    return _build_entries(creditors, expenses, manual, _coverage(conn))
 
 
 def _entries_bulk(conn, masters: list[dict]) -> dict[str, list[dict]]:
@@ -121,14 +122,22 @@ def _entries_bulk(conn, masters: list[dict]) -> dict[str, list[dict]]:
         row = dict(r)
         put(man, [row["master_id"]] if row["master_id"] in known_ids else [], row)
 
+    from obligations import coverage as _coverage
+    cov = _coverage(conn)          # один расчёт на всю сводку, не на каждого мастера
     return {m["id"]: _build_entries(cred.get(m["id"], []), exp.get(m["id"], []),
-                                    man.get(m["id"], []))
+                                    man.get(m["id"], []), cov)
             for m in masters}
 
 
-def _build_entries(creditors: list[dict], expenses: list[dict], manual: list[dict]) -> list[dict]:
+def _build_entries(creditors: list[dict], expenses: list[dict], manual: list[dict],
+                   coverage: dict | None = None) -> list[dict]:
     """Сборка ленты из уже загруженных источников — общая для одиночного счёта
-    и для сводки сальдо, чтобы правила дедупа не разъезжались между экранами."""
+    и для сводки сальдо, чтобы правила дедупа не разъезжались между экранами.
+
+    coverage — покрытие обязательств фактом (obligations.coverage): нужно, чтобы
+    у ЗАКРЫТЫХ обязательств начислять признанное, а не полный план сметы. Один
+    источник на лицевой счёт и на экран «Мы должны» — иначе две цифры долга по
+    одному подрядчику разъедутся."""
     out = []
 
     def add(kind, amount, date, title, **ref):
@@ -143,8 +152,23 @@ def _build_entries(creditors: list[dict], expenses: list[dict], manual: list[dic
     for c in creditors:
         if c["status"] == "cancelled" or not c["total"]:
             continue
+        # Постоянные обязательства (аренда) — не расчёт с подрядчиком, а накладные
+        # расходы фирмы (orders._overhead_month). Тёзка-мастер тянул бы их в сальдо
+        # каждый месяц, и долг рос бы вечно.
+        if (c.get("kind") or "") == "fixed":
+            continue
+        # Начисление ЗАКРЫТОГО обязательства = признанная сумма, а не полный план:
+        # завершение заказа списывает непокрытый остаток (obligations.close_for_order),
+        # и полный total оставил бы у подрядчика фантомный долг на списанное.
+        recognized = c["total"]
+        if c["status"] not in ("open", "partial"):
+            cov = (coverage or {}).get(c["id"], {})
+            recognized = round(max(c["paid"] or 0, cov.get("covered_exact", 0.0))
+                               + cov.get("covered_by_name", 0.0), 2)
+            if recognized <= 0:
+                continue
         accrued_creditors.add(c["id"])
-        add("accrual", c["total"], c.get("due_date") or c.get("created_at"),
+        add("accrual", recognized, c.get("due_date") or c.get("created_at"),
             c.get("description") or "Обязательство по смете",
             source="creditor", ref_id=c["id"], order_id=c.get("order_id"),
             order_number=c.get("order_number"), order_title=c.get("order_title"))

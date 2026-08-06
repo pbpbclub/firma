@@ -1126,9 +1126,58 @@ def get_estimate(order_id: str):
 
 class StatusUpdate(BaseModel):
     status: str
+    close_obligations: Optional[bool] = None   # подтверждение списания остатков
+    only_ids: Optional[List[str]] = None       # закрыть только эти (чекбоксы окна)
 
 
 VALID_STATUSES = set(STATUS_LABELS)   # один источник: ярлык есть — статус валиден
+
+
+def _apply_status(conn, row, new_status: str, *, close_obligations: bool = False,
+                  only_ids: Optional[List[str]] = None) -> dict:
+    """Смена статуса заказа + расчёты с подрядчиками.
+
+    ЕДИНСТВЕННОЕ место, где статус превращается в закрытие обязательств: сюда
+    заходят оба входа — PATCH /{id}/status и PATCH /{id} (там status в allowed).
+    Разведи их — и правка через карточку тихо обошла бы закрытие.
+
+    Завершение заказа = расчёты закрыты (решение Юры 04.08.2026). Если остались
+    непокрытые остатки, без подтверждения отдаём 409 со списком: план сметы и
+    факт расходятся законно, списывать молча нельзя."""
+    from obligations import close_for_order, reopen_for_order
+    out = {}
+    was = row["status"]
+    if new_status == "completed" and was != "completed":
+        res = close_for_order(conn, row["id"], force=close_obligations, only_ids=only_ids)
+        if res.get("needs_confirm"):
+            raise HTTPException(status_code=409, detail={
+                "code": "obligations_unpaid",
+                "message": f"По заказу остаются незакрытые обязательства на {res['unpaid_total']:g} ₽",
+                "unpaid_total": res["unpaid_total"],
+                "items": res["items"],
+            })
+        for it in res.get("items", []):
+            before = res.get("before_rows", {}).get(it["id"])
+            audit(conn, "creditor", it["id"], "close",
+                  f"Закрыто завершением заказа {row['number']}: «{it['name']}» "
+                  f"план {it['plan']:g} ₽, факт {it['fact']:g} ₽, списано {it['debt']:g} ₽",
+                  before_row=before)
+        out = {"closed_obligations": res.get("closed", 0),
+               "written_off": res.get("written_off", 0.0)}
+    elif was == "completed" and new_status != "completed":
+        # Вернули в работу: переоткрываем только закрытое этим завершением —
+        # закрытое вручную и погашенное полностью остаётся закрытым.
+        out = reopen_for_order(conn, row["id"])
+    conn.execute("UPDATE orders SET status = ?, updated_at = datetime('now') WHERE id = ?",
+                 (new_status, row["id"]))
+    summary = (f"«{row['title']}»: {STATUS_LABELS.get(was, was)} → "
+               f"{STATUS_LABELS.get(new_status, new_status)}")
+    if out.get("closed_obligations"):
+        summary += f"; закрыто обязательств: {out['closed_obligations']} (списано {out['written_off']:g} ₽)"
+    elif out.get("reopened"):
+        summary += f"; переоткрыто обязательств: {out['reopened']}"
+    audit(conn, "order", row["id"], "status", summary)
+    return out
 
 
 @router.patch("/{order_id}/status")
@@ -1140,11 +1189,11 @@ def update_status(order_id: str, body: StatusUpdate):
         r = conn.execute("SELECT * FROM orders WHERE id = ? OR number = ?", (order_id, order_id)).fetchone()
         if not r:
             raise HTTPException(status_code=404, detail="Not found")
-        conn.execute("UPDATE orders SET status = ?, updated_at = datetime('now') WHERE id = ?", (body.status, r["id"]))
-        audit(conn, "order", r["id"], "status",
-              f"«{r['title']}»: {STATUS_LABELS.get(r['status'], r['status'])} → {STATUS_LABELS.get(body.status, body.status)}")
+        res = _apply_status(conn, r, body.status,
+                            close_obligations=bool(body.close_obligations),
+                            only_ids=body.only_ids)
         conn.commit()
-        return {"ok": True, "status": body.status}
+        return {"ok": True, "status": body.status, **res}
     finally:
         conn.close()
 
@@ -1220,6 +1269,15 @@ async def update_order(order_id: str, body: dict = Body(...)):
             raise HTTPException(status_code=404, detail="Not found")
 
         allowed = {"title", "priority", "deadline", "customer_id", "price_plan", "cost_plan", "brand", "status", "finance_tx_id", "discount", "discount_note"}
+        # Статус идёт тем же путём, что и PATCH /{id}/status: завершение заказа
+        # закрывает расчёты с подрядчиками и требует подтверждения (см. _apply_status).
+        status_applied = "status" in body and body["status"] != r["status"]
+        if status_applied:
+            if body["status"] not in VALID_STATUSES:
+                raise HTTPException(status_code=400, detail=f"Invalid status: {body['status']}")
+            _apply_status(conn, r, body["status"],
+                          close_obligations=bool(body.get("close_obligations")),
+                          only_ids=body.get("only_ids"))
         fields, values = [], []
         for key in allowed:
             if key not in body:
@@ -1227,8 +1285,8 @@ async def update_order(order_id: str, body: dict = Body(...)):
             val = body[key]
             if key == "priority" and val not in {"low", "normal", "high", "urgent"}:
                 raise HTTPException(status_code=400, detail=f"Invalid priority: {val}")
-            if key == "status" and val not in VALID_STATUSES:
-                raise HTTPException(status_code=400, detail=f"Invalid status: {val}")
+            if key == "status":
+                continue   # уже применён выше вместе с закрытием обязательств
             if key == "brand" and val is not None and val not in _valid_brands(conn):
                 raise HTTPException(status_code=400, detail=f"Invalid brand: {val}")
             if key == "title" and val is not None:
@@ -1247,6 +1305,9 @@ async def update_order(order_id: str, body: dict = Body(...)):
             audit(conn, "order", r["id"], "update",
                   f"«{r['title']}»: правка {', '.join(k for k in allowed if k in body)}",
                   before_row=r)
+        # Коммит и когда пришёл ОДИН status: _apply_status уже сменил статус и
+        # закрыл обязательства, без коммита это откатилось бы при close().
+        if fields or status_applied:
             conn.commit()
 
         return dict(conn.execute("SELECT * FROM orders WHERE id = ?", (r["id"],)).fetchone())

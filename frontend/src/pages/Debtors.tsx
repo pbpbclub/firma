@@ -19,7 +19,7 @@ const SANS = "inherit";
 
 // Полярность вкладки: деньги входят (in) / выходят (out) — задаёт цвет зоны.
 const TAB_POLARITY: Record<string, keyof typeof POLARITY> = {
-  debtors: "in", unallocated: "in", creditors: "out", fixed: "out",
+  debtors: "in", unallocated: "in", creditors: "out", fixed: "out", plan: "out",
 };
 
 function Checkbox({ checked, indeterminate = false, onChange }: {
@@ -696,6 +696,13 @@ function UnallocatedTab() {
             <div style={{ fontFamily: SANS }}>
               <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>{r.client}</div>
               {r.inn && <div style={{ fontSize: 10, color: "#A89070", marginTop: 1 }}>ИНН {r.inn}</div>}
+              {/* Тот же долг может уже висеть на заказе — складывать нельзя, пока не сверил */}
+              {r.duplicate_of && (
+                <div title={`Долг по заказу: ${fmt(r.duplicate_of.debt)}. Счёт и заказ — один и тот же долг: сверь и разнеси, иначе посчитается дважды.`}
+                  style={{ fontSize: 10, color: "#B8860B", marginTop: 2 }}>
+                  ⚠ похоже на заказ {r.duplicate_of.number} · {r.duplicate_of.title}
+                </div>
+              )}
             </div>
             <div style={{ fontSize: 11, color: "#6B6355", paddingRight: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: SANS }}>
               {r.note || "—"}
@@ -859,12 +866,17 @@ function LinkTxModal({ creditor, onClose }: { creditor: any; onClose: () => void
 
 // ── Вкладка: кредиторы ─────────────────────────────────────────────────────
 
-const creditorCols = "28px 1.8fr 1.6fr 110px 110px 110px 110px 90px 28px";
+// ПЛАН · ФАКТ · ОСТАТОК: «оплачено» переехало в «факт» — деньги подрядчику чаще
+// уходят расходом, чем отметкой оплаты (ТЗ обязательств 04.08.2026), а колонка
+// «отклонение» ушла: при плане из сметы отклонение — это и есть остаток.
+const creditorCols = "28px 1.8fr 1.5fr 110px 130px 110px 90px 28px";
 
-function CreditorsTab() {
+function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
+  const qc = useQueryClient();
   const [addOpen, setAddOpen] = useState(false);
   const [editItem, setEditItem] = useState<any>(null);
   const [linkItem, setLinkItem] = useState<any>(null);
+  const [closeOpen, setCloseOpen] = useState(false);
   const [contragentFilter, setContragentFilter] = useState("");
   const [descFilter, setDescFilter] = useState("");
   const [cPlanMin, setCPlanMin] = useState("");
@@ -882,10 +894,9 @@ function CreditorsTab() {
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const { data, isLoading } = useQuery({ queryKey: ["creditors"], queryFn: () => financeApi.creditors() });
 
-  const items: any[] = data?.items || [];
-  const totalDebt = data?.total_debt ?? 0;
-  const totalOwed = data?.total_owed ?? 0;
-  const totalPaid = data?.total_paid ?? 0;
+  // scope с бэка: debt — живые заказы (производство, завершённые) и ручные;
+  // plan — обязательства незапущенных заказов, это план закупок, не долг.
+  const items: any[] = (data?.items || []).filter((c: any) => (c.scope ?? "debt") === scope);
   const uniqueContragents = useMemo(() => [...new Set(items.map((c: any) => c.name).filter(Boolean))].sort() as string[], [items]);
   const uniqueDescriptions = useMemo(() => [...new Set(items.map((c: any) => c.description).filter(Boolean))].sort() as string[], [items]);
   const filteredItems = useMemo(() => {
@@ -894,16 +905,31 @@ function CreditorsTab() {
     if (descFilter) r = r.filter((c: any) => c.description === descFilter);
     if (cPlanMin) r = r.filter((c: any) => ((c.amount_plan ?? c.total) || 0) >= parseFloat(cPlanMin));
     if (cPlanMax) r = r.filter((c: any) => ((c.amount_plan ?? c.total) || 0) <= parseFloat(cPlanMax));
-    if (cPaidMin) r = r.filter((c: any) => (c.paid || 0) >= parseFloat(cPaidMin));
-    if (cPaidMax) r = r.filter((c: any) => (c.paid || 0) <= parseFloat(cPaidMax));
-    if (varMin) r = r.filter((c: any) => c.variance != null && c.variance >= parseFloat(varMin));
-    if (varMax) r = r.filter((c: any) => c.variance != null && c.variance <= parseFloat(varMax));
+    if (cPaidMin) r = r.filter((c: any) => ((c.fact ?? c.paid) || 0) >= parseFloat(cPaidMin));
+    if (cPaidMax) r = r.filter((c: any) => ((c.fact ?? c.paid) || 0) <= parseFloat(cPaidMax));
     if (cDebtMin) r = r.filter((c: any) => (c.debt || 0) >= parseFloat(cDebtMin));
     if (cDebtMax) r = r.filter((c: any) => (c.debt || 0) <= parseFloat(cDebtMax));
     if (dueFrom) r = r.filter((c: any) => c.due_date && c.due_date.slice(0, 10) >= dueFrom);
     if (dueTo) r = r.filter((c: any) => c.due_date && c.due_date.slice(0, 10) <= dueTo);
     return r;
   }, [items, contragentFilter, descFilter, cPlanMin, cPlanMax, cPaidMin, cPaidMax, varMin, varMax, cDebtMin, cDebtMax, dueFrom, dueTo]);
+
+  // Итоги — по видимым строкам: серверные спорили бы с включённым фильтром
+  // («сумма строк ≠ итог», code_rules 02.08).
+  const totalOwed = filteredItems.reduce((s: number, c: any) => s + ((c.amount_plan ?? c.total) || 0), 0);
+  const totalPaid = filteredItems.reduce((s: number, c: any) => s + ((c.fact ?? c.paid) || 0), 0);
+  const totalDebt = filteredItems.reduce((s: number, c: any) => s + (c.debt || 0), 0);
+  const closableTotal = data?.closable_total ?? 0;
+  const closableCount = data?.closable_count ?? 0;
+
+  const closeCompleted = useMutation({
+    mutationFn: () => financeApi.closeCompletedObligations(),
+    onSuccess: () => {
+      setCloseOpen(false);
+      qc.invalidateQueries({ queryKey: ["creditors"] });
+      qc.invalidateQueries({ queryKey: ["orders-v2"] });
+    },
+  });
 
   if (isLoading) return <Loading />;
 
@@ -912,6 +938,39 @@ function CreditorsTab() {
       {addOpen && <AddCreditorModal onClose={() => setAddOpen(false)} />}
       {editItem && <PayCreditorModal item={editItem} onClose={() => setEditItem(null)} />}
       {linkItem && <LinkTxModal creditor={linkItem} onClose={() => setLinkItem(null)} />}
+      {closeOpen && (
+        <Modal
+          eyebrow="ЗАКРЫТЬ РАСЧЁТЫ ПО ЗАВЕРШЁННЫМ"
+          onClose={() => setCloseOpen(false)}
+          onCancel={() => setCloseOpen(false)}
+          onSave={() => closeCompleted.mutate()}
+          saveLabel="Закрыть расчёты"
+          saving={closeCompleted.isPending}
+        >
+          <div style={{ padding: "18px 24px", fontSize: 13, color: "#6B6355", lineHeight: 1.6 }}>
+            Заказы сданы и оплачены, но обязательства по их сметам остались открытыми:
+            <b> {closableCount} строк на {fmt(closableTotal)}</b>. Закрыть — значит признать
+            расчёты законченными: непокрытые остатки спишутся. Каждая строка попадёт в журнал
+            изменений; вернёшь заказ в работу — обязательства переоткроются.
+          </div>
+        </Modal>
+      )}
+
+      {scope === "debt" && closableCount > 0 && (
+        <div style={{ margin: "12px 28px 0", padding: "11px 14px", background: "#FBF7EF",
+                      borderLeft: "3px solid #B8860B", display: "flex", alignItems: "center",
+                      justifyContent: "space-between", gap: 16 }}>
+          <div style={{ fontSize: 12, color: "#6B6355", lineHeight: 1.5 }}>
+            По завершённым заказам остались открытые обязательства: <b>{closableCount} строк
+            на {fmt(closableTotal)}</b> — план сметы, по которому деньги уже прошли расходами.
+          </div>
+          <button onClick={() => setCloseOpen(true)}
+            style={{ fontSize: 11, color: "#B8860B", background: "none", border: "1px solid #B8860B",
+                     padding: "5px 11px", cursor: "pointer", whiteSpace: "nowrap" }}>
+            Закрыть расчёты
+          </button>
+        </div>
+      )}
 
       {(() => {
         const hasFilters = !!(contragentFilter || descFilter || cPlanMin || cPlanMax || cPaidMin || cPaidMax || varMin || varMax || cDebtMin || cDebtMax || dueFrom || dueTo);
@@ -945,15 +1004,14 @@ function CreditorsTab() {
         <div><ColumnFilter label="КОНТРАГЕНТ" options={uniqueContragents} value={contragentFilter} onChange={setContragentFilter} /></div>
         <div><ColumnFilter label="ЗА ЧТО" options={uniqueDescriptions} value={descFilter} onChange={setDescFilter} /></div>
         <div><AmountFilter label="ПЛАН" min={cPlanMin} max={cPlanMax} onChange={(mn, mx) => { setCPlanMin(mn); setCPlanMax(mx); }} /></div>
-        <div><AmountFilter label="ОПЛАЧЕНО" min={cPaidMin} max={cPaidMax} onChange={(mn, mx) => { setCPaidMin(mn); setCPaidMax(mx); }} /></div>
-        <div><AmountFilter label="ОТКЛОНЕНИЕ" min={varMin} max={varMax} onChange={(mn, mx) => { setVarMin(mn); setVarMax(mx); }} /></div>
+        <div><AmountFilter label="ФАКТ" min={cPaidMin} max={cPaidMax} onChange={(mn, mx) => { setCPaidMin(mn); setCPaidMax(mx); }} /></div>
         <div><AmountFilter label="ОСТАТОК" min={cDebtMin} max={cDebtMax} onChange={(mn, mx) => { setCDebtMin(mn); setCDebtMax(mx); }} /></div>
         <div><PeriodFilter label="СРОК" from={dueFrom} to={dueTo} onChange={(f, t) => { setDueFrom(f); setDueTo(t); }} align="right" /></div>
         <div />
       </div>
 
       {filteredItems.length === 0 ? (
-        <EmptyState title="Нет открытых обязательств" />
+        <EmptyState title={scope === "plan" ? "Плановых обязательств нет" : "Нет открытых обязательств"} />
       ) : (
         <>
           {filteredItems.map((c: any, i: number) => {
@@ -977,19 +1035,35 @@ function CreditorsTab() {
               </div>
               <div style={{ fontFamily: SANS }}>
                 <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>{c.name}</div>
-                {c.estimate_item_title && (
-                  <div style={{ fontSize: 10, color: "#A89070", marginTop: 2 }}>← Смета: {c.estimate_item_title}</div>
+                {(c.order_title || c.estimate_item_title) && (
+                  <div style={{ fontSize: 10, color: "#A89070", marginTop: 2 }}>
+                    {c.order_title ? `${c.order_title}` : `← Смета: ${c.estimate_item_title}`}
+                    {c.order_status === "completed" && (
+                      <span style={{ marginLeft: 6, color: "#B8860B" }}>· заказ завершён</span>
+                    )}
+                  </div>
                 )}
               </div>
               <div style={{ fontSize: 12, color: "#6B6355", paddingRight: 16, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: SANS }}>
                 {c.description || "—"}
               </div>
               <div style={{ fontSize: 13, color: "#6B6355" }}>{fmt(c.amount_plan ?? c.total)}</div>
-              <div style={{ fontSize: 13, color: "#4A7C59" }}>{c.paid > 0 ? fmt(c.paid) : "—"}</div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: c.variance == null ? "#C8C0B0" : c.variance > 0 ? "#8B3A3A" : c.variance < 0 ? "#4A7C59" : "#A89070" }}>
-                {c.variance == null ? "—" : c.variance === 0 ? "0 ₽" : `${c.variance > 0 ? "+" : "−"}${fmt(Math.abs(c.variance))}`}
+              <div>
+                <div style={{ fontSize: 13, color: (c.fact ?? c.paid) > 0 ? "#4A7C59" : "#C8C0B0" }}>
+                  {(c.fact ?? c.paid) > 0 ? fmt(c.fact ?? c.paid) : "—"}
+                </div>
+                {c.fact_by_name > 0 && (
+                  <div style={{ fontSize: 9, color: "#A89070", fontFamily: SANS, marginTop: 1 }}>по расходам</div>
+                )}
+                {c.ambiguous && (
+                  <div title={`Расходов той же категории по заказу: ${fmt(c.bucket_hint)}. Автоматически не засчитываем — у строки нет подрядчика.`}
+                    style={{ fontSize: 9, color: "#B8860B", fontFamily: SANS, marginTop: 1 }}>
+                    ≈ похоже, закрыто
+                  </div>
+                )}
               </div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: c.debt > 0 ? "#8B3A3A" : "#4A7C59" }}>
+              <div style={{ fontSize: 13, fontWeight: 700,
+                            color: c.debt <= 0 ? "#4A7C59" : scope === "plan" ? "#B8860B" : "#8B3A3A" }}>
                 {c.debt > 0 ? fmt(c.debt) : "Закрыт"}
               </div>
               <div><DeadlinePill date={c.due_date} /></div>
@@ -1010,10 +1084,10 @@ function CreditorsTab() {
           }}>
             <div />
             <div style={{ fontSize: 11, color: "#A89070", fontFamily: SANS }}>{filteredItems.length} записей</div>
+            <div />
             <div style={{ fontSize: 12, color: "#6B6355", fontWeight: 500 }}>{fmt(totalOwed)}</div>
             <div style={{ fontSize: 12, color: "#4A7C59", fontWeight: 500 }}>{fmt(totalPaid)}</div>
-            <div />
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#8B3A3A" }}>{fmt(totalDebt)}</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: scope === "plan" ? "#B8860B" : "#8B3A3A" }}>{fmt(totalDebt)}</div>
             <div /><div />
           </div>
         </>
@@ -1293,7 +1367,7 @@ function FixedTab() {
 
 export default function Debtors() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState<"debtors" | "unallocated" | "creditors" | "fixed">("debtors");
+  const [tab, setTab] = useState<"debtors" | "unallocated" | "creditors" | "plan" | "fixed">("debtors");
   const [addCreditorOpen, setAddCreditorOpen] = useState(false);
   const [addReceivableOpen, setAddReceivableOpen] = useState(false);
   const [addFixedOpen, setAddFixedOpen] = useState(false);
@@ -1302,13 +1376,20 @@ export default function Debtors() {
   const { data: credData } = useQuery({ queryKey: ["creditors"], queryFn: () => financeApi.creditors() });
   const { data: recData }  = useQuery({ queryKey: ["receivables"], queryFn: financeApi.receivables });
 
-  const receivable = (debtData?.total ?? 0) + (recData?.total_debt ?? 0);
+  // В сальдо идут только долги по ЗАКАЗАМ: счета из вики — параллельный учёт
+  // тех же денег (Ануш ORD-015, Винзавод/Мирра), сложение считало их дважды.
+  // Счета показываем отдельной подписью и на своей вкладке (решение Юры 04.08.2026).
+  const receivable = debtData?.total ?? 0;
+  const unallocated = recData?.total_debt ?? 0;
   const payable    = credData?.total_debt ?? 0;
   const openRecCount = recData?.open_items?.length ?? 0;
 
   const TABS = [
     { id: "debtors",     label: "Нам должны" },
     { id: "creditors",   label: "Мы должны" },
+    // План по подрядчикам: обязательства заказов, которые ещё не запущены.
+    // В сальдо не идут — подрядчикам ничего не заказано (решение Юры 04.08.2026).
+    { id: "plan",        label: "План по подрядчикам" },
     { id: "fixed",       label: "Постоянные" },
     { id: "unallocated", label: openRecCount > 0 ? `Нераспределённые (${openRecCount})` : "Нераспределённые" },
   ];
@@ -1331,6 +1412,14 @@ export default function Debtors() {
               Нам должны <span style={{ fontSize: 13 }}>→</span>
             </div>
             <div style={{ ...T.hero, color: POLARITY.in.color, marginTop: 6 }}>{fmt(receivable)}</div>
+            {unallocated > 0 && (
+              <button onClick={() => setTab("unallocated")}
+                title="Счета из вики: тот же клиент может быть и в заказах — сверь, прежде чем складывать"
+                style={{ marginTop: 4, padding: 0, background: "none", border: "none", cursor: "pointer",
+                         fontSize: 11, color: "#A89070", fontFamily: "inherit", textAlign: "left" }}>
+                + счета, ещё не разнесённые по заказам: {fmt(unallocated)}
+              </button>
+            )}
           </div>
 
           {/* Чистая позиция */}
@@ -1392,6 +1481,8 @@ export default function Debtors() {
           const onAdd = {
             debtors: () => navigate("/orders"),
             creditors: () => setAddCreditorOpen(true),
+            // План рождается из смет, руками сюда не добавляют — ведём в заказы
+            plan: () => navigate("/orders"),
             fixed: () => setAddFixedOpen(true),
             unallocated: () => setAddReceivableOpen(true),
           }[tab];
@@ -1408,6 +1499,16 @@ export default function Debtors() {
         {tab === "debtors" && <DebtorsTab />}
         {tab === "unallocated" && <UnallocatedTab />}
         {tab === "creditors" && <CreditorsTab />}
+        {tab === "plan" && (
+          <>
+            <div style={{ margin: "12px 28px 0", padding: "11px 14px", background: "#FAF8F5",
+                          borderLeft: "3px solid #EDEBE6", fontSize: 12, color: "#6B6355", lineHeight: 1.5 }}>
+              Плановые закупки и работы из утверждённых смет по заказам, которые ещё не в
+              производстве. В сальдо не входят: подрядчикам пока ничего не заказано.
+            </div>
+            <CreditorsTab scope="plan" />
+          </>
+        )}
         {tab === "fixed" && <FixedTab />}
       </div>
     </div>
