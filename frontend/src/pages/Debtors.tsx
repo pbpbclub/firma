@@ -661,6 +661,13 @@ function UnallocatedTab() {
           onClose={() => setLinkItem(null)}
         />
       )}
+      {/* Проверка на дубли с заказами не отработала — молчать нельзя: экран без
+          пометок читается как «дублей нет», и долг посчитается дважды */}
+      {data?.duplicates_checked === false && (
+        <div style={{ padding: "8px 28px", background: "#FAF8F5", borderBottom: "1px solid #EDEBE6", fontSize: 11, color: "#8B3A3A" }}>
+          ⚠ Сверка с заказами не выполнена{data?.duplicates_error ? `: ${data.duplicates_error}` : ""} — пометки «похоже на заказ» сейчас не показываются.
+        </div>
+      )}
       <div style={{ padding: "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
           <span style={{ fontSize: 11, color: "#6B6355" }}>{filtered.length} счетов</span>

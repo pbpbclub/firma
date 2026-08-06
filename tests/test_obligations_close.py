@@ -179,3 +179,51 @@ class TestLedgerAgreement:
                       VALUES ('c-f','Аренда мастерской',4000,0,'open','fixed','2026-08',datetime('now'))""")
         master = dict(db.execute("SELECT * FROM masters WHERE id='m-9'").fetchone())
         assert _totals(_entries(db, master))["balance"] == 0
+
+
+class _NoCloseConn:
+    """Соединение, которое эндпоинт не закроет: тестовая база in-memory живёт
+    ровно до close(), а close_completed_obligations честно зовёт его в finally."""
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def close(self):
+        pass
+
+
+class TestCloseCompletedEndpoint:
+    """order_ids приходят из тела запроса, а close_for_order зовётся с force=True —
+    статус заказа обязан перепроверяться на сервере (code_rules 06.08.2026)."""
+
+    def test_незавершённый_заказ_из_тела_не_списывается(self, db, monkeypatch):
+        from routers import finance
+        _cred(db, "c-1", "Работа: Сварка", 30_000)
+        monkeypatch.setattr(finance, "get_production", lambda: _NoCloseConn(db))
+        with pytest.raises(HTTPException) as e:
+            finance.close_completed_obligations(finance.CloseCompletedIn(order_ids=["o-1"]))
+        assert e.value.status_code == 400
+        assert [o["number"] for o in e.value.detail["skipped"]] == ["ORD-901"]
+        assert db.execute("SELECT status FROM creditors WHERE id='c-1'").fetchone()[0] == "open"
+
+    def test_несуществующий_id_из_тела_отвергается(self, db, monkeypatch):
+        from routers import finance
+        _cred(db, "c-1", "Работа: Сварка", 30_000)
+        monkeypatch.setattr(finance, "get_production", lambda: _NoCloseConn(db))
+        with pytest.raises(HTTPException) as e:
+            finance.close_completed_obligations(finance.CloseCompletedIn(order_ids=["o-нет"]))
+        assert e.value.status_code == 400 and e.value.detail["unknown"] == ["o-нет"]
+
+    def test_завершённый_заказ_закрывается_и_пишет_журнал(self, db, monkeypatch):
+        from routers import finance
+        _cred(db, "c-1", "Работа: Сварка", 30_000)
+        db.execute("UPDATE orders SET status='completed' WHERE id='o-1'")
+        monkeypatch.setattr(finance, "get_production", lambda: _NoCloseConn(db))
+        res = finance.close_completed_obligations(finance.CloseCompletedIn(order_ids=["o-1"]))
+        assert res["closed"] == 1 and res["written_off"] == 30_000
+        assert db.execute("SELECT status FROM creditors WHERE id='c-1'").fetchone()[0] == "closed"
+        assert db.execute(
+            "SELECT COUNT(*) FROM audit_log WHERE entity_type='creditor'").fetchone()[0] == 1

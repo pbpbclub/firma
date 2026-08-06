@@ -1562,20 +1562,34 @@ def ensure_paid_obligations_closed():
     показывалось в «Мы должны» с нулевым остатком и в долге подрядчика
     (живой случай — «Миша Юрьев» 6 400/6 400).
 
-    Порог 0.01, а не строгое равенство: деньги в REAL (правило Б3)."""
+    Порог 0.01, а не строгое равенство: деньги в REAL (правило Б3).
+
+    Каждая закрытая строка пишется в audit_log (actor='system', база общая —
+    без следа непонятно, кто и когда закрыл обязательство). Снимок «до» берём
+    перед UPDATE: по нему строку можно вернуть."""
+    from audit import audit
     conn = get_production()
     try:
         info = conn.execute("PRAGMA table_info(creditors)").fetchall()
         if not info or "closed_reason" not in {r[1] for r in info}:
             return
-        conn.execute("""
+        where = ("""WHERE status = 'open' AND COALESCE(total,0) > 0
+                      AND COALESCE(paid,0) >= COALESCE(total,0) - 0.01""")
+        before = [dict(r) for r in conn.execute(f"SELECT * FROM creditors {where}").fetchall()]
+        if not before:
+            return
+        conn.execute(f"""
             UPDATE creditors
                SET status = 'closed',
                    closed_at = COALESCE(closed_at, datetime('now')),
                    closed_reason = COALESCE(closed_reason, 'paid_in_full')
-             WHERE status = 'open' AND COALESCE(total,0) > 0
-               AND COALESCE(paid,0) >= COALESCE(total,0) - 0.01
+             {where}
         """)
+        for row in before:
+            audit(conn, "creditor", row["id"], "status",
+                  f"Закрыто миграцией как полностью оплаченное: «{row['name']}» "
+                  f"план {(row['total'] or 0):g} ₽, оплачено {(row['paid'] or 0):g} ₽",
+                  before_row=row)
         conn.commit()
     finally:
         conn.close()

@@ -842,7 +842,11 @@ def get_creditors(status: Optional[str] = None):
             r["cover_sources"] = c.get("sources", [])
             r["bucket_hint"] = c.get("bucket_hint", 0.0)
             r["ambiguous"] = c.get("ambiguous", False)
-            r["variance"] = round(r["fact"] - r["plan"], 2) if r["fact"] > 0 else None
+            # Отклонение считается только от ОТДЕЛЬНО заданного плана (amount_plan).
+            # Там, где его нет, план и есть total, и «отклонение» выродилось бы в
+            # непокрытый остаток — а это долг (r["debt"]), а не отклонение от плана.
+            r["variance"] = (round(r["fact"] - r["amount_plan"], 2)
+                             if r.get("amount_plan") is not None and r["fact"] > 0 else None)
         # items остаётся ПОЛНЫМ списком: по ключу ["creditors"] его читает ExpenseModal
         # (подсказка «это оплата обязательства?») — обрезав, сломали бы подсказку для
         # заказов в статусе «Смета», по которым расходы заводят регулярно.
@@ -876,7 +880,12 @@ def close_completed_obligations(body: Optional[CloseCompletedIn] = None):
 
     Тот же путь, что и завершение заказа, — не миграция: 116 200 ₽ по старым
     заказам это молчаливое списание чужих денег при рестарте сервиса, такое
-    делается кнопкой и с полным следом в журнале."""
+    делается кнопкой и с полным следом в журнале.
+
+    order_ids из тела НЕ доверяем: force=True списывает остаток без окна
+    подтверждения, и имя эндпоинта («close-completed») проверкой не является —
+    статус каждого заказа перепроверяется здесь, иначе id заказа в производстве
+    молча спишет живой долг подрядчику (code_rules 06.08.2026)."""
     from obligations import close_for_order
     body = body or CloseCompletedIn()
     conn = get_production()
@@ -884,7 +893,22 @@ def close_completed_obligations(body: Optional[CloseCompletedIn] = None):
         if body.order_ids:
             holes = ",".join("?" * len(body.order_ids))
             rows = conn.execute(
-                f"SELECT id, number, title FROM orders WHERE id IN ({holes})", body.order_ids).fetchall()
+                f"""SELECT id, number, title FROM orders
+                     WHERE id IN ({holes}) AND status = 'completed'""", body.order_ids).fetchall()
+            found = {r["id"] for r in rows}
+            skipped = [i for i in body.order_ids if i not in found]
+            if skipped:
+                # Всё или ничего: частичное списание по «хорошей» половине списка
+                # оставило бы Юру гадать, что именно прошло.
+                bad_ids = set(skipped)
+                bad = [dict(r) for r in conn.execute(
+                    f"SELECT id, number, title, status FROM orders WHERE id IN ({holes})",
+                    body.order_ids).fetchall() if r["id"] in bad_ids]
+                raise HTTPException(status_code=400, detail={
+                    "error": "Закрыть расчёты можно только по завершённым заказам",
+                    "skipped": bad,
+                    "unknown": [i for i in skipped if i not in {b["id"] for b in bad}],
+                })
         else:
             rows = conn.execute("""
                 SELECT DISTINCT o.id, o.number, o.title FROM orders o
@@ -1234,12 +1258,16 @@ def get_receivables():
                 row["debt"] = round(row["amount"] - (row["paid"] or 0), 2)
                 items.append(row)
             open_items = [r for r in items if r["debt"] > 0]
-            _mark_receivable_duplicates(open_items)
+            dup_error = _mark_receivable_duplicates(open_items)
             return {
                 "items": items,
                 "open_items": open_items,
                 "total_debt": round(sum(r["debt"] for r in open_items), 2),
                 "total_amount": round(sum(r["amount"] for r in items), 2),
+                # «дублей нет» и «проверка не отработала» — разные вещи
+                # (code_rules 05.08.2026): фронт обязан показать деградацию.
+                "duplicates_checked": dup_error is None,
+                "duplicates_error": dup_error,
             }
         finally:
             conn.close()
@@ -1247,8 +1275,12 @@ def get_receivables():
         return {"items": [], "open_items": [], "total_debt": 0, "total_amount": 0, "error": str(e)}
 
 
-def _mark_receivable_duplicates(open_items: list) -> None:
+def _mark_receivable_duplicates(open_items: list) -> Optional[str]:
     """Пометить счета, которые похожи на долг уже заведённого заказа.
+
+    Возвращает None при удачной проверке и текст ошибки при сбое доступа к
+    production.db: молчаливый выход рисовал экран как «дублей нет», хотя проверка
+    не отрабатывала вовсе (code_rules 05.08.2026).
 
     Счета из вики (finance.db) и дебиторка по заказам — два разных учёта одних
     и тех же денег: «Винзавод/ЛОРО/Мирра» и «Ануш ORD-015» это те же клиенты,
@@ -1258,7 +1290,10 @@ def _mark_receivable_duplicates(open_items: list) -> None:
     Совпадение: номер заказа в номере счёта, либо клиент похож на заказчика
     (masters._norm_name — тот же нестрогий матч, что в картотеке) при близкой сумме."""
     from routers.masters import _norm_name
-    prod = get_production()
+    try:
+        prod = get_production()
+    except Exception as e:
+        return f"production.db недоступна: {e}"
     try:
         orders = [dict(r) for r in prod.execute("""
             SELECT o.id, o.number, o.title, o.price_plan,
@@ -1266,8 +1301,8 @@ def _mark_receivable_duplicates(open_items: list) -> None:
                    COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id = o.id), 0) AS paid
               FROM orders o LEFT JOIN customers c ON c.id = o.customer_id
              WHERE o.archived = 0 AND o.status NOT IN ('cancelled')""").fetchall()]
-    except Exception:
-        return
+    except Exception as e:
+        return f"не удалось прочитать заказы: {e}"
     finally:
         prod.close()
     for r in open_items:
