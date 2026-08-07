@@ -959,6 +959,69 @@ def overhead_summary():
         conn.close()
 
 
+SILENT_ASK, SILENT_REFRESH, SILENT_ARCHIVE = 14, 30, 60
+SILENT_STATUSES = ("draft", "estimate", "project")
+
+
+@router.get("/silent")
+def silent_orders(min_days: int = Query(SILENT_ASK, ge=0)):
+    """«Молчат» — просчёты и проекты без движения (правило фин-агента,
+    `weekly_report.py::silent_orders`, просьба Юры 07.08.2026).
+
+    Движение = максимум из: заведение заказа, последняя смета, последний платёж.
+    `orders.updated_at` намеренно НЕ берём — он дёргается от любой технической
+    правки и обнуляет счётчик тишины, хотя заказчик так и молчит. Заказы в
+    производстве не считаем: там молчание ничего не меняет.
+    Пороги: 14 дн. — напомнить, 30 — актуализировать цену, 60 — кандидат в архив
+    (архивирует только Юра, автоматики нет).
+    """
+    from datetime import datetime, date
+    from zoneinfo import ZoneInfo
+
+    conn = get_production()
+    try:
+        ph = ",".join("?" * len(SILENT_STATUSES))
+        rows = conn.execute(f"""
+            SELECT o.id, o.number, o.title, o.status, o.price_plan,
+                   c.name AS customer, o.brand,
+                   MAX(COALESCE(o.created_at, ''),
+                       COALESCE((SELECT MAX(s.created_at) FROM estimate_sets s WHERE s.order_id = o.id), ''),
+                       COALESCE((SELECT MAX(p.paid_at)    FROM payments p     WHERE p.order_id = o.id), '')
+                   ) AS moved_at
+            FROM orders o LEFT JOIN customers c ON c.id = o.customer_id
+            WHERE o.status IN ({ph}) AND COALESCE(o.archived, 0) = 0
+        """, SILENT_STATUSES).fetchall()
+    finally:
+        conn.close()
+
+    today = datetime.now(ZoneInfo("Asia/Tbilisi")).date()
+    out = []
+    for r in rows:
+        if not r["moved_at"]:
+            continue
+        try:
+            days = (today - date.fromisoformat(str(r["moved_at"])[:10])).days
+        except ValueError:
+            continue
+        if days < min_days:
+            continue
+        step = ("archive" if days >= SILENT_ARCHIVE else
+                "refresh" if days >= SILENT_REFRESH else "remind")
+        out.append({
+            "id": r["id"], "number": r["number"], "title": r["title"],
+            "status": r["status"], "customer": r["customer"], "brand": r["brand"],
+            "price_plan": r["price_plan"] or 0,
+            "moved_at": str(r["moved_at"])[:10], "days": days, "step": step,
+        })
+    out.sort(key=lambda x: x["days"], reverse=True)
+    return {
+        "thresholds": {"ask": SILENT_ASK, "refresh": SILENT_REFRESH, "archive": SILENT_ARCHIVE},
+        "total": len(out),
+        "archive_candidates": sum(1 for r in out if r["step"] == "archive"),
+        "orders": out,
+    }
+
+
 @router.get("/{order_id}")
 def get_order(order_id: str):
     conn = get_production()

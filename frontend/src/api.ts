@@ -27,6 +27,8 @@ export const ordersApi = {
   planFactSummary: () => api.get("/orders/plan-fact-summary").then((r) => r.data),
   // A8: накладные месяца и их раскладка по заказам в производстве
   overheadSummary: () => api.get("/orders/overhead-summary").then((r) => r.data),
+  // «Молчат»: просчёты без движения (правило фин-агента, 14/30/60 дней)
+  silent: () => api.get("/orders/silent").then((r) => r.data),
   estimate: (id: string) => api.get(`/orders/${id}/estimate`).then((r) => r.data),
   // opts — подтверждение закрытия обязательств при завершении заказа (409 без него)
   updateStatus: (id: string, status: string, opts?: { close_obligations?: boolean; only_ids?: string[] }) =>

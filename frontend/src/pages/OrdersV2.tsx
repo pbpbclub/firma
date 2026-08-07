@@ -12,6 +12,7 @@ import { MagnifyingGlass, DotsThree, Plus, Files, CaretRight, Archive, ArrowCoun
 import { ColumnFilter, AmountFilter } from "../components/TableFilters";
 import { ProfitLadder, PlanFactDuel } from "../components/OrderFinance";
 import { ReadinessPanel } from "../components/order/ReadinessPanel";
+import { SilentPanel } from "../components/order/SilentPanel";
 import { StatusPicker } from "../components/order/StatusPicker";
 import { EstimateReviewQueue } from "../components/EstimateReviewQueue";
 import { Breadcrumbs } from "../components/ui/Breadcrumbs";
@@ -463,6 +464,7 @@ export default function OrdersV2() {
   const [showNewOrder, setShowNewOrder] = useState(false);
   const [summaryMode, setSummaryMode] = useState(false);
   const [readyMode, setReadyMode] = useState(false);
+  const [silentMode, setSilentMode] = useState(false);
   const [reviewMode, setReviewMode] = useState(false);
 
   const { data: summary } = useQuery({
@@ -477,6 +479,11 @@ export default function OrdersV2() {
     queryFn: estimatesApi.reviewQueue,
   });
   const reviewCount = reviewQueue?.sets?.length ?? 0;
+
+  // «Молчат»: счётчик тоже нужен снаружи — смысл вкладки в том, чтобы заметить
+  // залежавшийся просчёт, не заходя в неё специально.
+  const { data: silentData } = useQuery({ queryKey: ["orders", "silent"], queryFn: ordersApi.silent });
+  const silentCount = silentData?.total ?? 0;
 
   // «Потенциальная выручка» — тот же источник, что секция в «Обязательствах»
   // (finance/debtors → potential_total): формула живёт в одном месте, на бэке.
@@ -637,7 +644,7 @@ export default function OrdersV2() {
             {(archiveMode || summaryMode || reviewMode) && (
               <div style={{ paddingBottom: 12 }}>
                 <Breadcrumbs items={[
-                  { label: "Заказы", onClick: () => { setReviewMode(false); setSummaryMode(false); setArchiveMode(false); setStatus("in_production"); setPage(0); } },
+                  { label: "Заказы", onClick: () => { setReviewMode(false); setSummaryMode(false); setArchiveMode(false); setSilentMode(false); setStatus("in_production"); setPage(0); } },
                   { label: reviewMode ? "К утверждению" : summaryMode ? "Сводка П/Ф" : "Архив" },
                 ]} />
               </div>
@@ -660,7 +667,7 @@ export default function OrdersV2() {
               </button>
             ))}
             <button
-              onClick={() => { setReviewMode(!reviewMode); setReadyMode(false); setSummaryMode(false); setArchiveMode(false); setStatus(reviewMode ? "in_production" : ""); setPage(0); setSelected(null); }}
+              onClick={() => { setReviewMode(!reviewMode); setReadyMode(false); setSummaryMode(false); setArchiveMode(false); setSilentMode(false); setStatus(reviewMode ? "in_production" : ""); setPage(0); setSelected(null); }}
               style={{
                 fontSize: 13, padding: "0 0 12px",
                 border: "none", background: "none", cursor: "pointer",
@@ -675,7 +682,7 @@ export default function OrdersV2() {
               К утверждению{reviewCount > 0 ? ` (${reviewCount})` : ""}
             </button>
             <button
-              onClick={() => { setSummaryMode(!summaryMode); setReadyMode(false); setArchiveMode(false); setReviewMode(false); setStatus(summaryMode ? "in_production" : ""); setPage(0); setSelected(null); }}
+              onClick={() => { setSummaryMode(!summaryMode); setReadyMode(false); setArchiveMode(false); setReviewMode(false); setSilentMode(false); setStatus(summaryMode ? "in_production" : ""); setPage(0); setSelected(null); }}
               style={{
                 fontSize: 13, padding: "0 0 12px",
                 border: "none", background: "none", cursor: "pointer",
@@ -689,7 +696,7 @@ export default function OrdersV2() {
               Сводка П/Ф
             </button>
             <button
-              onClick={() => { setReadyMode(!readyMode); setSummaryMode(false); setArchiveMode(false); setReviewMode(false); setSelected(null); }}
+              onClick={() => { setReadyMode(!readyMode); setSummaryMode(false); setArchiveMode(false); setReviewMode(false); setSilentMode(false); setSelected(null); }}
               style={{
                 fontSize: 13, padding: "0 0 12px",
                 border: "none", background: "none", cursor: "pointer",
@@ -703,7 +710,21 @@ export default function OrdersV2() {
               Готовность
             </button>
             <button
-              onClick={() => { setArchiveMode(!archiveMode); setReadyMode(false); setSummaryMode(false); setReviewMode(false); setStatus(""); setPage(0); setSelected(null); }}
+              onClick={() => { setSilentMode(!silentMode); setReadyMode(false); setSummaryMode(false); setArchiveMode(false); setReviewMode(false); setSelected(null); }}
+              style={{
+                fontSize: 13, padding: "0 0 12px",
+                border: "none", background: "none", cursor: "pointer",
+                color: silentMode ? "#1A1A1A" : silentCount > 0 ? "#E8592A" : "#A89070",
+                fontWeight: silentMode || silentCount > 0 ? 600 : 400,
+                borderBottom: silentMode ? "2px solid #E8592A" : "2px solid transparent",
+                marginBottom: -1,
+                transition: "all 0.15s",
+              }}
+            >
+              Молчат{silentCount > 0 ? ` (${silentCount})` : ""}
+            </button>
+            <button
+              onClick={() => { setArchiveMode(!archiveMode); setReadyMode(false); setSummaryMode(false); setReviewMode(false); setSilentMode(false); setStatus(""); setPage(0); setSelected(null); }}
               style={{
                 fontSize: 13, padding: "0 0 12px",
                 border: "none", background: "none", cursor: "pointer",
@@ -721,7 +742,9 @@ export default function OrdersV2() {
           </div>
         </div>
 
-        {readyMode ? (
+        {silentMode ? (
+          <SilentPanel />
+        ) : readyMode ? (
           <ReadinessPanel />
         ) : reviewMode ? (
           <EstimateReviewQueue />
