@@ -116,6 +116,140 @@ def _sync_order_from_set(conn, set_id: str):
     )
 
 
+def _resync_order_plan(conn, order_id: str) -> dict:
+    """План заказа = его активная смета (порядок как в orders._active_set).
+
+    Смет не осталось (например, единственную перенесли в другой заказ) — план
+    обнуляется: он был выведен из этой сметы, и оставленный «хвост» врал бы
+    в план-факте и дашборде. Прежние значения возвращаются наружу — чтобы их
+    было видно в ответе move и в журнале."""
+    before = conn.execute(
+        "SELECT price_plan, cost_plan FROM orders WHERE id = ?", (order_id,)
+    ).fetchone()
+    row = conn.execute(
+        """SELECT id FROM estimate_sets WHERE order_id = ?
+           ORDER BY CASE status WHEN 'approved' THEN 0 WHEN 'superseded' THEN 2 ELSE 1 END,
+                    COALESCE(is_primary,0) DESC, created_at DESC
+           LIMIT 1""", (order_id,)
+    ).fetchone()
+    if row:
+        _sync_order_from_set(conn, row["id"])
+    else:
+        conn.execute(
+            "UPDATE orders SET price_plan = 0, cost_plan = 0, updated_at = ? WHERE id = ?",
+            (_now(), order_id)
+        )
+    after = conn.execute(
+        "SELECT price_plan, cost_plan FROM orders WHERE id = ?", (order_id,)
+    ).fetchone()
+    return {
+        "price_before": (before["price_plan"] or 0) if before else 0,
+        "price_after": (after["price_plan"] or 0) if after else 0,
+        "cost_before": (before["cost_plan"] or 0) if before else 0,
+        "cost_after": (after["cost_plan"] or 0) if after else 0,
+        "sets_left": conn.execute(
+            "SELECT COUNT(*) FROM estimate_sets WHERE order_id = ?", (order_id,)
+        ).fetchone()[0],
+    }
+
+
+def _move_set(conn, set_id: str, target_order_id: str, confirm: bool = False) -> dict:
+    """Перенести смету в другой заказ (просьба фин-агента 07.08.2026: просчёт
+    кресла Карин завели отдельным ORD-033, хотя это часть проекта Полисад ORD-035 —
+    раньше приходилось пересоздавать смету инструментом).
+
+    За сметой едут её обязательства (creditors по позициям/строкам) и планы
+    ОБОИХ заказов. Заказ-донор, оставшийся без смет, НЕ трогаем: возвращаем флаг
+    donor_empty, удалять или архивировать решает Юра.
+
+    Не коммитит — коммит на вызывающем."""
+    row = conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Set not found")
+    src_id = row["order_id"]
+    donor = conn.execute(
+        "SELECT id, number, title FROM orders WHERE id = ?", (src_id,)
+    ).fetchone()
+    target = conn.execute(
+        "SELECT id, number, title FROM orders WHERE id = ?", (target_order_id,)
+    ).fetchone()
+    if not target:
+        raise HTTPException(status_code=404, detail="Заказ-приёмник не найден")
+    if src_id == target_order_id:
+        return {"moved": False, "reason": "same_order", "set_id": set_id,
+                "order_id": target_order_id}
+    # Утверждённая смета станет активной у приёмника и вытеснит его утверждённую —
+    # это молча переписало бы план чужого заказа. Спрашиваем.
+    if row["status"] == "approved":
+        clash = conn.execute(
+            "SELECT id, title, number FROM estimate_sets WHERE order_id = ? AND status = 'approved'",
+            (target_order_id,)
+        ).fetchall()
+        if clash and not confirm:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "target_has_approved",
+                    "message": (f"У заказа «{target['title'] or target['number']}» уже есть "
+                                f"утверждённая смета — перенос сделает её superseded. "
+                                f"Повтори с confirm=true."),
+                    "sets": [dict(c) for c in clash],
+                },
+            )
+    conn.execute(
+        "UPDATE estimate_sets SET order_id = ?, is_primary = 0, updated_at = ? WHERE id = ?",
+        (target_order_id, _now(), set_id)
+    )
+    # Обязательства по позициям/строкам этой сметы — это план закупок ИМЕННО по ней,
+    # у донора им делать нечего (иначе его сальдо «Мы должны» держит чужой долг).
+    obligations_moved = conn.execute(
+        """UPDATE creditors SET order_id = ?
+           WHERE (order_id = ? OR order_id IS NULL)
+             AND (estimate_item_id IN (SELECT id FROM estimate_items WHERE set_id = ?)
+                  OR estimate_line_id IN (SELECT el.id FROM estimate_lines el
+                                          JOIN estimate_items ei ON ei.id = el.item_id
+                                          WHERE ei.set_id = ?))""",
+        (target_order_id, src_id, set_id, set_id)
+    ).rowcount
+    if row["status"] == "approved":
+        # supersede прочих смет приёмника + is_primary + синк его плана + догенерация
+        # недостающих обязательств (дедуп по estimate_line_id — перенесённые не задвоятся).
+        approve = _approve_set(conn, set_id)
+        target_plan = {
+            "price_before": approve["price_before"], "price_after": approve["price_after"],
+            "cost_before": approve["cost_before"], "cost_after": approve["cost_after"],
+            "sets_left": conn.execute(
+                "SELECT COUNT(*) FROM estimate_sets WHERE order_id = ?", (target_order_id,)
+            ).fetchone()[0],
+        }
+        obligations_created = approve["obligations"]
+    else:
+        target_plan = _resync_order_plan(conn, target_order_id)
+        obligations_created = None
+    donor_plan = _resync_order_plan(conn, src_id)
+    donor_label = (donor["title"] or donor["number"] or src_id) if donor else src_id
+    target_label = target["title"] or target["number"] or target_order_id
+    audit(conn, "estimate", set_id, "move",
+          f"Смета «{row['title'] or row['number'] or set_id}» перенесена: "
+          f"{donor_label} → {target_label}; обязательств {obligations_moved}, "
+          f"план донора {donor_plan['price_before']:g} → {donor_plan['price_after']:g} ₽, "
+          f"план приёмника {target_plan['price_before']:g} → {target_plan['price_after']:g} ₽",
+          before_row=row)
+    return {
+        "moved": True,
+        "set_id": set_id,
+        "status": row["status"],
+        "from_order": {"id": src_id, "number": donor["number"] if donor else None,
+                       "title": donor["title"] if donor else None, **donor_plan},
+        "to_order": {"id": target_order_id, "number": target["number"],
+                     "title": target["title"], **target_plan},
+        "obligations_moved": obligations_moved,
+        "obligations_created": obligations_created,
+        # Донор остался без смет — решение об удалении/архиве за Юрой, сами не трогаем.
+        "donor_empty": donor_plan["sets_left"] == 0,
+    }
+
+
 def _sync_order_if_approved(conn, item_id: str):
     """Sync parent order totals if the item's set is approved."""
     row = conn.execute(
@@ -226,6 +360,9 @@ class SetCreate(BaseModel):
 
 
 class SetUpdate(BaseModel):
+    # order_id здесь = перенос сметы в другой заказ (тот же код, что и POST /sets/{id}/move,
+    # но без confirm: конфликт утверждённых смет вернёт 409 и потребует move).
+    order_id: Optional[str] = None
     title: Optional[str] = None
     payment_type: Optional[Literal["cash", "bank", "transit"]] = None
     bank_pct: Optional[float] = None
@@ -410,7 +547,12 @@ def update_set(set_id: str, body: SetUpdate):
         if not row:
             raise HTTPException(status_code=404, detail="Not found")
         fields = body.model_dump(exclude_unset=True)   # присланный null очищает поле
+        move_to = fields.pop("order_id", None)
         if not fields:
+            if move_to:
+                _move_set(conn, set_id, move_to)
+                conn.commit()
+                return dict(conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (set_id,)).fetchone())
             return dict(row)
         # У утверждённой сметы суммы согласованы с клиентом: менять payment_type/bank_pct нельзя.
         if row["status"] == "approved" and ("payment_type" in fields or "bank_pct" in fields):
@@ -430,6 +572,10 @@ def update_set(set_id: str, body: SetUpdate):
         # supersede прочих смет, is_primary, синк заказа и обязательства должны
         # зафиксироваться вместе со сменой статуса. Ранний commit оставлял после
         # падения _approve_set заказ с двумя активными сметами и старым планом.
+        # Перенос — до approve-ветки: иначе смета успела бы утвердиться на заказе-доноре
+        # (supersede его смет, синк его плана) и только потом уехать.
+        if move_to:
+            _move_set(conn, set_id, move_to)
         updated = conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
         if updated["status"] == "approved":
             # Одна активная смета на заказ: supersede прочих + синк заказа + обязательства.
@@ -440,6 +586,25 @@ def update_set(set_id: str, body: SetUpdate):
                   before_row=row)
         conn.commit()
         return dict(conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (set_id,)).fetchone())
+    finally:
+        conn.close()
+
+
+class MoveIn(BaseModel):
+    order_id: str
+    confirm: bool = False
+
+
+@router.post("/sets/{set_id}/move")
+def move_set(set_id: str, body: MoveIn):
+    """Перенести смету в другой заказ вместе с обязательствами; планы обоих
+    заказов пересчитываются. Заказ-донор без смет остаётся как есть — в ответе
+    `donor_empty: true`, что с ним делать, решает Юра."""
+    conn = get_production()
+    try:
+        res = _move_set(conn, set_id, body.order_id, confirm=body.confirm)
+        conn.commit()
+        return res
     finally:
         conn.close()
 

@@ -203,6 +203,9 @@ costing_rules(pattern, kind material|catalog|work, target_id) -- выученн�
 **Сметы извне — только через API, не в SQLite.** `POST /api/estimates/sets/full` (сет +
 позиции одним запросом) — единственная точка входа для агентов; с 05.08.2026 на неё
 переведён `production.py estimate-create`, прямая запись смет в базу оттуда убрана
+(перенос сметы в другой заказ — `POST /api/estimates/sets/{id}/move {order_id, confirm}`
+или `order_id` в PUT сета: едут обязательства по строкам, планы обоих заказов
+пересчитываются, донор без смет НЕ удаляется — флаг `donor_empty` в ответе)
 (своя копия формулы безнала уже разъезжалась с `money.py`). Цены за штуку —
 `cost_unit` / `sale_unit` / `client_unit` (`client_unit` = «к оплате», безнал
 разворачивается сервером через `cash_from_client`). **`markup` сервер в цену не
