@@ -885,12 +885,18 @@ def close_completed_obligations(body: Optional[CloseCompletedIn] = None):
     order_ids из тела НЕ доверяем: force=True списывает остаток без окна
     подтверждения, и имя эндпоинта («close-completed») проверкой не является —
     статус каждого заказа перепроверяется здесь, иначе id заказа в производстве
-    молча спишет живой долг подрядчику (code_rules 06.08.2026)."""
+    молча спишет живой долг подрядчику (code_rules 06.08.2026).
+
+    «Поле не передано» (None — все завершённые) и «передан пустой список»
+    (снятый выбор во фронте — не делать ничего) — разные случаи: `if order_ids:`
+    схлопывал их и превращал пустой выбор в списание по всей базе."""
     from obligations import close_for_order
     body = body or CloseCompletedIn()
     conn = get_production()
     try:
-        if body.order_ids:
+        if body.order_ids is not None and not body.order_ids:
+            return {"ok": True, "closed": 0, "written_off": 0.0}
+        if body.order_ids is not None:
             holes = ",".join("?" * len(body.order_ids))
             rows = conn.execute(
                 f"""SELECT id, number, title FROM orders

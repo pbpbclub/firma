@@ -995,13 +995,17 @@ def silent_orders(min_days: int = Query(SILENT_ASK, ge=0)):
         conn.close()
 
     today = datetime.now(ZoneInfo("Asia/Tbilisi")).date()
-    out = []
+    out, undated = [], []
     for r in rows:
-        if not r["moved_at"]:
-            continue
+        # Дату движения не разобрали (нет created_at, битый формат). Молча
+        # выбросить нельзя: заказ пропал бы из вкладки и выглядел как «движение
+        # было» — отдаём отдельным списком, чтобы это было видно.
         try:
-            days = (today - date.fromisoformat(str(r["moved_at"])[:10])).days
+            days = (today - date.fromisoformat(str(r["moved_at"] or "")[:10])).days
         except ValueError:
+            undated.append({"id": r["id"], "number": r["number"], "title": r["title"],
+                            "status": r["status"], "customer": r["customer"],
+                            "moved_at": r["moved_at"] or None})
             continue
         if days < min_days:
             continue
@@ -1019,6 +1023,8 @@ def silent_orders(min_days: int = Query(SILENT_ASK, ge=0)):
         "total": len(out),
         "archive_candidates": sum(1 for r in out if r["step"] == "archive"),
         "orders": out,
+        "undated": undated,          # дату движения не разобрали — тишину не посчитать
+        "undated_count": len(undated),
     }
 
 
@@ -1398,6 +1404,14 @@ def delete_order(order_id: str):
             "DELETE FROM fund_transactions WHERE expense_id IN (SELECT id FROM expenses WHERE order_id = ?)",
             (oid,))
         conn.execute("DELETE FROM expenses WHERE order_id = ?", (oid,))  # legacy MES, FK на orders
+        # Картинки позиций сметы каскад снимет сам, файлы на диске — нет:
+        # собираем пути до удаления, сносим после коммита (media.media_files_of).
+        from media import media_files_of, unlink_files
+        media_paths = media_files_of(conn, estimate_item_ids=[
+            x["id"] for x in conn.execute(
+                """SELECT ei.id FROM estimate_items ei
+                     JOIN estimate_sets es ON ei.set_id = es.id
+                    WHERE es.order_id = ?""", (oid,)).fetchall()])
         # Порядок важен: FK включены (estimate_lines → estimate_items → estimate_sets),
         # удаляем от листьев к корню, иначе IntegrityError и заказ не удаляется.
         conn.execute("DELETE FROM estimate_lines WHERE item_id IN (SELECT ei.id FROM estimate_items ei JOIN estimate_sets es ON ei.set_id = es.id WHERE es.order_id = ?)", (oid,))
@@ -1410,6 +1424,7 @@ def delete_order(order_id: str):
         audit(conn, "order", oid, "delete", f"Удалён заказ «{r['title']}» ({r['number']})",
               before_row=r)
         conn.commit()
+        unlink_files(media_paths)
         return {"ok": True}
     finally:
         conn.close()

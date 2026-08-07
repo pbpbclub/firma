@@ -239,6 +239,8 @@ def _move_set(conn, set_id: str, target_order_id: str, confirm: bool = False) ->
         "moved": True,
         "set_id": set_id,
         "status": row["status"],
+        # Утверждение уже доведено здесь — вызывающему повторять _approve_set нельзя.
+        "approved": row["status"] == "approved",
         "from_order": {"id": src_id, "number": donor["number"] if donor else None,
                        "title": donor["title"] if donor else None, **donor_plan},
         "to_order": {"id": target_order_id, "number": target["number"],
@@ -574,12 +576,15 @@ def update_set(set_id: str, body: SetUpdate):
         # падения _approve_set заказ с двумя активными сметами и старым планом.
         # Перенос — до approve-ветки: иначе смета успела бы утвердиться на заказе-доноре
         # (supersede его смет, синк его плана) и только потом уехать.
-        if move_to:
-            _move_set(conn, set_id, move_to)
+        moved = _move_set(conn, set_id, move_to) if move_to else None
         updated = conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
         if updated["status"] == "approved":
             # Одна активная смета на заказ: supersede прочих + синк заказа + обязательства.
-            _approve_set(conn, set_id)
+            # Перенос утверждённой сметы уже провёл всё это внутри _move_set —
+            # второй вызов гнал supersede/синк/генерацию по кругу и писал в журнал
+            # две записи об одном утверждении.
+            if not (moved or {}).get("approved"):
+                _approve_set(conn, set_id)
         else:
             audit(conn, "estimate", set_id, "update",
                   f"Правка сметы: {', '.join(k for k in fields if k != 'updated_at')}",
@@ -731,11 +736,16 @@ def delete_set(set_id: str):
             raise HTTPException(status_code=409, detail="Утверждённую смету нельзя удалить (по ней выставлен счёт). Сначала переведи в superseded.")
         # cascade manually (SQLite foreign keys may not be enforced)
         items = conn.execute("SELECT id FROM estimate_items WHERE set_id = ?", (set_id,)).fetchall()
+        # Картинки позиций каскад снимет сам, а файлы на диске — нет: пути
+        # собираем до удаления, сносим после коммита (media.media_files_of).
+        from media import media_files_of, unlink_files
+        files = media_files_of(conn, estimate_item_ids=[i["id"] for i in items])
         for item in items:
             conn.execute("DELETE FROM estimate_lines WHERE item_id = ?", (item["id"],))
         conn.execute("DELETE FROM estimate_items WHERE set_id = ?", (set_id,))
         conn.execute("DELETE FROM estimate_sets WHERE id = ?", (set_id,))
         conn.commit()
+        unlink_files(files)
         return {"ok": True}
     finally:
         conn.close()
@@ -964,11 +974,14 @@ def delete_item(item_id: str):
         _assert_set_editable(conn, set_id)
         _touch_set(conn, item_id)
         before = conn.execute("SELECT * FROM estimate_items WHERE id = ?", (item_id,)).fetchone()
+        from media import media_files_of, unlink_files
+        files = media_files_of(conn, estimate_item_ids=[item_id])
         conn.execute("DELETE FROM estimate_lines WHERE item_id = ?", (item_id,))
         conn.execute("DELETE FROM estimate_items WHERE id = ?", (item_id,))
         audit(conn, "estimate_item", item_id, "delete",
               f"Удалена позиция «{before['title']}» ({before['sale_price'] or 0:g} ₽)", before_row=before)
         conn.commit()
+        unlink_files(files)   # каскад унёс строки media, файлы сносим сами
         # Sync after deletion so totals exclude the removed item
         set_row = conn.execute("SELECT status FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
         if set_row and set_row["status"] == "approved":

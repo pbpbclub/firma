@@ -57,6 +57,45 @@ def _binding(catalog_item_id: Optional[str], estimate_item_id: Optional[str]):
     return cat, est
 
 
+def _check_parent(conn, cat: Optional[str], est: Optional[str]):
+    """Привязка обязана указывать на живую строку.
+
+    Опечатка в id уводит файл в никуда: строка есть, галерея его не показывает
+    (выборка идёт по родителю), ошибки нет. Проверяют и приём файла, и
+    перепривязка — иначе PATCH становится дыркой в обход проверки приёма."""
+    table = "catalog_items" if cat else "estimate_items"
+    target = cat or est
+    if not conn.execute(f"SELECT 1 FROM {table} WHERE id = ?", (target,)).fetchone():
+        raise HTTPException(status_code=404, detail=f"{table}: {target} не найден")
+
+
+def media_files_of(conn, *, catalog_item_ids=(), estimate_item_ids=()) -> list:
+    """Пути файлов, которые унесёт с собой удаление родителя.
+
+    `media.catalog_item_id/estimate_item_id` объявлены ON DELETE CASCADE: строку
+    база снимет сама, но файл на диске адресован ТОЛЬКО этой строкой, и вместе с
+    ней ссылка исчезает навсегда. Поэтому обработчики удаления карточки каталога,
+    позиции сметы и заказа собирают пути ДО удаления и зовут `unlink_files` после
+    успешного commit (code_rules 07.08.2026)."""
+    paths = []
+    for field, ids in (("catalog_item_id", catalog_item_ids),
+                       ("estimate_item_id", estimate_item_ids)):
+        ids = [i for i in (ids or []) if i]
+        if not ids:
+            continue
+        holes = ",".join("?" * len(ids))
+        for r in conn.execute(
+                f"SELECT path, thumb_path FROM media WHERE {field} IN ({holes})", ids).fetchall():
+            paths += [p for p in (r["path"], r["thumb_path"]) if p]
+    return paths
+
+
+def unlink_files(paths):
+    """Снести файлы медиатеки — только ПОСЛЕ коммита удаления их строк."""
+    for p in paths:
+        Path(p).unlink(missing_ok=True)
+
+
 def _check_kind(kind: str) -> str:
     kind = (kind or "").strip().lower()
     if kind not in MEDIA_KINDS:
@@ -237,10 +276,7 @@ async def upload_media(
     media_id = str(uuid.uuid4())
     conn = get_production()
     try:
-        target = cat or est
-        table = "catalog_items" if cat else "estimate_items"
-        if not conn.execute(f"SELECT 1 FROM {table} WHERE id = ?", (target,)).fetchone():
-            raise HTTPException(status_code=404, detail=f"{table}: {target} не найден")
+        _check_parent(conn, cat, est)
         order_id = _order_of_estimate_item(conn, est) if est else None
 
         stored = _store(raw, media_id)
@@ -260,10 +296,15 @@ async def upload_media(
                   (ral or "").strip() or None, (source or "").strip() or None,
                   (note or "").strip() or None))
             conn.commit()
-        except sqlite3.IntegrityError as e:
-            for p in (stored["path"], stored["thumb_path"]):
-                Path(p).unlink(missing_ok=True)
-            raise HTTPException(status_code=400, detail=f"медиатека: {e}")
+        except Exception as e:
+            # Файлы легли на диск ДО INSERT, поэтому убираем их при ЛЮБОМ сбое
+            # записи, а не только при IntegrityError: production.db общая, и
+            # штатный отказ здесь — «database is locked» (OperationalError),
+            # после которого узкий except оставлял мусор навсегда.
+            unlink_files((stored["path"], stored["thumb_path"]))
+            if isinstance(e, sqlite3.IntegrityError):
+                raise HTTPException(status_code=400, detail=f"медиатека: {e}")
+            raise
         return _row(conn.execute("SELECT * FROM media WHERE id = ?", (media_id,)).fetchone())
     finally:
         conn.close()
@@ -287,6 +328,7 @@ def update_media(media_id: str, body: dict):
         if "catalog_item_id" in body or "estimate_item_id" in body:
             # Прислали новую привязку — старая снимается целиком, обе разом жить не могут.
             cat, est = _binding(body.get("catalog_item_id"), body.get("estimate_item_id"))
+            _check_parent(conn, cat, est)
         order_id = _order_of_estimate_item(conn, est) if est else None
 
         sets = {"kind": kind, "catalog_item_id": cat, "estimate_item_id": est, "order_id": order_id}

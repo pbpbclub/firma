@@ -531,9 +531,14 @@ def delete_item(item_id: str):
         existing = conn.execute("SELECT id FROM catalog_items WHERE id = ?", (item_id,)).fetchone()
         if not existing:
             raise HTTPException(status_code=404, detail="Not found")
+        # Картинки карточки уносит каскад media.catalog_item_id, файлы на диске —
+        # нет: пути собираем до удаления, сносим после коммита.
+        from media import media_files_of, unlink_files
+        files = media_files_of(conn, catalog_item_ids=[item_id])
         conn.execute("DELETE FROM catalog_item_lines WHERE item_id = ?", (item_id,))
         conn.execute("DELETE FROM catalog_items WHERE id = ?", (item_id,))
         conn.commit()
+        unlink_files(files)
         return {"ok": True}
     finally:
         conn.close()
@@ -548,16 +553,19 @@ def delete_by_titles(body: DeleteByTitlesBody):
     """Delete all estimate_items (and their lines) matching the given titles."""
     conn = get_production()
     try:
-        deleted = 0
+        from media import media_files_of, unlink_files
+        deleted, files = 0, []
         for title in body.titles:
             item_ids = [r["id"] for r in conn.execute(
                 "SELECT id FROM estimate_items WHERE title = ?", (title,)
             ).fetchall()]
+            files += media_files_of(conn, estimate_item_ids=item_ids)
             for iid in item_ids:
                 conn.execute("DELETE FROM estimate_lines WHERE item_id = ?", (iid,))
             result = conn.execute("DELETE FROM estimate_items WHERE title = ?", (title,))
             deleted += result.rowcount
         conn.commit()
+        unlink_files(files)   # каскад унёс строки media, файлы сносим сами
         return {"deleted": deleted}
     finally:
         conn.close()
