@@ -6,6 +6,7 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { ordersApi, estimatesApi, catalogApi, mastersApi, workTypesApi, materialsApi } from "../api";
 import { useNavigationGuard, NavigationGuardModal } from "../components/NavigationGuard";
 import { CostingBlock } from "../components/CostingBlock";
+import { MediaGallery } from "../components/MediaGallery";
 import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { CalcHeader, CalcSection, CalcRow, CalcFooter } from "../components/ui/Calc";
 import { BrandSelect, EditableText } from "../components/ui/Selects";
@@ -289,6 +290,10 @@ function ItemModal({ item, onClose, onRefetch, initialReadOnly }: {
         <CalcSection label="Доставка" addLabel="Добавить доставку" readOnly={readOnly} onAdd={() => addLine("delivery")}>
           {deliveryLines.map(renderRow)}
         </CalcSection>
+
+        {/* Картинки позиции — переопределение для этого заказа: разовый МАФ каталога
+            не имеет и получает картинку сюда, ничего не засоряя в каталоге. */}
+        <MediaGallery estimateItemId={item.id} readOnly={readOnly} compact />
       </div>
 
       {/* Двусторонний ввод: коэффициент → цена, цена (за шт) → коэффициент.

@@ -24,6 +24,33 @@ def get_production():
     return conn
 
 
+def _backup_production(tag: str):
+    """Копия production.db перед разовой миграцией.
+
+    Через sqlite3-backup API, а не копированием файла: база в WAL, и `cp` унёс бы
+    снимок без незачекпойнченного хвоста. Падать из-за бэкапа нельзя — миграции
+    ниже аддитивные, поэтому неудачу только печатаем."""
+    from datetime import datetime
+    dest_dir = Path("/opt/ai-os/data/backups")
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / f"production-{tag}-{datetime.now():%Y%m%d_%H%M%S}.db"
+        src = get_production()
+        try:
+            out = sqlite3.connect(dest)
+            try:
+                src.backup(out)
+            finally:
+                out.close()
+        finally:
+            src.close()
+        print(f"[migration] бэкап production.db → {dest}")
+        return dest
+    except Exception as e:
+        print(f"[migration] бэкап production.db не сделан ({tag}): {e}")
+        return None
+
+
 def get_finance():
     conn = sqlite3.connect(FINANCE_DB)
     conn.row_factory = sqlite3.Row
@@ -1679,3 +1706,84 @@ def ensure_master_ledger_schema():
         conn.commit()
     finally:
         conn.close()
+
+
+MEDIA_ROOT = Path("/opt/firma/data/media")
+MEDIA_KINDS = ("studio", "photo", "viz", "render", "draft", "ref")
+
+
+def ensure_media_schema():
+    """Медиатека изделий — картинки в КП, чертежи в спецификацию (спека Юры 07.08.2026).
+
+    Роли файла: studio/photo/viz/render идут наружу (КП, в этом порядке),
+    draft/ref — только внутрь (спецификация мастеру, рефы). В роли файлов сколько
+    угодно, главный один — `is_primary`, его и берёт документ.
+
+    Привязка РОВНО ОДНА (CHECK): `catalog_item_id` — базовая картинка карточки
+    каталога, `estimate_item_id` — переопределение для конкретного заказа. Выбор
+    для документа: сначала файлы позиции сметы, нет — файлы карточки каталога
+    (routers/media.py::pick). `order_id` — не привязка, а ярлык для выборки
+    «все картинки заказа», проставляется от позиции сметы.
+
+    Блобы в SQLite не кладём: в базе путь и метаданные, файлы на диске под
+    MEDIA_ROOT — иначе production.db станет не скопировать."""
+    conn = get_production()
+    try:
+        fresh = not conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='media'"
+        ).fetchone()
+        if fresh:
+            _backup_production("before-media")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS media (
+                id               TEXT PRIMARY KEY,
+                kind             TEXT NOT NULL,
+                path             TEXT NOT NULL,
+                thumb_path       TEXT,
+                mime             TEXT,
+                width            INTEGER,
+                height           INTEGER,
+                bytes            INTEGER,
+                title            TEXT,
+                catalog_item_id  TEXT REFERENCES catalog_items(id) ON DELETE CASCADE,
+                estimate_item_id TEXT REFERENCES estimate_items(id) ON DELETE CASCADE,
+                order_id         TEXT REFERENCES orders(id) ON DELETE SET NULL,
+                is_primary       INTEGER NOT NULL DEFAULT 0,
+                ral              TEXT,
+                source           TEXT,
+                note             TEXT,
+                created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at       TEXT,
+                CHECK (kind IN ('studio','photo','viz','render','draft','ref')),
+                CHECK (is_primary IN (0, 1)),
+                CHECK ((catalog_item_id IS NOT NULL) + (estimate_item_id IS NOT NULL) = 1)
+            )
+        """)
+        # Главный в роли — ровно один на привязку. Частичный уникальный индекс:
+        # ошибку ловит база, а не только обработчик.
+        conn.execute("""CREATE UNIQUE INDEX IF NOT EXISTS idx_media_primary_catalog
+                        ON media(catalog_item_id, kind)
+                        WHERE is_primary = 1 AND catalog_item_id IS NOT NULL""")
+        conn.execute("""CREATE UNIQUE INDEX IF NOT EXISTS idx_media_primary_estimate
+                        ON media(estimate_item_id, kind)
+                        WHERE is_primary = 1 AND estimate_item_id IS NOT NULL""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_media_catalog ON media(catalog_item_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_media_estimate ON media(estimate_item_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_media_order ON media(order_id)")
+        conn.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_media_updated_at
+            AFTER UPDATE ON media
+            BEGIN
+                UPDATE media SET updated_at = datetime('now') WHERE id = NEW.id;
+            END
+        """)
+        conn.commit()
+    finally:
+        conn.close()
+    # Каталог файлов заводим здесь, но падать из-за него нельзя: миграции гоняются
+    # и из тестов под claude-runner, где /opt/firma/data не наш. Приём файла
+    # создаёт папку месяца сам (routers/media.py::_store).
+    try:
+        MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        print(f"[migration] каталог медиатеки {MEDIA_ROOT} не создан: {e}")

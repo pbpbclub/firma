@@ -7,6 +7,7 @@ import { Loading } from "../components/ui/Loading";
 import { EmptyState } from "../components/ui/EmptyState";
 import { catalogApi } from "../api";
 import { MagnifyingGlass, Plus, X, Trash, Tag } from "@phosphor-icons/react";
+import { MediaGallery } from "../components/MediaGallery";
 import { ColumnFilter, AmountFilter } from "../components/TableFilters";
 import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { CalcHeader, CalcSection, CalcRow, CalcFooter } from "../components/ui/Calc";
@@ -317,6 +318,10 @@ function CalculatorModal({
           <CalcSection label="Доставка" addLabel="Добавить доставку" onAdd={() => addLine("delivery")}>
             {deliveryLines.map(renderRow)}
           </CalcSection>
+
+          {/* Медиатека карточки — базовые картинки изделия (спека 07.08.2026).
+              У новой карточки id ещё нет: файл привязывать не к чему. */}
+          {!isNew && item?.id && <MediaGallery catalogItemId={item.id} />}
 
           {(notes || isNew) && (
             <>

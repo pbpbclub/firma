@@ -423,3 +423,50 @@ export const authApi = {
   changePassword: (data: { current_password: string; new_password: string }) =>
     api.post("/auth/change-password", data).then((r) => r.data),
 };
+
+// ─── Медиатека изделий (спека 07.08.2026) ────────────────────────────────────
+// Файл отдаётся по токену в query: <img src> не умеет слать Authorization,
+// а раздавать чертежи и рендеры заказов без токена нельзя.
+export const MEDIA_KINDS = ["studio", "photo", "viz", "render", "draft", "ref"] as const;
+export type MediaKind = (typeof MEDIA_KINDS)[number];
+
+const MEDIA_KIND_LABELS: Record<string, string> = {
+  studio: "Студия", photo: "Фото", viz: "Интерьер",
+  render: "Рендер", draft: "Чертёж", ref: "Реф",
+};
+export function mediaKindLabel(kind: string) { return MEDIA_KIND_LABELS[kind] || kind; }
+
+export interface MediaFile {
+  id: string; kind: string; title: string | null; url: string; thumb_url: string;
+  is_primary: number; ral: string | null; source: string | null; note: string | null;
+  width: number | null; height: number | null; bytes: number | null;
+  catalog_item_id: string | null; estimate_item_id: string | null; order_id: string | null;
+  created_at: string;
+}
+
+export const mediaApi = {
+  list: (params: Record<string, string | undefined>) =>
+    api.get("/media", { params }).then((r) => r.data),
+  upload: (data: {
+    file: File; kind: string; catalog_item_id?: string; estimate_item_id?: string;
+    title?: string | null; ral?: string | null; source?: string | null; note?: string | null;
+    is_primary?: boolean;
+  }) => {
+    const fd = new FormData();
+    fd.append("file", data.file);
+    fd.append("kind", data.kind);
+    for (const f of ["catalog_item_id", "estimate_item_id", "title", "ral", "source", "note"] as const) {
+      const v = (data as any)[f];
+      if (v) fd.append(f, v);
+    }
+    if (data.is_primary) fd.append("is_primary", "true");
+    return api.post("/media", fd).then((r) => r.data);
+  },
+  patch: (id: string, data: Record<string, any>) => api.patch(`/media/${id}`, data).then((r) => r.data),
+  remove: (id: string) => api.delete(`/media/${id}`).then((r) => r.data),
+  // Подстановка в документ: сначала позиция сметы, нет — карточка каталога
+  pick: (params: { purpose?: "kp" | "spec"; estimate_item_id?: string; catalog_item_id?: string }) =>
+    api.get("/media/pick", { params }).then((r) => r.data),
+  fileUrl: (id: string) => `/api/media/${id}/file?token=${encodeURIComponent(getToken() || "")}`,
+  thumbUrl: (id: string) => `/api/media/${id}/thumb?token=${encodeURIComponent(getToken() || "")}`,
+};
