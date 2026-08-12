@@ -298,6 +298,10 @@ export const workRatesApi = {
     api.post("/work-rates", data).then(r => r.data),
   delete: (id: string) => api.delete(`/work-rates/${id}`).then(r => r.data),
   bootstrap: () => api.post("/work-rates/bootstrap").then(r => r.data),
+  // Ступени по объёму партии: «от 10 шт — 325 ₽». Нет ступеней — работает базовая ставка.
+  addTier: (rateId: string, data: { min_qty: number; rate: number; note?: string | null }) =>
+    api.post(`/work-rates/${rateId}/tiers`, data).then(r => r.data),
+  deleteTier: (tierId: string) => api.delete(`/work-rate-tiers/${tierId}`).then(r => r.data),
 };
 
 export const priceBookApi = {

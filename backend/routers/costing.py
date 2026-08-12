@@ -27,7 +27,8 @@ from routers.estimates import (
     _lookup_cheapest, _recalc_item, _touch_set, _assert_set_editable, _now,
     totals_from_items,
 )
-from routers.rates import norm_title, find_work_rate, find_price_book, find_costing_rule
+from routers.rates import (norm_title, find_work_rate, find_price_book, find_costing_rule,
+                           effective_rate, batch_qty)
 
 router = APIRouter()
 
@@ -180,22 +181,27 @@ def _client_price_per_unit(item, set_row) -> float:
     return sale / qty if qty else sale
 
 
-def _rate_price(rate, item, set_row, line_qty: float) -> float:
+def _rate_price(conn, rate, item, set_row, line_qty: float) -> float:
     """Цена строки по ставке (unit_price; line_total = qty × unit_price считает вызывающий).
 
     per_unit/hourly — цена за единицу/час, умножается на qty честно.
     fixed ₽/изделие и percent — величина ИТОГА строки, а не цены за единицу,
     поэтому делятся на qty: при qty=3 фиксированные 5 000 ₽ должны остаться
     5 000 ₽ на изделие, а не превратиться в 15 000. Умножение на количество
-    ИЗДЕЛИЙ (не строк) делает _recalc_item — оно к qty строки отношения не имеет."""
+    ИЗДЕЛИЙ (не строк) делает _recalc_item — оно к qty строки отношения не имеет.
+
+    Сама ставка берётся ступенью по объёму партии (work_rate_tiers): 8 гибов на
+    разовом стуле — 450 ₽, 40 гибов на партии из пяти — 325 ₽. Ступеней нет —
+    базовая rate, как раньше."""
+    value = effective_rate(conn, rate, batch_qty(rate["scheme"], line_qty, item["quantity"] if item else None))
     if rate["scheme"] == "percent":
         per_unit_client = _client_price_per_unit(item, set_row)
         q = line_qty or 1
-        return round(rate["rate"] / 100.0 * per_unit_client / q, 2)
+        return round(value / 100.0 * per_unit_client / q, 2)
     if rate["scheme"] == "fixed":
         q = line_qty or 1
-        return round(rate["rate"] / q, 2)
-    return round(rate["rate"], 2)
+        return round(value / q, 2)
+    return round(value, 2)
 
 
 # ─── резолвер строки ────────────────────────────────────────────────────────
@@ -258,10 +264,14 @@ def _resolve_line(conn, line, item, set_row) -> dict:
             hist = _work_price_history(conn, line["title"] or name, line["master_id"])
             rate = find_work_rate(conn, wt_id, line["master_id"]) if wt_id else None
             hint = _history_hint(hist)
+            # Ориентир — ставка ступени по объёму этой партии, а не базовая цифра
+            rate_qty = batch_qty(rate["scheme"], line["qty"], item["quantity"]) if rate else None
+            rate_value = effective_rate(conn, rate, rate_qty) if rate else None
             if not hint and rate:
                 unit_lbl = {"per_unit": "₽/ед", "hourly": "₽/ч", "fixed": "₽ за изделие",
                             "percent": "%"}.get(rate["scheme"], "₽")
-                hint = f"ориентир {rate['rate']:g} {unit_lbl}. "
+                tier_lbl = f" (партия {rate_qty:g})" if rate_value != rate["rate"] else ""
+                hint = f"ориентир {rate_value:g} {unit_lbl}{tier_lbl}. "
             out.update(status="missing", reason="ask_price",
                        ask=f"Работа «{name}»{who}: {hint}Сколько в этот раз, ₽/{line['unit'] or 'ед'}?",
                        work_type_id=wt_id,
@@ -272,7 +282,9 @@ def _resolve_line(conn, line, item, set_row) -> dict:
                 out["history"] = hist
             if rate:
                 out["prefill_scheme"] = rate["scheme"]
-                out["prefill_rate"] = rate["rate"]
+                out["prefill_rate"] = rate_value
+                out["prefill_base_rate"] = rate["rate"]
+                out["prefill_batch_qty"] = rate_qty
         return out
 
     # delivery / other
@@ -409,7 +421,7 @@ def _expand_item_from_catalog(conn, item, set_row, catalog_item_id: str) -> int:
         if cl["type"] in ("labor", "service") and cl["work_type_id"]:
             rate = find_work_rate(conn, cl["work_type_id"], cl["master_id"])
             if rate:
-                unit_price = _rate_price(rate, item, set_row, cl["qty"])
+                unit_price = _rate_price(conn, rate, item, set_row, cl["qty"])
                 # A9: снимок ставки — смета read-only навсегда, строка самодостаточна
                 applied_rate, rate_scheme = rate["rate"], rate["scheme"]
                 rate_date = _now()[:10]

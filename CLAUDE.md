@@ -187,6 +187,7 @@ WHERE c.order_id = ?
 ```sql
 work_rates(id, work_type_id, master_id NULL=дефолт, scheme, rate, unit, note, source)
 -- scheme: fixed ₽/изделие | per_unit ₽/ед | hourly ₽/ч | percent (% от клиентской цены позиции)
+work_rate_tiers(id, work_rate_id, min_qty, rate, note)  -- ступени по объёму партии
 price_book(pattern, match_type, title, unit, price, source)   -- цены ВНЕ прайсов (фанера/ткань)
 costing_rules(pattern, kind material|catalog|work, target_id) -- выученные сопоставления
 -- catalog_item_lines дополнена material_code/work_type_id/master_id (привязки не теряются)
@@ -194,6 +195,12 @@ costing_rules(pattern, kind material|catalog|work, target_id) -- выученн�
 
 - `GET /api/estimates/sets/{id}/cost-check` (dry-run) / `POST .../cost-fill` (apply,
   `{expand_items, refresh_materials}`); UI — `components/CostingBlock.tsx` в редакторе сметы.
+- **Ступени ставки по объёму** (12.08.2026): `work_rate_tiers` — берётся строка с
+  наибольшим `min_qty <= объёму партии`, подходящей нет → базовая `work_rates.rate`
+  (ставки без ступеней работают как раньше). Объём партии считает
+  `rates.py::batch_qty`: per_unit/hourly — qty строки × количество изделий позиции
+  (8 гибов × 5 стульев = 40), fixed/percent — количество изделий. Единая точка
+  чтения — `rates.py::effective_rate`, ставку в цену больше нигде напрямую не брать.
 - Обучение: ручная цена работы в строке и approve сметы пишут learned-записи;
   **ручное (source=manual) не перетирается** — upsert'ы с overwrite=False.
 - Bootstrap ставок: `POST /api/work-rates/bootstrap` (вики analytics + история creditors).

@@ -390,7 +390,8 @@ def import_bom(body: BomIn):
     from db import get_materials
     from routers.estimates import _lookup_cheapest
     from routers.costing import _match_material_code
-    from routers.rates import resolve_work_type, find_work_rate, find_price_book, norm_title
+    from routers.rates import (resolve_work_type, find_work_rate, find_price_book, norm_title,
+                               effective_rate, batch_qty)
 
     def _material_title(code: str):
         # Недоступная база прайсов — явная ошибка, а не «названия нет»:
@@ -479,10 +480,13 @@ def import_bom(body: BomIn):
                     line_title = line_title or wt["name"]
                     rate = find_work_rate(conn, wt_id, None)
                     if rate and rate["scheme"] != "percent":
+                        # Ставка — ступенью по объёму (карточка каталога = одно изделие,
+                        # партия = qty строки), см. rates.batch_qty
+                        value = effective_rate(conn, rate, batch_qty(rate["scheme"], l.qty, 1))
                         # fixed — ₽ за изделие: в unit_price кладём долю на единицу,
                         # иначе qty×rate молча раздувает себестоимость (см. costing._rate_price)
-                        rate_value = round(rate["rate"] / (l.qty or 1), 2) if rate["scheme"] == "fixed" \
-                            else round(rate["rate"], 2)
+                        rate_value = round(value / (l.qty or 1), 2) if rate["scheme"] == "fixed" \
+                            else round(value, 2)
                         unit_price = unit_price or rate_value
                         matched += 1
                     elif not unit_price:

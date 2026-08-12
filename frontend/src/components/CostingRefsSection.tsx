@@ -39,6 +39,18 @@ export function CostingRefsSection() {
     onSuccess: () => { inv(); setAdding(false); setForm({ work_type_id: "", master_id: "", scheme: "per_unit", rate: "", unit: "шт" }); },
   });
   const delRate = useMutation({ mutationFn: (id: string) => workRatesApi.delete(id), onSuccess: inv });
+
+  // Ступени по объёму партии: гибка стоит 450 ₽ на разовом изделии и 325 ₽ от 10 штук
+  const [tierFor, setTierFor] = useState<string | null>(null);
+  const [hoverId, setHoverId] = useState<string | null>(null);
+  const [tierForm, setTierForm] = useState({ min_qty: "", rate: "" });
+  const addTier = useMutation({
+    mutationFn: ({ rateId }: { rateId: string }) => workRatesApi.addTier(rateId, {
+      min_qty: parseInt(tierForm.min_qty, 10), rate: parseFloat(tierForm.rate),
+    }),
+    onSuccess: () => { inv(); setTierForm({ min_qty: "", rate: "" }); },
+  });
+  const delTier = useMutation({ mutationFn: (id: string) => workRatesApi.deleteTier(id), onSuccess: inv });
   const delPrice = useMutation({
     mutationFn: (id: number) => priceBookApi.delete(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["price-book"] }),
@@ -114,26 +126,74 @@ export function CostingRefsSection() {
         <div style={{ border: "1px solid #EDEBE6" }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 110px 110px 90px 40px", padding: "8px 12px", borderBottom: "1px solid #EDEBE6", background: "#FAF8F5" }}>
             {["ВИД РАБОТ", "ИСПОЛНИТЕЛЬ", "СХЕМА", "СТАВКА", "ОТКУДА", ""].map((h, i) => (
-              <div key={i} style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.05em", textAlign: i === 3 ? "right" : "left" }}>{h}</div>
+              <div key={i} style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.05em", textAlign: i === 3 ? "right" : "left", paddingRight: i === 3 ? 12 : 0 }}>{h}</div>
             ))}
           </div>
-          {rates.map((r: any) => (
-            <div key={r.id} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 110px 110px 90px 40px", padding: "9px 12px", borderBottom: "1px solid #F2EFE9", alignItems: "center" }}>
-              <div style={{ fontSize: 12, color: "#1A1A1A" }}>{r.work_type_name}</div>
-              <div style={{ fontSize: 12, color: r.master_name ? "#1A1A1A" : "#A89070" }}>{r.master_name || "дефолт"}</div>
-              <div style={{ fontSize: 11, color: "#6B6355" }}>{SCHEME_LABEL[r.scheme] || r.scheme}</div>
-              <div style={{ fontSize: 12, textAlign: "right", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
-                {r.scheme === "percent" ? `${r.rate}%` : fmtMoney(r.rate)}
+          {rates.map((r: any) => {
+            const tiers: any[] = r.tiers ?? [];
+            const open = tierFor === r.id;
+            const showTierRow = open || tiers.length > 0 || hoverId === r.id;
+            return (
+            <div key={r.id} style={{ borderBottom: "1px solid #F2EFE9" }}
+                 onMouseEnter={() => setHoverId(r.id)} onMouseLeave={() => setHoverId(null)}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 110px 110px 90px 40px", padding: "9px 12px", alignItems: "center" }}>
+                <div style={{ fontSize: 12, color: "#1A1A1A" }}>{r.work_type_name}</div>
+                <div style={{ fontSize: 12, color: r.master_name ? "#1A1A1A" : "#A89070" }}>{r.master_name || "дефолт"}</div>
+                <div style={{ fontSize: 11, color: "#6B6355" }}>{SCHEME_LABEL[r.scheme] || r.scheme}</div>
+                <div style={{ fontSize: 12, textAlign: "right", paddingRight: 12, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
+                  {r.scheme === "percent" ? `${r.rate}%` : fmtMoney(r.rate)}
+                </div>
+                <div style={{ fontSize: 10, color: "#A89070" }} title={r.note || ""}>{SOURCE_LABEL[r.source] || r.source}</div>
+                <button onClick={() => delRate.mutate(r.id)}
+                  style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", display: "flex", justifyContent: "flex-end", padding: 2 }}
+                  onMouseEnter={e => (e.currentTarget.style.color = "#8B3A3A")}
+                  onMouseLeave={e => (e.currentTarget.style.color = "#C8C0B0")}>
+                  <Trash size={13} />
+                </button>
               </div>
-              <div style={{ fontSize: 10, color: "#A89070" }} title={r.note || ""}>{SOURCE_LABEL[r.source] || r.source}</div>
-              <button onClick={() => delRate.mutate(r.id)}
-                style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", display: "flex", justifyContent: "flex-end", padding: 2 }}
-                onMouseEnter={e => (e.currentTarget.style.color = "#8B3A3A")}
-                onMouseLeave={e => (e.currentTarget.style.color = "#C8C0B0")}>
-                <Trash size={13} />
-              </button>
+
+              {/* Ступени по объёму: пусто — работает базовая ставка выше */}
+              {showTierRow && <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, padding: "0 12px 9px 12px" }}>
+                {tiers.map((t: any) => (
+                  <span key={t.id} style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "1px solid #EDEBE6", background: "#FAF8F5", padding: "3px 6px", fontSize: 11, color: "#6B6355" }}>
+                    <span>от {t.min_qty} шт —</span>
+                    <span style={{ fontFamily: MONO, color: "#1A1A1A" }}>{r.scheme === "percent" ? `${t.rate}%` : fmtMoney(t.rate)}</span>
+                    <button onClick={() => delTier.mutate(t.id)} title="Удалить ступень"
+                      style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 0, display: "flex" }}
+                      onMouseEnter={e => (e.currentTarget.style.color = "#8B3A3A")}
+                      onMouseLeave={e => (e.currentTarget.style.color = "#C8C0B0")}>
+                      <Trash size={11} />
+                    </button>
+                  </span>
+                ))}
+                {open ? (
+                  <>
+                    <input type="number" placeholder="от N шт" value={tierForm.min_qty}
+                      onChange={e => setTierForm(f => ({ ...f, min_qty: e.target.value }))}
+                      style={{ ...inputStyle, width: 80, padding: "3px 6px", fontSize: 11, fontFamily: MONO }} />
+                    <input type="number" placeholder="₽" value={tierForm.rate}
+                      onChange={e => setTierForm(f => ({ ...f, rate: e.target.value }))}
+                      style={{ ...inputStyle, width: 80, padding: "3px 6px", fontSize: 11, textAlign: "right", fontFamily: MONO }} />
+                    <button onClick={() => addTier.mutate({ rateId: r.id })}
+                      disabled={!parseInt(tierForm.min_qty, 10) || !parseFloat(tierForm.rate) || addTier.isPending}
+                      style={{ border: "1px solid #E8592A", background: "#E8592A", color: "#fff", fontSize: 11, padding: "3px 10px", cursor: "pointer", fontFamily: "inherit" }}>
+                      {addTier.isPending ? "..." : "Добавить"}
+                    </button>
+                    <button onClick={() => { setTierFor(null); setTierForm({ min_qty: "", rate: "" }); }}
+                      style={{ border: "1px solid #EDEBE6", background: "none", color: "#6B6355", fontSize: 11, padding: "3px 10px", cursor: "pointer", fontFamily: "inherit" }}>
+                      Готово
+                    </button>
+                  </>
+                ) : (
+                  <button onClick={() => { setTierFor(r.id); setTierForm({ min_qty: "", rate: "" }); }}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 4, border: "1px solid #EDEBE6", background: "none", color: "#A89070", fontSize: 11, padding: "3px 8px", cursor: "pointer", fontFamily: "inherit" }}>
+                    <Plus size={11} /> {tiers.length ? "ступень" : "ступень по объёму"}
+                  </button>
+                )}
+              </div>}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

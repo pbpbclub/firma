@@ -6,7 +6,8 @@ from audit import audit
 from db import get_production, get_materials
 from money import client_price, cash_from_client, DEFAULT_BANK_PCT
 from routers.materials import cheapest_price
-from routers.rates import find_work_rate, upsert_work_rate, upsert_price_book
+from routers.rates import (find_work_rate, upsert_work_rate, upsert_price_book,
+                           effective_rate, batch_qty)
 import uuid, subprocess, glob, os
 from datetime import datetime
 
@@ -1208,9 +1209,12 @@ def from_catalog(body: FromCatalog):
             if cl["type"] in ("labor", "service") and cl["work_type_id"]:
                 rate = find_work_rate(conn, cl["work_type_id"], cl["master_id"])
                 if rate and rate["scheme"] != "percent":
-                    unit_price = round(rate["rate"], 2)
+                    # Ступень по объёму: позиция из каталога создаётся количеством 1,
+                    # партия = qty строки (пересчёт по количеству делает cost-fill)
+                    value = effective_rate(conn, rate, batch_qty(rate["scheme"], cl["qty"], 1))
+                    unit_price = round(value, 2)
                     # A9: снимок применённой ставки (симметрия price_supplier/price_date)
-                    applied_rate, rate_scheme = rate["rate"], rate["scheme"]
+                    applied_rate, rate_scheme = value, rate["scheme"]
                     rate_date = _now()[:10]
             line_total = round((cl["qty"] or 0) * unit_price, 2)
             conn.execute(

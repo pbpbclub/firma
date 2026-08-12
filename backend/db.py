@@ -842,6 +842,35 @@ def ensure_work_rates_schema():
         conn.close()
 
 
+def ensure_work_rate_tiers_schema():
+    """Ступени ставки по объёму партии (ТЗ Юры 12.08.2026).
+
+    Подрядчик по гибке берёт 450 ₽ за гиб на разовом изделии и 325 ₽ от 10 штук —
+    одна цифра в work_rates занижала работу в полтора раза. Ступень выбирается
+    строкой с наибольшим min_qty <= объёму партии; подходящей нет — базовая
+    work_rates.rate, как раньше. Ставки без ступеней не меняются вовсе."""
+    conn = get_production()
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS work_rate_tiers (
+                id           TEXT PRIMARY KEY,
+                work_rate_id TEXT NOT NULL REFERENCES work_rates(id) ON DELETE CASCADE,
+                min_qty      INTEGER NOT NULL,
+                rate         REAL NOT NULL,
+                note         TEXT,
+                created_at   TEXT DEFAULT (datetime('now')),
+                updated_at   TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_work_rate_tiers
+            ON work_rate_tiers(work_rate_id, min_qty)
+        """)
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_price_book_schema():
     """Выученные цены материалов ВНЕ прайсов materials.db (фанера, ткань, крепёж...).
 
