@@ -2,6 +2,7 @@
 // платежи, исполнители) → ИТОГ (план-факт и лестница прибыли). Ось видна всегда:
 // без сметы — CTA создать, с черновиком — плашка «утверди».
 import { useState, useEffect } from "react";
+import { MoneyInput, parseMoney } from "../components/ui/MoneyInput";
 import { debtColor } from "../components/ui/type";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
@@ -75,16 +76,18 @@ const SPLIT_TARGETS = [
 // Допработа: что сделали сверх сметы, за сколько и во что обошлось.
 /** Платёж клиента вручную. Ключевое поле — «относится к»: без extra_id платёж
  *  ложится в смету, и допработа остаётся с «оплачено 0» при пришедших деньгах. */
-function PaymentModal({ extras, saving, onSave, onClose }: {
-  extras: any[]; saving: boolean;
+function PaymentModal({ extras, debt, saving, onSave, onClose }: {
+  extras: any[]; debt: number; saving: boolean;
   onSave: (d: { amount: number; paid_at: string; note: string | null; extra_id: string | null }) => void;
   onClose: () => void;
 }) {
-  const [amount, setAmount] = useState("");
+  // Остаток долга подставляем сразу: типовое «клиент закрыл остаток» не должно
+  // требовать ручного набора цифры, которая выведена на том же экране.
+  const [amount, setAmount] = useState(debt > 0 ? String(debt) : "");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [note, setNote] = useState("");
   const [extraId, setExtraId] = useState("");
-  const amountNum = parseFloat(amount);
+  const amountNum = parseMoney(amount);
   const valid = !isNaN(amountNum) && amountNum > 0 && !!date;
   const lbl: React.CSSProperties = { fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 5 };
   const inp: React.CSSProperties = { width: "100%", padding: "7px 9px", fontSize: 13, border: "1px solid #EDEBE6",
@@ -98,8 +101,10 @@ function PaymentModal({ extras, saving, onSave, onClose }: {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <div>
             <div style={lbl}>СУММА ₽</div>
-            <input style={{ ...inp, fontFamily: MONO, textAlign: "right" }} autoFocus type="number" min="0" step="0.01"
-              value={amount} onChange={e => setAmount(e.target.value)} placeholder="0" />
+            <MoneyInput style={inp} autoFocus value={amount} onChange={setAmount} />
+            {debt > 0 && (
+              <div style={{ fontSize: 10, color: "#A89070", marginTop: 4 }}>остаток долга {fmtMoney(debt)}</div>
+            )}
           </div>
           <div>
             <div style={lbl}>ДАТА</div>
@@ -133,15 +138,17 @@ function PaymentModal({ extras, saving, onSave, onClose }: {
 
 function ExtraModal({ extra, saving, onSave, onClose }: {
   extra?: any; saving: boolean;
-  onSave: (d: { title: string; price: number; cost: number; note: string | null }) => void;
+  onSave: (d: { title: string; price: number; cost: number; note: string | null; created_at?: string }) => void;
   onClose: () => void;
 }) {
   const [title, setTitle] = useState(extra?.title ?? "");
+  // Даты у допа не было вовсе — в ленте заказа ему не на что было опереться.
+  const [date, setDate] = useState((extra?.created_at ?? new Date().toISOString()).slice(0, 10));
   const [price, setPrice] = useState(extra?.price != null ? String(extra.price) : "");
   const [cost, setCost]   = useState(extra?.cost != null ? String(extra.cost) : "");
   const [note, setNote]   = useState(extra?.note ?? "");
-  const priceNum = parseFloat(price) || 0;
-  const costNum  = parseFloat(cost) || 0;
+  const priceNum = parseMoney(price) || 0;
+  const costNum  = parseMoney(cost) || 0;
   const valid = title.trim().length > 0 && priceNum >= 0 && costNum >= 0;
   const lbl: React.CSSProperties = { fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 5 };
   const inp: React.CSSProperties = { width: "100%", padding: "7px 9px", fontSize: 13, border: "1px solid #EDEBE6",
@@ -149,7 +156,8 @@ function ExtraModal({ extra, saving, onSave, onClose }: {
   return (
     <Modal size="md" eyebrow={extra ? "ДОПРАБОТА · ПРАВКА" : "НОВАЯ ДОПРАБОТА"} onClose={onClose}
       onCancel={onClose}
-      onSave={() => valid && onSave({ title: title.trim(), price: priceNum, cost: costNum, note: note.trim() || null })}
+      onSave={() => valid && onSave({ title: title.trim(), price: priceNum, cost: costNum,
+                                     note: note.trim() || null, created_at: date || undefined })}
       saveLabel={extra ? "Сохранить" : "Добавить"} saving={saving} canSave={valid}>
       <div style={{ padding: "16px 24px 20px" }}>
         <div style={lbl}>ЧТО СДЕЛАЛИ</div>
@@ -158,14 +166,16 @@ function ExtraModal({ extra, saving, onSave, onClose }: {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 }}>
           <div>
             <div style={lbl}>ЦЕНА ДЛЯ ЗАКАЗЧИКА ₽</div>
-            <input style={{ ...inp, fontFamily: MONO, textAlign: "right" }} type="number" min="0" step="0.01"
-              value={price} onChange={e => setPrice(e.target.value)} placeholder="0" />
+            <MoneyInput style={inp} value={price} onChange={setPrice} />
           </div>
           <div>
             <div style={lbl}>СЕБЕСТОИМОСТЬ ₽</div>
-            <input style={{ ...inp, fontFamily: MONO, textAlign: "right" }} type="number" min="0" step="0.01"
-              value={cost} onChange={e => setCost(e.target.value)} placeholder="0" />
+            <MoneyInput style={inp} value={cost} onChange={setCost} />
           </div>
+        </div>
+        <div style={{ marginTop: 14, maxWidth: 200 }}>
+          <div style={lbl}>КОГДА</div>
+          <input style={inp} type="date" value={date} onChange={e => setDate(e.target.value)} />
         </div>
         <div style={{ marginTop: 14 }}>
           <div style={lbl}>ЗАМЕТКА</div>
@@ -194,15 +204,15 @@ function SplitExpenseModal({ expense, saving, onSave, onClose }: {
     { amount: "", category: "work", title: "", purpose: "" },
   ]);
   const patch = (i: number, p: Partial<Part>) => setParts(parts.map((x, j) => (j === i ? { ...x, ...p } : x)));
-  const sum = parts.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+  const sum = parts.reduce((s, p) => s + (parseMoney(p.amount) || 0), 0);
   const diff = Math.round(((expense.amount || 0) - sum) * 100) / 100;
-  const valid = parts.length >= 2 && parts.every(p => (parseFloat(p.amount) || 0) > 0) && Math.abs(diff) < 0.01;
+  const valid = parts.length >= 2 && parts.every(p => (parseMoney(p.amount) || 0) > 0) && Math.abs(diff) < 0.01;
   const addPart = () => setParts([...parts, { amount: diff > 0 ? String(diff) : "", category: "other", title: "", purpose: "" }]);
-  const outOfOrder = parts.filter(p => p.purpose).reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+  const outOfOrder = parts.filter(p => p.purpose).reduce((s, p) => s + (parseMoney(p.amount) || 0), 0);
   return (
     <Modal size="lg" eyebrow="ДЕТАЛИЗАЦИЯ РАСХОДА" onClose={onClose}
       onCancel={onClose} onSave={() => valid && onSave(parts.map(p => ({
-        amount: parseFloat(p.amount), category: p.category, title: p.title.trim() || null,
+        amount: parseMoney(p.amount), category: p.category, title: p.title.trim() || null,
         purpose: p.purpose || null,
       })))}
       saveLabel={saving ? "Разбиваем..." : "Разбить"} saving={saving} canSave={valid}>
@@ -213,12 +223,11 @@ function SplitExpenseModal({ expense, saving, onSave, onClose }: {
         </div>
         {parts.map((p, i) => (
           <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
-            <input value={p.amount} onChange={e => patch(i, { amount: e.target.value })} placeholder="сумма" type="number"
-              style={{ width: 110, border: "1px solid #EDEBE6", padding: "6px 8px", fontSize: 12, outline: "none",
-                       fontFamily: MONO, textAlign: "right" }} />
+            <MoneyInput value={p.amount} onChange={v => patch(i, { amount: v })} placeholder="сумма"
+              style={{ width: 110, border: "1px solid #EDEBE6", padding: "6px 8px", fontSize: 12, outline: "none" }} />
             <div style={{ display: "flex" }}>
               {EXPENSE_CATEGORIES.map(c => (
-                <button key={c.v} onClick={() => patch(i, { category: c.v })}
+                <button type="button" key={c.v} onClick={() => patch(i, { category: c.v })}
                   style={{ fontSize: 10.5, padding: "6px 10px", cursor: "pointer", fontFamily: "inherit",
                            border: "1px solid #EDEBE6", marginLeft: -1,
                            background: p.category === c.v ? "#1A1A1A" : "#fff",
@@ -237,7 +246,7 @@ function SplitExpenseModal({ expense, saving, onSave, onClose }: {
             <input value={p.title} onChange={e => patch(i, { title: e.target.value })} placeholder="название (опц.)"
               style={{ flex: 1, minWidth: 90, border: "1px solid #EDEBE6", padding: "6px 8px", fontSize: 12, outline: "none" }} />
             {parts.length > 2 && (
-              <button onClick={() => setParts(parts.filter((_, j) => j !== i))}
+              <button type="button" onClick={() => setParts(parts.filter((_, j) => j !== i))}
                 style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 3, display: "flex" }}>
                 <Trash size={12} />
               </button>
@@ -245,7 +254,7 @@ function SplitExpenseModal({ expense, saving, onSave, onClose }: {
           </div>
         ))}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12 }}>
-          <button onClick={addPart}
+          <button type="button" onClick={addPart}
             style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, padding: "5px 10px",
                      border: "1px solid #EDEBE6", background: "#fff", color: "#6B6355", cursor: "pointer", fontFamily: "inherit" }}>
             <Plus size={11} /> часть
@@ -505,7 +514,7 @@ export default function OrderDetail() {
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           {saveMutation.isError && <span style={{ fontSize: 11, color: "#8B3A3A" }}>Ошибка сохранения</span>}
           {saveMutation.isSuccess && <span style={{ fontSize: 11, color: "#4A7C59" }}>Сохранено ✓</span>}
-          <button
+          <button type="button"
             onClick={() => setConfirmDelete(true)}
             title="Удалить заказ"
             style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, background: "#F2EFE9", border: "none", cursor: "pointer", color: "#8B3A3A" }}
@@ -564,6 +573,7 @@ export default function OrderDetail() {
         {payModal && (
           <PaymentModal
             extras={extras}
+            debt={order?.debt ?? 0}
             saving={savePayment.isPending}
             onSave={(d) => savePayment.mutate(d)}
             onClose={() => setPayModal(false)}
@@ -751,7 +761,7 @@ export default function OrderDetail() {
                         <span style={{ fontSize: 11, color: "#A89070" }}>отложено под закупку — тратить нельзя</span>
                       </div>
                       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                        <button onClick={() => releaseReserve.mutate()} disabled={releaseReserve.isPending}
+                        <button type="button" onClick={() => releaseReserve.mutate()} disabled={releaseReserve.isPending}
                           style={{ padding: "6px 14px", border: "1px solid #4A7C59", background: "none", color: "#4A7C59", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
                           {releaseReserve.isPending ? "..." : "Материалы закуплены — снять резерв"}
                         </button>
@@ -845,13 +855,13 @@ export default function OrderDetail() {
                     <div style={{ fontSize: 13, fontWeight: 600, textAlign: "right", fontFamily: MONO, fontVariantNumeric: "tabular-nums",
                                   color: x.gross >= 0 ? "#4A7C59" : "#8B3A3A" }}>{fmtMoney(x.gross)}</div>
                     <div style={{ display: "flex", gap: 2, justifyContent: "flex-end" }}>
-                      <button onClick={() => setExtraModal({ open: true, item: x })}
+                      <button type="button" onClick={() => setExtraModal({ open: true, item: x })}
                         style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 3, display: "flex" }}
                         onMouseEnter={ev => (ev.currentTarget.style.color = "#1A1A1A")}
                         onMouseLeave={ev => (ev.currentTarget.style.color = "#C8C0B0")}>
                         <PencilSimple size={13} />
                       </button>
-                      <button onClick={() => setDelExtra(x)}
+                      <button type="button" onClick={() => setDelExtra(x)}
                         style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 3, display: "flex" }}
                         onMouseEnter={ev => (ev.currentTarget.style.color = "#8B3A3A")}
                         onMouseLeave={ev => (ev.currentTarget.style.color = "#C8C0B0")}>
@@ -932,20 +942,20 @@ export default function OrderDetail() {
                       <div style={{ fontSize: 13, fontWeight: 600, color: "#8B3A3A", textAlign: "right",
                                     fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmtMoney(e.amount)}</div>
                       <div style={{ display: "flex", gap: 2, justifyContent: "flex-end" }}>
-                        <button onClick={() => setExpenseModal({ open: true, item: e })}
+                        <button type="button" onClick={() => setExpenseModal({ open: true, item: e })}
                           style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 3, display: "flex" }}
                           onMouseEnter={ev => (ev.currentTarget.style.color = "#1A1A1A")}
                           onMouseLeave={ev => (ev.currentTarget.style.color = "#C8C0B0")}>
                           <PencilSimple size={13} />
                         </button>
-                        <button onClick={() => setSplitExpense(e)}
+                        <button type="button" onClick={() => setSplitExpense(e)}
                           title="Детализировать: разбить на категории (материалы/работы/…)"
                           style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 3, display: "flex" }}
                           onMouseEnter={ev => (ev.currentTarget.style.color = "#E8592A")}
                           onMouseLeave={ev => (ev.currentTarget.style.color = "#C8C0B0")}>
                           <ArrowsSplit size={13} />
                         </button>
-                        <button onClick={() => setDelExpense(e)}
+                        <button type="button" onClick={() => setDelExpense(e)}
                           style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 3, display: "flex" }}
                           onMouseEnter={ev => (ev.currentTarget.style.color = "#8B3A3A")}
                           onMouseLeave={ev => (ev.currentTarget.style.color = "#C8C0B0")}>

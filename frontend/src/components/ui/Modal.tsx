@@ -58,14 +58,19 @@ export function Modal({
       style={{ position: "fixed", inset: 0, zIndex, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }}
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div
+      {/* Именно <form>, а не div: Enter в поле сохраняет форму, и это работает
+          сразу во всех модалках. Раньше Enter не делал ничего в 20 формах из 26 —
+          набрал сумму и обязан взять мышь. В <textarea> Enter по-прежнему переносит
+          строку (нативное поведение формы), заметки и JSON не ломаются. */}
+      <form
+        onSubmit={e => { e.preventDefault(); if (onSave && !saving && canSave) onSave(); }}
         style={{ background: "#FFFFFF", width: WIDTHS[size], maxWidth: "95vw", maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,0.16)" }}
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
         <div style={{ padding: "16px 24px", borderBottom: "1px solid #EDEBE6", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
           <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.06em" }}>{eyebrow}</div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070", display: "flex", alignItems: "center", padding: 4 }}
+          <button type="button" onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070", display: "flex", alignItems: "center", padding: 4 }}
             onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
             onMouseLeave={e => (e.currentTarget.style.color = "#A89070")}
           >
@@ -81,7 +86,7 @@ export function Modal({
           <div style={{ padding: "14px 24px", borderTop: "1px solid #EDEBE6", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
             <div>
               {footerLeft ?? (onDelete ? (
-                <button onClick={onDelete}
+                <button type="button" onClick={onDelete}
                   style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#8B3A3A", display: "flex", alignItems: "center", gap: 5 }}>
                   <Trash size={13} /> {deleteLabel}
                 </button>
@@ -89,13 +94,13 @@ export function Modal({
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               {onCancel && (
-                <button onClick={onCancel}
+                <button type="button" onClick={onCancel}
                   style={{ padding: "7px 16px", background: "#F2EFE9", border: "none", cursor: "pointer", fontSize: 12, color: "#6B6355" }}>
                   Отмена
                 </button>
               )}
               {onSave && (
-                <button onClick={onSave} disabled={saving || !canSave}
+                <button type="submit" disabled={saving || !canSave}
                   style={{
                     padding: "7px 20px", border: "none", fontSize: 12, fontWeight: 600,
                     background: canSave ? "#E8592A" : "#EDEBE6",
@@ -108,7 +113,7 @@ export function Modal({
             </div>
           </div>
         )}
-      </div>
+      </form>
     </div>
   );
 }
@@ -129,10 +134,10 @@ export function ConfirmModal({ message, confirmLabel = "Удалить безв�
         style={{ background: "#fff", padding: "28px 32px", maxWidth: 380, boxShadow: "0 8px 40px rgba(0,0,0,0.18)", display: "flex", flexDirection: "column", gap: 20 }}>
         <div style={{ fontSize: 13, color: "#1A1A1A", lineHeight: 1.5 }}>{message}</div>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button onClick={onCancel} style={{ padding: "7px 16px", background: "#F2EFE9", border: "none", cursor: "pointer", fontSize: 12, color: "#6B6355" }}>
+          <button type="button" onClick={onCancel} style={{ padding: "7px 16px", background: "#F2EFE9", border: "none", cursor: "pointer", fontSize: 12, color: "#6B6355" }}>
             Отмена
           </button>
-          <button onClick={onConfirm} style={{ padding: "7px 16px", background: "#8B3A3A", border: "none", cursor: "pointer", fontSize: 12, color: "#fff", fontWeight: 600 }}>
+          <button type="button" onClick={onConfirm} style={{ padding: "7px 16px", background: "#8B3A3A", border: "none", cursor: "pointer", fontSize: 12, color: "#fff", fontWeight: 600 }}>
             {confirmLabel}
           </button>
         </div>

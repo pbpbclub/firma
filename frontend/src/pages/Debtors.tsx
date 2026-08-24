@@ -8,7 +8,7 @@ import { financeApi, zenmoneyApi, ordersApi, ledgerApi } from "../api";
 import { useNavigate } from "react-router-dom";
 import { Bank, X, Check, Plus, LinkSimple } from "@phosphor-icons/react";
 import { ColumnFilter, AmountFilter, PeriodFilter } from "../components/TableFilters";
-import { Modal } from "../components/ui/Modal";
+import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { MONO } from "../components/ui/Num";
 import { IconButton } from "../components/ui/IconButton";
 import { T, POLARITY, debtColor } from "../components/ui/type";
@@ -90,7 +90,7 @@ function LinkInTxModal({ title, name, amount, linkedTxId, onLink, onClose }: {
               <LinkSimple size={11} style={{ marginRight: 4 }} />
               Привязана транзакция
             </div>
-            <button onClick={() => onLink(null)}
+            <button type="button" onClick={() => onLink(null)}
               style={{ fontSize: 11, color: "#8B3A3A", background: "none", border: "none", cursor: "pointer", padding: 0 }}>Отвязать</button>
           </div>
         )}
@@ -144,6 +144,7 @@ function AddCreditorModal({ onClose }: { onClose: () => void }) {
   const [paid, setPaid] = useState("0");
   const [desc, setDesc] = useState("");
   const [dueDate, setDueDate] = useState("");
+  const [error, setError] = useState("");
 
   const { mutate, isPending } = useMutation({
     mutationFn: () => financeApi.createCreditor({
@@ -157,6 +158,7 @@ function AddCreditorModal({ onClose }: { onClose: () => void }) {
       qc.invalidateQueries({ queryKey: ["creditors"] });
       onClose();
     },
+    onError: (e: any) => setError(e?.response?.data?.detail || "Не удалось сохранить"),
   });
 
   return (
@@ -214,6 +216,7 @@ function AddCreditorModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
+      {error && <div style={{ padding: "0 24px 12px", fontSize: 11, color: "#8B3A3A" }}>{error}</div>}
     </Modal>
   );
 }
@@ -289,20 +292,20 @@ function PayCreditorModal({ item, onClose }: { item: any; onClose: () => void })
         </div>
 
         <div style={{ display: "flex", justifyContent: "space-between", marginTop: 20, gap: 8 }}>
-          <button
+          <button type="button"
             onClick={() => del.mutate()}
             style={{ padding: "7px 12px", border: "1px solid #EDEBE6", background: "none", fontSize: 11, cursor: "pointer", color: "#8B3A3A" }}
           >
             Удалить
           </button>
           <div style={{ display: "flex", gap: 8 }}>
-            <button
+            <button type="button"
               onClick={() => close.mutate()}
               style={{ padding: "7px 12px", border: "1px solid #4A7C59", background: "none", fontSize: 11, cursor: "pointer", color: "#4A7C59", display: "flex", alignItems: "center", gap: 4 }}
             >
               <Check size={12} /> Закрыть долг
             </button>
-            <button
+            <button type="button"
               onClick={() => update.mutate({ paid: parseFloat(paid) || 0, total: parseFloat(total) || 0, description: desc || undefined, due_date: dueDate || undefined })}
               style={{ padding: "7px 16px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600 }}
             >
@@ -396,7 +399,7 @@ function DebtorsTab() {
               {selectedIds.size === 0 && <span>{filtered.length} позиций</span>}
               {selectedIds.size === 0 && hasFilters && total > 0 && <span style={{ color: debtColor(total, "in") }}>долг {fmt(total)}</span>}
             </div>
-            <button onClick={canClear ? clearFilters : undefined} style={{ fontSize: 10, color: canClear ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: canClear ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
+            <button type="button" onClick={canClear ? clearFilters : undefined} style={{ fontSize: 10, color: canClear ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: canClear ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
               <X size={10} /> Сбросить
             </button>
           </div>
@@ -530,9 +533,11 @@ function AddReceivableModal({ onClose }: { onClose: () => void }) {
   const [client, setClient] = useState("");
   const [inn, setInn] = useState("");
   const [invoiceNum, setInvoiceNum] = useState("");
-  const [invoiceDate, setInvoiceDate] = useState("");
+  // Дата счёта по умолчанию — сегодня: счёт почти всегда заводится днём выставления.
+  const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().slice(0, 10));
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
+  const [error, setError] = useState("");
 
   const { mutate, isPending } = useMutation({
     mutationFn: () => financeApi.createReceivable({
@@ -544,6 +549,7 @@ function AddReceivableModal({ onClose }: { onClose: () => void }) {
       note: note.trim() || undefined,
     }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["receivables"] }); onClose(); },
+    onError: (e: any) => setError(e?.response?.data?.detail || "Не удалось сохранить"),
   });
 
   return (
@@ -595,6 +601,7 @@ function AddReceivableModal({ onClose }: { onClose: () => void }) {
               style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none", resize: "vertical", fontFamily: "inherit" }} />
           </div>
         </div>
+      {error && <div style={{ padding: "0 24px 12px", fontSize: 11, color: "#8B3A3A" }}>{error}</div>}
     </Modal>
   );
 }
@@ -672,7 +679,7 @@ function UnallocatedTab() {
       <div style={{ padding: "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
           <span style={{ fontSize: 11, color: "#6B6355" }}>{filtered.length} счетов</span>
-          <button onClick={hasFilters ? clearFilters : undefined} style={{ fontSize: 10, color: hasFilters ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: hasFilters ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
+          <button type="button" onClick={hasFilters ? clearFilters : undefined} style={{ fontSize: 10, color: hasFilters ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: hasFilters ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
             <X size={10} /> Сбросить
           </button>
         </div>
@@ -736,13 +743,13 @@ function UnallocatedTab() {
                 style={{ width: 120, border: "1px solid #EDEBE6", padding: "5px 8px", fontSize: 12, outline: "none" }}
                 placeholder="Сумма ₽"
               />
-              <button
+              <button type="button"
                 onClick={() => update.mutate({ id: r.id, paid: parseFloat(paidDraft) || 0 })}
                 style={{ padding: "5px 14px", border: "none", background: "#4A7C59", color: "#fff", fontSize: 11, cursor: "pointer", fontWeight: 600 }}
               >
                 Сохранить
               </button>
-              <button onClick={() => setEditId(null)}
+              <button type="button" onClick={() => setEditId(null)}
                 style={{ padding: "5px 10px", border: "1px solid #EDEBE6", background: "none", fontSize: 11, cursor: "pointer", color: "#A89070" }}>
                 ✕
               </button>
@@ -804,7 +811,7 @@ function LinkTxModal({ creditor, onClose }: { creditor: any; onClose: () => void
           {/* Source tabs */}
           <div style={{ display: "flex", gap: 0 }}>
             {([["finance", "ДДС (банк)"], ["zen", "Личные финансы"]] as const).map(([id, label]) => (
-              <button key={id} onClick={() => setTab(id)}
+              <button type="button" key={id} onClick={() => setTab(id)}
                 style={{
                   padding: "4px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", border: "1px solid",
                   borderColor: tab === id ? "#1A1A1A" : "#EDEBE6",
@@ -822,7 +829,7 @@ function LinkTxModal({ creditor, onClose }: { creditor: any; onClose: () => void
               <LinkSimple size={11} style={{ marginRight: 4 }} />
               Привязана транзакция
             </div>
-            <button
+            <button type="button"
               onClick={() => link.mutate(tab === "finance" ? { finance_tx_id: null, paid: 0 } : { zenmoney_tx_id: null, paid: 0 })}
               style={{ fontSize: 11, color: "#8B3A3A", background: "none", border: "none", cursor: "pointer", padding: 0 }}
             >Отвязать</button>
@@ -972,7 +979,7 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
             По завершённым заказам остались открытые обязательства: <b>{closableCount} строк
             на {fmt(closableTotal)}</b> — план сметы, по которому деньги уже прошли расходами.
           </div>
-          <button onClick={() => setCloseOpen(true)}
+          <button type="button" onClick={() => setCloseOpen(true)}
             style={{ fontSize: 11, color: "#B8860B", background: "none", border: "1px solid #B8860B",
                      padding: "5px 11px", cursor: "pointer", whiteSpace: "nowrap" }}>
             Закрыть расчёты
@@ -991,7 +998,7 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
               {selectedIds.size > 0 && selDebt > 0 && <span style={{ color: "#8B3A3A" }}>{fmt(selDebt)}</span>}
               {selectedIds.size === 0 && <span>{filteredItems.length} записей</span>}
             </div>
-            <button onClick={canClear ? clearFilters : undefined} style={{ fontSize: 10, color: canClear ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: canClear ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
+            <button type="button" onClick={canClear ? clearFilters : undefined} style={{ fontSize: 10, color: canClear ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: canClear ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
               <X size={10} /> Сбросить
             </button>
           </div>
@@ -1117,6 +1124,10 @@ function AddFixedModal({ item, onClose }: { item?: any; onClose: () => void }) {
   const [payDay, setPayDay] = useState(item?.pay_day ? String(item.pay_day) : "");
   const [note, setNote] = useState(item?.note ?? "");
   const [active, setActive] = useState(item ? !!item.active : true);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  // Раньше у этих мутаций не было onError вовсе: на 400 окно просто не закрывалось,
+  // кнопка отвисала, и никакого объяснения не появлялось.
+  const [error, setError] = useState("");
 
   const { mutate, isPending } = useMutation({
     mutationFn: () => {
@@ -1134,6 +1145,7 @@ function AddFixedModal({ item, onClose }: { item?: any; onClose: () => void }) {
       qc.invalidateQueries({ queryKey: ["fixed-obligations"] });
       onClose();
     },
+    onError: (e: any) => setError(e?.response?.data?.detail || "Не удалось сохранить"),
   });
 
   const { mutate: remove, isPending: removing } = useMutation({
@@ -1145,6 +1157,7 @@ function AddFixedModal({ item, onClose }: { item?: any; onClose: () => void }) {
   });
 
   return (
+    <>
     <Modal
       size="md"
       eyebrow={item ? "ПОСТОЯННОЕ ОБЯЗАТЕЛЬСТВО" : "НОВОЕ ПОСТОЯННОЕ ОБЯЗАТЕЛЬСТВО"}
@@ -1196,8 +1209,8 @@ function AddFixedModal({ item, onClose }: { item?: any; onClose: () => void }) {
               <Checkbox checked={active} onChange={() => setActive(!active)} />
               Активно (создаётся каждый месяц)
             </label>
-            <button
-              onClick={() => { if (confirm("Удалить постоянное обязательство? История оплат прошлых месяцев сохранится.")) remove(); }}
+            <button type="button"
+              onClick={() => setConfirmRemove(true)}
               disabled={removing}
               style={{ fontSize: 11, color: "#8B3A3A", background: "none", border: "none", cursor: "pointer", padding: 0 }}
             >
@@ -1206,7 +1219,17 @@ function AddFixedModal({ item, onClose }: { item?: any; onClose: () => void }) {
           </div>
         )}
       </div>
+      {error && <div style={{ padding: "0 24px 12px", fontSize: 11, color: "#8B3A3A" }}>{error}</div>}
     </Modal>
+    {confirmRemove && (
+      <ConfirmModal
+        message="Удалить постоянное обязательство? История оплат прошлых месяцев сохранится."
+        confirmLabel="Удалить"
+        onConfirm={() => { setConfirmRemove(false); remove(); }}
+        onCancel={() => setConfirmRemove(false)}
+      />
+    )}
+    </>
   );
 }
 
@@ -1276,7 +1299,7 @@ function FixedTab() {
       <div style={{ padding: "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
         <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
           <span style={{ fontSize: 11, color: "#6B6355" }}>{filtered.length} постоянных · нагрузка {fmt(totals.plan_month)}/мес</span>
-          <button onClick={hasFilters ? clearFilters : undefined} style={{ fontSize: 10, color: hasFilters ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: hasFilters ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
+          <button type="button" onClick={hasFilters ? clearFilters : undefined} style={{ fontSize: 10, color: hasFilters ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: hasFilters ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
             <X size={10} /> Сбросить
           </button>
         </div>
@@ -1335,7 +1358,7 @@ function FixedTab() {
                 {f.creditor_id == null ? "—" : f.debt > 0 ? fmt(f.debt) : "Закрыт"}
               </div>
               <div>
-                <button
+                <button type="button"
                   onClick={e => { e.stopPropagation(); setEditTemplate(f); }}
                   style={{ fontSize: 11, color: "#A89070", background: "none", border: "1px solid #EDEBE6", padding: "3px 8px", cursor: "pointer" }}
                 >
@@ -1506,7 +1529,7 @@ export default function Debtors() {
             </div>
             <div style={{ ...T.hero, color: POLARITY.in.color, marginTop: 6 }}>{fmt(receivable)}</div>
             {unallocated > 0 && (
-              <button onClick={() => setTab("unallocated")}
+              <button type="button" onClick={() => setTab("unallocated")}
                 title="Счета из вики: тот же клиент может быть и в заказах — сверь, прежде чем складывать"
                 style={{ marginTop: 4, padding: 0, background: "none", border: "none", cursor: "pointer",
                          fontSize: 11, color: "#A89070", fontFamily: "inherit", textAlign: "left" }}>
@@ -1544,7 +1567,7 @@ export default function Debtors() {
             const pol = POLARITY[TAB_POLARITY[t.id]];
             const active = tab === t.id;
             return (
-              <button
+              <button type="button"
                 key={t.id}
                 onClick={() => setTab(t.id as any)}
                 style={{

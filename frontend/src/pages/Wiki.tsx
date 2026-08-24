@@ -99,7 +99,7 @@ function WikiCategoryView({ cat, id, navigate }: { cat: WikiCategory; id?: strin
       p === "…" ? (
         <span key={`e${i}`} style={{ fontSize: 10, color: "#A89070", padding: "0 2px" }}>…</span>
       ) : (
-        <button key={p} onClick={() => setPage(p as number)} style={{
+        <button type="button" key={p} onClick={() => setPage(p as number)} style={{
           minWidth: 20, height: 20, background: "none", border: "none", cursor: "pointer",
           fontSize: 10, fontWeight: page === p ? 600 : 400,
           color: page === p ? "#1A1A1A" : "#A89070",
@@ -143,8 +143,8 @@ function WikiCategoryView({ cat, id, navigate }: { cat: WikiCategory; id?: strin
               </div>
             ) : (
               <div style={{ display: "flex", gap: 6 }}>
-                <button onClick={() => setSearchOpen(true)} style={{ width: 28, height: 28, background: "#F2EFE9", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#6B6355" }}><MagnifyingGlass size={14} /></button>
-                <button onClick={onAddClick} title={`Новый: ${cat.singular}`} style={{ width: 28, height: 28, background: "#E8592A", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff" }}><Plus size={14} /></button>
+                <button type="button" onClick={() => setSearchOpen(true)} style={{ width: 28, height: 28, background: "#F2EFE9", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#6B6355" }}><MagnifyingGlass size={14} /></button>
+                <button type="button" onClick={onAddClick} title={`Новый: ${cat.singular}`} style={{ width: 28, height: 28, background: "#E8592A", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff" }}><Plus size={14} /></button>
               </div>
             )}
           </div>
@@ -154,7 +154,7 @@ function WikiCategoryView({ cat, id, navigate }: { cat: WikiCategory; id?: strin
             {WIKI_CATEGORIES.map((c) => {
               const active = c.key === cat.key;
               return (
-                <button key={c.key} onClick={() => navigate(`/wiki/${c.key}`)}
+                <button type="button" key={c.key} onClick={() => navigate(`/wiki/${c.key}`)}
                   style={{
                     background: "none", border: "none", cursor: "pointer", padding: "6px 0 10px",
                     fontSize: 12, fontWeight: active ? 600 : 400, fontFamily: "inherit",
@@ -168,7 +168,7 @@ function WikiCategoryView({ cat, id, navigate }: { cat: WikiCategory; id?: strin
 
         <div style={{ padding: "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
           <span style={{ fontSize: 11, color: "#6B6355" }}>{totalCount} записей</span>
-          <button onClick={hasFilters ? clearFilters : undefined} style={{ fontSize: 10, color: hasFilters ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: hasFilters ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
+          <button type="button" onClick={hasFilters ? clearFilters : undefined} style={{ fontSize: 10, color: hasFilters ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: hasFilters ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
             <X size={10} /> Сбросить
           </button>
         </div>
@@ -248,7 +248,7 @@ function WikiCategoryView({ cat, id, navigate }: { cat: WikiCategory; id?: strin
             <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
               <span style={{ letterSpacing: "0.06em" }}>НА СТРАНИЦЕ</span>
               {PAGE_SIZE_OPTIONS.map(n => (
-                <button key={n} onClick={() => changePageSize(n)}
+                <button type="button" key={n} onClick={() => changePageSize(n)}
                   style={{
                     background: "none", border: "none", cursor: "pointer", padding: "0 1px", fontSize: 10,
                     fontFamily: "inherit", fontWeight: pageSize === n ? 600 : 400,
@@ -263,7 +263,7 @@ function WikiCategoryView({ cat, id, navigate }: { cat: WikiCategory; id?: strin
           {totalPages > 1 && (
             <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
               {renderPageNums()}
-              <button onClick={() => setPage(p => Math.min(p + 1, totalPages - 1))} disabled={page >= totalPages - 1}
+              <button type="button" onClick={() => setPage(p => Math.min(p + 1, totalPages - 1))} disabled={page >= totalPages - 1}
                 style={{ background: "none", border: "none", cursor: page >= totalPages - 1 ? "default" : "pointer", color: page >= totalPages - 1 ? "#D0C8C0" : "#A89070", display: "flex", alignItems: "center", padding: "0 2px" }}>
                 <CaretRight size={11} />
               </button>

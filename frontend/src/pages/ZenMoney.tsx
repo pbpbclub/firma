@@ -126,7 +126,7 @@ function EntityPicker({ entityType, value, onChange }: {
       {value.name && (
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, padding: "4px 8px", background: "#FFF3EF", border: "1px solid #F0D8D0" }}>
           <span style={{ fontSize: 11, flex: 1, color: "#1A1A1A" }}>{value.name}</span>
-          <button onClick={() => onChange("", "")} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: "#A89070" }}>
+          <button type="button" onClick={() => onChange("", "")} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: "#A89070" }}>
             <X size={11} />
           </button>
         </div>
@@ -244,7 +244,7 @@ function PayeeRulePopup({ payee, ruleId, onClose }: {
               <IconButton icon={Trash} title="Удалить" tone="danger" size={22} iconSize={13} onClick={() => del.mutate()} />
             </>
           )}
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 2, color: "#A89070" }}>
+          <button type="button" onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 2, color: "#A89070" }}>
             <X size={13} />
           </button>
         </div>
@@ -318,7 +318,7 @@ function PayeeRulePopup({ payee, ruleId, onClose }: {
             />
           )}
           <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
-            <button onClick={() => save.mutate()} disabled={save.isPending || !form.pattern}
+            <button type="button" onClick={() => save.mutate()} disabled={save.isPending || !form.pattern}
               style={{
                 flex: 1, background: "#1A1A1A", color: "#FFFFFF", border: "none",
                 padding: "6px 0", fontSize: 11, cursor: "pointer", fontFamily: "inherit",
@@ -326,7 +326,7 @@ function PayeeRulePopup({ payee, ruleId, onClose }: {
               {save.isPending ? "Сохраняем..." : "Сохранить"}
             </button>
             {editing && ruleId && (
-              <button onClick={() => setEditing(false)}
+              <button type="button" onClick={() => setEditing(false)}
                 style={{ background: "none", border: "1px solid #EDEBE6", padding: "6px 10px", fontSize: 11, cursor: "pointer", fontFamily: "inherit", color: "#6B6355" }}>
                 Отмена
               </button>
@@ -383,7 +383,7 @@ function LinkZenModal({ tx, creditorByZenTx, onClose }: {
         {currentCreditor && (
           <div style={{ padding: "8px 20px", background: "#F2FDF5", borderBottom: "1px solid #D0EDD8", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ fontSize: 11, color: "#4A7C59" }}><LinkSimple size={11} style={{ marginRight: 4 }} />Привязано: <strong>{currentCreditor.name}</strong></div>
-            <button onClick={() => link.mutate({ creditorId: currentCreditor.id, txId: null })}
+            <button type="button" onClick={() => link.mutate({ creditorId: currentCreditor.id, txId: null })}
               style={{ fontSize: 11, color: "#8B3A3A", background: "none", border: "none", cursor: "pointer", padding: 0 }}>Отвязать</button>
           </div>
         )}
@@ -665,7 +665,7 @@ export default function ZenMoneyPage() {
             </div>
             <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
               {/* Sync button */}
-              <button
+              <button type="button"
                 onClick={() => syncMutation.mutate()}
                 disabled={syncMutation.isPending}
                 title="Синхронизировать с ZenMoney"
@@ -733,7 +733,7 @@ export default function ZenMoneyPage() {
               )}
 
               {/* Toggle */}
-              <button
+              <button type="button"
                 onClick={() => switchFeed(false)}
                 style={{
                   padding: "4px 12px", fontSize: 12,
@@ -745,7 +745,7 @@ export default function ZenMoneyPage() {
               >
                 Все
               </button>
-              <button
+              <button type="button"
                 onClick={() => switchFeed(true)}
                 style={{
                   padding: "4px 12px", fontSize: 12,
@@ -766,7 +766,7 @@ export default function ZenMoneyPage() {
           {!showBusiness && (
             <div style={{ display: "flex", gap: 24, borderBottom: "1px solid #EDEBE6", marginBottom: 16 }}>
               {DIR_FILTERS.map((f) => (
-                <button
+                <button type="button"
                   key={f.v}
                   onClick={() => { setDirection(f.v); setSelectedIds(new Set()); }}
                   style={{
@@ -866,7 +866,7 @@ export default function ZenMoneyPage() {
                   {selectedIds.size === 0 && hasFilters && inc > 0 && <span style={{ color: "#4A7C59" }}>+{fmt(inc)}</span>}
                   {selectedIds.size === 0 && hasFilters && (exp > 0 || inc > 0) && <span style={{ color: net >= 0 ? "#4A7C59" : "#8B3A3A", fontWeight: 600 }}>{net >= 0 ? "+" : "−"}{fmt(Math.abs(net))}</span>}
                 </div>
-                <button onClick={canClear ? clearFilters : undefined} style={{ fontSize: 10, color: canClear ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: canClear ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
+                <button type="button" onClick={canClear ? clearFilters : undefined} style={{ fontSize: 10, color: canClear ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: canClear ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
                   <X size={10} /> Сбросить
                 </button>
               </div>

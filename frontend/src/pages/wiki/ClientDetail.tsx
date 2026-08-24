@@ -79,12 +79,12 @@ function LinkedMasterSection({ customerId, linked }: { customerId: string; linke
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #F2EFE9" }}>
           <div style={{ fontSize: 11, color: "#A89070" }}>Он же подрядчик</div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <button onClick={() => nav(`/wiki/contractors/${linked.id}`)}
+            <button type="button" onClick={() => nav(`/wiki/contractors/${linked.id}`)}
               style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 13, fontWeight: 500, color: "#E8592A",
                        background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", padding: 0 }}>
               <Wrench size={12} /> {linked.name} →
             </button>
-            <button onClick={() => link.mutate(null)} title="Убрать связь"
+            <button type="button" onClick={() => link.mutate(null)} title="Убрать связь"
               style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}>
               <X size={11} />
             </button>
@@ -97,18 +97,18 @@ function LinkedMasterSection({ customerId, linked }: { customerId: string; linke
             <option value="">— выбери подрядчика —</option>
             {(masters as any[]).map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>
-          <button disabled={!pick || link.isPending} onClick={() => link.mutate(pick)}
+          <button type="button" disabled={!pick || link.isPending} onClick={() => link.mutate(pick)}
             style={{ fontSize: 11, padding: "5px 10px", border: "none", background: pick ? "#E8592A" : "#EDEBE6",
                      color: pick ? "#fff" : "#A89070", cursor: pick ? "pointer" : "default", fontFamily: "inherit", fontWeight: 600 }}>
             {link.isPending ? "..." : "Связать"}
           </button>
-          <button onClick={() => setPicking(false)}
+          <button type="button" onClick={() => setPicking(false)}
             style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}>
             <X size={11} />
           </button>
         </div>
       ) : (
-        <button onClick={() => setPicking(true)}
+        <button type="button" onClick={() => setPicking(true)}
           style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, padding: "4px 9px", marginTop: 2,
                    border: "1px solid #EDEBE6", background: "#fff", color: "#6B6355", cursor: "pointer", fontFamily: "inherit" }}>
           <Wrench size={11} /> Он же подрядчик

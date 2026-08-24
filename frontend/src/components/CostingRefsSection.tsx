@@ -87,12 +87,12 @@ export function CostingRefsSection() {
       {/* ── Ставки работ ── */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
         <div style={label}>СТАВКИ РАБОТ (СЕБЕСТОИМОСТЬ)</div>
-        <button onClick={() => bootstrap.mutate()} disabled={bootstrap.isPending}
+        <button type="button" onClick={() => bootstrap.mutate()} disabled={bootstrap.isPending}
           title="Первичное наполнение: схемы оплаты из вики подрядчиков + история обязательств"
           style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 5, background: "none", border: "1px solid #EDEBE6", padding: "4px 10px", fontSize: 11, cursor: "pointer", color: "#6B6355", fontFamily: "inherit" }}>
           <ArrowsClockwise size={11} /> {bootstrap.isPending ? "..." : "Импорт из вики"}
         </button>
-        <button onClick={() => setAdding(v => !v)}
+        <button type="button" onClick={() => setAdding(v => !v)}
           style={{ display: "flex", alignItems: "center", gap: 5, background: "none", border: "1px solid #EDEBE6", padding: "4px 10px", fontSize: 11, cursor: "pointer", color: "#6B6355", fontFamily: "inherit" }}>
           <Plus size={11} /> Добавить
         </button>
@@ -130,7 +130,7 @@ export function CostingRefsSection() {
             <div style={{ fontSize: 10, color: "#A89070", marginBottom: 3 }}>СТАВКА</div>
             <input type="number" value={form.rate} onChange={e => setForm(f => ({ ...f, rate: e.target.value }))} style={{ ...inputStyle, width: 100, textAlign: "right", fontFamily: MONO }} />
           </div>
-          <button onClick={() => addRate.mutate()} disabled={!form.work_type_id || !parseFloat(form.rate) || addRate.isPending}
+          <button type="button" onClick={() => addRate.mutate()} disabled={!form.work_type_id || !parseFloat(form.rate) || addRate.isPending}
             style={{ background: "#1A1A1A", color: "#FFF", border: "none", padding: "7px 18px", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
             {addRate.isPending ? "..." : "Сохранить"}
           </button>
@@ -167,7 +167,7 @@ export function CostingRefsSection() {
                   {r.scheme === "percent" ? `${r.rate}%` : fmtMoney(r.rate)}
                 </div>
                 <div style={{ fontSize: 10, color: "#A89070" }} title={r.note || ""}>{SOURCE_LABEL[r.source] || r.source}</div>
-                <button onClick={() => delRate.mutate(r.id)}
+                <button type="button" onClick={() => delRate.mutate(r.id)}
                   style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", display: "flex", justifyContent: "flex-end", padding: 2 }}
                   onMouseEnter={e => (e.currentTarget.style.color = "#8B3A3A")}
                   onMouseLeave={e => (e.currentTarget.style.color = "#C8C0B0")}>
@@ -181,7 +181,7 @@ export function CostingRefsSection() {
                   <span key={t.id} style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "1px solid #EDEBE6", background: "#FAF8F5", padding: "3px 6px", fontSize: 11, color: "#6B6355" }}>
                     <span>от {t.min_qty} шт —</span>
                     <span style={{ fontFamily: MONO, color: "#1A1A1A" }}>{r.scheme === "percent" ? `${t.rate}%` : fmtMoney(t.rate)}</span>
-                    <button onClick={() => delTier.mutate(t.id)} title="Удалить ступень"
+                    <button type="button" onClick={() => delTier.mutate(t.id)} title="Удалить ступень"
                       style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 0, display: "flex" }}
                       onMouseEnter={e => (e.currentTarget.style.color = "#8B3A3A")}
                       onMouseLeave={e => (e.currentTarget.style.color = "#C8C0B0")}>
@@ -197,18 +197,18 @@ export function CostingRefsSection() {
                     <input type="number" placeholder="₽" value={tierForm.rate}
                       onChange={e => setTierForm(f => ({ ...f, rate: e.target.value }))}
                       style={{ ...inputStyle, width: 80, padding: "3px 6px", fontSize: 11, textAlign: "right", fontFamily: MONO }} />
-                    <button onClick={() => addTier.mutate({ rateId: r.id })}
+                    <button type="button" onClick={() => addTier.mutate({ rateId: r.id })}
                       disabled={!parseInt(tierForm.min_qty, 10) || !parseFloat(tierForm.rate) || addTier.isPending}
                       style={{ border: "1px solid #E8592A", background: "#E8592A", color: "#fff", fontSize: 11, padding: "3px 10px", cursor: "pointer", fontFamily: "inherit" }}>
                       {addTier.isPending ? "..." : "Добавить"}
                     </button>
-                    <button onClick={() => { setTierFor(null); setTierForm({ min_qty: "", rate: "" }); }}
+                    <button type="button" onClick={() => { setTierFor(null); setTierForm({ min_qty: "", rate: "" }); }}
                       style={{ border: "1px solid #EDEBE6", background: "none", color: "#6B6355", fontSize: 11, padding: "3px 10px", cursor: "pointer", fontFamily: "inherit" }}>
                       Готово
                     </button>
                   </>
                 ) : (
-                  <button onClick={() => { setTierFor(r.id); setTierForm({ min_qty: "", rate: "" }); }}
+                  <button type="button" onClick={() => { setTierFor(r.id); setTierForm({ min_qty: "", rate: "" }); }}
                     style={{ display: "inline-flex", alignItems: "center", gap: 4, border: "1px solid #EDEBE6", background: "none", color: "#A89070", fontSize: 11, padding: "3px 8px", cursor: "pointer", fontFamily: "inherit" }}>
                     <Plus size={11} /> {tiers.length ? "ступень" : "ступень по объёму"}
                   </button>
@@ -245,7 +245,7 @@ export function CostingRefsSection() {
                 <span style={{ fontSize: 10, color: "#A89070" }}>
                   {r.match_type === "contains" ? "по вхождению" : "точно"}
                 </span>
-                <button onClick={() => delRule.mutate(r.id)} disabled={delRule.isPending}
+                <button type="button" onClick={() => delRule.mutate(r.id)} disabled={delRule.isPending}
                   title="Снять правило — подстановка прекратится"
                   style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", display: "flex", justifyContent: "flex-end", padding: 2 }}
                   onMouseEnter={e => (e.currentTarget.style.color = "#8B3A3A")}
@@ -283,7 +283,7 @@ export function CostingRefsSection() {
                   <span key={m.id} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11,
                          border: "1px solid #EDEBE6", padding: "3px 6px 3px 9px", color: "#6B6355" }}>
                     {m.name}
-                    <button onClick={() => unlink.mutate({ wt: wt.id, master: m.id })} disabled={unlink.isPending}
+                    <button type="button" onClick={() => unlink.mutate({ wt: wt.id, master: m.id })} disabled={unlink.isPending}
                       title="Убрать из этого вида работ"
                       style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 0, display: "flex" }}>
                       <X size={10} />
@@ -312,7 +312,7 @@ export function CostingRefsSection() {
                 <div style={{ fontSize: 11, color: "#A89070" }}>{p.unit || "—"}</div>
                 <div style={{ fontSize: 12, textAlign: "right", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmtMoney(p.price)}</div>
                 <div style={{ fontSize: 10, color: "#A89070" }}>{SOURCE_LABEL[p.source] || p.source}{p.times_used ? ` ·×${p.times_used}` : ""}</div>
-                <button onClick={() => delPrice.mutate(p.id)}
+                <button type="button" onClick={() => delPrice.mutate(p.id)}
                   style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", display: "flex", justifyContent: "flex-end", padding: 2 }}
                   onMouseEnter={e => (e.currentTarget.style.color = "#8B3A3A")}
                   onMouseLeave={e => (e.currentTarget.style.color = "#C8C0B0")}>

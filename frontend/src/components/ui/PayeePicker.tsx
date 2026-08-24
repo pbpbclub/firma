@@ -66,7 +66,7 @@ export function PayeePicker({ value, onChange, suggestName, placeholder = "— �
           style={{ border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 12, outline: "none", minWidth: 220, flex: 1, fontFamily: "inherit" }} />
         <div style={{ display: "flex" }}>
           {PAYEE_ROLES.map(r => (
-            <button key={r} onClick={() => setRole(r)}
+            <button type="button" key={r} onClick={() => setRole(r)}
               style={{ fontSize: 10.5, padding: "4px 9px", cursor: "pointer", fontFamily: "inherit", marginLeft: -1,
                        border: `1px solid ${role === r ? "#E8592A" : "#EDEBE6"}`,
                        background: role === r ? "#FFF4EE" : "#fff",
@@ -75,13 +75,13 @@ export function PayeePicker({ value, onChange, suggestName, placeholder = "— �
             </button>
           ))}
         </div>
-        <button disabled={!name.trim() || create.isPending} onClick={() => create.mutate()}
+        <button type="button" disabled={!name.trim() || create.isPending} onClick={() => create.mutate()}
           style={{ fontSize: 11, padding: "5px 10px", border: "none", fontFamily: "inherit", fontWeight: 600,
                    background: name.trim() ? "#E8592A" : "#EDEBE6", color: name.trim() ? "#fff" : "#A89070",
                    cursor: name.trim() ? "pointer" : "default" }}>
           {create.isPending ? "..." : "Создать"}
         </button>
-        <button onClick={() => { setAdding(false); setName(""); }}
+        <button type="button" onClick={() => { setAdding(false); setName(""); }}
           style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}>
           <X size={11} />
         </button>
@@ -111,7 +111,7 @@ export function PayeePicker({ value, onChange, suggestName, placeholder = "— �
           </optgroup>
         )}
       </select>
-      <button onClick={() => { setName(prettifyPayee(suggestName)); setAdding(true); }}
+      <button type="button" onClick={() => { setName(prettifyPayee(suggestName)); setAdding(true); }}
         title="Завести нового контрагента"
         style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10.5, padding: "5px 9px",
                  border: "1px solid #EDEBE6", background: "#fff", color: "#6B6355",
@@ -153,13 +153,13 @@ export function CustomerPicker({ value, onChange, suggestName, placeholder = "�
       <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", ...style }}>
         <input value={name} onChange={e => setName(e.target.value)} autoFocus placeholder="название клиента"
           style={{ border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 12, outline: "none", minWidth: 220, flex: 1, fontFamily: "inherit" }} />
-        <button disabled={!name.trim() || create.isPending} onClick={() => create.mutate()}
+        <button type="button" disabled={!name.trim() || create.isPending} onClick={() => create.mutate()}
           style={{ fontSize: 11, padding: "5px 10px", border: "none", fontFamily: "inherit", fontWeight: 600,
                    background: name.trim() ? "#E8592A" : "#EDEBE6", color: name.trim() ? "#fff" : "#A89070",
                    cursor: name.trim() ? "pointer" : "default" }}>
           {create.isPending ? "..." : "Создать"}
         </button>
-        <button onClick={() => { setAdding(false); setName(""); }}
+        <button type="button" onClick={() => { setAdding(false); setName(""); }}
           style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}>
           <X size={11} />
         </button>
@@ -176,7 +176,7 @@ export function CustomerPicker({ value, onChange, suggestName, placeholder = "�
         <option value="">{placeholder}</option>
         {(customers as any[]).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
       </select>
-      <button onClick={() => { setName(prettifyPayee(suggestName)); setAdding(true); }}
+      <button type="button" onClick={() => { setName(prettifyPayee(suggestName)); setAdding(true); }}
         title="Завести нового клиента"
         style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10.5, padding: "5px 9px",
                  border: "1px solid #EDEBE6", background: "#fff", color: "#6B6355",

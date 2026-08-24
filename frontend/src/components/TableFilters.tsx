@@ -47,7 +47,7 @@ export function ColumnFilter({ label, options, value, onChange, align, maxHeight
   const filtered = q ? options.filter(o => o.toLowerCase().includes(q.toLowerCase())) : options;
   return (
     <div ref={ref} style={{ position: "relative", display: "inline-flex" }}>
-      <button onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }} style={triggerStyle(!!value, align)}>
+      <button type="button" onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }} style={triggerStyle(!!value, align)}>
         {label}
       </button>
       {open && (
@@ -84,7 +84,7 @@ export function AmountFilter({ label, min, max, onChange, align }: {
   const active = !!min || !!max;
   return (
     <div ref={ref} style={{ position: "relative", display: "inline-flex" }}>
-      <button onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }} style={triggerStyle(active, align)}>
+      <button type="button" onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }} style={triggerStyle(active, align)}>
         {label}
       </button>
       {open && (
@@ -97,7 +97,7 @@ export function AmountFilter({ label, min, max, onChange, align }: {
               style={{ width: 84, border: "1px solid #EDEBE6", padding: "5px 8px", fontSize: 12, outline: "none" }} />
           </div>
           {active && (
-            <button onClick={() => { onChange("", ""); setOpen(false); }}
+            <button type="button" onClick={() => { onChange("", ""); setOpen(false); }}
               style={{ marginTop: 8, width: "100%", padding: "5px", border: "none", background: "#FAF8F5", fontSize: 11, color: "#A89070", cursor: "pointer" }}>
               Сбросить
             </button>
@@ -132,14 +132,14 @@ export function PeriodFilter({ label, from, to, onChange, align }: {
   ];
   return (
     <div ref={ref} style={{ position: "relative", display: "inline-flex" }}>
-      <button onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }} style={triggerStyle(active, align)}>
+      <button type="button" onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }} style={triggerStyle(active, align)}>
         {label}
       </button>
       {open && (
         <div style={{ ...popBase(align), minWidth: 230 }}>
           <div style={{ padding: "8px 10px 6px", borderBottom: "1px solid #F2EFE9", display: "flex", flexWrap: "wrap", gap: 4 }}>
             {PRESETS.map(p => (
-              <button key={p.label}
+              <button type="button" key={p.label}
                 onClick={() => { const [f,t] = p.get(); onChange(f,t); setOpen(false); }}
                 style={{ fontSize: 10, padding: "3px 8px", border: "1px solid #EDEBE6", background: "none", cursor: "pointer", color: "#6B6355" }}
                 onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")}
@@ -160,7 +160,7 @@ export function PeriodFilter({ label, from, to, onChange, align }: {
             </div>
           </div>
           {active && (
-            <button onClick={() => { onChange("", ""); setOpen(false); }}
+            <button type="button" onClick={() => { onChange("", ""); setOpen(false); }}
               style={{ width: "100%", padding: "6px", border: "none", borderTop: "1px solid #F2EFE9", background: "#FAF8F5", fontSize: 11, color: "#A89070", cursor: "pointer" }}>
               Сбросить
             </button>

@@ -48,7 +48,7 @@ export function PayeeRulesSection({ entityType, entityId }: { entityType: string
         <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>
           ZENMONEY <span style={{ color: "#C8C0B0", fontWeight: 400 }}>· паттерны</span>
         </div>
-        <button onClick={() => setAdding(v => !v)}
+        <button type="button" onClick={() => setAdding(v => !v)}
           style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070", padding: 0, display: "flex", alignItems: "center" }}>
           <Tag size={12} />
         </button>
@@ -65,7 +65,7 @@ export function PayeeRulesSection({ entityType, entityId }: { entityType: string
             <span style={{ fontSize: 10, color: "#A89070", marginLeft: 5 }}>{MATCH_TYPE_LABELS[r.match_type]}</span>
             {r.display_name && <span style={{ fontSize: 10, color: "#6B6355", marginLeft: 5 }}>→ {r.display_name}</span>}
           </div>
-          <button onClick={() => del.mutate(r.id)}
+          <button type="button" onClick={() => del.mutate(r.id)}
             style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2 }}>
             <X size={11} />
           </button>
@@ -94,11 +94,11 @@ export function PayeeRulesSection({ entityType, entityId }: { entityType: string
               placeholder="отображаемое имя" style={inputStyle} />
           </div>
           <div style={{ display: "flex", gap: 6 }}>
-            <button onClick={() => create.mutate()} disabled={!form.pattern || create.isPending}
+            <button type="button" onClick={() => create.mutate()} disabled={!form.pattern || create.isPending}
               style={{ flex: 1, background: "#1A1A1A", color: "#FFF", border: "none", padding: "5px 0", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
               {create.isPending ? "..." : "Сохранить"}
             </button>
-            <button onClick={() => setAdding(false)}
+            <button type="button" onClick={() => setAdding(false)}
               style={{ background: "none", border: "1px solid #EDEBE6", padding: "5px 10px", fontSize: 11, cursor: "pointer", fontFamily: "inherit", color: "#6B6355" }}>
               Отмена
             </button>

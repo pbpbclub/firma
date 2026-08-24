@@ -122,12 +122,12 @@ function WikiOnlyContractors() {
                   <option value="">— кто это в картотеке —</option>
                   {(masters as any[]).map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
                 </select>
-                <button disabled={!pick || link.isPending}
+                <button type="button" disabled={!pick || link.isPending}
                   onClick={() => link.mutate({ contractor_id: w.contractor_id, master_id: pick })}
                   style={{ fontSize: 11, padding: "5px 10px", border: "none", background: pick ? "#E8592A" : "#EDEBE6", color: pick ? "#fff" : "#A89070", cursor: pick ? "pointer" : "default", fontFamily: "inherit", fontWeight: 600 }}>
                   {link.isPending ? "..." : "Привязать"}
                 </button>
-                <button onClick={() => { setLinkFor(null); setPick(""); }}
+                <button type="button" onClick={() => { setLinkFor(null); setPick(""); }}
                   style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}>
                   <X size={11} />
                 </button>
@@ -136,7 +136,7 @@ function WikiOnlyContractors() {
               <>
                 {/* Кандидат из картотеки: похоже, это он же под другим именем */}
                 {w.suggested_master && (
-                  <button
+                  <button type="button"
                     onClick={() => link.mutate({ contractor_id: w.contractor_id, master_id: w.suggested_master.id })}
                     disabled={link.isPending}
                     title={`Привязать к существующему подрядчику «${w.suggested_master.name}» — дубль не создаётся`}
@@ -144,12 +144,12 @@ function WikiOnlyContractors() {
                     <LinkSimple size={11} /> Это «{w.suggested_master.name}»
                   </button>
                 )}
-                <button onClick={() => { setLinkFor(w.contractor_id); setPick(""); }}
+                <button type="button" onClick={() => { setLinkFor(w.contractor_id); setPick(""); }}
                   title="Привязать к существующему подрядчику"
                   style={{ fontSize: 11, color: "#6B6355", background: "#fff", border: "1px solid #EDEBE6", padding: "5px 10px", cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}>
                   <LinkSimple size={11} /> Привязать
                 </button>
-                <button
+                <button type="button"
                   onClick={() => add.mutate(w)} disabled={add.isPending}
                   title="Завести нового подрядчика в картотеке"
                   style={{ fontSize: 11, fontWeight: 600, color: "#E8592A", background: "transparent", border: "1px solid #E8592A", padding: "5px 12px", cursor: add.isPending ? "default" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}

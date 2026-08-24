@@ -56,7 +56,7 @@ export function OrderParams({ order, form, field, customers, onStatusChanged }: 
       {/* Шапка-свёртка. Выжимка живёт РЯДОМ с кнопкой, а не внутри: в выжимке
           кликабельная пилюля статуса, а button внутри button — невалидный HTML. */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", minHeight: 46 }}>
-        <button onClick={() => setOpen(o => !o)}
+        <button type="button" onClick={() => setOpen(o => !o)}
           style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0",
             background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
           {open ? <CaretDown size={11} style={{ color: "#A89070" }} /> : <CaretRight size={11} style={{ color: "#A89070" }} />}
@@ -144,7 +144,7 @@ export function OrderParams({ order, form, field, customers, onStatusChanged }: 
                     if (e.key === "Enter") createCustomer();
                   }}
                   style={{ flex: 1, border: "1px solid #E8592A", padding: "6px 10px", fontSize: 13, outline: "none", fontFamily: "inherit" }} />
-                <button disabled={creatingCustomer || !newCustomerName.trim()} onClick={createCustomer}
+                <button type="button" disabled={creatingCustomer || !newCustomerName.trim()} onClick={createCustomer}
                   style={{ padding: "6px 14px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600, opacity: creatingCustomer || !newCustomerName.trim() ? 0.5 : 1, fontFamily: "inherit" }}>
                   {creatingCustomer ? "..." : "Создать"}
                 </button>

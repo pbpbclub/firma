@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { MoneyInput, parseMoney } from "./ui/MoneyInput";
 import { useQuery } from "@tanstack/react-query";
 import { Modal } from "./ui/Modal";
 import { PayeePicker } from "./ui/PayeePicker";
@@ -53,7 +54,14 @@ export function ExpenseModal({ orderId, expense, existingExpenses = [], extras =
 }) {
   const [title, setTitle]       = useState(expense?.title ?? "");
   const [amount, setAmount]     = useState(expense?.amount != null ? String(expense.amount) : "");
-  const [category, setCategory] = useState(expense?.category ?? "material");
+  // Последняя категория запоминается по заказу: десять расходов «Работы» подряд
+  // не должны требовать десяти переставлений чипа. Тот же приём, что у размера
+  // страницы в пагинаторе (usePager с ключом localStorage).
+  const catKey = `expense_cat_${orderId}`;
+  const [category, setCategory] = useState<string>(() => {
+    if (expense?.category) return expense.category;
+    try { return localStorage.getItem(catKey) || "material"; } catch { return "material"; }
+  });
   const [masterId, setMasterId] = useState(expense?.master_id ?? "");
   const [date, setDate]         = useState(expense?.expense_date ?? new Date().toISOString().slice(0, 10));
   const [creditorId, setCreditorId] = useState<string | null>(expense?.creditor_id ?? null);
@@ -91,7 +99,7 @@ export function ExpenseModal({ orderId, expense, existingExpenses = [], extras =
   });
   const advanceLeft = ledger?.balance != null ? Math.max(0, -ledger.balance) : null;
 
-  const amountNum = parseFloat(amount);
+  const amountNum = parseMoney(amount);
   const valid = title.trim().length > 0 && !isNaN(amountNum) && amountNum > 0
     && (paySource !== "accountable" || !!accountableId)
     // Без подрядчика непонятно, чей аванс/зачёт закрывает расход — бэк такое отвергает.
@@ -109,6 +117,7 @@ export function ExpenseModal({ orderId, expense, existingExpenses = [], extras =
   const submit = () => {
     if (!valid) return;
     if (dupCandidate && !dupConfirmed) { setDupConfirmed(true); return; }
+    try { localStorage.setItem(catKey, category); } catch { /* приватный режим — не беда */ }
     onSave({
       title: title.trim(),
       amount: amountNum,
@@ -145,9 +154,7 @@ export function ExpenseModal({ orderId, expense, existingExpenses = [], extras =
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 }}>
           <div>
             <div style={lbl}>СУММА ₽</div>
-            <input style={{ ...inp, fontFamily: MONO, fontVariantNumeric: "tabular-nums", textAlign: "right" }}
-              type="number" min="0" step="0.01" value={amount}
-              onChange={e => setAmount(e.target.value)} placeholder="0" />
+            <MoneyInput style={inp} value={amount} onChange={setAmount} />
           </div>
           <div>
             <div style={lbl}>ДАТА</div>
@@ -159,7 +166,7 @@ export function ExpenseModal({ orderId, expense, existingExpenses = [], extras =
           <div style={lbl}>КАТЕГОРИЯ</div>
           <div style={{ display: "flex" }}>
             {EXPENSE_CATEGORIES.map(c => (
-              <button key={c.v} onClick={() => setCategory(c.v)}
+              <button type="button" key={c.v} onClick={() => setCategory(c.v)}
                 style={{
                   padding: "5px 12px", fontSize: 11, cursor: "pointer", border: "1px solid",
                   borderColor: category === c.v ? "#1A1A1A" : "#EDEBE6",
@@ -175,7 +182,7 @@ export function ExpenseModal({ orderId, expense, existingExpenses = [], extras =
           <div style={lbl}>ЧЕМ ЗАКРЫТО</div>
           <div style={{ display: "flex", flexWrap: "wrap" }}>
             {SETTLEMENTS.map(p => (
-              <button key={p.v} onClick={() => setSettledBy(p.v)} title={p.hint}
+              <button type="button" key={p.v} onClick={() => setSettledBy(p.v)} title={p.hint}
                 style={{
                   padding: "5px 11px", fontSize: 11, cursor: "pointer", border: "1px solid",
                   borderColor: settledBy === p.v ? "#1A1A1A" : "#EDEBE6",
@@ -208,7 +215,7 @@ export function ExpenseModal({ orderId, expense, existingExpenses = [], extras =
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <div style={{ display: "flex" }}>
               {PAYMENT_SOURCES.map(p => (
-                <button key={p.v} onClick={() => setPaySource(p.v)}
+                <button type="button" key={p.v} onClick={() => setPaySource(p.v)}
                   style={{
                     padding: "5px 12px", fontSize: 11, cursor: "pointer", border: "1px solid",
                     borderColor: paySource === p.v ? "#1A1A1A" : "#EDEBE6",

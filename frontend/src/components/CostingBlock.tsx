@@ -193,7 +193,7 @@ export function CostingBlock({ setId, editable, onChanged }: {
 
   return (
     <div style={{ margin: "8px 28px 0", border: "1px solid #EDEBE6", flexShrink: 0 }}>
-      <button onClick={() => setOpen(o => !o)}
+      <button type="button" onClick={() => setOpen(o => !o)}
         style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "8px 12px",
           background: missing.length ? "#FFF4EE" : "#FAF8F5", border: "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
         {open ? <CaretDown size={11} style={{ color: "#A89070" }} /> : <CaretRight size={11} style={{ color: "#A89070" }} />}
@@ -240,7 +240,7 @@ export function CostingBlock({ setId, editable, onChanged }: {
                   only фильтрует только заполнение строк, разворот позиций из каталога
                   отработал бы всё равно. */}
               {editable && (
-                <button onClick={() => fill.mutate({ only: [l.line_id], expand_items: false })}
+                <button type="button" onClick={() => fill.mutate({ only: [l.line_id], expand_items: false })}
                   disabled={fill.isPending}
                   title="Подставить цену только в эту строку, остальную смету не трогать"
                   style={{ marginLeft: "auto", fontSize: 10, padding: "2px 8px", border: "1px solid #EDEBE6",

@@ -140,7 +140,7 @@ export function StatusPicker({ orderId, current, onChange }: {
         </Modal>
       )}
 
-      <button
+      <button type="button"
         onClick={() => setOpen(o => !o)}
         disabled={saving}
         style={{

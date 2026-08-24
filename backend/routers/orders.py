@@ -170,6 +170,10 @@ def suggest_orders(counterparty: str = "", amount: float = 0, limit: int = Query
         tfacts = _transit_facts(conn)
         discounts = _discounts(conn)
         extras = _extras_totals(conn)
+        # Факт себестоимости пачкой: подсказка в разноске показывает не только долг,
+        # но и план/факт заказа — чтобы решение принималось не вслепую (24.08.2026).
+        # _margin здесь и так считается на каждого кандидата, лишних запросов нет.
+        fcosts = _fact_costs(conn, [r["id"] for r in rows])
         scored = []
         for r in rows:
             row = dict(r)
@@ -182,6 +186,12 @@ def suggest_orders(counterparty: str = "", amount: float = 0, limit: int = Query
             as_ = _amount_score(amount, row.get("price_plan") or 0)
             row["score"] = round(0.6 * ns + 0.4 * as_, 3)
             row["debt"] = round((row.get("price_plan") or 0) - (row.get("paid_total") or 0), 2)
+            row["cost_plan"] = m["cost"]
+            if m.get("transit"):
+                tf = tfacts.get(row["id"]) or {}
+                row["cost_fact"] = round((tf.get("fact") or 0) + (tf.get("fact_extra") or 0), 2)
+            else:
+                row["cost_fact"] = fcosts.get(row["id"], 0.0)
             scored.append(row)
         scored.sort(key=lambda x: x["score"], reverse=True)
         return scored[:limit]
@@ -1629,6 +1639,9 @@ class ExtraIn(BaseModel):
     price: float = 0
     cost: float = 0
     note: Optional[str] = None
+    # Дата допа. Раньше в форме её не было вовсе, и доп ложился датой создания
+    # записи — в ленте заказа ему не на что было опереться. Не прислали — сегодня.
+    created_at: Optional[str] = None
 
 
 def _extras_list(conn, oid: str) -> list:
@@ -1674,10 +1687,10 @@ def add_extra(order_id: str, body: ExtraIn, user=Depends(get_current_user)):
         oid = _resolve_order(conn, order_id)
         xid = str(uuid4())
         conn.execute(
-            """INSERT INTO order_extras (id, order_id, title, price, cost, note, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO order_extras (id, order_id, title, price, cost, note, created_by, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))""",
             (xid, oid, body.title.strip(), round(body.price or 0, 2), round(body.cost or 0, 2),
-             body.note, (user or {}).get("name") or (user or {}).get("email")))
+             body.note, (user or {}).get("name") or (user or {}).get("email"), body.created_at))
         conn.commit()
         return dict(conn.execute("SELECT * FROM order_extras WHERE id = ?", (xid,)).fetchone())
     finally:

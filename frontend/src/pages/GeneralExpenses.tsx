@@ -56,7 +56,7 @@ function Chips({ options, value, onPick }: {
   return (
     <div style={{ display: "flex" }}>
       {options.map(o => (
-        <button key={o.v} onClick={() => onPick(o.v)} title={o.hint}
+        <button type="button" key={o.v} onClick={() => onPick(o.v)} title={o.hint}
           style={{ fontSize: 11, padding: "7px 12px", cursor: "pointer", fontFamily: "inherit",
                    border: "1px solid #EDEBE6", marginLeft: -1,
                    background: value === o.v ? "#1A1A1A" : "#fff",
@@ -256,7 +256,7 @@ export default function GeneralExpenses() {
             Траты вне клиентских заказов — в их себестоимость не входят
           </div>
         </div>
-        <button onClick={() => setForm({ item: null })}
+        <button type="button" onClick={() => setForm({ item: null })}
           style={{ padding: "7px 14px", background: "#E8592A", border: "none", color: "#FFFFFF", fontSize: 12,
                    fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}>
           <Plus size={12} /> Трата без заказа
@@ -326,19 +326,19 @@ export default function GeneralExpenses() {
                   </td>
                   <td style={{ padding: "9px 28px", textAlign: "right", whiteSpace: "nowrap" }}>
                     {it.purpose === "stock" && it.amount > 0 && (
-                      <button onClick={() => setWriteOff(it)}
+                      <button type="button" onClick={() => setWriteOff(it)}
                         style={{ fontSize: 11, padding: "5px 10px", border: "1px solid #EDEBE6", background: "#fff",
                                  color: "#6B6355", cursor: "pointer", fontFamily: "inherit", display: "inline-flex",
                                  alignItems: "center", gap: 5, marginRight: 6 }}>
                         <ArrowRight size={11} /> В заказ
                       </button>
                     )}
-                    <button onClick={() => setForm({ item: it })} title="Править"
+                    <button type="button" onClick={() => setForm({ item: it })} title="Править"
                       style={{ background: "none", border: "1px solid #EDEBE6", cursor: "pointer", color: "#6B6355",
                                padding: "5px 7px", marginRight: 6 }}>
                       <PencilSimple size={12} />
                     </button>
-                    <button onClick={() => del.mutate(it.id)} title="Удалить"
+                    <button type="button" onClick={() => del.mutate(it.id)} title="Удалить"
                       style={{ background: "none", border: "1px solid #EDEBE6", cursor: "pointer", color: "#C8C0B0", padding: "5px 7px" }}>
                       <Trash size={12} />
                     </button>
@@ -356,7 +356,7 @@ export default function GeneralExpenses() {
                       {fmt(w.amount)}
                     </td>
                     <td style={{ padding: "8px 28px", textAlign: "right" }}>
-                      <button onClick={() => undo.mutate(w.id)} disabled={undo.isPending}
+                      <button type="button" onClick={() => undo.mutate(w.id)} disabled={undo.isPending}
                         title="Вернуть сумму в запас и убрать расход из заказа"
                         style={{ fontSize: 11, padding: "4px 10px", border: "1px solid #EDEBE6", background: "#fff",
                                  color: "#6B6355", cursor: "pointer", fontFamily: "inherit" }}>

@@ -17,7 +17,7 @@ const VARIANTS: Record<string, React.CSSProperties> = {
 
 export function Button({ variant = "ghost", size = "md", style, disabled, children, ...rest }: Props) {
   return (
-    <button
+    <button type="button"
       {...rest}
       disabled={disabled}
       style={{

@@ -103,14 +103,14 @@ export function MediaGallery({
               </div>
               {!readOnly && (
                 <div style={{ position: "absolute", top: 0, right: 0, display: "flex" }}>
-                  <button
+                  <button type="button"
                     title={f.is_primary ? "Главный в роли" : "Сделать главным"}
                     disabled={busy || !!f.is_primary}
                     onClick={() => patch(f.id, { is_primary: true })}
                     style={{ border: "none", background: "rgba(26,26,26,0.72)", color: f.is_primary ? "#E8592A" : "#fff", cursor: f.is_primary ? "default" : "pointer", padding: "2px 4px", lineHeight: 0 }}>
                     <Star size={11} weight={f.is_primary ? "fill" : "regular"} />
                   </button>
-                  <button
+                  <button type="button"
                     title="Удалить файл"
                     disabled={busy}
                     onClick={() => remove(f.id)}
@@ -156,7 +156,7 @@ export function MediaGallery({
       {preview && (
         <div onClick={() => setPreview(null)}
           style={{ position: "fixed", inset: 0, background: "rgba(26,26,26,0.82)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center", padding: 40 }}>
-          <button onClick={() => setPreview(null)}
+          <button type="button" onClick={() => setPreview(null)}
             style={{ position: "absolute", top: 20, right: 24, border: "none", background: "transparent", color: "#fff", cursor: "pointer" }}>
             <X size={20} />
           </button>

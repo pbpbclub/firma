@@ -23,7 +23,7 @@ export function Breadcrumbs({ items, tail }: { items: Crumb[]; tail?: ReactNode 
                 {c.label}
               </span>
             ) : (
-              <button
+              <button type="button"
                 onClick={() => (c.onClick ? c.onClick() : c.to && navigate(c.to))}
                 style={{ background: "none", border: "none", cursor: "pointer", padding: 0, fontSize: 12, color: "#A89070", fontFamily: "inherit", whiteSpace: "nowrap" }}
                 onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}

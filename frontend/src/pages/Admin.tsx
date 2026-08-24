@@ -265,7 +265,7 @@ function ZenMoneySyncSection() {
               <div style={{ fontSize: 11, color: "#4A7C59", marginTop: 6 }}>Готово</div>
             )}
           </div>
-          <button
+          <button type="button"
             onClick={() => sync.mutate()}
             disabled={sync.isPending}
             style={{
@@ -338,7 +338,7 @@ function UsersSection() {
         <SectionLabel>ПОЛЬЗОВАТЕЛИ</SectionLabel>
         <div style={{ flex: 1 }} />
         {!adding && (
-          <button
+          <button type="button"
             onClick={() => setAdding(true)}
             style={{ display: "flex", alignItems: "center", gap: 5, background: "none", border: "1px solid #EDEBE6", padding: "4px 10px", fontSize: 11, cursor: "pointer", color: "#6B6355" }}
           >
@@ -381,14 +381,14 @@ function UsersSection() {
             }}>
               {u.role.toUpperCase()}
             </div>
-            <button
+            <button type="button"
               onClick={() => doReset(u)}
               disabled={resetPwd.isPending}
               style={{ background: "none", border: "1px solid #EDEBE6", cursor: "pointer", color: "#6B6355", padding: "3px 8px", fontSize: 10, fontFamily: "inherit" }}
               title="Выдать новый пароль (старый восстановить нельзя — хранится только хэш)">
               сбросить пароль
             </button>
-            <button
+            <button type="button"
               onClick={() => deleteUser.mutate(u.id)}
               style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 4 }}
               title="Удалить пользователя"
@@ -425,14 +425,14 @@ function UsersSection() {
             </div>
             {formError && <div style={{ fontSize: 11, color: "#8B3A3A", marginBottom: 8 }}>{formError}</div>}
             <div style={{ display: "flex", gap: 8 }}>
-              <button
+              <button type="button"
                 onClick={() => addUser.mutate()}
                 disabled={addUser.isPending || !form.email || !form.name || !form.password}
                 style={{ padding: "6px 16px", background: "#E8592A", border: "none", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
               >
                 {addUser.isPending ? "Создаём..." : "Создать"}
               </button>
-              <button
+              <button type="button"
                 onClick={() => { setAdding(false); setFormError(""); }}
                 style={{ padding: "6px 12px", background: "none", border: "1px solid #EDEBE6", fontSize: 12, cursor: "pointer", color: "#6B6355" }}
               >
@@ -518,7 +518,7 @@ function ImportsSection() {
               <div style={{ fontSize: 13, fontWeight: 700, color: "#4A7C59", whiteSpace: "nowrap" }}>
                 +{imp.rows_added} строк
               </div>
-              <button
+              <button type="button"
                 onClick={() => setConfirmId(imp.id)}
                 style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 4 }}
                 title="Удалить выписку"
@@ -577,7 +577,7 @@ function EntityPickerAdmin({ entityType, value, onChange }: {
       {value.name ? (
         <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 8px", border: "1px solid #EDEBE6", marginBottom: 4, background: "#F9F6F2" }}>
           <span style={{ flex: 1, fontSize: 12, color: "#1A1A1A" }}>{value.name}</span>
-          <button onClick={() => onChange("", "")} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070", padding: 0, fontSize: 14 }}>✕</button>
+          <button type="button" onClick={() => onChange("", "")} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070", padding: 0, fontSize: 14 }}>✕</button>
         </div>
       ) : (
         <div style={{ position: "relative" }}>
@@ -631,7 +631,7 @@ function PayeeRulesSection() {
     <div style={{ marginBottom: 40 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
         <SectionLabel>ПРАВИЛА СОПОСТАВЛЕНИЯ ПЛАТЕЖЕЙ</SectionLabel>
-        <button onClick={() => { setEditId(null); setForm({ pattern: "", match_type: "exact", display_name: "", entity_type: "label", entity_id: "", entity_name: "" }); // Тумблер только из состояния «создание»: при открытой правке клик по
+        <button type="button" onClick={() => { setEditId(null); setForm({ pattern: "", match_type: "exact", display_name: "", entity_type: "label", entity_id: "", entity_name: "" }); // Тумблер только из состояния «создание»: при открытой правке клик по
           // «Добавить» закрывал панель вместо переключения на создание.
           setAdding(editId ? true : !adding); }}
           style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 5, background: "none", border: "1px solid #EDEBE6", padding: "4px 10px", fontSize: 11, cursor: "pointer", color: "#6B6355", fontFamily: "inherit" }}>
@@ -681,11 +681,11 @@ function PayeeRulesSection() {
             )}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={() => save.mutate()} disabled={!form.pattern || save.isPending}
+            <button type="button" onClick={() => save.mutate()} disabled={!form.pattern || save.isPending}
               style={{ background: "#1A1A1A", color: "#FFF", border: "none", padding: "7px 20px", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
               {save.isPending ? "Сохраняем..." : editId ? "Обновить" : "Создать"}
             </button>
-            <button onClick={() => { setAdding(false); setEditId(null); }}
+            <button type="button" onClick={() => { setAdding(false); setEditId(null); }}
               style={{ background: "none", border: "1px solid #EDEBE6", padding: "7px 14px", fontSize: 12, cursor: "pointer", fontFamily: "inherit", color: "#6B6355" }}>
               Отмена
             </button>
@@ -714,8 +714,8 @@ function PayeeRulesSection() {
                 {r.entity_name && <span style={{ color: "#A89070" }}> · {r.entity_name}</span>}
               </div>
               <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                <button onClick={() => startEdit(r)} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070", padding: 2 }} title="Редактировать">✎</button>
-                <button onClick={() => del.mutate(r.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2 }} title="Удалить">✕</button>
+                <button type="button" onClick={() => startEdit(r)} style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070", padding: 2 }} title="Редактировать">✎</button>
+                <button type="button" onClick={() => del.mutate(r.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2 }} title="Удалить">✕</button>
               </div>
             </div>
           ))}
@@ -781,7 +781,7 @@ function PasswordSection() {
             {msg.text}
           </div>
         )}
-        <button
+        <button type="button"
           onClick={save}
           disabled={saving || !current || !next || !repeat}
           style={{
@@ -822,7 +822,7 @@ export default function Admin() {
 
       <div style={{ display: "flex", gap: 22, borderBottom: "1px solid #EDEBE6", marginBottom: 28 }}>
         {ADMIN_TABS.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)}
+          <button type="button" key={t.id} onClick={() => setTab(t.id)}
             style={{ background: "none", border: "none", cursor: "pointer", fontFamily: "inherit",
               padding: "0 0 10px", fontSize: 13,
               fontWeight: tab === t.id ? 700 : 400,

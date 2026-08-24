@@ -47,7 +47,7 @@ export function CalcSection({ label, addLabel, onAdd, children, readOnly }: {
       <div style={sectionLabelStyle}>{label}</div>
       {children}
       {!readOnly && (
-        <button
+        <button type="button"
           onClick={onAdd}
           style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "#A89070", padding: "6px 0", display: "flex", alignItems: "center", gap: 4 }}
           onMouseEnter={e => (e.currentTarget.style.color = "#E8592A")}
@@ -230,7 +230,7 @@ export function CalcRow({
         />
       )}
       {/* Удалить */}
-      <button onClick={onRemove}
+      <button type="button" onClick={onRemove}
         style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 0, display: "flex", alignItems: "center" }}
         onMouseEnter={e => (e.currentTarget.style.color = "#8B3A3A")}
         onMouseLeave={e => (e.currentTarget.style.color = "#C8C0B0")}

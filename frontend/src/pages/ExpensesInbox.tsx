@@ -7,6 +7,7 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { PeriodFilter, AmountFilter, ColumnFilter } from "../components/TableFilters";
 import { inboxApi, ordersApi, mastersApi, payeeRulesApi, estimatesApi, paymentsApi, accountableApi, customersApi } from "../api";
 import { PaymentAllocator, allocReady, allocPayload, type Alloc as PayAlloc } from "../components/money/PaymentAllocator";
+import { MoneyInput, parseMoney } from "../components/ui/MoneyInput";
 import { EXPENSE_CATEGORIES } from "../components/ExpenseModal";
 import { Modal } from "../components/ui/Modal";
 import { PayeePicker, CustomerPicker } from "../components/ui/PayeePicker";
@@ -65,7 +66,7 @@ function ObligationPicker({ orderId, categoryLabel, value, amount, onPick }: {
       return (
         <div style={{ marginTop: 8, fontSize: 10, color: "#A89070" }}>
           Смета не утверждена — плановых строк ещё нет.
-          <button disabled={approve.isPending} onClick={() => approve.mutate()}
+          <button type="button" disabled={approve.isPending} onClick={() => approve.mutate()}
             style={{ marginLeft: 8, fontSize: 10, color: "#E8592A", background: "none",
                      border: "1px solid #E8592A", padding: "2px 8px",
                      cursor: approve.isPending ? "default" : "pointer", fontFamily: "inherit" }}>
@@ -168,7 +169,7 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
         expense_date: (tx.date || "").slice(0, 10) || null,
         allocations: allocs.map(a => ({
           order_id: a.order_id || null, purpose: a.purpose || null,
-          amount: parseFloat(a.amount) || 0,
+          amount: parseMoney(a.amount) || 0,
           category: a.category, master_id: a.master_id || null,
           supplier: masterName(a.master_id) ?? tx.counterparty,
           creditor_id: a.creditor_id,
@@ -226,14 +227,14 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
   const addOrder = (orderId: string) => {
     if (allocs.some(a => a.order_id === orderId)) return;
     // По умолчанию — остаток неразнесённого (первый заказ = полная сумма платежа).
-    const other = allocs.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    const other = allocs.reduce((s, a) => s + (parseMoney(a.amount) || 0), 0);
     const left = Math.round((tx.amount - other) * 100) / 100;
     setAllocs([...allocs, { order_id: orderId, amount: left > 0 ? String(left) : "", category: tx.category_hint || "material", master_id: payeeMaster || "", creditor_id: null }]);
   };
   // Часть, которая ни к какому заказу не относится (закупка впрок, свой образец).
   const addGeneral = (purpose: string) => {
     if (allocs.some(a => a.purpose === purpose)) return;
-    const other = allocs.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+    const other = allocs.reduce((s, a) => s + (parseMoney(a.amount) || 0), 0);
     const left = Math.round((tx.amount - other) * 100) / 100;
     setAllocs([...allocs, { order_id: "", purpose, amount: left > 0 ? String(left) : "",
                             category: tx.category_hint || "material", master_id: payeeMaster || "", creditor_id: null }]);
@@ -247,7 +248,7 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
     setAllocs(allocs.map((a, i) => ({ ...a, amount: String(i === 0 ? each + rest : each) })));
   };
 
-  const sum = allocs.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+  const sum = allocs.reduce((s, a) => s + (parseMoney(a.amount) || 0), 0);
   const diff = Math.round((tx.amount - sum) * 100) / 100;
   const ready = allocs.length > 0 && Math.abs(diff) < 0.01;
 
@@ -272,7 +273,7 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
           />
           {/* Запомнить привязку сразу — не дожидаясь разноски платежа */}
           {payeeMaster && payeeStr && !ruleSaved && (
-            <button onClick={() => saveRule.mutate()} disabled={saveRule.isPending}
+            <button type="button" onClick={() => saveRule.mutate()} disabled={saveRule.isPending}
               title={`Запомнить: все платежи «${payeeStr}» → ${masterName(payeeMaster)}`}
               style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, padding: "5px 10px",
                        border: "1px solid #E8592A", background: "#fff", color: "#E8592A",
@@ -305,7 +306,7 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
       <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 6 }}>
         РАЗНЕСТИ НА ЗАКАЗЫ
         {allocs.length > 1 && (
-          <button onClick={splitEvenly}
+          <button type="button" onClick={splitEvenly}
             style={{ marginLeft: 10, fontSize: 10, color: "#E8592A", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
             Поровну
           </button>
@@ -319,13 +320,19 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
         return (
           <div key={a.order_id || "p:" + a.purpose} style={{ background: "#fff", border: "1px solid #EDEBE6", padding: "8px 10px", marginBottom: 8 }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 120px 24px", gap: 8, alignItems: "center" }}>
-              <div style={{ fontSize: 12, fontWeight: 500, color: genLabel ? "#E8592A" : "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {genLabel ? genLabel + " · без заказа" : (o?.title ?? a.order_id)}
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 500, color: genLabel ? "#E8592A" : "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {genLabel ? genLabel + " · без заказа" : (o?.title ?? a.order_id)}
+                </div>
+                {/* Себестоимость заказа прямо здесь: раньше, чтобы понять «сколько по
+                    нему уже потрачено», надо было уйти с экрана разбора выписки. */}
+                {!genLabel && o && (o.cost_plan > 0 || o.cost_fact > 0) && (
+                  <OrderCost plan={o.cost_plan} fact={o.cost_fact} debt={o.debt} />
+                )}
               </div>
-              <input value={a.amount} onChange={e => patch(i, { amount: e.target.value })}
-                placeholder="сумма" type="number"
-                style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "5px 8px", fontSize: 12, outline: "none", textAlign: "right", fontFamily: MONO }} />
-              <button onClick={() => setAllocs(allocs.filter((_, j) => j !== i))}
+              <MoneyInput value={a.amount} onChange={v => patch(i, { amount: v })} placeholder="сумма"
+                style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "5px 8px", fontSize: 12, outline: "none" }} />
+              <button type="button" onClick={() => setAllocs(allocs.filter((_, j) => j !== i))}
                 style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 0, display: "flex", justifyContent: "center" }}>
                 <X size={12} />
               </button>
@@ -334,7 +341,7 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
               {/* Категория — компактные чипы */}
               <div style={{ display: "flex" }}>
                 {EXPENSE_CATEGORIES.map(c => (
-                  <button key={c.v} onClick={() => patch(i, { category: c.v, creditor_id: null })}
+                  <button type="button" key={c.v} onClick={() => patch(i, { category: c.v, creditor_id: null })}
                     style={{
                       padding: "3px 9px", fontSize: 10, cursor: "pointer", border: "1px solid",
                       borderColor: a.category === c.v ? "#1A1A1A" : "#EDEBE6",
@@ -358,7 +365,7 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
                 // платежа, но не больше остатка по плановой строке. Введённую вручную не трогаем.
                 let amount = a.amount;
                 if (cid && !a.amount) {
-                  const other = allocs.reduce((s, x, j) => j === i ? s : s + (parseFloat(x.amount) || 0), 0);
+                  const other = allocs.reduce((s, x, j) => j === i ? s : s + (parseMoney(x.amount) || 0), 0);
                   const txLeft = Math.max(0, tx.amount - other);
                   const def = Math.min(remaining, txLeft);
                   if (def > 0) amount = String(def);
@@ -373,7 +380,7 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
       {/* Подсказки заказов */}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8, marginBottom: 12 }}>
         {(suggestions as any[]).filter((o: any) => !allocs.some(a => a.order_id === o.id)).slice(0, 6).map((o: any) => (
-          <button key={o.id} onClick={() => addOrder(o.id)}
+          <button type="button" key={o.id} onClick={() => addOrder(o.id)}
             style={{ fontSize: 11, padding: "3px 9px", border: "1px solid #EDEBE6", background: "#fff", cursor: "pointer", color: "#6B6355", fontFamily: "inherit" }}
             onMouseEnter={e => { e.currentTarget.style.borderColor = "#E8592A"; e.currentTarget.style.color = "#E8592A"; }}
             onMouseLeave={e => { e.currentTarget.style.borderColor = "#EDEBE6"; e.currentTarget.style.color = "#6B6355"; }}>
@@ -381,7 +388,7 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
           </button>
         ))}
         {GENERAL_TARGETS.filter(t => !allocs.some(a => a.purpose === t.v)).map(t => (
-          <button key={t.v} onClick={() => addGeneral(t.v)}
+          <button type="button" key={t.v} onClick={() => addGeneral(t.v)}
             title="Часть перевода не относится ни к какому заказу"
             style={{ fontSize: 11, padding: "3px 9px", border: "1px dashed #EDEBE6", background: "#fff", cursor: "pointer", color: "#A89070", fontFamily: "inherit" }}
             onMouseEnter={e => { e.currentTarget.style.borderColor = "#E8592A"; e.currentTarget.style.color = "#E8592A"; }}
@@ -399,12 +406,12 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
             <>
               <span style={{ fontSize: 10, color: "#A89070" }}>Скрыть:</span>
               {DISMISS_REASONS.map(r => (
-                <button key={r} disabled={dismiss.isPending} onClick={() => dismiss.mutate(r)}
+                <button type="button" key={r} disabled={dismiss.isPending} onClick={() => dismiss.mutate(r)}
                   style={{ fontSize: 10, padding: "3px 8px", border: "1px solid #EDEBE6", background: "#fff", cursor: "pointer", color: "#6B6355", fontFamily: "inherit" }}>
                   {r}
                 </button>
               ))}
-              <button onClick={() => setRowMode("none")} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}>
+              <button type="button" onClick={() => setRowMode("none")} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}>
                 <X size={11} />
               </button>
             </>
@@ -416,12 +423,12 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
                 <option value="">— кому —</option>
                 {(masters as any[]).map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
               </select>
-              <button disabled={!accountablePick || issueAccountable.isPending} onClick={() => issueAccountable.mutate()}
+              <button type="button" disabled={!accountablePick || issueAccountable.isPending} onClick={() => issueAccountable.mutate()}
                 style={{ fontSize: 10, padding: "3px 10px", border: "none", background: accountablePick ? "#E8592A" : "#EDEBE6",
                   color: accountablePick ? "#fff" : "#A89070", cursor: accountablePick ? "pointer" : "default", fontFamily: "inherit", fontWeight: 600 }}>
                 {issueAccountable.isPending ? "..." : "Выдать"}
               </button>
-              <button onClick={() => setRowMode("none")} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}>
+              <button type="button" onClick={() => setRowMode("none")} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}>
                 <X size={11} />
               </button>
             </>
@@ -431,7 +438,7 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
               {PERSONAL_SUBCATS.map(sc => {
                 const on = personalSubcat === sc;
                 return (
-                  <button key={sc} onClick={() => setPersonalSubcat(sc)}
+                  <button type="button" key={sc} onClick={() => setPersonalSubcat(sc)}
                     style={{ fontSize: 10, padding: "3px 8px", border: `1px solid ${on ? "#E8592A" : "#EDEBE6"}`,
                       background: on ? "#FFF4EE" : "#fff", color: on ? "#E8592A" : "#6B6355",
                       cursor: "pointer", fontFamily: "inherit", fontWeight: on ? 600 : 400 }}>
@@ -445,11 +452,11 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
                   запомнить «{payeeStr}»
                 </label>
               )}
-              <button disabled={markPersonal.isPending} onClick={() => markPersonal.mutate()}
+              <button type="button" disabled={markPersonal.isPending} onClick={() => markPersonal.mutate()}
                 style={{ fontSize: 10, padding: "3px 10px", border: "none", background: "#E8592A", color: "#fff", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
                 {markPersonal.isPending ? "..." : (rememberPersonal && payeeStr ? "Запомнить" : "Скрыть")}
               </button>
-              <button onClick={() => setRowMode("none")} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}>
+              <button type="button" onClick={() => setRowMode("none")} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}>
                 <X size={11} />
               </button>
             </>
@@ -475,7 +482,7 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {error && <span style={{ fontSize: 11, color: "#8B3A3A" }}>{error}</span>}
-          <button disabled={!ready || save.isPending} onClick={() => { setError(""); save.mutate(); }}
+          <button type="button" disabled={!ready || save.isPending} onClick={() => { setError(""); save.mutate(); }}
             style={{
               padding: "6px 16px", border: "none", fontSize: 12, fontWeight: 600,
               background: ready ? "#E8592A" : "#EDEBE6", color: ready ? "#fff" : "#A89070",
@@ -500,7 +507,7 @@ function ActionChip({ icon, label, title, onClick }:
   { icon: ReactNode; label: string; title?: string; onClick: () => void }) {
   const [hover, setHover] = useState(false);
   return (
-    <button onClick={onClick} title={title}
+    <button type="button" onClick={onClick} title={title}
       onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
       style={{
         display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, lineHeight: 1,
@@ -510,6 +517,27 @@ function ActionChip({ icon, label, title, onClick }:
       }}>
       {icon} {label}
     </button>
+  );
+}
+
+/** Себестоимость заказа в строке разноски: план → факт, полоска покрытия,
+ *  перерасход красным. Данные приходят из /orders/suggest (добавлены 24.08.2026). */
+function OrderCost({ plan, fact, debt }: { plan: number; fact: number; debt?: number }) {
+  const pct = plan > 0 ? Math.min(100, (fact / plan) * 100) : 0;
+  const over = fact > plan && plan > 0;
+  return (
+    <div style={{ marginTop: 3 }}>
+      <div style={{ fontSize: 10, color: "#A89070" }}>
+        себест. план <span style={{ fontFamily: MONO }}>{fmt(plan)}</span>
+        <span style={{ color: "#C8C0B0" }}> → </span>
+        факт <span style={{ fontFamily: MONO, color: over ? "#8B3A3A" : "#6B6355", fontWeight: over ? 700 : 400 }}>{fmt(fact)}</span>
+        {over && <span style={{ color: "#8B3A3A" }}> · перерасход {fmt(fact - plan)}</span>}
+        {!over && (debt ?? 0) > 0 && <span> · клиент должен {fmt(debt!)}</span>}
+      </div>
+      <div style={{ height: 2, background: "#EDEBE6", marginTop: 3, maxWidth: 240 }}>
+        <div style={{ height: 2, width: `${pct}%`, background: over ? "#8B3A3A" : "#4A7C59" }} />
+      </div>
+    </div>
   );
 }
 
@@ -569,7 +597,7 @@ function PaymentAllocRow({ tx, onDone, onReservePrompt }: {
           <CustomerPicker value={payerCustomer} onChange={setPayerCustomer} suggestName={payerStr}
             highlight={tx.match_source === "suggest"} style={{ flex: 1, minWidth: 260 }} />
           {payerCustomer && payerStr && !payerSaved && (
-            <button onClick={() => savePayerRule.mutate()} disabled={savePayerRule.isPending}
+            <button type="button" onClick={() => savePayerRule.mutate()} disabled={savePayerRule.isPending}
               title={`Запомнить: все платежи от «${payerStr}» → ${customerName(payerCustomer)}`}
               style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, padding: "5px 10px",
                        border: "1px solid #E8592A", background: "#fff", color: "#E8592A",
@@ -600,17 +628,17 @@ function PaymentAllocRow({ tx, onDone, onReservePrompt }: {
             <>
               <span style={{ fontSize: 10, color: "#A89070" }}>Скрыть:</span>
               {DISMISS_REASONS.map(r => (
-                <button key={r} disabled={dismiss.isPending} onClick={() => dismiss.mutate(r)}
+                <button type="button" key={r} disabled={dismiss.isPending} onClick={() => dismiss.mutate(r)}
                   style={{ fontSize: 10, padding: "3px 8px", border: "1px solid #EDEBE6", background: "#fff", cursor: "pointer", color: "#6B6355", fontFamily: "inherit" }}>
                   {r}
                 </button>
               ))}
-              <button onClick={() => setHideMode(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}>
+              <button type="button" onClick={() => setHideMode(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}>
                 <X size={11} />
               </button>
             </>
           ) : (
-            <button onClick={() => setHideMode(true)}
+            <button type="button" onClick={() => setHideMode(true)}
               style={{ fontSize: 10, color: "#A89070", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
               Это не по заказам — скрыть
             </button>
@@ -618,7 +646,7 @@ function PaymentAllocRow({ tx, onDone, onReservePrompt }: {
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {error && <span style={{ fontSize: 11, color: "#8B3A3A" }}>{error}</span>}
-          <button disabled={!ready || save.isPending} onClick={() => { setError(""); save.mutate(); }}
+          <button type="button" disabled={!ready || save.isPending} onClick={() => { setError(""); save.mutate(); }}
             style={{
               padding: "6px 16px", border: "none", fontSize: 12, fontWeight: 600,
               background: ready ? "#E8592A" : "#EDEBE6", color: ready ? "#fff" : "#A89070",
@@ -712,7 +740,7 @@ export default function ExpensesInbox() {
 
         <div style={{ display: "flex", gap: 24, borderBottom: "1px solid #EDEBE6" }}>
           {SOURCES.map(s => (
-            <button key={s.id} onClick={() => { setSource(s.id); setOpenId(null); }}
+            <button type="button" key={s.id} onClick={() => { setSource(s.id); setOpenId(null); }}
               style={{
                 fontSize: 13, padding: "0 0 12px", border: "none", background: "none", cursor: "pointer",
                 color: source === s.id ? "#1A1A1A" : "#A89070",
@@ -730,7 +758,7 @@ export default function ExpensesInbox() {
           <span>{items.length}{truncated ? "+" : ""} неразнесённых</span>
           {/* Личные по умолчанию окном в 90 дней — раньше это был просто текст, теперь кнопка */}
           {source === "zen" && !from && (
-            <button onClick={() => { setFrom("2020-01-01"); setTo(""); }}
+            <button type="button" onClick={() => { setFrom("2020-01-01"); setTo(""); }}
               style={{ fontSize: 10, color: "#6B6355", background: "#fff", border: "1px solid #EDEBE6",
                        padding: "3px 8px", cursor: "pointer", fontFamily: "inherit" }}>
               показаны 90 дней — за всё время
@@ -744,7 +772,7 @@ export default function ExpensesInbox() {
             показать скрытые
           </label>
         </div>
-        <button onClick={hasFilters ? clearFilters : undefined}
+        <button type="button" onClick={hasFilters ? clearFilters : undefined}
           style={{ fontSize: 10, color: hasFilters ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: hasFilters ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
           <X size={10} /> Сбросить
         </button>
@@ -814,7 +842,7 @@ export default function ExpensesInbox() {
                 <div style={{ padding: "12px 28px", background: "#FAF8F5", borderBottom: "1px solid #EDEBE6",
                   display: "flex", alignItems: "center", gap: 12, fontSize: 11, color: "#6B6355" }}>
                   Скрыто из инбокса: {t.dismissed_reason}
-                  <button disabled={undismiss.isPending} onClick={() => undismiss.mutate(t.id)}
+                  <button type="button" disabled={undismiss.isPending} onClick={() => undismiss.mutate(t.id)}
                     style={{ fontSize: 11, color: "#E8592A", background: "none", border: "1px solid #E8592A",
                       padding: "3px 10px", cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 4 }}>
                     <ArrowCounterClockwise size={11} /> Вернуть в инбокс

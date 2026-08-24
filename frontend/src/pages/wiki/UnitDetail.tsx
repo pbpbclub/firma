@@ -113,11 +113,11 @@ export function UnitModal({ row, onClose }: { row: any; onClose: () => void }) {
         confirmDel ? (
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <span style={{ fontSize: 11, color: "#8B3A3A" }}>Удалить?</span>
-            <button onClick={async () => { await businessUnitsApi.delete(unit.id); refresh(); onClose(); }} style={{ fontSize: 11, color: "#fff", background: "#8B3A3A", border: "none", padding: "4px 10px", cursor: "pointer" }}>Да</button>
-            <button onClick={() => setConfirmDel(false)} style={{ fontSize: 11, color: "#6B6355", background: "none", border: "none", cursor: "pointer" }}>Нет</button>
+            <button type="button" onClick={async () => { await businessUnitsApi.delete(unit.id); refresh(); onClose(); }} style={{ fontSize: 11, color: "#fff", background: "#8B3A3A", border: "none", padding: "4px 10px", cursor: "pointer" }}>Да</button>
+            <button type="button" onClick={() => setConfirmDel(false)} style={{ fontSize: 11, color: "#6B6355", background: "none", border: "none", cursor: "pointer" }}>Нет</button>
           </div>
         ) : (
-          <button onClick={() => setConfirmDel(true)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#8B3A3A", display: "flex", alignItems: "center", gap: 5 }}>
+          <button type="button" onClick={() => setConfirmDel(true)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#8B3A3A", display: "flex", alignItems: "center", gap: 5 }}>
             <Trash size={13} /> Удалить
           </button>
         )
@@ -188,7 +188,7 @@ function AccountRow({ a, onChanged }: { a: any; onChanged: () => void }) {
           {ACCOUNT_SOURCES.map(s => <option key={s.v} value={s.v}>{s.l}</option>)}
         </select>
         {source === "bank" && <input placeholder="№ счёта" value={number} onChange={e => setNumber(e.target.value)} style={{ ...inp, width: 130 }} />}
-        <button disabled={!name.trim() || busy} onClick={async () => {
+        <button type="button" disabled={!name.trim() || busy} onClick={async () => {
           setBusy(true);
           try {
             await businessUnitsApi.updateAccount(a.id, {
@@ -199,7 +199,7 @@ function AccountRow({ a, onChanged }: { a: any; onChanged: () => void }) {
         }} style={{ padding: "6px 12px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600, opacity: name.trim() ? 1 : 0.5 }}>
           {busy ? "..." : "OK"}
         </button>
-        <button onClick={() => setEdit(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", fontSize: 12, fontFamily: "inherit" }}>Отмена</button>
+        <button type="button" onClick={() => setEdit(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", fontSize: 12, fontFamily: "inherit" }}>Отмена</button>
       </div>
     );
   }
@@ -212,7 +212,7 @@ function AccountRow({ a, onChanged }: { a: any; onChanged: () => void }) {
         </div>
       </div>
       <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(a.balance || 0)}</div>
-      <button onClick={async () => { await businessUnitsApi.deleteAccount(a.id); onChanged(); }}
+      <button type="button" onClick={async () => { await businessUnitsApi.deleteAccount(a.id); onChanged(); }}
         style={{ background: "none", border: "none", cursor: "pointer", color: "#D0C8C0", padding: 0, display: "flex" }}
         onMouseEnter={e => (e.currentTarget.style.color = "#8B3A3A")}
         onMouseLeave={e => (e.currentTarget.style.color = "#D0C8C0")}>
@@ -230,7 +230,7 @@ function AddAccountRow({ unitId, onAdded }: { unitId: string; onAdded: () => voi
   const inputStyle: React.CSSProperties = { boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "6px 9px", fontSize: 12, outline: "none" };
   if (!open) {
     return (
-      <button onClick={() => setOpen(true)} style={{ background: "none", border: "1px dashed #EDEBE6", cursor: "pointer", fontSize: 12, color: "#A89070", padding: "7px 10px", display: "flex", alignItems: "center", gap: 5 }}>
+      <button type="button" onClick={() => setOpen(true)} style={{ background: "none", border: "1px dashed #EDEBE6", cursor: "pointer", fontSize: 12, color: "#A89070", padding: "7px 10px", display: "flex", alignItems: "center", gap: 5 }}>
         <Plus size={11} /> Добавить счёт
       </button>
     );
@@ -242,7 +242,7 @@ function AddAccountRow({ unitId, onAdded }: { unitId: string; onAdded: () => voi
         {ACCOUNT_SOURCES.map(s => <option key={s.v} value={s.v}>{s.l}</option>)}
       </select>
       {source === "bank" && <input placeholder="№ счёта" value={number} onChange={e => setNumber(e.target.value)} style={{ ...inputStyle, width: 130 }} />}
-      <button disabled={!name.trim()} onClick={async () => {
+      <button type="button" disabled={!name.trim()} onClick={async () => {
         await businessUnitsApi.addAccount({ business_unit_id: unitId, name: name.trim(), source, number: number.trim() || null });
         onAdded();
       }} style={{ padding: "6px 12px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600, opacity: name.trim() ? 1 : 0.5 }}>OK</button>

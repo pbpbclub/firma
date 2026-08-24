@@ -417,7 +417,7 @@ function CalculatorModal({
               У новой карточки id ещё нет — привязывать импорт не к чему. */}
           {!isNew && item?.id && (
             <div style={{ marginTop: 18, display: "flex", alignItems: "center", gap: 10 }}>
-              <button onClick={() => setBomOpen(true)}
+              <button type="button" onClick={() => setBomOpen(true)}
                 style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, padding: "5px 11px",
                          border: "1px solid #EDEBE6", background: "#fff", color: "#6B6355",
                          cursor: "pointer", fontFamily: "inherit" }}
@@ -623,13 +623,13 @@ export default function Catalog() {
                   />
                 </div>
               ) : (
-                <button onClick={() => setSearchOpen(true)} style={{ width: 28, height: 28, background: "#F2EFE9", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <button type="button" onClick={() => setSearchOpen(true)} style={{ width: 28, height: 28, background: "#F2EFE9", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
                   <MagnifyingGlass size={13} color="#6B6355" />
                 </button>
               )
             )}
             {!isSmets && (
-              <button
+              <button type="button"
                 onClick={openNew}
                 style={{ width: 28, height: 28, background: "#E8592A", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
               >
@@ -642,7 +642,7 @@ export default function Catalog() {
         {/* Tabs */}
         <div style={{ display: "flex", gap: 0 }}>
           {tabs.map((t) => (
-            <button
+            <button type="button"
               key={t}
               onClick={() => {
                 // Выделение НЕ переносится между вкладками: бренд-вкладки кладут в
@@ -707,17 +707,17 @@ export default function Catalog() {
                             <datalist id="catalog-cat-bulk">
                               {allCatOptions.map(c => <option key={c} value={c} />)}
                             </datalist>
-                            <button onClick={bulkSetCategory} disabled={bulkCatSaving}
+                            <button type="button" onClick={bulkSetCategory} disabled={bulkCatSaving}
                               style={{ fontSize: 10, padding: "4px 10px", border: "none", background: "#E8592A", color: "#fff", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
                               {bulkCatSaving ? "..." : `Применить (${selectedIds.size})`}
                             </button>
-                            <button onClick={() => { setBulkCatOpen(false); setBulkCat(""); }}
+                            <button type="button" onClick={() => { setBulkCatOpen(false); setBulkCat(""); }}
                               style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}>
                               <X size={11} />
                             </button>
                           </div>
                         ) : (
-                          <button
+                          <button type="button"
                             onClick={() => setBulkCatOpen(true)}
                             style={{ fontSize: 10, color: "#6B6355", background: "#fff", border: "1px solid #EDEBE6", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", fontFamily: "inherit" }}
                           >
@@ -725,7 +725,7 @@ export default function Catalog() {
                           </button>
                         ))}
                         {selectedIds.size > 0 && !bulkCatOpen && (
-                          <button
+                          <button type="button"
                             onClick={() => setConfirmBulkDelete(true)}
                             disabled={bulkDeleting}
                             style={{ fontSize: 10, color: "#8B3A3A", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 3, padding: 0 }}
@@ -733,7 +733,7 @@ export default function Catalog() {
                             <Trash size={10} /> Удалить ({selectedIds.size})
                           </button>
                         )}
-                        <button onClick={canClear ? clearFilters : undefined} style={{ fontSize: 10, color: canClear ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: canClear ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
+                        <button type="button" onClick={canClear ? clearFilters : undefined} style={{ fontSize: 10, color: canClear ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: canClear ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
                           <X size={10} /> Сбросить
                         </button>
                       </div>
@@ -870,7 +870,7 @@ export default function Catalog() {
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                         {selectedIds.size > 0 && (
-                          <button
+                          <button type="button"
                             onClick={() => setConfirmSmetsDelete(true)}
                             disabled={smetsDeleting}
                             style={{ fontSize: 10, color: "#8B3A3A", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 3, padding: 0 }}
@@ -878,7 +878,7 @@ export default function Catalog() {
                             <Trash size={10} /> Удалить ({selectedIds.size})
                           </button>
                         )}
-                        <button onClick={canClear ? clearFilters : undefined} style={{ fontSize: 10, color: canClear ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: canClear ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
+                        <button type="button" onClick={canClear ? clearFilters : undefined} style={{ fontSize: 10, color: canClear ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: canClear ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
                           <X size={10} /> Сбросить
                         </button>
                       </div>

@@ -94,7 +94,7 @@ function BrandPicker({ orderId, current, onChange }: { orderId: string; current:
 
   return (
     <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
-      <button
+      <button type="button"
         onClick={() => setOpen(o => !o)}
         disabled={saving}
         style={{
@@ -139,7 +139,7 @@ function BrandPicker({ orderId, current, onChange }: { orderId: string; current:
 
 function IconBtn({ onClick, children, orange }: { onClick?: () => void; children: React.ReactNode; orange?: boolean }) {
   return (
-    <button
+    <button type="button"
       onClick={onClick}
       style={{
         width: 28, height: 28,
@@ -169,7 +169,7 @@ function EstimatesDropdown({ orderId, sets }: { orderId: string; sets: any[] }) 
 
   return (
     <div ref={ref} style={{ position: "relative" }}>
-      <button
+      <button type="button"
         onClick={() => sets.length === 1 ? navigate(`/orders/${orderId}/estimate?set=${sets[0].id}`) : setOpen(v => !v)}
         style={{ padding: "5px 10px", border: "1px solid #E8592A", background: "transparent", color: "#E8592A", fontSize: 11, cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}
       >
@@ -340,7 +340,7 @@ function NewOrderModal({ onClose, onCreated }: {
                       onKeyDown={e => { if (e.key === "Enter") handleInnLookup(); }}
                       style={{ flex: 1, border: "1px solid #EDEBE6", padding: "6px 10px", fontSize: 13, outline: "none", boxSizing: "border-box" }}
                     />
-                    <button
+                    <button type="button"
                       disabled={lookingUp || !newCustomer.inn.trim()}
                       onClick={handleInnLookup}
                       style={{ padding: "6px 12px", border: "1px solid #1A1A1A", background: "#1A1A1A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600, opacity: lookingUp || !newCustomer.inn.trim() ? 0.5 : 1, whiteSpace: "nowrap" }}>
@@ -379,12 +379,12 @@ function NewOrderModal({ onClose, onCreated }: {
                   </select>
                 </div>
                 <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
-                  <button
+                  <button type="button"
                     onClick={() => { setCustomerId(""); }}
                     style={{ padding: "6px 12px", border: "1px solid #EDEBE6", background: "#fff", color: "#6B6355", fontSize: 12, cursor: "pointer" }}>
                     Отмена
                   </button>
-                  <button
+                  <button type="button"
                     disabled={creatingCustomer || !newCustomer.name.trim()}
                     onClick={handleCreateCustomer}
                     style={{ flex: 1, padding: "6px 12px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600, opacity: creatingCustomer || !newCustomer.name.trim() ? 0.5 : 1 }}>
@@ -441,6 +441,7 @@ export default function OrdersV2() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [bulkError, setBulkError] = useState("");
 
   const bulkDelete = useMutation({
     mutationFn: async (ids: string[]) => {
@@ -449,13 +450,14 @@ export default function OrdersV2() {
     onSuccess: () => {
       setSelectedIds(new Set());
       setConfirmDelete(false);
+      setBulkError("");
       if (selected && selectedIds.has(selected.id)) setSelected(null);
       qc.invalidateQueries({ queryKey: ["orders-v2"] });
     },
     onError: (e: any) => {
       setConfirmDelete(false);
       qc.invalidateQueries({ queryKey: ["orders-v2"] });
-      alert("Не удалось удалить: " + (e?.response?.data?.detail || e?.message || "ошибка сервера"));
+      setBulkError("Не удалось удалить: " + (e?.response?.data?.detail || e?.message || "ошибка сервера"));
     },
   });
   const [amountMin, setAmountMin] = useState("");
@@ -598,7 +600,7 @@ export default function OrdersV2() {
       p === "…" ? (
         <span key={`e${i}`} style={{ fontSize: 10, color: "#A89070", padding: "0 2px" }}>…</span>
       ) : (
-        <button
+        <button type="button"
           key={p}
           onClick={() => setPage(p as number)}
           style={{
@@ -677,7 +679,7 @@ export default function OrdersV2() {
                 кликабельными, но мёртвыми — эта асимметрия и была багом. Активный
                 раздел и так подсвечен своей вкладкой, крошки не нужны. */}
             {STATUSES.map((s) => (
-              <button
+              <button type="button"
                 key={s.value}
                 onClick={() => goto("list", s.value)}
                 style={{
@@ -695,7 +697,7 @@ export default function OrdersV2() {
                 {s.label}
               </button>
             ))}
-            <button
+            <button type="button"
               onClick={() => toggleMode("review")}
               style={{
                 fontSize: 13, padding: "0 0 12px",
@@ -710,7 +712,7 @@ export default function OrdersV2() {
             >
               К утверждению{reviewCount > 0 ? ` (${reviewCount})` : ""}
             </button>
-            <button
+            <button type="button"
               onClick={() => toggleMode("summary")}
               style={{
                 fontSize: 13, padding: "0 0 12px",
@@ -724,7 +726,7 @@ export default function OrdersV2() {
             >
               Сводка П/Ф
             </button>
-            <button
+            <button type="button"
               onClick={() => toggleMode("ready")}
               style={{
                 fontSize: 13, padding: "0 0 12px",
@@ -738,7 +740,7 @@ export default function OrdersV2() {
             >
               Готовность
             </button>
-            <button
+            <button type="button"
               onClick={() => toggleMode("silent")}
               style={{
                 fontSize: 13, padding: "0 0 12px",
@@ -752,7 +754,7 @@ export default function OrdersV2() {
             >
               Молчат{silentCount > 0 ? ` (${silentCount})` : ""}
             </button>
-            <button
+            <button type="button"
               onClick={() => toggleMode("archive")}
               style={{
                 fontSize: 13, padding: "0 0 12px",
@@ -808,7 +810,7 @@ export default function OrdersV2() {
                     </div>
                     <div style={{ display: "flex" }}>
                       {([["active", "В работе"], ["completed", "Завершённые"], ["all", "Все"]] as const).map(([v, l]) => (
-                        <button key={v} onClick={() => setSummaryScope(v)}
+                        <button type="button" key={v} onClick={() => setSummaryScope(v)}
                           style={{ padding: "4px 11px", fontSize: 11, cursor: "pointer", border: "1px solid",
                             borderColor: summaryScope === v ? "#1A1A1A" : "#EDEBE6",
                             background: summaryScope === v ? "#1A1A1A" : "transparent",
@@ -897,6 +899,16 @@ export default function OrdersV2() {
             })()}
           </div>
         ) : (<>
+        {bulkError && (
+          <div style={{ padding: "9px 28px", background: "#FBF3F2", borderBottom: "1px solid #EDEBE6",
+                        display: "flex", alignItems: "center", gap: 10, fontSize: 12, color: "#8B3A3A" }}>
+            <span style={{ flex: 1 }}>{bulkError}</span>
+            <button type="button" onClick={() => setBulkError("")}
+              style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070", fontFamily: "inherit", fontSize: 11 }}>
+              закрыть
+            </button>
+          </div>
+        )}
         {/* Filter / selection bar — always visible to prevent layout shift */}
         {(() => {
           const hasFilters = !!(titleFilter || customerFilter || statusFilter || brandFilter || amountMin || amountMax || factMin || factMax);
@@ -921,14 +933,14 @@ export default function OrdersV2() {
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                   {selectedIds.size > 0 && (
-                    <button
+                    <button type="button"
                       onClick={() => setConfirmDelete(true)}
                       style={{ fontSize: 10, color: "#8B3A3A", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 3, padding: 0 }}
                     >
                       <Trash size={10} /> Удалить
                     </button>
                   )}
-                  <button onClick={canClear ? clearFilters : undefined} style={{ fontSize: 10, color: canClear ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: canClear ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
+                  <button type="button" onClick={canClear ? clearFilters : undefined} style={{ fontSize: 10, color: canClear ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: canClear ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
                     <X size={10} /> Сбросить
                   </button>
                 </div>
@@ -1115,7 +1127,7 @@ export default function OrdersV2() {
           </div>
           <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
             {renderPageNums()}
-            <button
+            <button type="button"
               onClick={() => setPage(p => Math.min(p + 1, totalPages - 1))}
               disabled={page >= totalPages - 1}
               style={{
@@ -1179,13 +1191,13 @@ export default function OrdersV2() {
                   }}
                 />
                 <EstimatesDropdown orderId={selected.id} sets={detail?.estimate_sets ?? []} />
-                <button
+                <button type="button"
                   onClick={() => navigate(`/orders/${selected.id}`)}
                   style={{ height: 28, padding: "0 12px", border: "none", background: "#E8592A", color: "#FFFFFF", cursor: "pointer", display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}
                 >
                   Открыть заказ <CaretRight size={12} />
                 </button>
-                <button
+                <button type="button"
                   onClick={handleArchive}
                   disabled={archiving}
                   title={archiveMode ? "Восстановить из архива" : "В архив"}
@@ -1200,7 +1212,7 @@ export default function OrdersV2() {
                   {archiveMode ? <ArrowCounterClockwise size={15} /> : <Archive size={15} />}
                 </button>
                 {selected.customer_id && (
-                  <button
+                  <button type="button"
                     onClick={() => navigate(`/customers/${selected.customer_id}`)}
                     title="Перейти к клиенту"
                     style={{
@@ -1215,7 +1227,7 @@ export default function OrdersV2() {
                 )}
               </div>
             </div>
-            <button
+            <button type="button"
               onClick={() => setSelected(null)}
               style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 4, marginTop: -2 }}
               onMouseEnter={(e) => (e.currentTarget.style.color = "#1A1A1A")}

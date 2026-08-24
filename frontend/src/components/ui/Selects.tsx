@@ -78,7 +78,7 @@ export function BrandSelect({ value, onChange }: {
         const color = meta?.color ?? "#A89070";
         const active = value === b;
         return (
-          <button
+          <button type="button"
             key={String(b)}
             onClick={() => onChange(active && b ? null : b)}
             style={{

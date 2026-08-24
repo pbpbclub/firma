@@ -59,7 +59,7 @@ export function DetailShell({
         </div>
         <div style={{ display: "flex", gap: 4, alignItems: "center", flexShrink: 0 }}>
           {onEdit && <IconButton icon={PencilSimple} title="Редактировать" size={28} iconSize={16} color="#C8C0B0" onClick={onEdit} />}
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 6 }}
+          <button type="button" onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 6 }}
             onMouseEnter={e => (e.currentTarget.style.color = "#1A1A1A")}
             onMouseLeave={e => (e.currentTarget.style.color = "#C8C0B0")}>
             <X size={16} />

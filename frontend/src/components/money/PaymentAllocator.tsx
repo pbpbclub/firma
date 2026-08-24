@@ -14,6 +14,7 @@
  * частичная разноска не поддерживается, поэтому остаток показываем всегда.
  */
 import { useQuery } from "@tanstack/react-query";
+import { MoneyInput, parseMoney } from "../ui/MoneyInput";
 import { X } from "@phosphor-icons/react";
 import { ordersApi } from "../../api";
 import { MONO } from "../ui/Num";
@@ -46,6 +47,25 @@ function ExtraPicker({ orderId, value, onChange }: {
   );
 }
 
+/** Себестоимость заказа: план → факт и полоска покрытия. Перерасход красным. */
+function OrderCost({ plan, fact }: { plan: number; fact: number }) {
+  const pct = plan > 0 ? Math.min(100, (fact / plan) * 100) : 0;
+  const over = fact > plan && plan > 0;
+  return (
+    <div style={{ marginTop: 3 }}>
+      <div style={{ fontSize: 10, color: "#A89070" }}>
+        себест. план <span style={{ fontFamily: MONO }}>{fmt(plan)}</span>
+        <span style={{ color: "#C8C0B0" }}> → </span>
+        факт <span style={{ fontFamily: MONO, color: over ? "#8B3A3A" : "#6B6355", fontWeight: over ? 700 : 400 }}>{fmt(fact)}</span>
+        {over && <span style={{ color: "#8B3A3A" }}> · перерасход {fmt(fact - plan)}</span>}
+      </div>
+      <div style={{ height: 2, background: "#EDEBE6", marginTop: 3, maxWidth: 220 }}>
+        <div style={{ height: 2, width: `${pct}%`, background: over ? "#8B3A3A" : "#4A7C59" }} />
+      </div>
+    </div>
+  );
+}
+
 export function PaymentAllocator({ tx, allocs, onChange, label = "ПЛАТЁЖ ПО ЗАКАЗАМ" }: {
   tx: { id: string | number; amount: number; counterparty?: string | null; purpose?: string | null };
   allocs: Alloc[];
@@ -70,7 +90,7 @@ export function PaymentAllocator({ tx, allocs, onChange, label = "ПЛАТЁЖ �
     onChange([...allocs, { order_id: orderId, amount: left > 0 ? String(left) : "" }]);
   };
 
-  const sum = allocs.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+  const sum = allocs.reduce((s, a) => s + (parseMoney(a.amount) || 0), 0);
   const diff = Math.round((tx.amount - sum) * 100) / 100;
 
   return (
@@ -87,15 +107,21 @@ export function PaymentAllocator({ tx, allocs, onChange, label = "ПЛАТЁЖ �
                 {o?.title ?? a.order_id}
               </div>
               {o && (
-                <div style={{ fontSize: 10, color: "#A89070", marginTop: 1 }}>
-                  {o.customer_name ? `${o.customer_name} · ` : ""}долг{" "}
-                  <span style={{ fontFamily: MONO, color: debtColor(o.debt, "in") }}>{fmt(o.debt)}</span>
-                </div>
+                <>
+                  <div style={{ fontSize: 10, color: "#A89070", marginTop: 1 }}>
+                    {o.customer_name ? `${o.customer_name} · ` : ""}долг{" "}
+                    <span style={{ fontFamily: MONO, color: debtColor(o.debt, "in") }}>{fmt(o.debt)}</span>
+                  </div>
+                  {/* Себестоимость заказа прямо в строке разноски: раньше был виден
+                      только долг, и «сколько уже потрачено» приходилось смотреть в
+                      карточке заказа, уйдя с экрана разбора выписки. */}
+                  {(o.cost_plan > 0 || o.cost_fact > 0) && <OrderCost plan={o.cost_plan} fact={o.cost_fact} />}
+                </>
               )}
             </div>
-            <input value={a.amount} onChange={e => patch(i, "amount", e.target.value)} placeholder="сумма" type="number"
-              style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "5px 8px", fontSize: 12, outline: "none", textAlign: "right", fontFamily: MONO }} />
-            <button onClick={() => onChange(allocs.filter((_, j) => j !== i))}
+            <MoneyInput value={a.amount} onChange={v => patch(i, "amount", v)} placeholder="сумма"
+              style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "5px 8px", fontSize: 12, outline: "none" }} />
+            <button type="button" onClick={() => onChange(allocs.filter((_, j) => j !== i))}
               style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 0, display: "flex", justifyContent: "center" }}>
               <X size={12} />
             </button>
@@ -110,7 +136,7 @@ export function PaymentAllocator({ tx, allocs, onChange, label = "ПЛАТЁЖ �
 
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4, marginBottom: 12 }}>
         {(suggestions as any[]).filter((o: any) => !allocs.some(a => a.order_id === o.id)).slice(0, 6).map((o: any) => (
-          <button key={o.id} onClick={() => addOrder(o.id)}
+          <button type="button" key={o.id} onClick={() => addOrder(o.id)}
             style={{ fontSize: 11, padding: "3px 9px", border: "1px solid #EDEBE6", background: "#fff", cursor: "pointer", color: "#6B6355", fontFamily: "inherit" }}
             onMouseEnter={e => { e.currentTarget.style.borderColor = "#E8592A"; e.currentTarget.style.color = "#E8592A"; }}
             onMouseLeave={e => { e.currentTarget.style.borderColor = "#EDEBE6"; e.currentTarget.style.color = "#6B6355"; }}>
@@ -133,7 +159,7 @@ export function PaymentAllocator({ tx, allocs, onChange, label = "ПЛАТЁЖ �
 /** Готова ли разноска к отправке: есть строки и сумма сошлась с транзакцией. */
 export function allocReady(allocs: Alloc[], txAmount: number): boolean {
   if (!allocs.length) return false;
-  const sum = allocs.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+  const sum = allocs.reduce((s, a) => s + (parseMoney(a.amount) || 0), 0);
   return Math.abs(txAmount - sum) < 0.01;
 }
 
@@ -141,7 +167,7 @@ export function allocReady(allocs: Alloc[], txAmount: number): boolean {
 export function allocPayload(allocs: Alloc[]) {
   return allocs.map(a => ({
     order_id: a.order_id,
-    amount: parseFloat(a.amount) || 0,
+    amount: parseMoney(a.amount) || 0,
     extra_id: a.extra_id || null,
     note: a.note?.trim() || null,
   }));

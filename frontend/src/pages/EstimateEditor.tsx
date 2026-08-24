@@ -263,7 +263,7 @@ function ItemModal({ item, onClose, onRefetch, initialReadOnly }: {
   const fieldLabel: React.CSSProperties = { fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 };
 
   const syncBtn = (
-    <button
+    <button type="button"
       onClick={handleSyncToCatalog}
       disabled={syncing}
       style={{
@@ -282,7 +282,7 @@ function ItemModal({ item, onClose, onRefetch, initialReadOnly }: {
   );
 
   const editBtn = (
-    <button
+    <button type="button"
       onClick={() => setReadOnly(false)}
       style={{ fontSize: 11, fontWeight: 600, cursor: "pointer", border: "1px solid #E8592A", background: "transparent", color: "#E8592A", padding: "4px 12px", display: "flex", alignItems: "center", gap: 5 }}
       onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "#E8592A"; (e.currentTarget as HTMLElement).style.color = "#fff"; }}
@@ -478,6 +478,9 @@ export default function EstimateEditor() {
   // Утверждение и рассогласование — через свои защищённые ручки, а не через
   // PUT {status}. Раньше кнопка шла в updateSet и проходила мимо гейта нулевых цен
   // (цена заказа молча становилась 0 ₽), а «снять» меняло одну надпись.
+  // Ошибки показываем полосой в шапке редактора, а не браузерным alert() поверх
+  // фирменного UI: alert нельзя ни скопировать, ни оставить на экране, читая смету.
+  const [topError, setTopError] = useState("");
   const [moveOpen, setMoveOpen] = useState(false);
   const [moveResult, setMoveResult] = useState<any>(null);
   const [approveForce, setApproveForce] = useState<string | null>(null);   // текст 409 от бэка
@@ -585,7 +588,7 @@ export default function EstimateEditor() {
     } catch (e: any) {
       // 409 — «в смете нет продажных цен»: спрашиваем, а не утверждаем молча.
       if (e?.response?.status === 409) setApproveForce(String(e.response.data?.detail || "Утвердить всё равно?"));
-      else alert(e?.response?.data?.detail || "Не удалось утвердить смету");
+      else setTopError(e?.response?.data?.detail || "Не удалось утвердить смету");
     } finally { setSetBusy(false); }
   };
 
@@ -599,7 +602,7 @@ export default function EstimateEditor() {
     } catch (e: any) {
       const d = e?.response?.data?.detail;
       if (e?.response?.status === 409 && d?.code === "unapprove_confirm") setUnapprove(d);
-      else alert(typeof d === "string" ? d : "Не удалось снять согласование");
+      else setTopError(typeof d === "string" ? d : "Не удалось снять согласование");
     } finally { setSetBusy(false); }
   };
 
@@ -637,7 +640,7 @@ export default function EstimateEditor() {
       const blob = await estimatesApi.invoice(activeSetId);
       window.open(URL.createObjectURL(blob), "_blank");
     } catch {
-      alert("Ошибка генерации счёта");
+      setTopError("Не удалось собрать счёт — попробуй ещё раз");
     } finally {
       setInvoicing(false);
     }
@@ -651,7 +654,7 @@ export default function EstimateEditor() {
       const blob = await estimatesApi.kp(activeSetId);
       window.open(URL.createObjectURL(blob), "_blank");
     } catch (e: any) {
-      alert("Ошибка генерации КП: " + (e?.response?.data?.detail ?? ""));
+      setTopError("Не удалось собрать КП" + (e?.response?.data?.detail ? ": " + e.response.data.detail : ""));
     } finally {
       setKping(false);
     }
@@ -665,6 +668,17 @@ export default function EstimateEditor() {
   return (
     <>
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+
+      {topError && (
+        <div style={{ padding: "9px 28px", background: "#FBF3F2", borderBottom: "1px solid #EDEBE6",
+                      display: "flex", alignItems: "center", gap: 10, fontSize: 12, color: "#8B3A3A" }}>
+          <span style={{ flex: 1 }}>{topError}</span>
+          <button type="button" onClick={() => setTopError("")}
+            style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070", fontFamily: "inherit", fontSize: 11 }}>
+            закрыть
+          </button>
+        </div>
+      )}
 
       {/* ─ Header ─────────────────────────────────────────────────────────── */}
       <div style={{ padding: "0 16px 0 28px", borderBottom: "1px solid #EDEBE6", display: "flex", alignItems: "center", gap: 8, flexShrink: 0, height: 46 }}>
@@ -723,7 +737,7 @@ export default function EstimateEditor() {
                       />
                     ) : (
                       <>
-                        <button
+                        <button type="button"
                           onClick={() => isActive
                             ? (setEditingSetId(s.id), setEditingSetName(s.title || ""))
                             : switchSet(s.id)
@@ -746,7 +760,7 @@ export default function EstimateEditor() {
                             style={{ color: "#E8592A", fontSize: 14, lineHeight: 1, paddingRight: 6 }}>•</span>
                         )}
                         {editMode && isActive && (
-                          <button
+                          <button type="button"
                             onClick={() => setConfirmDeleteSet(true)}
                             title="Удалить смету"
                             style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: "2px 6px 2px 0", display: "flex", alignItems: "center", fontSize: 14, lineHeight: 1 }}
@@ -759,7 +773,7 @@ export default function EstimateEditor() {
                   </div>
                 );
               })}
-              <button
+              <button type="button"
                 onClick={createSet}
                 title="Новая смета"
                 style={{ background: "none", border: "none", cursor: "pointer", color: "#A89070", display: "flex", alignItems: "center", padding: "2px 4px", fontSize: 18, lineHeight: 1, flexShrink: 0 }}
@@ -777,7 +791,7 @@ export default function EstimateEditor() {
               {/* Нал/Безнал — только в режиме редактирования */}
               <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
                 {[{ v: "cash", l: "Нал" }, { v: "bank", l: "Безнал" }, { v: "transit", l: "Транзит" }].map(pt => (
-                  <button
+                  <button type="button"
                     key={pt.v}
                     onClick={() => editMode && updateSet({ payment_type: pt.v })}
                     style={{
@@ -832,7 +846,7 @@ export default function EstimateEditor() {
               <div style={{ width: 1, height: 18, background: "#EDEBE6", margin: "0 2px" }} />
 
               {/* Согласовать */}
-              <button
+              <button type="button"
                 onClick={() => (activeSet.status === "approved" ? doUnapprove(false) : doApprove(false))}
                 disabled={setBusy}
                 title={activeSet.status === "approved" ? "Снять согласование" : "Согласовать"}
@@ -847,7 +861,7 @@ export default function EstimateEditor() {
               </button>
 
               {/* Обязательства */}
-              <button
+              <button type="button"
                 onClick={activeSet.status !== "approved" ? undefined : hasObligations ? () => setConfirmRevert(true) : createObligations}
                 disabled={obligating || activeSet.status !== "approved"}
                 title={activeSet.status !== "approved" ? "Доступно после согласования" : hasObligations ? "Обязательства созданы (нажмите для отмены)" : "Создать обязательства"}
@@ -866,7 +880,7 @@ export default function EstimateEditor() {
               </button>
 
               {/* Счёт */}
-              <button
+              <button type="button"
                 onClick={generateInvoice}
                 disabled={invoicing}
                 title="Сгенерировать счёт"
@@ -883,7 +897,7 @@ export default function EstimateEditor() {
               </button>
 
               {/* КП — генератор фин-агента (kp.py), шаблон один на систему */}
-              <button
+              <button type="button"
                 onClick={generateKp}
                 disabled={kping}
                 title="Сгенерировать КП (коммерческое предложение)"
@@ -905,7 +919,7 @@ export default function EstimateEditor() {
                   жила только в ветке isApproved — вариант №2 из черновика приходилось
                   набирать заново. У утверждённой подпись прежняя: для неё это
                   единственный способ правки (смета заморожена). */}
-              <button
+              <button type="button"
                 onClick={async () => {
                   const nv = await estimatesApi.newVersion(activeSet.id);
                   await refetch();
@@ -924,7 +938,7 @@ export default function EstimateEditor() {
 
               {/* Перенести смету в другой заказ (просчёт завели отдельным заказом,
                   а это часть проекта). Ручка есть с 07.08, входа в UI не было. */}
-              <button
+              <button type="button"
                 onClick={() => setMoveOpen(true)}
                 title="Перенести смету в другой заказ вместе с обязательствами"
                 style={{ width: 28, height: 28, padding: 0, border: "1px solid #EDEBE6", background: "transparent", color: "#6B6355", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
@@ -937,7 +951,7 @@ export default function EstimateEditor() {
               {/* A3: основная смета — ручной выбор Юры; переключается там же, где
                   ты между вариантами и ходишь. Утверждённая основная всегда. */}
               {activeSet.status === "draft" && visibleSets.length > 1 && (
-                <button
+                <button type="button"
                   onClick={() => (activeSet.is_primary
                     ? estimatesApi.unsetPrimary(activeSet.id).then(() => refetch())
                     : estimatesApi.setPrimary(activeSet.id).then(() => refetch()))}
@@ -954,7 +968,7 @@ export default function EstimateEditor() {
               )}
 
               {editMode ? (
-                <button
+                <button type="button"
                   onClick={() => setEditMode(false)}
                   title="Сохранить"
                   style={{ width: 28, height: 28, padding: 0, border: "none", background: "#4A7C59", color: "#FFFFFF", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
@@ -962,7 +976,7 @@ export default function EstimateEditor() {
                   <FloppyDisk size={16} />
                 </button>
               ) : (
-                <button
+                <button type="button"
                   onClick={() => setEditMode(true)}
                   title="Редактировать"
                   style={{ width: 28, height: 28, padding: 0, border: "1px solid #EDEBE6", background: "transparent", color: "#6B6355", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
@@ -974,7 +988,7 @@ export default function EstimateEditor() {
               )}
             </>
           ) : (
-            <button
+            <button type="button"
               onClick={createSet}
               style={{ padding: "5px 14px", background: "#E8592A", border: "none", color: "#FFFFFF", fontSize: 12, cursor: "pointer", fontWeight: 600 }}
             >
@@ -1292,7 +1306,7 @@ export default function EstimateEditor() {
                       <Cube size={13} weight="fill" />
                     </span>
                   ) : (
-                    <button
+                    <button type="button"
                       onClick={e => { e.stopPropagation(); setOpen({ id: item.id, readOnly: false }); }}
                       title="Заполнить калькулятор"
                       style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}
@@ -1303,7 +1317,7 @@ export default function EstimateEditor() {
                     </button>
                   )}
                   {editMode && (
-                    <button
+                    <button type="button"
                       onClick={e => { e.stopPropagation(); estimatesApi.deleteItem(item.id).then(() => refetch()); }}
                       style={{ background: "none", border: "none", cursor: "pointer", color: "#D0C8C0", padding: 2, display: "flex" }}
                       onMouseEnter={e => (e.currentTarget.style.color = "#8B3A3A")}
@@ -1318,7 +1332,7 @@ export default function EstimateEditor() {
 
             {/* Add row — visible in edit mode */}
             {editMode && <div style={{ padding: "10px 28px", display: "flex", gap: 10 }}>
-              <button
+              <button type="button"
                 onClick={addItemInline}
                 style={{ background: "none", border: "1px solid #EDEBE6", cursor: "pointer", fontSize: 12, color: "#6B6355", padding: "6px 12px", display: "flex", alignItems: "center", gap: 5 }}
                 onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "#1A1A1A"; }}
@@ -1326,7 +1340,7 @@ export default function EstimateEditor() {
               >
                 <Plus size={11} /> Позиция
               </button>
-              <button
+              <button type="button"
                 onClick={() => setCatalogOpen(true)}
                 style={{ background: "none", border: "1px solid #EDEBE6", cursor: "pointer", fontSize: 12, color: "#6B6355", padding: "6px 12px", display: "flex", alignItems: "center", gap: 5 }}
                 onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "#1A1A1A"; }}

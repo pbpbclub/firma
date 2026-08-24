@@ -7,7 +7,7 @@ import { financeApi, zenmoneyApi, ordersApi, paymentsApi, inboxApi } from "../ap
 import { PaymentAllocator, allocReady, allocPayload, type Alloc as PayAlloc } from "../components/money/PaymentAllocator";
 import { MagnifyingGlass, X, LinkSimple } from "@phosphor-icons/react";
 import { ColumnFilter, AmountFilter, PeriodFilter } from "../components/TableFilters";
-import { Modal } from "../components/ui/Modal";
+import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { MONO } from "../components/ui/Num";
 import { IconButton } from "../components/ui/IconButton";
 
@@ -112,7 +112,7 @@ function LinkCreditorModal({ tx, creditorByFinTx, onClose }: {
               <LinkSimple size={11} style={{ marginRight: 4 }} />
               Привязано: <strong>{currentCreditor.name}</strong>
             </div>
-            <button
+            <button type="button"
               onClick={() => link.mutate({ creditorId: currentCreditor.id, txId: null })}
               style={{ fontSize: 11, color: "#8B3A3A", background: "none", border: "none", cursor: "pointer", padding: 0 }}
             >Отвязать</button>
@@ -180,11 +180,11 @@ function ReservePromptBody({ prompt, pending, onReserve, onSkip }: {
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <input type="number" min="0" value={amt} onChange={e => setAmt(e.target.value)}
           style={{ width: 150, border: "1px solid #EDEBE6", padding: "8px 10px", fontSize: 13, outline: "none", fontFamily: MONO, textAlign: "right" }} />
-        <button onClick={() => onReserve(parseFloat(amt) || 0)} disabled={pending}
+        <button type="button" onClick={() => onReserve(parseFloat(amt) || 0)} disabled={pending}
           style={{ padding: "8px 18px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
           {pending ? "..." : "Зарезервировать"}
         </button>
-        <button onClick={onSkip}
+        <button type="button" onClick={onSkip}
           style={{ padding: "8px 14px", border: "1px solid #EDEBE6", background: "none", color: "#A89070", fontSize: 12, cursor: "pointer" }}>Не сейчас</button>
       </div>
     </div>
@@ -268,14 +268,14 @@ function LinkOrderModal({ tx, paymentByFinTx, onClose }: {
               <LinkSimple size={11} style={{ marginRight: 4 }} />
               Привязано: <strong>{currentPayment.order_title}</strong>
             </div>
-            <button onClick={() => link.mutate({ orderId: null, txId: String(tx.id) })} style={{ fontSize: 11, color: "#8B3A3A", background: "none", border: "none", cursor: "pointer", padding: 0 }}>Отвязать</button>
+            <button type="button" onClick={() => link.mutate({ orderId: null, txId: String(tx.id) })} style={{ fontSize: 11, color: "#8B3A3A", background: "none", border: "none", cursor: "pointer", padding: 0 }}>Отвязать</button>
           </div>
         )}
         <div style={{ padding: "14px 20px 18px" }}>
           <PaymentAllocator tx={tx} allocs={allocs} onChange={setAllocs} />
           {error && <div style={{ fontSize: 11, color: "#8B3A3A", marginTop: 8 }}>{error}</div>}
           <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}>
-            <button
+            <button type="button"
               disabled={!allocReady(allocs, tx.amount) || link.isPending}
               onClick={() => link.mutate({ orderId: allocs[0]?.order_id ?? null, txId: String(tx.id) })}
               style={{ fontSize: 12, fontWeight: 600, padding: "7px 16px", border: "none", fontFamily: "inherit",
@@ -357,6 +357,7 @@ const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
     },
   });
 
+  const [undoGroup, setUndoGroup] = useState<string | null>(null);
   const [asOf, setAsOf] = useState(new Date().toISOString().slice(0, 10));
   const { data: balance } = useQuery({ queryKey: ["fin-bal-at", asOf], queryFn: () => financeApi.balanceAtDate(asOf) });
   const { data: zmBal } = useQuery({ queryKey: ["zm-bal-at", asOf], queryFn: () => zenmoneyApi.balanceAtDate(asOf) });
@@ -417,7 +418,7 @@ const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
           {/* Filter tabs */}
           <div style={{ display: "flex", gap: 24, borderBottom: "1px solid #EDEBE6" }}>
             {FILTERS.map((f) => (
-              <button
+              <button type="button"
                 key={f.v}
                 onClick={() => { setDirection(f.v); setSelectedIds(new Set()); }}
                 style={{
@@ -474,7 +475,7 @@ const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
                 {selectedIds.size === 0 && hasFilters && fOut > 0 && <span style={{ color: "#8B3A3A" }}>−{fmt(fOut)}</span>}
                 {selectedIds.size === 0 && hasFilters && (fIn > 0 || fOut > 0) && <span style={{ color: net >= 0 ? "#4A7C59" : "#8B3A3A", fontWeight: 600 }}>{net >= 0 ? "+" : "−"}{fmt(Math.abs(net))}</span>}
               </div>
-              <button onClick={canClear ? clearFilters : undefined} style={{ fontSize: 10, color: canClear ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: canClear ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
+              <button type="button" onClick={canClear ? clearFilters : undefined} style={{ fontSize: 10, color: canClear ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: canClear ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
                 <X size={10} /> Сбросить
               </button>
             </div>
@@ -567,7 +568,7 @@ const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
                       {(() => {
                         const gid = expensesByTx.get(String(t.id))!.find((e: any) => e.group_id)?.group_id;
                         return gid ? (
-                          <button onClick={ev => { ev.stopPropagation(); if (confirm("Откатить разноску этого списания целиком? Транзакция вернётся в «Разноску».")) undoExpenseGroup.mutate(gid); }}
+                          <button type="button" onClick={ev => { ev.stopPropagation(); setUndoGroup(gid); }}
                             title="Откатить разноску целиком"
                             style={{ marginLeft: 6, fontSize: 10, color: "#8B3A3A", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
                             откатить
@@ -595,6 +596,14 @@ const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
                 </div>
               </div>
             ))
+          )}
+          {undoGroup && (
+            <ConfirmModal
+              message="Откатить разноску этого списания целиком? Расходы по заказам удалятся, транзакция вернётся в «Разноску»."
+              confirmLabel="Откатить"
+              onConfirm={() => { undoExpenseGroup.mutate(undoGroup); setUndoGroup(null); }}
+              onCancel={() => setUndoGroup(null)}
+            />
           )}
           {linkModal && (
             <LinkCreditorModal

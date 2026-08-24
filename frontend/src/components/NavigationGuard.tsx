@@ -36,13 +36,13 @@ export function NavigationGuardModal({ blocker }: { blocker: ReturnType<typeof u
           Если уйти сейчас, все незаписанные изменения будут потеряны.
         </div>
         <div style={{ display: "flex", gap: 10 }}>
-          <button
+          <button type="button"
             onClick={() => blocker.proceed?.()}
             style={{ flex: 1, background: "#1A1A1A", color: "#FFF", border: "none", padding: "9px 0", fontSize: 12, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
           >
             Уйти без сохранения
           </button>
-          <button
+          <button type="button"
             onClick={() => blocker.reset?.()}
             style={{ flex: 1, background: "none", border: "1px solid #EDEBE6", padding: "9px 0", fontSize: 12, cursor: "pointer", fontFamily: "inherit", color: "#1A1A1A", fontWeight: 600 }}
           >

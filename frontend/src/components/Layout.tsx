@@ -68,7 +68,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           overflow: "hidden",
         }}>
           {/* Hamburger */}
-          <button
+          <button type="button"
             onClick={() => setExpanded((v) => !v)}
             style={{
               height: 56,
@@ -163,7 +163,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 {user?.name}
               </div>
             )}
-            <button
+            <button type="button"
               onClick={logout}
               title="Выйти"
               style={{

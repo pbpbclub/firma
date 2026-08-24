@@ -137,7 +137,7 @@ function FundDetailModal({ fund, onClose, onRefresh }: {
 
           {/* Кнопки действий */}
           <div style={{ padding: "12px 24px", borderBottom: "1px solid #EDEBE6", display: "flex", gap: 8 }}>
-            <button
+            <button type="button"
               onClick={() => setTxModal("deposit")}
               style={{ padding: "6px 14px", border: "1px solid #EDEBE6", background: "transparent", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#4A7C59", display: "flex", alignItems: "center", gap: 5 }}
               onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "#F0F7F2"; }}
@@ -145,7 +145,7 @@ function FundDetailModal({ fund, onClose, onRefresh }: {
             >
               <Plus size={11} /> Пополнить
             </button>
-            <button
+            <button type="button"
               onClick={() => setTxModal("withdraw")}
               style={{ padding: "6px 14px", border: "1px solid #EDEBE6", background: "transparent", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#8B3A3A", display: "flex", alignItems: "center", gap: 5 }}
               onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "#FBF3F3"; }}
@@ -237,7 +237,7 @@ function CreateFundModal({ onClose, onDone }: { onClose: () => void; onDone: () 
             <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.05em", marginBottom: 8 }}>ЦВЕТ</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {PRESET_COLORS.map(c => (
-                <button key={c} onClick={() => setColor(c)}
+                <button type="button" key={c} onClick={() => setColor(c)}
                   style={{
                     width: 28, height: 28, background: c, border: "none", cursor: "pointer",
                     outline: color === c ? `2px solid ${c}` : "none",
@@ -304,7 +304,7 @@ function AccountableSection() {
       </div>
       {(people as any[]).map((p: any) => (
         <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "9px 0", borderBottom: "1px solid #F2EFE9" }}>
-          <button onClick={() => { setOpFor(null); setAmount(""); setHistFor(p); }} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 13, color: "#1A1A1A", textDecoration: "underline", textDecorationColor: "#EDEBE6", fontFamily: "inherit" }}>
+          <button type="button" onClick={() => { setOpFor(null); setAmount(""); setHistFor(p); }} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 13, color: "#1A1A1A", textDecoration: "underline", textDecorationColor: "#EDEBE6", fontFamily: "inherit" }}>
             {p.name}
           </button>
           <span style={{ fontSize: 10, color: "#A89070" }}>на руках</span>
@@ -316,19 +316,19 @@ function AccountableSection() {
               <span style={{ fontSize: 10, color: "#A89070" }}>{opFor!.kind === "issue" ? "Выдать из кассы:" : "Возврат в кассу:"}</span>
               <input type="number" value={amount} onChange={e => setAmount(e.target.value)} autoFocus
                 style={{ width: 100, border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 12, outline: "none", textAlign: "right", fontFamily: MONO }} />
-              <button disabled={saving || !parseFloat(amount)} onClick={doOp}
+              <button type="button" disabled={saving || !parseFloat(amount)} onClick={doOp}
                 style={{ fontSize: 11, padding: "4px 12px", border: "none", background: "#E8592A", color: "#fff", cursor: "pointer", fontWeight: 600, fontFamily: "inherit" }}>
                 {saving ? "..." : "OK"}
               </button>
-              <button onClick={() => { setOpFor(null); setAmount(""); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2 }}>✕</button>
+              <button type="button" onClick={() => { setOpFor(null); setAmount(""); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2 }}>✕</button>
             </div>
           ) : (
             <div style={{ display: "flex", gap: 6 }}>
-              <button onClick={() => setOpFor({ person: p, kind: "issue" })}
+              <button type="button" onClick={() => setOpFor({ person: p, kind: "issue" })}
                 style={{ fontSize: 11, padding: "4px 10px", border: "1px solid #EDEBE6", background: "transparent", color: "#4A7C59", cursor: "pointer", fontFamily: "inherit" }}>
                 Выдать из кассы
               </button>
-              <button onClick={() => setOpFor({ person: p, kind: "return" })} disabled={p.balance <= 0}
+              <button type="button" onClick={() => setOpFor({ person: p, kind: "return" })} disabled={p.balance <= 0}
                 style={{ fontSize: 11, padding: "4px 10px", border: "1px solid #EDEBE6", background: "transparent", color: p.balance > 0 ? "#8B3A3A" : "#C8C0B0", cursor: p.balance > 0 ? "pointer" : "default", fontFamily: "inherit" }}>
                 Возврат в кассу
               </button>
@@ -353,7 +353,7 @@ function AccountableSection() {
                 </span>
                 {/* Удаление сносит и парное движение кассы (fund_transactions.
                     accountable_op_id) — иначе «на руках» и остаток кассы разъезжались. */}
-                <button onClick={() => delOp.mutate(o.id)} disabled={delOp.isPending}
+                <button type="button" onClick={() => delOp.mutate(o.id)} disabled={delOp.isPending}
                   title="Удалить операцию — вместе с её движением кассы"
                   style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: "2px 4px", display: "flex" }}>
                   <Trash size={12} />
@@ -417,7 +417,7 @@ export default function Funds() {
             <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 2 }}>ВСЕГО В ФОНДАХ</div>
             <div style={{ fontSize: 20, fontWeight: 700, color: "#1A1A1A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(totalBalance)}</div>
           </div>
-          <button
+          <button type="button"
             onClick={() => setCreateOpen(true)}
             style={{ padding: "7px 14px", background: "#E8592A", border: "none", color: "#FFFFFF", fontSize: 12, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}
           >
@@ -431,7 +431,7 @@ export default function Funds() {
       ) : fundList.length === 0 ? (
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12, color: "#A89070", fontSize: 13 }}>
           <div>Фондов нет — создайте первый</div>
-          <button onClick={() => setCreateOpen(true)} style={{ padding: "7px 16px", background: "#E8592A", border: "none", color: "#FFFFFF", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+          <button type="button" onClick={() => setCreateOpen(true)} style={{ padding: "7px 16px", background: "#E8592A", border: "none", color: "#FFFFFF", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
             + Создать фонд
           </button>
         </div>
@@ -447,7 +447,7 @@ export default function Funds() {
               <div key={f.id} style={{ padding: "20px 24px", borderRight: "1px solid #EDEBE6", boxSizing: "border-box" }}>
 
                 {/* Название — кликабельное */}
-                <button
+                <button type="button"
                   onClick={() => setDetailFund(f)}
                   style={{ background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, marginBottom: 10, width: "100%", textAlign: "left" }}
                 >
@@ -466,7 +466,7 @@ export default function Funds() {
                 </div>
 
                 <div style={{ display: "flex", gap: 6 }}>
-                  <button
+                  <button type="button"
                     onClick={() => setTxModal({ fund: f, mode: "deposit" })}
                     style={{ flex: 1, padding: "5px 0", fontSize: 11, fontWeight: 600, border: "1px solid #EDEBE6", background: "transparent", color: "#4A7C59", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}
                     onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "#F0F7F2"; }}
@@ -474,7 +474,7 @@ export default function Funds() {
                   >
                     <Plus size={10} /> Пополнить
                   </button>
-                  <button
+                  <button type="button"
                     onClick={() => setTxModal({ fund: f, mode: "withdraw" })}
                     style={{ flex: 1, padding: "5px 0", fontSize: 11, fontWeight: 600, border: "1px solid #EDEBE6", background: "transparent", color: "#8B3A3A", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}
                     onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "#FBF3F3"; }}

@@ -50,7 +50,7 @@ export function Pager({ pager, totalCount, truncated }: {
         <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
           <span style={{ letterSpacing: "0.06em" }}>НА СТРАНИЦЕ</span>
           {PAGE_SIZE_OPTIONS.map(n => (
-            <button key={n} onClick={() => changePageSize(n)}
+            <button type="button" key={n} onClick={() => changePageSize(n)}
               style={{ background: "none", border: "none", cursor: "pointer", padding: "0 1px", fontSize: 10,
                        fontFamily: "inherit", fontWeight: pageSize === n ? 600 : 400,
                        color: pageSize === n ? "#1A1A1A" : "#A89070",
@@ -66,7 +66,7 @@ export function Pager({ pager, totalCount, truncated }: {
             p === "…" ? (
               <span key={`e${i}`} style={{ fontSize: 10, color: "#C8C0B0", padding: "0 2px" }}>…</span>
             ) : (
-              <button key={p} onClick={() => setPage(p as number)}
+              <button type="button" key={p} onClick={() => setPage(p as number)}
                 style={{ background: "none", border: "none", cursor: "pointer", fontSize: 10,
                          fontFamily: "inherit", fontWeight: page === p ? 600 : 400,
                          color: page === p ? "#1A1A1A" : "#A89070", padding: "0 2px",
@@ -74,7 +74,7 @@ export function Pager({ pager, totalCount, truncated }: {
                 {(p as number) + 1}
               </button>
             ))}
-          <button onClick={() => setPage(p => Math.min(p + 1, totalPages - 1))} disabled={page >= totalPages - 1}
+          <button type="button" onClick={() => setPage(p => Math.min(p + 1, totalPages - 1))} disabled={page >= totalPages - 1}
             style={{ background: "none", border: "none", display: "flex", alignItems: "center", padding: "0 2px",
                      cursor: page >= totalPages - 1 ? "default" : "pointer",
                      color: page >= totalPages - 1 ? "#D0C8C0" : "#A89070" }}>

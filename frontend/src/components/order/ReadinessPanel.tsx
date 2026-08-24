@@ -54,7 +54,7 @@ function StubRow({ it, onSaved }: { it: any; onSaved: () => void }) {
           onKeyDown={e => { if (e.key === "Enter" && ok) save.mutate(); }}
           style={{ flex: 1, border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 12,
                    outline: "none", fontFamily: MONO, textAlign: "right", minWidth: 0 }} />
-        <button disabled={!ok || save.isPending} onClick={() => save.mutate()}
+        <button type="button" disabled={!ok || save.isPending} onClick={() => save.mutate()}
           style={{ fontSize: 11, padding: "4px 10px", border: "none", fontFamily: "inherit", fontWeight: 600,
                    background: ok ? "#E8592A" : "#EDEBE6", color: ok ? "#fff" : "#A89070",
                    cursor: ok ? "pointer" : "default" }}>
@@ -95,7 +95,7 @@ function RateHoleRow({ w, onSaved }: { w: any; onSaved: () => void }) {
           onKeyDown={e => { if (e.key === "Enter" && ok) save.mutate(); }}
           style={{ flex: 1, border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 12,
                    outline: "none", fontFamily: MONO, textAlign: "right", minWidth: 0 }} />
-        <button disabled={!ok || save.isPending} onClick={() => save.mutate()}
+        <button type="button" disabled={!ok || save.isPending} onClick={() => save.mutate()}
           style={{ fontSize: 11, padding: "4px 10px", border: "none", fontFamily: "inherit", fontWeight: 600,
                    background: ok ? "#E8592A" : "#EDEBE6", color: ok ? "#fff" : "#A89070",
                    cursor: ok ? "pointer" : "default" }}>
@@ -223,13 +223,13 @@ export function ReadinessPanel() {
                     <span style={{ fontSize: 10, letterSpacing: "0.06em", color: "#E8592A", textAlign: "center",
                                    border: "1px solid #E8592A", padding: "4px 6px", fontWeight: 600 }}>ОСНОВНАЯ</span>
                   ) : (
-                    <button onClick={() => primary.mutate(st.set_id)} disabled={primary.isPending}
+                    <button type="button" onClick={() => primary.mutate(st.set_id)} disabled={primary.isPending}
                       style={{ fontSize: 11, padding: "4px 10px", border: "1px solid #E8592A", background: "#fff",
                                color: "#E8592A", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
                       показывать эту
                     </button>
                   )}
-                  <button onClick={() => { if (confirm(`Пометить остальные сметы заказа «${o.order_title}» заменёнными? Варианты пропадут из работы.`)) keep.mutate(st.set_id); }}
+                  <button type="button" onClick={() => { if (confirm(`Пометить остальные сметы заказа «${o.order_title}» заменёнными? Варианты пропадут из работы.`)) keep.mutate(st.set_id); }}
                     disabled={keep.isPending}
                     style={{ fontSize: 11, padding: "4px 10px", border: "1px solid #EDEBE6", background: "#fff",
                              color: "#6B6355", cursor: "pointer", fontFamily: "inherit" }}>
@@ -368,7 +368,7 @@ export function ReadinessPanel() {
                 {fmt(r.rate)} / {r.unit || "ед"}
               </span>
               <span style={{ fontSize: 10, color: "#C8C0B0" }}>источник: {r.source}</span>
-              <button onClick={() => delRate.mutate(r.id)} disabled={delRate.isPending}
+              <button type="button" onClick={() => delRate.mutate(r.id)} disabled={delRate.isPending}
                 title="Удалить ставку — она разовая, а не постоянная"
                 style={{ fontSize: 10, padding: "3px 8px", border: "1px solid #EDEBE6", background: "#fff",
                          color: "#8B3A3A", cursor: "pointer", fontFamily: "inherit" }}>

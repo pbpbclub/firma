@@ -16,7 +16,7 @@ export function EmptyState({ title, hint, icon: Icon, action, compact }: {
       <div style={{ fontSize: 13, color: "#A89070" }}>{title}</div>
       {hint && <div style={{ fontSize: 11, color: "#C8C0B0", maxWidth: 320, lineHeight: 1.5 }}>{hint}</div>}
       {action && (
-        <button
+        <button type="button"
           onClick={action.onClick}
           style={{ marginTop: 6, padding: "7px 16px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
         >{action.label}</button>

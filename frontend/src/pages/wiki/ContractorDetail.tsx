@@ -34,7 +34,7 @@ function ActionChip({ icon, label, onClick }:
   { icon: ReactNode; label: string; onClick: () => void }) {
   const [hover, setHover] = useState(false);
   return (
-    <button onClick={onClick}
+    <button type="button" onClick={onClick}
       onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
       style={{
         display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, lineHeight: 1,
@@ -324,7 +324,7 @@ export function ContractorDetail({ id, onClose }: { id: string; onClose: () => v
             {data.linked_customers.map((c: any) => (
               <div key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #F2EFE9" }}>
                 <div style={{ fontSize: 11, color: "#A89070" }}>Он же клиент</div>
-                <button onClick={() => nav(`/wiki/clients/${c.id}`)}
+                <button type="button" onClick={() => nav(`/wiki/clients/${c.id}`)}
                   style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 13, fontWeight: 500, color: "#E8592A",
                            background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", padding: 0 }}>
                   <User size={12} /> {c.name} →
@@ -439,18 +439,18 @@ export function ContractorDetail({ id, onClose }: { id: string; onClose: () => v
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                    <button onClick={() => saveCreditor.mutate({ status: "closed" })}
+                    <button type="button" onClick={() => saveCreditor.mutate({ status: "closed" })}
                       style={{ padding: "4px 10px", border: "1px solid #4A7C59", background: "none", fontSize: 11, cursor: "pointer", color: "#4A7C59", display: "flex", alignItems: "center", gap: 4 }}>
                       <Check size={11} /> Закрыть
                     </button>
-                    <button onClick={() => {
+                    <button type="button" onClick={() => {
                       const t = parseFloat((document.getElementById(`ec-total-${c.id}`) as HTMLInputElement).value);
                       const p = parseFloat((document.getElementById(`ec-paid-${c.id}`) as HTMLInputElement).value);
                       saveCreditor.mutate({ total: isNaN(t) ? c.total : t, paid: isNaN(p) ? c.paid : p });
                     }} style={{ padding: "4px 10px", border: "none", background: "#E8592A", color: "#fff", fontSize: 11, cursor: "pointer", fontWeight: 600 }}>
                       Сохранить
                     </button>
-                    <button onClick={() => setEditCreditor(null)}
+                    <button type="button" onClick={() => setEditCreditor(null)}
                       style={{ padding: "4px 10px", border: "1px solid #EDEBE6", background: "none", fontSize: 11, cursor: "pointer", color: "#A89070" }}>
                       ✕
                     </button>
