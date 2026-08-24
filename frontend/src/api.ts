@@ -29,6 +29,9 @@ export const ordersApi = {
     api.get("/orders/plan-fact-summary", { params: { scope } }).then((r) => r.data),
   // A8: накладные месяца и их раскладка по заказам в производстве
   overheadSummary: () => api.get("/orders/overhead-summary").then((r) => r.data),
+  // Карточка «План / факт» PDF — тем же движком, что КП.
+  card: (id: string) =>
+    api.post(`/orders/${id}/card`, {}, { responseType: "blob" }).then((r) => r.data),
   // «Молчат»: просчёты без движения (правило фин-агента, 14/30/60 дней)
   silent: () => api.get("/orders/silent").then((r) => r.data),
   estimate: (id: string) => api.get(`/orders/${id}/estimate`).then((r) => r.data),
@@ -349,6 +352,16 @@ export const ledgerApi = {
   // Зачёт. С order_id — расход по заказу (гасит обязательство и растит
   // себестоимость), без него — строка регистра, двигающая только сальдо.
   offset: (data: Record<string, any>) => api.post("/ledger/offset", data).then((r) => r.data),
+  // Карточка «Расчёты с подрядчиком» PDF — тем же движком, что КП.
+  card: (id: string, params?: { date_from?: string; date_to?: string }) =>
+    api.post(`/ledger/masters/${id}/card`, {}, { params, responseType: "blob" }).then((r) => r.data),
+};
+
+// Срезы-карточки PDF: то, что финагент присылает в Telegram, кнопкой из веба.
+export const reportsApi = {
+  monthCard: (month?: string) =>
+    api.post("/reports/month-card", {}, { params: month ? { month } : {}, responseType: "blob" })
+       .then((r) => r.data),
 };
 
 export const mastersApi = {

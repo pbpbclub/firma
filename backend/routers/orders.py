@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Query, HTTPException, Body, Depends
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional, List
 from uuid import uuid4
@@ -1644,6 +1645,27 @@ class ExtraIn(BaseModel):
     created_at: Optional[str] = None
 
 
+def _extra_created_at(raw) -> Optional[str]:
+    """Дата допа из тела запроса → канонический 'YYYY-MM-DD HH:MM:SS'.
+
+    Форма шлёт голую дату (input type=date), база пишет datetime('now'). Без
+    приведения в колонке смешивались два формата, а любая другая строка легла бы
+    молча и навсегда сломала бы сортировку ленты (code_rules 24.08.2026)."""
+    if raw is None or not str(raw).strip():
+        return None
+    s = str(raw).strip().replace("T", " ")
+    from datetime import datetime
+    for fmt, tail in (("%Y-%m-%d", " 00:00:00"), ("%Y-%m-%d %H:%M", ":00"),
+                      ("%Y-%m-%d %H:%M:%S", "")):
+        try:
+            datetime.strptime(s, fmt)
+            return s + tail
+        except ValueError:
+            continue
+    raise HTTPException(status_code=400,
+                        detail="created_at must be YYYY-MM-DD or YYYY-MM-DD HH:MM[:SS]")
+
+
 def _extras_list(conn, oid: str) -> list:
     """Допы заказа с фактом: сколько по нему уже оплачено и сколько потрачено."""
     rows = conn.execute(
@@ -1663,6 +1685,59 @@ def _extras_list(conn, oid: str) -> list:
         d["rest"] = round((d["price"] or 0) - d["paid"], 2)
         out.append(d)
     return out
+
+
+@router.post("/{order_id}/card")
+def order_card(order_id: str):
+    """Карточка заказа «План / факт» одним PDF — то, что финагент присылает в Telegram.
+
+    Ничего не считает заново: берёт готовый ответ карточки заказа (_plan_fact,
+    _margin, платежи, расходы) и раскладывает по вёрстке. Рендер — общий card.py
+    финагента, тот же, которым собирается КП."""
+    import cards
+    from datetime import date
+
+    data = get_order(order_id)          # тот же контракт, что у веб-карточки
+    pf = data.get("plan_fact") or {}
+    # get_order расходы не отдаёт (у них свой эндпоинт) — берём тем же вызовом.
+    exps = [e for e in (list_expenses(order_id).get("items") or []) if (e.get("amount") or 0) > 0]
+    exps.sort(key=lambda e: -(e.get("amount") or 0))
+    settled_label = {"advance": "закрыто авансом", "offset": "закрыто зачётом",
+                     "third_party": "оплачено за него", "none": "ещё не оплачено"}
+    path = cards.render(
+        "order.html.j2",
+        stem=f"order-{data.get('number') or order_id}",
+        today=date.today().strftime("%d.%m.%Y"),
+        order=data,
+        customer=data.get("customer_name"),
+        status_label=data.get("status_label"),
+        revenue=pf.get("revenue") or data.get("price_plan") or 0,
+        paid=data.get("paid_total") or 0,
+        debt=data.get("debt") or 0,
+        categories=pf.get("categories") or [],
+        plan_unbroken=pf.get("plan_unbroken") or 0,
+        cost_plan=pf.get("cost_plan") or 0,
+        cost_fact=pf.get("cost_fact") or 0,
+        cost_delta=pf.get("cost_delta") or 0,
+        extras=pf.get("extras") or {},
+        tax=pf.get("tax") or 0,
+        # У заказа в работе факт внесён не весь, и «выручка − факт − налог» врала бы
+        # вверх (у ORD-023 — 140 839 вместо 90 949). Тот же приём, что в _plan_fact:
+        # завершённый считаем фактом, живой — прогнозом по max(план, факт).
+        net=(round((pf.get("revenue") or 0) - (pf.get("cost_fact") or 0) - (pf.get("tax") or 0), 2)
+             if data.get("status") == "completed" else (pf.get("net_forecast") or 0)),
+        net_is_forecast=data.get("status") != "completed",
+        net_plan=pf.get("net_plan") or 0,
+        cost_expected=pf.get("cost_expected") or pf.get("cost_fact") or 0,
+        cash_gap=pf.get("cash_collected_vs_cost") or 0,
+        expenses=[{"title": e.get("title"), "amount": e.get("amount"),
+                   "supplier": e.get("supplier") or "",
+                   # Jinja печатает None как «None» — в карточке это выглядело
+                   # «Роман ЛазаревNone». Пустая строка, а не None.
+                   "settled": settled_label.get(e.get("settled_by") or "", "")} for e in exps],
+    )
+    return FileResponse(path, media_type="application/pdf",
+                        filename=f"plan-fact-{data.get('number') or order_id}.pdf")
 
 
 @router.get("/{order_id}/extras")
@@ -1690,7 +1765,8 @@ def add_extra(order_id: str, body: ExtraIn, user=Depends(get_current_user)):
             """INSERT INTO order_extras (id, order_id, title, price, cost, note, created_by, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))""",
             (xid, oid, body.title.strip(), round(body.price or 0, 2), round(body.cost or 0, 2),
-             body.note, (user or {}).get("name") or (user or {}).get("email"), body.created_at))
+             body.note, (user or {}).get("name") or (user or {}).get("email"),
+             _extra_created_at(body.created_at)))
         conn.commit()
         return dict(conn.execute("SELECT * FROM order_extras WHERE id = ?", (xid,)).fetchone())
     finally:
@@ -1709,10 +1785,14 @@ def update_extra(order_id: str, extra_id: str, body: ExtraIn):
         if not r:
             raise HTTPException(status_code=404, detail="Not found")
         conn.execute(
+            # created_at правится ТОЙ ЖЕ формой, что и заводит доп: поле, проведённое
+            # только в INSERT, давало на правке даты 200 и молча старое значение
+            # (code_rules 24.08.2026). Не прислали — оставляем как было.
             """UPDATE order_extras SET title = ?, price = ?, cost = ?, note = ?,
+                      created_at = COALESCE(?, created_at),
                       updated_at = datetime('now') WHERE id = ?""",
             (body.title.strip(), round(body.price or 0, 2), round(body.cost or 0, 2),
-             body.note, extra_id))
+             body.note, _extra_created_at(body.created_at), extra_id))
         conn.commit()
         return dict(conn.execute("SELECT * FROM order_extras WHERE id = ?", (extra_id,)).fetchone())
     finally:

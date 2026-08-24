@@ -3,11 +3,12 @@ import { QueryError } from "../components/ui/QueryError";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { financeApi, taxApi, ordersApi } from "../api";
+import { financeApi, taxApi, ordersApi, reportsApi } from "../api";
 import { MONO } from "../components/ui/Num";
 import { DeadlinePill } from "../components/ui/Pill";
 import { POLARITY, debtColor } from "../components/ui/type";
 import { CircleProgress } from "../components/ui/CircleProgress";
+import { CardButton } from "../components/CardButton";
 
 
 function ThinBar({ pct, color = "#E8592A" }: { pct: number; color?: string }) {
@@ -62,8 +63,14 @@ export default function Dashboard() {
 
       {/* Header */}
       <div style={{ padding: "24px 28px 20px", borderBottom: "1px solid #EDEBE6" }}>
-        <div style={{ fontSize: 26, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em" }}>
-          {new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+          <div style={{ fontSize: 26, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em" }}>
+            {new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })}
+          </div>
+          {/* Тот же срез, что финагент присылает в Telegram: деньги месяца, заказы, долги. */}
+          <CardButton label="Срез за месяц"
+            filename={`Срез — ${new Date().toLocaleDateString("ru-RU", { month: "long", year: "numeric" })}.pdf`}
+            fetcher={() => reportsApi.monthCard()} />
         </div>
       </div>
 

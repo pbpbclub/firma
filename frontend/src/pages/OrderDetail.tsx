@@ -24,6 +24,7 @@ import { OrderParams } from "../components/order/OrderParams";
 import type { OrderFormState } from "../components/order/OrderParams";
 import { useNavigationGuard, NavigationGuardModal } from "../components/NavigationGuard";
 import { Breadcrumbs } from "../components/ui/Breadcrumbs";
+import { CardButton } from "../components/CardButton";
 
 // A1/A2 (ТЗ 24.08.2026): «чем закрыт расход». cash и пустое — обычная оплата,
 // бейджа не требует; остальное стоит отметить, иначе строка читается как выплата.
@@ -495,6 +496,11 @@ export default function OrderDetail() {
   const activeDraft = order?.plan_source === "draft"
     ? (drafts.find((s: any) => s.is_primary) ?? [...drafts].reverse()[0] ?? null)
     : null;
+  // Смета, по которой собирать КП: утверждённая, иначе основная, иначе активный черновик.
+  const kpSetId: string | undefined =
+    (estimates as any[]).find((s: any) => s.status === "approved")?.id
+    ?? (estimates as any[]).find((s: any) => s.is_primary && s.status !== "superseded")?.id
+    ?? activeDraft?.id;
 
   if (isLoading || !form) {
     return <Loading />;
@@ -512,6 +518,16 @@ export default function OrderDetail() {
           tail={<span style={{ fontSize: 10, color: "#C8C0B0", fontFamily: MONO }}>{order?.number}</span>}
         />
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          {/* Выгрузки PDF. «КП» жила только в редакторе сметы, хотя ищут её здесь;
+              в редакторе она осталась — там она рядом со строками, которые уходят
+              заказчику. Активная смета = утверждённая, иначе основная. */}
+          <CardButton label="Карточка П/Ф"
+            filename={`План-факт — ${order?.title ?? order?.number ?? "заказ"}.pdf`}
+            fetcher={() => ordersApi.card(id!)} />
+          {kpSetId && (
+            <CardButton label="КП" filename={`КП — ${order?.title ?? "заказ"}.pdf`}
+              fetcher={() => estimatesApi.kp(kpSetId)} />
+          )}
           {saveMutation.isError && <span style={{ fontSize: 11, color: "#8B3A3A" }}>Ошибка сохранения</span>}
           {saveMutation.isSuccess && <span style={{ fontSize: 11, color: "#4A7C59" }}>Сохранено ✓</span>}
           <button type="button"

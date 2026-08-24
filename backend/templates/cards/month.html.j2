@@ -1,0 +1,170 @@
+{% extends "_base.html.j2" %}
+{# Срез за месяц: деньги месяца → накладные → заказы в работе → долги. #}
+{% block body %}
+<div class="caps">Срез за месяц · на {{ today }}</div>
+<h1>{{ month_label }}</h1>
+<div class="sub">
+  {% if bank.unavailable %}Банк недоступен — цифры ниже по данным Фирмы
+  {% else %}По банку пришло {{ bank.income | money }} <span class="rub">₽</span>,
+  ушло {{ bank.expense | money }} <span class="rub">₽</span> ·
+  {% if bank_delta >= 0 %}месяц в плюсе на {{ bank_delta | money }} <span class="rub">₽</span>
+  {% else %}месяц в минусе на {{ bank_delta | abs | money }} <span class="rub">₽</span>{% endif %}{% endif %}
+</div>
+
+<div class="card">
+  <h2>Деньги месяца</h2>
+  <div class="hint">Разнесённое по заказам и траты вне заказов. Общие траты в
+    себестоимость заказов не входят — складывать их в одну сумму значит выдать
+    накладные за себестоимость.</div>
+  <div class="rows two">
+    <div class="n">Поступления от заказчиков</div>
+    <div class="s pos">{{ paid | money }}<span class="rub">₽</span></div>
+    {% for c in by_cat %}
+    <div class="n">{{ c.label }}<small>по заказам</small></div>
+    <div class="s">{{ c.value | money }}<span class="rub">₽</span></div>
+    {% endfor %}
+    {% if by_cat %}
+    <div class="n">Себестоимость заказов за месяц</div>
+    <div class="s">{{ on_orders | money }}<span class="rub">₽</span></div>
+    {% endif %}
+    {% for g in general_rows %}
+    <div class="n">{{ g.label }}<small>вне заказов</small></div>
+    <div class="s dim">{{ g.value | money }}<span class="rub">₽</span></div>
+    {% endfor %}
+    <div class="sub2">
+      <div>Потрачено за месяц</div>
+      <div class="s">{{ spent | money }}<span class="rub">₽</span></div>
+    </div>
+    <div class="sub2">
+      <div>{% if left >= 0 %}Осталось от поступлений{% else %}Потратили больше, чем пришло{% endif %}</div>
+      <div class="s {{ 'pos' if left >= 0 else 'neg' }}">{{ left | abs | money }}<span class="rub">₽</span></div>
+    </div>
+  </div>
+</div>
+
+{% if overhead.total %}
+<div class="card">
+  <h2>Накладные месяца</h2>
+  <div class="hint">Общехозяйственные траты{% if overhead.fixed %} и оплаченные постоянные
+    обязательства{% endif %}. Делятся между заказами в производстве пропорционально
+    их фактической себестоимости.{% if not overhead_orders %} Раскладка показывается
+    только для текущего месяца.{% endif %}</div>
+  <div class="rows two">
+    <div class="n">Расходы вне заказов</div>
+    <div class="s">{{ overhead.expenses | money }}<span class="rub">₽</span></div>
+    {% if overhead.fixed %}
+    <div class="n">Постоянные обязательства<small>аренда и подобное, оплачено</small></div>
+    <div class="s">{{ overhead.fixed | money }}<span class="rub">₽</span></div>
+    {% endif %}
+    <div class="sub2"><div>Итого накладных</div>
+      <div class="s">{{ overhead.total | money }}<span class="rub">₽</span></div></div>
+  </div>
+  {% if overhead_orders %}
+  <div class="rows four" style="margin-top:12px">
+    <div class="head">Заказ</div><div class="head r">Доля</div>
+    <div class="head r">Себест. факт</div><div class="head r">Накладных</div>
+    {% for o in overhead_orders %}
+    <div class="n">{{ o.title }}</div>
+    <div class="s dim">{{ (o.share * 100) | round | int }}%</div>
+    <div class="s dim">{{ o.fact_cost | money }}<span class="rub">₽</span></div>
+    <div class="s">{{ o.amount | money }}<span class="rub">₽</span></div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if orders %}
+<div class="card">
+  <h2>В производстве</h2>
+  <div class="hint">Себестоимость — план сметы против внесённого факта. Чистая — прогноз:
+    у живого заказа факт внесён не весь, поэтому берётся большее из плана и факта.</div>
+  <div class="rows four">
+    <div class="head">Заказ</div><div class="head r">Цена</div>
+    <div class="head r">Себест. п/ф</div><div class="head r">Чистая</div>
+    {% for o in orders %}
+    <div class="n">{{ o.title }}<small>{{ o.status_label }} · оплачено {{ o.paid_total | money }} ₽{% if o.overspent %} · перерасход себестоимости{% endif %}</small></div>
+    <div class="s">{{ o.price_plan | money }}<span class="rub">₽</span></div>
+    <div class="s dim">{{ o.cost_plan | money }} / {{ o.cost_fact | money }}</div>
+    <div class="s {{ 'pos' if o.net_forecast >= 0 else 'neg' }}">{{ o.net_forecast | money }}<span class="rub">₽</span></div>
+    {% endfor %}
+    <div class="sub2">
+      <div>Прогноз чистой по производству</div>
+      <div class="s"></div><div class="s"></div>
+      <div class="s {{ 'pos' if net_forecast >= 0 else 'neg' }}">{{ net_forecast | money }}<span class="rub">₽</span></div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% if pipeline %}
+<div class="card">
+  <h2>В просчёте и проектах</h2>
+  <div class="hint">Ещё не производство: черновики, сметы и проекты. Их прогноз держим
+    отдельно — в одном ведре с производством он поглощает реальные деньги.</div>
+  <div class="rows four">
+    <div class="head">Заказ</div><div class="head r">Цена</div>
+    <div class="head r">Себест. план</div><div class="head r">Чистая</div>
+    {% for o in pipeline %}
+    <div class="n">{{ o.title }}<small>{{ o.status_label }}</small></div>
+    <div class="s">{{ o.price_plan | money }}<span class="rub">₽</span></div>
+    <div class="s dim">{{ o.cost_plan | money }}<span class="rub">₽</span></div>
+    <div class="s dim">{{ o.net_forecast | money }}<span class="rub">₽</span></div>
+    {% endfor %}
+    {% if pipeline_more %}
+    <div class="n dim">…и ещё {{ pipeline_more }} заказ(ов) помельче</div>
+    <div class="s dim">—</div><div class="s dim">—</div><div class="s dim">—</div>
+    {% endif %}
+    <div class="sub2">
+      <div>Если всё дойдёт до работы</div>
+      <div class="s">{{ pipeline_revenue | money }}<span class="rub">₽</span></div>
+      <div class="s"></div>
+      <div class="s gold">{{ pipeline_net | money }}<span class="rub">₽</span></div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Долги на сегодня</h2>
+  <div class="hint">Нам должны — будущие деньги; мы должны — обязательства по живым
+    заказам. План закупок и потенциальная выручка не долг: их считаем отдельно.</div>
+  <div class="rows two">
+    <div class="n">Нам должны заказчики</div>
+    <div class="s pos">{{ debtors_total | money }}<span class="rub">₽</span></div>
+    {% if potential %}
+    <div class="n">Ждут оплаты счёта<small>потенциальная выручка, ещё не долг</small></div>
+    <div class="s gold">{{ potential | money }}<span class="rub">₽</span></div>
+    {% endif %}
+    <div class="n">Мы должны по обязательствам</div>
+    <div class="s neg">{{ creditors_debt | money }}<span class="rub">₽</span></div>
+    {% if creditors_plan %}
+    <div class="n">План по подрядчикам<small>ещё не заказано, не долг</small></div>
+    <div class="s gold">{{ creditors_plan | money }}<span class="rub">₽</span></div>
+    {% endif %}
+    <div class="n">Лицевые счета подрядчиков<small>с учётом авансов и зачётов</small></div>
+    <div class="s neg">{{ we_owe | money }}<span class="rub">₽</span></div>
+    {% if they_owe %}
+    <div class="n">Авансы у подрядчиков<small>отработают будущими работами</small></div>
+    <div class="s pos">{{ they_owe | money }}<span class="rub">₽</span></div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card sumcard{{ ' good' if net_forecast > 0 else '' }}">
+  <h2>Что несёт производство</h2>
+  <div class="prices">
+    <div><div class="caps">Цена заказов</div><div class="big sm">{{ prod_revenue | money }}<span class="rub">₽</span></div></div>
+    <div><div class="caps">Оплачено</div><div class="big sm">{{ prod_paid | money }}<span class="rub">₽</span></div></div>
+    <div><div class="caps">Себест. факт</div><div class="big sm">{{ prod_cost_fact | money }}<span class="rub">₽</span></div></div>
+  </div>
+  <div class="total{{ ' good' if net_forecast > 0 else '' }}">
+    <div>Чистая · прогноз</div>
+    <div>{{ net_forecast | money }}<span class="rub">₽</span></div>
+  </div>
+  <div class="foot">
+    Прогноз по заказам в производстве после УСН; накладные в него не входят —
+    {{ overhead.total | money }} ₽ за месяц делятся между заказами в производстве отдельно.
+  </div>
+</div>
+{% endblock %}

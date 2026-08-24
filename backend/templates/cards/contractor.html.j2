@@ -1,0 +1,59 @@
+{% extends "_base.html.j2" %}
+{# Карточка «Расчёты с подрядчиком»: сальдо лицевого счёта и из чего оно сложилось.
+   Не путать с «Мы должны» в обязательствах — там план закупок по сметам, здесь
+   реальный долг мастеру с учётом авансов, зачётов и оплат за него. #}
+{% block body %}
+<div class="caps">Расчёты с подрядчиком · на {{ today }}</div>
+<h1>{{ master.name }}</h1>
+<div class="sub">
+  {% if master.role %}{{ master.role }} · {% endif %}
+  {% if balance > 0 %}мы должны {{ balance | money }} <span class="rub">₽</span>
+  {% elif balance < 0 %}за ним аванс {{ balance | abs | money }} <span class="rub">₽</span> — отработает будущими работами
+  {% else %}расчёты закрыты{% endif %}
+  {% if period %}<br>{{ period }}{% endif %}
+</div>
+
+<div class="card">
+  <h2>Из чего сложилось сальдо</h2>
+  <div class="hint">Начислено — принятые работы, остальное — то, чем они закрыты.</div>
+  <div class="rows two">
+    {% for t in totals %}
+    <div class="n">{{ t.label }}{% if t.hint %}<small>{{ t.hint }}</small>{% endif %}</div>
+    <div class="s {{ t.cls }}">{{ t.value | money }}<span class="rub">₽</span></div>
+    {% endfor %}
+    <div class="sub2">
+      <div>{% if balance > 0 %}Мы должны{% elif balance < 0 %}За ним аванс{% else %}Сальдо{% endif %}</div>
+      <div class="s {{ 'neg' if balance > 0 else 'pos' if balance < 0 else 'dim' }}">{{ balance | abs | money }}<span class="rub">₽</span></div>
+    </div>
+  </div>
+</div>
+
+{% if accepted %}
+<div class="card">
+  <h2>Принято, ещё не оплачено</h2>
+  <div class="hint">Работы приняты в себестоимость заказов, деньги по ним не двигались:
+    закрыты авансом, оплатой за него, либо ждут выплаты. В сальдо не входит.</div>
+  <div class="rows two">
+    {% for e in accepted %}
+    <div class="n">{{ e.title }}{% if e.order_title %}<small>{{ e.order_title }}</small>{% endif %}</div>
+    <div class="s dim">{{ e.amount | money }}<span class="rub">₽</span></div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if entries %}
+<div class="card">
+  <h2>Обороты</h2>
+  <div class="hint">Плюс — мы должны больше, минус — долг гасится.</div>
+  <div class="rows four">
+    {% for e in entries %}
+    <div class="n">{{ e.title }}{% if e.order_title %}<small>{{ e.order_title }}</small>{% endif %}</div>
+    <div class="s dim">{{ e.date | rusdate }}</div>
+    <div class="s dim">{{ e.kind_label }}</div>
+    <div class="s {{ 'neg' if e.effect > 0 else 'pos' }}">{{ e.effect | signed }}<span class="rub">₽</span></div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,29 @@
+{# Каркас карточки: шрифты и вёрстку подставляет card.py (см. cards.py). #}
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><style>
+/*FONTS*/
+/*CSS:card_detail.css*/
+/* База card_detail.css — три колонки (название/кол-во/сумма). Наши карточки
+   бывают на две и на четыре; без этих строк грид сыпал строки зигзагом. */
+.rows.two{grid-template-columns:1fr auto}
+.rows.four{grid-template-columns:1fr auto auto auto}
+.rows .head{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+.rows .head.r{text-align:right}
+.rows .n small{display:block;color:var(--muted);font-size:11px;line-height:1.35;margin-top:1px}
+.rows .s.pos{color:var(--green);font-weight:600}
+.rows .s.neg{color:#B33A1A;font-weight:600}
+/* Золотой — сознательное «это НЕ долг»: план закупок и потенциальная выручка.
+   Тот же смысл, что #B8860B в вебе; серым они читались бы как «мелочь». */
+.rows .s.gold{color:#B8860B;font-weight:600}
+.rows .sub2{grid-column:1/-1;display:grid;grid-template-columns:inherit;gap:7px 14px;
+            border-top:1px solid var(--border);margin-top:6px;padding-top:8px;
+            font-size:13px;font-weight:700}
+.prices .big.neg{color:#B33A1A}
+.note{border:1px dashed var(--border);border-radius:12px;padding:14px 16px;font-size:12.5px;
+      color:var(--muted);line-height:1.55;margin-bottom:12px}
+.note b{color:var(--ink);font-weight:700}
+.foot{margin-top:14px;font-size:11.5px;color:var(--muted);line-height:1.6}
+</style></head><body>
+{% block body %}{% endblock %}
+<div class="foot">{{ brand_line | default("Mera · проектное производство") }}</div>
+</body></html>

@@ -13,6 +13,7 @@ import { fmt, fmtDate } from "./helpers";
 import { DetailRow as Row } from "./DetailRow";
 import { DetailShell, DetailSection, NoteBlock, type DetailMetric } from "./DetailShell";
 import { Modal } from "../../components/ui/Modal";
+import { CardButton } from "../../components/CardButton";
 
 const LEDGER_ACTIONS = {
   advance: {
@@ -350,6 +351,10 @@ export function ContractorDetail({ id, onClose }: { id: string; onClose: () => v
               <ActionChip icon={<HandCoins size={12} />} label="Выдать аванс" onClick={() => setLedgerAction("advance")} />
               <ActionChip icon={<Receipt size={12} />} label="Оплатить за него" onClick={() => setLedgerAction("third_party")} />
               <ActionChip icon={<ArrowsLeftRight size={12} />} label="Провести зачёт" onClick={() => setLedgerAction("offset")} />
+              {/* Тот же лицевой счёт одним PDF — Юра пересылает его подрядчику при сверке. */}
+              <CardButton label="Сверка PDF"
+                filename={`Расчёты — ${master?.name ?? "подрядчик"}.pdf`}
+                fetcher={() => ledgerApi.card(id)} />
             </div>
             <Row label={ledger.balance >= 0 ? "Мы должны" : "Аванс у мастера"}
                  value={fmt(Math.abs(ledger.balance))} mono

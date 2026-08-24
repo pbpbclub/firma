@@ -12,6 +12,7 @@ import { CalcHeader, CalcSection, CalcRow, CalcFooter } from "../components/ui/C
 import { BrandSelect, EditableText } from "../components/ui/Selects";
 import { markupToPct, pctToMarkup, clientPrice, cashFromClient, taxFor } from "../components/ui/priceMath";
 import { Breadcrumbs } from "../components/ui/Breadcrumbs";
+import { downloadBlob } from "../components/ui/download";
 import { MONO } from "../components/ui/Num";
 
 const SANS = "inherit";
@@ -638,7 +639,7 @@ export default function EstimateEditor() {
     setInvoicing(true);
     try {
       const blob = await estimatesApi.invoice(activeSetId);
-      window.open(URL.createObjectURL(blob), "_blank");
+      downloadBlob(blob, `Счёт — ${order?.title ?? "заказ"}.pdf`);
     } catch {
       setTopError("Не удалось собрать счёт — попробуй ещё раз");
     } finally {
@@ -652,7 +653,7 @@ export default function EstimateEditor() {
     setKping(true);
     try {
       const blob = await estimatesApi.kp(activeSetId);
-      window.open(URL.createObjectURL(blob), "_blank");
+      downloadBlob(blob, `КП — ${order?.title ?? "заказ"}.pdf`);
     } catch (e: any) {
       setTopError("Не удалось собрать КП" + (e?.response?.data?.detail ? ": " + e.response.data.detail : ""));
     } finally {

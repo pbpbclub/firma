@@ -1,0 +1,91 @@
+{% extends "_base.html.j2" %}
+{# Карточка заказа «План / факт». Блоки — как в эталоне финагента
+   (data/uploads/ilyinsky_planfact.src.html): что продали и во что обошлось →
+   куда ушли деньги фактом → сколько осталось. #}
+{% block body %}
+<div class="caps">План / факт · на {{ today }}</div>
+<h1>{{ order.title }}</h1>
+<div class="sub">
+  Заказ {{ order.number }}{% if customer %} · {{ customer }}{% endif %} ·
+  {% if debt > 0 %}оплачено {{ paid | money }} <span class="rub">₽</span> из {{ revenue | money }} <span class="rub">₽</span>, остаток {{ debt | money }} <span class="rub">₽</span>
+  {% else %}оплачен полностью, {{ paid | money }} <span class="rub">₽</span>{% endif %}
+  {% if status_label %}<br>{{ status_label }}{% endif %}
+</div>
+
+{% if categories %}
+<div class="card">
+  <h2>Что заложили и что потратили</h2>
+  <div class="hint">Себестоимость по строкам активной сметы против внесённого факта.{% if plan_unbroken %}
+    В этой смете план лежит одной суммой, без разбивки по статьям, — поэтому разницу по статьям
+    сравнивать не с чем.{% endif %}</div>
+  <div class="rows four">
+    <div class="head">Статья</div><div class="head r">План</div><div class="head r">Факт</div><div class="head r">Разница</div>
+    {% for c in categories %}
+    <div class="n">{{ c.category }}</div>
+    <div class="s dim">{{ c.plan | money }}<span class="rub">₽</span></div>
+    <div class="s">{{ c.fact | money }}<span class="rub">₽</span></div>
+    {% if c.plan or not plan_unbroken %}
+    <div class="s {{ 'neg' if c.delta > 0 else 'pos' if c.delta < 0 else 'dim' }}">{{ c.delta | signed }}<span class="rub">₽</span></div>
+    {% else %}<div class="s dim">—</div>{% endif %}
+    {% endfor %}
+    {% if plan_unbroken %}
+    <div class="n">План без разбивки<small>позиции сметы без строк состава — сравнивать не с чем</small></div>
+    <div class="s dim">{{ plan_unbroken | money }}<span class="rub">₽</span></div>
+    <div class="s dim">—</div><div class="s dim">—</div>
+    {% endif %}
+    <div class="sub2">
+      <div>Итого себестоимость</div>
+      <div class="s">{{ cost_plan | money }}<span class="rub">₽</span></div>
+      <div class="s">{{ cost_fact | money }}<span class="rub">₽</span></div>
+      <div class="s {{ 'neg' if cost_delta > 0 else 'pos' if cost_delta < 0 else 'dim' }}">{{ cost_delta | signed }}<span class="rub">₽</span></div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% if expenses %}
+<div class="card">
+  <h2>Куда ушли деньги — факт</h2>
+  <div class="hint">Внесённые расходы по заказу.</div>
+  <div class="rows two">
+    {% for e in expenses %}
+    <div class="n">{{ e.title }}{% if e.supplier or e.settled %}<small>{{ e.supplier }}{% if e.supplier and e.settled %} · {% endif %}{{ e.settled }}</small>{% endif %}</div>
+    <div class="s">{{ e.amount | money }}<span class="rub">₽</span></div>
+    {% endfor %}
+    <div class="sub2"><div>Итого затрат</div><div class="s">{{ cost_fact | money }}<span class="rub">₽</span></div></div>
+  </div>
+</div>
+{% endif %}
+
+{% if extras and extras.count %}
+<div class="card">
+  <h2>Допработы сверх сметы</h2>
+  <div class="rows four">
+    <div class="head">Что</div><div class="head r">Цена</div><div class="head r">Себест.</div><div class="head r">Маржа</div>
+    <div class="n">{{ extras.count }} шт</div>
+    <div class="s">{{ extras.price | money }}<span class="rub">₽</span></div>
+    <div class="s dim">{{ (extras.cost_fact or extras.cost_plan) | money }}<span class="rub">₽</span></div>
+    <div class="s {{ 'pos' if extras.gross >= 0 else 'neg' }}">{{ extras.gross | signed }}<span class="rub">₽</span></div>
+  </div>
+</div>
+{% endif %}
+
+<div class="card sumcard{{ ' good' if net > 0 else '' }}">
+  <h2>Сколько осталось</h2>
+  <div class="prices">
+    <div><div class="caps">Пришло</div><div class="big">{{ paid | money }}<span class="rub">₽</span></div></div>
+    <div><div class="caps">Затраты{% if net_is_forecast %} · внесено{% endif %}</div><div class="big sm">{{ cost_fact | money }}<span class="rub">₽</span></div></div>
+    <div><div class="caps">УСН 6%</div><div class="big sm">{{ tax | money }}<span class="rub">₽</span></div></div>
+  </div>
+  <div class="total{{ ' good' if net > 0 else '' }}">
+    <div>{% if net_is_forecast %}Чистая · прогноз{% else %}{{ 'Прибыль' if net >= 0 else 'Убыток' }}{% endif %}</div>
+    <div>{{ net | money }}<span class="rub">₽</span></div>
+  </div>
+  <div class="foot">
+    {% if net_is_forecast %}Заказ ещё в работе: прогноз держится большего из плана и факта —
+    экономия зачтётся, когда расходы внесены полностью. По плану сметы {{ net_plan | money }} ₽.
+    {% else %}По плану сметы ожидалось {{ net_plan | money }} ₽.{% endif %}
+    {% if cash_gap < 0 %}Касса по заказу минус {{ cash_gap | abs | money }} ₽ — вложились раньше, чем заплатил клиент.{% endif %}
+  </div>
+</div>
+{% endblock %}

@@ -632,3 +632,58 @@ def contractor_pay(body: ContractorPayIn):
         conn.close()
     return {"expense": row, "purpose": purpose, "settled_on_order": settled,
             "hint": "оборот виден в GET /api/ledger/masters/{master_id}"}
+
+
+@router.post("/masters/{master_id}/card")
+def master_card(master_id: str,
+                date_from: Optional[str] = None,
+                date_to: Optional[str] = None):
+    """Карточка «Расчёты с подрядчиком» одним PDF.
+
+    Ничего не считает заново — раскладывает по вёрстке ответ master_ledger, чтобы
+    выкладка сходилась с экраном до рубля."""
+    import cards
+    from datetime import date as _date
+    from fastapi.responses import FileResponse
+
+    d = master_ledger(master_id, date_from=date_from, date_to=date_to)
+    entries = d["entries"]
+    # accepted — справочный вид со знаком 0: работы приняты, деньги не двигались.
+    # В обороты он не идёт (иначе читался бы как выплата), но «за что ещё должны»
+    # показать нужно — отдельным блоком.
+    body = [e for e in entries if e["kind"] != "accepted"]
+    body.sort(key=lambda e: (e["date"] or ""), reverse=True)
+
+    def row(key, label, cls, hint=None):
+        return {"label": label, "value": d.get(key) or 0, "cls": cls, "hint": hint}
+
+    totals = [row("accrued", "Начислено за работы", "")]
+    for key, label, hint in (("paid", "Выплачено деньгами", None),
+                             ("third_party", "Оплачено за него", "перевод третьему лицу"),
+                             ("offset", "Зачёт", "закрыто встречным обязательством")):
+        if d.get(key):
+            totals.append(row(key, label, "dim", hint))
+    if d.get("adjust"):
+        totals.append(row("adjust", "Корректировка", "dim"))
+
+    period = None
+    if date_from or date_to:
+        period = f"Период {date_from or '…'} — {date_to or 'сегодня'}"
+        if d.get("opening_balance"):
+            period += f" · на входе {cards.signed(d['opening_balance'])} ₽"
+
+    path = cards.render(
+        "contractor.html.j2",
+        stem=f"contractor-{d['master']['name']}",
+        today=_date.today().strftime("%d.%m.%Y"),
+        master=d["master"],
+        period=period,
+        totals=totals,
+        balance=d["balance"],
+        entries=body,
+        accepted=[e for e in entries if e["kind"] == "accepted"],
+    )
+    # Кириллицу в имени файла Starlette отдаёт через filename*=utf-8'' — браузер
+    # сохранит «Расчёты — Игорь Кебра.pdf», а не «master.pdf».
+    return FileResponse(path, media_type="application/pdf",
+                        filename=f"Расчёты — {d['master']['name']}.pdf")
