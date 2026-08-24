@@ -25,6 +25,7 @@ import type { OrderFormState } from "../components/order/OrderParams";
 import { useNavigationGuard, NavigationGuardModal } from "../components/NavigationGuard";
 import { Breadcrumbs } from "../components/ui/Breadcrumbs";
 import { CardButton } from "../components/CardButton";
+import { MasterLink } from "../components/ui/links";
 
 // A1/A2 (ТЗ 24.08.2026): «чем закрыт расход». cash и пустое — обычная оплата,
 // бейджа не требует; остальное стоит отметить, иначе строка читается как выплата.
@@ -952,7 +953,13 @@ export default function OrderDetail() {
                               style={{ fontSize: 9, color: "#A89070", background: "#F2EFE9", padding: "1px 5px", marginLeft: 5 }}>под отчёт</span>
                           )}
                         </div>
-                        {e.supplier && <div style={{ fontSize: 10, color: "#A89070", marginTop: 1 }}>{e.supplier}</div>}
+                        {/* Поставщик — свободный текст, а master_id есть только у расходов,
+                            сопоставленных с подрядчиком: ссылку даём именно по нему. */}
+                        {e.supplier && (
+                          <div style={{ fontSize: 10, color: "#A89070", marginTop: 1 }}>
+                            <MasterLink id={e.master_id}>{e.supplier}</MasterLink>
+                          </div>
+                        )}
                       </div>
                       <div style={{ fontSize: 10, color: "#6B6355" }}>{cat?.l ?? e.category}</div>
                       <div style={{ fontSize: 13, fontWeight: 600, color: "#8B3A3A", textAlign: "right",

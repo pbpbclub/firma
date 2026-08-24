@@ -5,8 +5,9 @@ import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { Loading } from "../components/ui/Loading";
 import { EmptyState } from "../components/ui/EmptyState";
 import { MONO } from "../components/ui/Num";
+import { DeadlinePill } from "../components/ui/Pill";
 import { Modal, ConfirmModal } from "../components/ui/Modal";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { ordersApi, customersApi, brandsApi, estimatesApi, financeApi } from "../api";
 import { MagnifyingGlass, DotsThree, Plus, Files, CaretRight, Archive, ArrowCounterClockwise, CaretDown, X, Trash, UserCircle } from "@phosphor-icons/react";
 import { ColumnFilter, AmountFilter } from "../components/TableFilters";
@@ -32,6 +33,7 @@ const STATUSES = [
 // Разделы экрана заказов. Взаимоисключающие по смыслу — поэтому одно значение,
 // а не набор булевых: два раздела сразу теперь невозможны по устройству.
 type OrdersMode = "list" | "review" | "summary" | "ready" | "silent" | "archive";
+const MODES: OrdersMode[] = ["list", "review", "summary", "ready", "silent", "archive"];
 
 const PAGE_SIZE = 10;
 
@@ -39,13 +41,6 @@ const PAGE_SIZE = 10;
 function fmtDate(s: string) {
   if (!s) return "—";
   return new Date(s).toLocaleDateString("ru-RU", { day: "numeric", month: "short", year: "numeric" });
-}
-
-function initials(name: string | undefined) {
-  if (!name) return "—";
-  const parts = name.trim().split(/\s+/);
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
 function Checkbox({ checked, indeterminate = false, onChange }: {
@@ -471,7 +466,12 @@ export default function OrdersV2() {
   // клик по статус-вкладке менял только status и не гасил флаг режима, а рендер
   // проверял режимы раньше таблицы — «Готовность» не отпускала экран, и выйти
   // можно было лишь повторным кликом по той же вкладке (баг Юры 24.08.2026).
-  const [mode, setMode] = useState<OrdersMode>("list");
+  // Режим можно задать ссылкой (?mode=silent) — с дашборда «что делать» ведёт
+  // прямо в нужную вкладку, а не «в Заказы, дальше сам».
+  const [params, setParams] = useSearchParams();
+  const urlMode = params.get("mode") as OrdersMode | null;
+  const [mode, setMode] = useState<OrdersMode>(
+    urlMode && MODES.includes(urlMode) ? urlMode : "list");
   const archiveMode = mode === "archive";
 
   /** Единственный вход для смены раздела.
@@ -482,6 +482,8 @@ export default function OrdersV2() {
    *  в остальных разделах не трогаем, он там ни на что не влияет. */
   const goto = (next: OrdersMode, nextStatus?: string) => {
     setMode(next);
+    // Ссылка не должна пережить уход из режима: иначе F5 возвращает в «Готовность».
+    if (params.get("mode")) setParams({}, { replace: true });
     setSelected(null);
     setPage(0);
     if (next === "list") setStatus(nextStatus ?? "in_production");
@@ -1048,20 +1050,29 @@ export default function OrdersV2() {
                       </div>
                     )}
                   </div>
-                  <div style={{
-                    width: 28, height: 28,
-                    borderRadius: "50%",
-                    background: isActive ? "rgba(255,255,255,0.25)" : "#F2EFE9",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    fontSize: 10, fontWeight: 700,
-                    color: isActive ? "#FFFFFF" : "#1A1A1A",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.08em",
-                  }}>
-                    {initials(o.customer_name)}
+                  {/* Имя клиента, а не кружок с двумя буквами: «КК» и «КО» на экране
+                      не различишь, а имя тут — главный признак заказа. Клик уводит
+                      в карточку клиента, если он заведён. */}
+                  <div style={{ fontSize: 12, lineHeight: 1.35, minWidth: 0, paddingRight: 8,
+                    color: isActive ? "rgba(255,255,255,0.9)" : o.customer_name ? "#6B6355" : "#C8C0B0" }}>
+                    {o.customer_id ? (
+                      <span onClick={(e) => { e.stopPropagation(); navigate(`/wiki/clients/${o.customer_id}`); }}
+                        title="Открыть клиента"
+                        style={{ borderBottom: "1px solid transparent", transition: "border-color 0.1s" }}
+                        onMouseEnter={(e) => (e.currentTarget.style.borderBottomColor = isActive ? "rgba(255,255,255,0.6)" : "#C8C0B0")}
+                        onMouseLeave={(e) => (e.currentTarget.style.borderBottomColor = "transparent")}>
+                        {o.customer_name}
+                      </span>
+                    ) : (o.customer_name || "—")}
                   </div>
                   <div style={{ fontSize: 11, color: isActive ? "#FFFFFF" : st.color, fontWeight: 500, lineHeight: 1.4 }}>
                     {st.label}
+                    {/* Дедлайн приходил с бэка и не показывался нигде — ни здесь, ни на главной. */}
+                    {o.deadline && !["completed", "cancelled"].includes(o.status) && (
+                      <div style={{ marginTop: 3 }}>
+                        <DeadlinePill date={o.deadline} onDark={isActive} />
+                      </div>
+                    )}
                   </div>
                   <div style={{ fontSize: 13, fontWeight: 600, color: isActive ? "#FFFFFF" : "#1A1A1A", lineHeight: 1.4, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
                     {fmt(o.price_plan)}

@@ -30,7 +30,8 @@ export function Pill({ tone = "neutral", children, style }: {
 
 // Дедлайн как пилл: считает дни до срока и подбирает тон/текст.
 // null-дата → ничего (пустой дедлайн — не сигнал).
-export function DeadlinePill({ date }: { date?: string | null }) {
+// onDark — строка на оранжевом выделении: обычная дата серым там нечитаема.
+export function DeadlinePill({ date, onDark }: { date?: string | null; onDark?: boolean }) {
   if (!date) return <span style={{ color: "#C8C0B0", fontSize: 12 }}>—</span>;
   const d = new Date(date);
   if (isNaN(+d)) return <span style={{ color: "#C8C0B0", fontSize: 12 }}>—</span>;
@@ -39,5 +40,5 @@ export function DeadlinePill({ date }: { date?: string | null }) {
   if (days < 0) return <Pill tone="overdue">просрочено {Math.abs(days)} дн.</Pill>;
   if (days === 0) return <Pill tone="soon">сегодня</Pill>;
   if (days <= 7) return <Pill tone="soon">{label} · {days} дн.</Pill>;
-  return <span style={{ color: "#6B6355", fontSize: 12 }}>{label}</span>;
+  return <span style={{ color: onDark ? "rgba(255,255,255,0.75)" : "#6B6355", fontSize: 12 }}>{label}</span>;
 }

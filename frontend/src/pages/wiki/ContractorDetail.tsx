@@ -14,6 +14,7 @@ import { DetailRow as Row } from "./DetailRow";
 import { DetailShell, DetailSection, NoteBlock, type DetailMetric } from "./DetailShell";
 import { Modal } from "../../components/ui/Modal";
 import { CardButton } from "../../components/CardButton";
+import { OrderLink } from "../../components/ui/links";
 
 const LEDGER_ACTIONS = {
   advance: {
@@ -374,7 +375,7 @@ export function ContractorDetail({ id, onClose }: { id: string; onClose: () => v
                   <span style={{ fontSize: 11, color: "#A89070", minWidth: 108 }}>{e.kind_label}</span>
                   <span style={{ fontSize: 12, color: "#1A1A1A", flex: 1, overflow: "hidden",
                                  textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {e.order_title || e.title}
+                    <OrderLink id={e.order_id}>{e.order_title || e.title}</OrderLink>
                   </span>
                   <span style={{ fontFamily: MONO, fontSize: 12,
                                  color: e.sign > 0 ? "#8B3A3A" : e.sign < 0 ? "#4A7C59" : "#A89070" }}>
@@ -474,7 +475,11 @@ export function ContractorDetail({ id, onClose }: { id: string; onClose: () => v
                 <div style={{ fontSize: 11, color: "#A89070", fontFamily: MONO }}>{fmtDate(e.expense_date)}</div>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 13, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.title}</div>
-                  {e.order_title && <div style={{ fontSize: 11, color: "#A89070", marginTop: 1 }}>{e.order_title}</div>}
+                  {e.order_title && (
+                    <div style={{ fontSize: 11, color: "#A89070", marginTop: 1 }}>
+                      <OrderLink id={e.order_id}>{e.order_title}</OrderLink>
+                    </div>
+                  )}
                 </div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#8B3A3A", textAlign: "right", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(e.amount)}</div>
               </div>

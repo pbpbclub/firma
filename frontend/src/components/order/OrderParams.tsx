@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { CaretDown, CaretRight, Phone, EnvelopeSimple } from "@phosphor-icons/react";
 import { customersApi } from "../../api";
+import { CustomerLink } from "../ui/links";
 import { contactHref } from "../ui/ContactLinks";
 import { MONO } from "../ui/Num";
 import { StatusPicker } from "./StatusPicker";
@@ -71,7 +72,7 @@ export function OrderParams({ order, form, field, customers, onStatusChanged }: 
               ? <StatusPicker orderId={order.id} current={form.status} onChange={onStatusChanged} />
               : <span style={{ color: statusMeta?.color, fontWeight: 600 }}>{statusMeta?.label ?? form.status}</span>}
             {form.brand && <> · <span style={{ color: brandColor, fontWeight: 600 }}>{form.brand}</span></>}
-            {customerName && <> · {customerName}</>}
+            {customerName && <> · <CustomerLink id={form.customer_id || order?.customer_id}>{customerName}</CustomerLink></>}
             {form.deadline && <> · до <span style={{ fontFamily: MONO }}>{fmtDate(form.deadline)}</span></>}
             {form.priority !== "normal" && <> · {PRIORITY_LABELS[form.priority] ?? form.priority}</>}
           </span>

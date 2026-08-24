@@ -3,6 +3,7 @@ import { debtColor } from "../../components/ui/type";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { MONO } from "../../components/ui/Num";
+import { OrderLink } from "../../components/ui/links";
 import { useNavigationGuard, NavigationGuardModal } from "../../components/NavigationGuard";
 import { EditModal, type FieldDef } from "../../components/EditModal";
 import { PayeeRulesSection } from "../../components/PayeeRulesSection";
@@ -212,7 +213,9 @@ export function ClientDetail({ id, onClose }: { id: string; onClose: () => void 
             {data.orders.map((o: any) => (
               <div key={o.id} style={{ padding: "9px 0", borderBottom: "1px solid #F2EFE9" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A" }}>{o.title || o.number || "—"}</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A" }}>
+                    <OrderLink id={o.id}>{o.title || o.number || "—"}</OrderLink>
+                  </div>
                   <div style={{ fontSize: 11, color: "#A89070" }}>{(ORDER_STATUS_MAP[o.status]?.label) || o.status}</div>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#6B6355" }}>

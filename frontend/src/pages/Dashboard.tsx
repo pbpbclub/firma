@@ -1,14 +1,16 @@
 import { fmtMoney as fmt } from "../components/ui/format";
 import { QueryError } from "../components/ui/QueryError";
+import { SkeletonRows } from "../components/ui/Loading";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { financeApi, taxApi, ordersApi, reportsApi } from "../api";
+import { financeApi, taxApi, ordersApi, reportsApi, estimatesApi } from "../api";
 import { MONO } from "../components/ui/Num";
 import { DeadlinePill } from "../components/ui/Pill";
 import { POLARITY, debtColor } from "../components/ui/type";
 import { CircleProgress } from "../components/ui/CircleProgress";
 import { CardButton } from "../components/CardButton";
+import { OrderLink } from "../components/ui/links";
 
 
 function ThinBar({ pct, color = "#E8592A" }: { pct: number; color?: string }) {
@@ -32,6 +34,12 @@ export default function Dashboard() {
     queryFn: () => ordersApi.list({ status: "in_production" }),
   });
   const byBrand = useQuery({ queryKey: ["finance-by-brand"], queryFn: financeApi.byBrand });
+  // «Что делать» — бэкенд считал это давно, а лежало оно за двумя кликами внутри Заказов.
+  const silent = useQuery({ queryKey: ["orders-silent"], queryFn: ordersApi.silent });
+  const readiness = useQuery({ queryKey: ["estimates-readiness"], queryFn: estimatesApi.readiness });
+  const pfSummary = useQuery({ queryKey: ["orders-plan-fact-summary", "active"],
+                               queryFn: () => ordersApi.planFactSummary("active") });
+  const creditors = useQuery({ queryKey: ["creditors"], queryFn: () => financeApi.creditors() });
   // A8: накладные месяца (аренда, расходники) и как они ложатся на заказы в работе
   const overhead = useQuery({ queryKey: ["overhead-summary"], queryFn: ordersApi.overheadSummary });
 
@@ -55,6 +63,29 @@ export default function Dashboard() {
 
   const section = { padding: "20px 28px", borderBottom: "1px solid #EDEBE6" };
 
+  // ── Что горит: цифры уже посчитаны бэком, здесь только собраны в строку ──
+  const rs = readiness.data?.summary ?? {};
+  const holes = (rs.orders_with_duplicates ?? 0) + (rs.invoice_drift ?? 0)
+              + (rs.transit_as_bank ?? 0) + (rs.tx_overspread ?? 0) + (rs.stub_items ?? 0);
+  const overspent = ((pfSummary.data?.orders ?? []) as any[]).filter(o => o.overspent).length;
+  const todo = [
+    { label: "Молчат", value: silent.data?.total ?? 0,
+      hint: (silent.data?.archive_candidates ?? 0) > 0 ? `${silent.data.archive_candidates} — кандидаты в архив` : "просчёты без движения",
+      to: "/orders?mode=silent", tone: "#E8592A" },
+    { label: "Дыры в сметах", value: holes,
+      hint: "дубли, расхождение со счётом, заглушки", to: "/orders?mode=ready", tone: "#8B3A3A" },
+    { label: "Перерасход", value: overspent,
+      hint: "факт выше плана сметы", to: "/orders?mode=summary", tone: "#8B3A3A" },
+    { label: "Можно закрыть", value: creditors.data?.closable_count ?? 0,
+      hint: creditors.data?.closable_total ? `обязательств на ${fmt(creditors.data.closable_total)}` : "обязательств по завершённым",
+      to: "/debtors", tone: "#4A7C59" },
+  ].filter(t => t.value > 0);
+
+  // Дашборд грузится восемью параллельными запросами, и каждый блок появлялся
+  // сам по себе — экран прыгал 5–8 раз. Пока не пришли денежные ответы, держим
+  // скелет: SkeletonRows был написан и не вызывался ни разу.
+  const coreLoading = [freeCash, balance, taxes, debtors, dds, orders].some(q => q.isLoading);
+
   return (
     <div style={{ display: "flex", flexDirection: "column" }}>
       {/* Любой упавший денежный запрос → баннер: раньше блоки просто исчезали
@@ -73,6 +104,8 @@ export default function Dashboard() {
             fetcher={() => reportsApi.monthCard()} />
         </div>
       </div>
+
+      {coreLoading && <SkeletonRows rows={9} cols={4} padding="18px 28px" />}
 
       {/* Свободные деньги — ключевая цифра (остаток − резервы − фонды) */}
       {(() => {
@@ -121,14 +154,20 @@ export default function Dashboard() {
       {/* 4 stat columns */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", borderBottom: "1px solid #EDEBE6" }}>
         {[
-          { label: "НА СЧЕТАХ", value: fmt(balanceTotal), color: balanceTotal > 0 ? "#4A7C59" : "#8B3A3A", pct: 100 },
-          { label: "ДЕБИТОРКА", value: fmt(debtTotal), color: debtColor(debtTotal, "in"), pct: debtPct },
-          { label: "НАЛОГ К УПЛАТЕ", value: fmt(taxToPay), color: debtColor(taxToPay, "out"), pct: taxPaidPct },
-          { label: "В ПРОИЗВОДСТВЕ", value: `${activeOrders.length} заказов`, color: "#1A1A1A", pct: Math.min(100, activeOrders.length * 10) },
+          // Плитки — двери на свои экраны. До этого кликались только резервы.
+          { label: "НА СЧЕТАХ", value: fmt(balanceTotal), color: balanceTotal > 0 ? "#4A7C59" : "#8B3A3A", pct: 100, to: "/finance" },
+          { label: "ДЕБИТОРКА", value: fmt(debtTotal), color: debtColor(debtTotal, "in"), pct: debtPct, to: "/debtors" },
+          { label: "НАЛОГ К УПЛАТЕ", value: fmt(taxToPay), color: debtColor(taxToPay, "out"), pct: taxPaidPct, to: "/taxes" },
+          { label: "В ПРОИЗВОДСТВЕ", value: `${activeOrders.length} заказов`, color: "#1A1A1A", pct: Math.min(100, activeOrders.length * 10), to: "/orders" },
         ].map((item, i) => (
-          <div key={item.label} style={{
+          <div key={item.label}
+            onClick={() => navigate(item.to)}
+            onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")}
+            onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+            style={{
             padding: "20px 24px",
             borderRight: i < 3 ? "1px solid #EDEBE6" : "none",
+            cursor: "pointer",
           }}>
             <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10 }}>{item.label}</div>
             <div style={{ fontSize: 20, fontWeight: 700, color: item.color, marginBottom: 14, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{item.value}</div>
@@ -159,6 +198,29 @@ export default function Dashboard() {
           ))}
         </div>
       </div>
+
+      {/* Что горит: то, что требует решения. Ни одна из этих цифр не новая —
+          они лежали за двумя кликами внутри Заказов и на главную не попадали. */}
+      {todo.length > 0 && (
+        <div style={{ ...section, display: "flex", gap: 48, alignItems: "flex-start" }}>
+          <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em", width: 80, paddingTop: 2 }}>ЧТО ДЕЛАТЬ</div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", flex: 1 }}>
+            {todo.map(t => (
+              <button type="button" key={t.label} onClick={() => navigate(t.to)}
+                style={{ border: "1px solid #EDEBE6", background: "#fff", padding: "8px 14px",
+                         cursor: "pointer", textAlign: "left", fontFamily: "inherit", minWidth: 150 }}
+                onMouseEnter={e => (e.currentTarget.style.borderColor = t.tone)}
+                onMouseLeave={e => (e.currentTarget.style.borderColor = "#EDEBE6")}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                  <span style={{ fontSize: 18, fontWeight: 700, color: t.tone, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{t.value}</span>
+                  <span style={{ fontSize: 12, color: "#1A1A1A", fontWeight: 500 }}>{t.label}</span>
+                </div>
+                <div style={{ fontSize: 10, color: "#A89070", marginTop: 2 }}>{t.hint}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* По брендам */}
       {(() => {
@@ -238,6 +300,39 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Мы должны — зеркало «Нам должны». На главной этой стороны не было вовсе:
+          видно было только то, что должны нам. План по подрядчикам рядом золотым:
+          это НЕ долг (ещё не заказано), путать их дорого. */}
+      {(creditors.data?.total_debt ?? 0) > 0 && (
+        <div style={{ ...section, borderLeft: `3px solid ${POLARITY.out.rail}`, cursor: "pointer" }}
+          onClick={() => navigate("/debtors")}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
+            <div style={{ fontSize: 11, color: POLARITY.out.color, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase" }}>Мы должны</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: debtColor(creditors.data.total_debt, "out"), fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
+              {fmt(creditors.data.total_debt)}
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 28, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontSize: 10, color: "#A89070" }}>ОБЯЗАТЕЛЬСТВ</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A", fontFamily: MONO }}>{creditors.data.debt_count ?? 0}</div>
+            </div>
+            {(creditors.data.plan_total ?? 0) > 0 && (
+              <div>
+                <div style={{ fontSize: 10, color: "#A89070" }}>ПЛАН ПО ПОДРЯДЧИКАМ · НЕ ДОЛГ</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#B8860B", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(creditors.data.plan_total)}</div>
+              </div>
+            )}
+            {(creditors.data.closable_total ?? 0) > 0 && (
+              <div>
+                <div style={{ fontSize: 10, color: "#A89070" }}>МОЖНО ЗАКРЫТЬ</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#4A7C59", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(creditors.data.closable_total)}</div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* A8: накладные месяца — как аренда/расходники ложатся на заказы в работе.
           Влияние на общую экономику: маржа заказов без накладных суммарно выше
           реальной ровно на эту сумму. */}
@@ -258,7 +353,9 @@ export default function Dashboard() {
                 marginBottom: i < arr.length - 1 ? 8 : 0,
                 borderBottom: i < arr.length - 1 ? "1px solid #F2EFE9" : "none",
               }}>
-                <div style={{ fontSize: 12, color: "#1A1A1A", flex: 1 }}>{r.title}</div>
+                <div style={{ fontSize: 12, color: "#1A1A1A", flex: 1 }}>
+                  <OrderLink id={r.order_id}>{r.title}</OrderLink>
+                </div>
                 <div style={{ fontSize: 10, color: "#A89070", fontFamily: MONO }}>{Math.round(r.share * 100)}%</div>
                 <div style={{ fontSize: 12, fontWeight: 600, color: "#B8860B", fontFamily: MONO, fontVariantNumeric: "tabular-nums", minWidth: 80, textAlign: "right" }}>−{fmt(r.amount)}</div>
               </div>
@@ -270,22 +367,30 @@ export default function Dashboard() {
       {/* Active orders */}
       {activeOrders.length > 0 && (
         <div style={section}>
-          <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em", marginBottom: 16 }}>В ПРОИЗВОДСТВЕ</div>
+          <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em", marginBottom: 16, cursor: "pointer" }}
+            onClick={() => navigate("/orders")}>В ПРОИЗВОДСТВЕ</div>
           {activeOrders.slice(0, 5).map((o: any, i: number) => {
             const paid = o.paid_total ?? 0;
             const plan = o.price_plan ?? 0;
             const p = plan > 0 ? Math.min(100, (paid / plan) * 100) : 0;
             return (
-              <div key={o.id} style={{
+              <div key={o.id}
+                onClick={() => navigate(`/orders/${o.id}`)}
+                style={{
                 paddingBottom: 14, marginBottom: i < Math.min(4, activeOrders.length - 1) ? 14 : 0,
                 borderBottom: i < Math.min(4, activeOrders.length - 1) ? "1px solid #F2EFE9" : "none",
+                cursor: "pointer",
               }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, gap: 12 }}>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>{o.title}</div>
                     <div style={{ fontSize: 11, color: "#A89070" }}>{o.customer_name || "—"}</div>
                   </div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(plan)}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    {/* Дедлайн приходил с бэка и не показывался ни здесь, ни в списке заказов. */}
+                    <DeadlinePill date={o.deadline} />
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(plan)}</div>
+                  </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <div style={{ flex: 1 }}><ThinBar pct={p} /></div>

@@ -9,6 +9,7 @@ import { MagnifyingGlass, X, LinkSimple } from "@phosphor-icons/react";
 import { ColumnFilter, AmountFilter, PeriodFilter } from "../components/TableFilters";
 import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { MONO } from "../components/ui/Num";
+import { OrderLink } from "../components/ui/links";
 import { IconButton } from "../components/ui/IconButton";
 
 function Checkbox({ checked, indeterminate = false, onChange }: {
@@ -564,7 +565,14 @@ const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
                   )}
                   {t.direction === "out" && expensesByTx.has(String(t.id)) && (
                     <div style={{ fontSize: 10, color: "#6B6355", marginTop: 2 }}>
-                      {expensesByTx.get(String(t.id))!.map((e: any) => e.order_title || e.purpose || "вне заказов").join(" · ")}
+                      {/* Разнесённые заказы — ссылками: из ДДС было видно, КУДА разнесено,
+                          но дойти до заказа приходилось через список. */}
+                      {expensesByTx.get(String(t.id))!.map((e: any, i: number, arr: any[]) => (
+                        <span key={e.id ?? i}>
+                          <OrderLink id={e.order_id}>{e.order_title || e.purpose || "вне заказов"}</OrderLink>
+                          {i < arr.length - 1 ? " · " : ""}
+                        </span>
+                      ))}
                       {(() => {
                         const gid = expensesByTx.get(String(t.id))!.find((e: any) => e.group_id)?.group_id;
                         return gid ? (

@@ -10,6 +10,7 @@ import { Bank, X, Check, Plus, LinkSimple } from "@phosphor-icons/react";
 import { ColumnFilter, AmountFilter, PeriodFilter } from "../components/TableFilters";
 import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { MONO } from "../components/ui/Num";
+import { OrderLink } from "../components/ui/links";
 import { IconButton } from "../components/ui/IconButton";
 import { T, POLARITY, debtColor } from "../components/ui/type";
 import { DeadlinePill } from "../components/ui/Pill";
@@ -1052,7 +1053,9 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
                 <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>{c.name}</div>
                 {(c.order_title || c.estimate_item_title) && (
                   <div style={{ fontSize: 10, color: "#A89070", marginTop: 2 }}>
-                    {c.order_title ? `${c.order_title}` : `← Смета: ${c.estimate_item_title}`}
+                    {c.order_title
+                      ? <OrderLink id={c.order_id}>{c.order_title}</OrderLink>
+                      : `← Смета: ${c.estimate_item_title}`}
                     {c.order_status === "completed" && (
                       <span style={{ marginLeft: 6, color: "#B8860B" }}>· заказ завершён</span>
                     )}
