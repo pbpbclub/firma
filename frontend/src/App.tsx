@@ -1,6 +1,8 @@
 import { createBrowserRouter, RouterProvider, Navigate, Outlet, useParams } from "react-router-dom";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { getToken } from "./auth";
+import { authApi } from "./api";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
@@ -23,7 +25,26 @@ const queryClient = new QueryClient({
 });
 
 function AuthLayout() {
-  if (!getToken()) return <Navigate to="/login" replace />;
+  // Гейт проверял только НАЛИЧИЕ строки в localStorage: с протухшим токеном
+  // приложение стартовало «залогиненным», рисовало имя из кэша и пустые экраны, и
+  // валилось на /login лишь после первого запроса, получившего 401 (24.08.2026).
+  //
+  // Спрашиваем /api/auth/me на старте: 401 подхватит тот же интерцептор и уведёт
+  // на логин сразу, а на успехе освежаем кэш профиля — смена роли или имени на
+  // бэке до этого была видна только после перелогина.
+  const hasToken = !!getToken();
+  const { data: me } = useQuery({
+    queryKey: ["auth-me"],
+    queryFn: authApi.me,
+    enabled: hasToken,
+    retry: false,
+    staleTime: 5 * 60_000,
+  });
+  useEffect(() => {
+    if (me) localStorage.setItem("firma_user", JSON.stringify(me));
+  }, [me]);
+
+  if (!hasToken) return <Navigate to="/login" replace />;
   return <Layout><Outlet /></Layout>;
 }
 

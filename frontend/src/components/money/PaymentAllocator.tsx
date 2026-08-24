@@ -18,6 +18,7 @@ import { X } from "@phosphor-icons/react";
 import { ordersApi } from "../../api";
 import { MONO } from "../ui/Num";
 import { fmtMoneyDash as fmt } from "../ui/format";
+import { debtColor } from "../ui/type";
 
 export type Alloc = { order_id: string; amount: string; extra_id?: string; note?: string };
 
@@ -87,7 +88,8 @@ export function PaymentAllocator({ tx, allocs, onChange, label = "ПЛАТЁЖ �
               </div>
               {o && (
                 <div style={{ fontSize: 10, color: "#A89070", marginTop: 1 }}>
-                  {o.customer_name ? `${o.customer_name} · ` : ""}долг <span style={{ fontFamily: MONO }}>{fmt(o.debt)}</span>
+                  {o.customer_name ? `${o.customer_name} · ` : ""}долг{" "}
+                  <span style={{ fontFamily: MONO, color: debtColor(o.debt, "in") }}>{fmt(o.debt)}</span>
                 </div>
               )}
             </div>

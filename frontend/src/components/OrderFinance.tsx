@@ -1,4 +1,5 @@
 import { fmtMoneyDash as fmt } from "./ui/format";
+import { debtColor } from "./ui/type";
 import { MONO } from "./ui/Num";
 import { CircleProgress } from "./ui/CircleProgress";
 
@@ -29,7 +30,9 @@ export function ProfitLadder({ order, paidTotal }: { order: any; paidTotal: numb
     ] : []),
     { label: hasDiscount ? "К оплате" : "Стоимость", value: fmt(revenue), color: "#1A1A1A" },
     { label: "Оплачено",  value: fmt(paidTotal),        color: "#4A7C59" },
-    { label: "Долг",      value: order.debt > 0 ? fmt(order.debt) : "Оплачено", color: order.debt > 0 ? "#E8592A" : "#4A7C59" },
+    // Долг клиента — это наши будущие деньги: зелёный. Раньше было наоборот —
+    // «долг есть» тревожно-оранжевым, «долга нет» зелёным (правило Юры 24.08.2026).
+    { label: "Долг",      value: order.debt > 0 ? fmt(order.debt) : "Оплачено", color: debtColor(order.debt, "in") },
     { label: "Валовая",   value: fmt(gross),            color: "#1A1A1A" },
     ...(taxed ? [{ label: `УСН ${order.tax_pct ?? 6}%${mixedTax ? " · с безнал. части" : ""}`, value: `−${fmt(tax)}`, color: "#8B3A3A" }] : []),
     { label: "Чистая",    value: fmt(net),              color: net > 0 ? "#4A7C59" : "#8B3A3A" },
@@ -71,6 +74,10 @@ export function PlanFactDuel({ planFact }: { planFact: any }) {
   // 01.08.2026): иначе транспорт на доработку читался бы как перерасход по заказу.
   // Без неё сумма строк не сходилась бы с cost_plan/cost_fact панели.
   const ex = pf.extras;
+  // cost_expected / gross_plan / gross_forecast намеренно не выводим отдельными
+  // строками: cost_expected — это max(план, факт), уже виден в счёте выше, а валовые
+  // до налога = net_* + tax, обе части на экране. Лишние строки в тесном блоке дороже
+  // пользы (решение 24.08.2026).
   // A3 (ТЗ 24.08.2026): план позиций без состава в категории не раскладывается —
   // он отдельной строкой ниже. Раньше падал в «Прочее», и разбивка показывала два
   // зеркальных перекоса (у ORD-024 по 16 000 ₽), которые читались как ошибка разноски.
@@ -199,6 +206,40 @@ export function PlanFactDuel({ planFact }: { planFact: any }) {
             <span style={{ fontWeight: 700, color: (pf.net_forecast ?? 0) >= (pf.net_plan ?? 0) && (pf.net_forecast ?? 0) >= 0 ? "#4A7C59" : "#8B3A3A" }}>{fmt(pf.net_forecast)}</span>
           </span>
         </div>
+        {/* Доп в дуэли шёл только себестоимостью — по план-факту нельзя было понять,
+            заработали на нём или нет. Выручку и маржу бэк считает с самого начала
+            (_plan_fact.extras), просто никто их не показывал. */}
+        {ex?.count > 0 && (ex.price > 0 || ex.gross !== 0) && (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline",
+                        marginTop: 8, paddingTop: 8, borderTop: "1px dashed #EDEBE6" }}>
+            <span style={{ fontSize: 11, color: "#6B6355" }}
+              title="Допработы сверх сметы: сколько выставили заказчику и что осталось после их себестоимости (до налога)">
+              Допработы: выручка → маржа
+            </span>
+            <span style={{ fontSize: 12, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
+              <span style={{ color: "#A89070" }}>{fmt(ex.price)}</span>
+              <span style={{ color: "#C8C0B0" }}> → </span>
+              <span style={{ fontWeight: 700, color: (ex.gross ?? 0) >= 0 ? "#4A7C59" : "#8B3A3A" }}>{fmt(ex.gross)}</span>
+            </span>
+          </div>
+        )}
+
+        {/* Касса, а не маржа: сколько пришло от клиента минус сколько уже потрачено.
+            Считалось в _plan_fact с самого начала и не выводилось никуда. Виден
+            кассовый разрыв: работы оплачены нами, а клиент ещё не заплатил. */}
+        {pf.has_facts && (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 6 }}>
+            <span style={{ fontSize: 11, color: "#6B6355" }}
+              title="Пришло от заказчика минус внесённые расходы. Это касса по заказу, а не прибыль: минус значит, что мы вложились раньше, чем нам заплатили.">
+              Касса по заказу: пришло − потрачено
+            </span>
+            <span style={{ fontSize: 12, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: "tabular-nums",
+              color: (pf.cash_collected_vs_cost ?? 0) < 0 ? "#8B3A3A" : "#6B6355" }}>
+              {fmt(pf.cash_collected_vs_cost)}
+            </span>
+          </div>
+        )}
+
         <div style={{ fontSize: 10, color: "#A89070", lineHeight: 1.5, marginTop: 6 }}>
           {pf.has_facts
             ? <>Внесено {coveragePct}% плановых затрат. Прогноз держится большего из плана и факта — экономия зачтётся, когда факт внесён полностью.</>

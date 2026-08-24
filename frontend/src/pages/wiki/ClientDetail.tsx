@@ -1,4 +1,5 @@
 import { ORDER_STATUS_MAP } from "../../components/domain";
+import { debtColor } from "../../components/ui/type";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { MONO } from "../../components/ui/Num";
@@ -173,7 +174,8 @@ export function ClientDetail({ id, onClose }: { id: string; onClose: () => void 
         metrics={summary ? [
           { label: "Заказов",  value: String(data?.orders?.length ?? 0) },
           { label: "Получено", value: fmt(summary.income), color: "#4A7C59" },
-          { label: "Долг",     value: totalDebt > 0 ? fmt(totalDebt) : "нет", color: totalDebt > 0 ? "#8B3A3A" : "#4A7C59" },
+          // Клиент должен НАМ — это дебиторка, зелёная. Красный тут значил «мы должны».
+          { label: "Долг",     value: totalDebt > 0 ? fmt(totalDebt) : "нет", color: debtColor(totalDebt, "in") },
         ] : undefined}
         onEdit={() => setEditing(true)}
         onClose={onClose}
@@ -215,7 +217,7 @@ export function ClientDetail({ id, onClose }: { id: string; onClose: () => void 
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#6B6355" }}>
                   <span style={{ fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(o.price_plan)}</span>
-                  <span style={{ color: o.debt > 0 ? "#E8592A" : "#4A7C59", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{o.debt > 0 ? `долг ${fmt(o.debt)}` : "оплачен"}</span>
+                  <span style={{ color: debtColor(o.debt, "in"), fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{o.debt > 0 ? `долг ${fmt(o.debt)}` : "оплачен"}</span>
                 </div>
               </div>
             ))}

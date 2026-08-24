@@ -2,6 +2,7 @@
 // Все числа считает бэкенд (_margin/_plan_fact): revenue у draft-смет берётся
 // из самого сета, поэтому здесь только отображение.
 import { MONO } from "../ui/Num";
+import { debtColor } from "../ui/type";
 import { fmtMoney } from "../ui/format";
 import { PLAN_SOURCE_LABEL } from "../domain";
 
@@ -46,8 +47,8 @@ export function OrderSummaryStrip({ order, paidTotal, compact }: { order: any; p
           value={fmtMoney(paidTotal)}
           color="#4A7C59"
           sub={debt > 0
-            ? <span style={{ color: "#E8592A", fontFamily: MONO }}>долг {fmtMoney(debt)}</span>
-            : <span style={{ color: "#4A7C59" }}>долга нет</span>}
+            ? <span style={{ color: debtColor(debt, "in"), fontFamily: MONO }}>долг {fmtMoney(debt)}</span>
+            : <span style={{ color: debtColor(0, "in") }}>долга нет</span>}
         />
         <Cell
           label="СЕБЕСТОИМОСТЬ"

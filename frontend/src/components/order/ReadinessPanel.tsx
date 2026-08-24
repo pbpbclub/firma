@@ -6,7 +6,7 @@ import { fmtMoneyDash as fmt } from "../ui/format";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
-import { estimatesApi, ratesApi, workRatesApi } from "../../api";
+import { estimatesApi, workRatesApi } from "../../api";
 import { MONO } from "../ui/Num";
 import { Loading } from "../ui/Loading";
 import { Check, Warning } from "@phosphor-icons/react";
@@ -109,7 +109,7 @@ function RateHoleRow({ w, onSaved }: { w: any; onSaved: () => void }) {
 // Цены на работы: у Юры мастер называет сумму заново каждый раз, поэтому вместо
 // «ставки» показываем историю — вилку и последние цифры.
 function WorkPrices() {
-  const { data } = useQuery({ queryKey: ["work-prices"], queryFn: ratesApi.prices });
+  const { data } = useQuery({ queryKey: ["work-prices"], queryFn: workRatesApi.prices });
   const items: any[] = data?.items ?? [];
   if (!items.length) return null;
   return (
@@ -143,7 +143,7 @@ export function ReadinessPanel() {
   const navigate = useNavigate();
   const refresh = () => qc.invalidateQueries({ queryKey: ["readiness"] });
   const delRate = useMutation({
-    mutationFn: (id: string) => ratesApi.delete(id),
+    mutationFn: (id: string) => workRatesApi.delete(id),
     onSuccess: refresh,
   });
   // Два разных действия с дублями: мягкое — просто показывать эту (варианты живы),

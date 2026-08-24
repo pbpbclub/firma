@@ -6,7 +6,7 @@ import { useNavigate } from "react-router-dom";
 import { financeApi, taxApi, ordersApi } from "../api";
 import { MONO } from "../components/ui/Num";
 import { DeadlinePill } from "../components/ui/Pill";
-import { POLARITY } from "../components/ui/type";
+import { POLARITY, debtColor } from "../components/ui/type";
 import { CircleProgress } from "../components/ui/CircleProgress";
 
 
@@ -115,8 +115,8 @@ export default function Dashboard() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", borderBottom: "1px solid #EDEBE6" }}>
         {[
           { label: "НА СЧЕТАХ", value: fmt(balanceTotal), color: balanceTotal > 0 ? "#4A7C59" : "#8B3A3A", pct: 100 },
-          { label: "ДЕБИТОРКА", value: fmt(debtTotal), color: "#E8592A", pct: debtPct },
-          { label: "НАЛОГ К УПЛАТЕ", value: fmt(taxToPay), color: taxToPay > 0 ? "#E8592A" : "#4A7C59", pct: taxPaidPct },
+          { label: "ДЕБИТОРКА", value: fmt(debtTotal), color: debtColor(debtTotal, "in"), pct: debtPct },
+          { label: "НАЛОГ К УПЛАТЕ", value: fmt(taxToPay), color: debtColor(taxToPay, "out"), pct: taxPaidPct },
           { label: "В ПРОИЗВОДСТВЕ", value: `${activeOrders.length} заказов`, color: "#1A1A1A", pct: Math.min(100, activeOrders.length * 10) },
         ].map((item, i) => (
           <div key={item.label} style={{
@@ -224,7 +224,7 @@ export default function Dashboard() {
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <DeadlinePill date={d.deadline} />
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#E8592A", fontFamily: MONO, fontVariantNumeric: "tabular-nums", minWidth: 92, textAlign: "right" }}>{fmt(d.debt)}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: debtColor(d.debt, "in"), fontFamily: MONO, fontVariantNumeric: "tabular-nums", minWidth: 92, textAlign: "right" }}>{fmt(d.debt)}</div>
               </div>
             </div>
           ))}

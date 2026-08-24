@@ -2,11 +2,11 @@ import { ORDER_STATUS_MAP } from "../components/domain";
 import { fmtMoneyDash as fmt } from "../components/ui/format";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { Loading } from "../components/ui/Loading";
 import { EmptyState } from "../components/ui/EmptyState";
 import { catalogApi } from "../api";
-import { MagnifyingGlass, Plus, X, Trash, Tag } from "@phosphor-icons/react";
+import { MagnifyingGlass, Plus, X, Trash, Tag, UploadSimple } from "@phosphor-icons/react";
 import { MediaGallery } from "../components/MediaGallery";
 import { ColumnFilter, AmountFilter } from "../components/TableFilters";
 import { Modal, ConfirmModal } from "../components/ui/Modal";
@@ -184,6 +184,94 @@ const CATEGORIES = ["Столы", "Уличная мебель", "Мягкая �
 
 // ─── Calculator Modal ────────────────────────────────────────────────────────
 
+/** Загрузка ведомости материалов из Blender (docs/bom-contract.md).
+ *
+ *  Ручка POST /api/catalog/import-bom работает с 07.08, но звал её только внешний
+ *  скрипт — из интерфейса залить ведомость было нельзя.
+ *
+ *  mode=upsert ЗАМЕНЯЕТ строки рецептуры целиком (catalog.py: DELETE ... WHERE
+ *  item_id = ?), а не дополняет. Предупреждаем об этом прямо в окне.
+ *
+ *  unmatched импорт не блокирует: строки без цены лягут нулём и всплывут как
+ *  «нужен ввод» в себестоимости сметы. */
+function BomImportModal({ itemId, title, onClose, onDone }: {
+  itemId: string; title: string; onClose: () => void; onDone: () => void;
+}) {
+  const [raw, setRaw] = useState("");
+  const [res, setRes] = useState<any>(null);
+  const [error, setError] = useState("");
+
+  const send = useMutation({
+    mutationFn: (body: any) => catalogApi.importBom(body),
+    onSuccess: (r: any) => { setRes(r); setError(""); },
+    onError: (e: any) => setError(e?.response?.data?.detail || "Не удалось разобрать ведомость"),
+  });
+
+  const run = () => {
+    let parsed: any;
+    try { parsed = JSON.parse(raw); }
+    catch { setError("Это не JSON — проверь, что скопировал файл целиком"); return; }
+    // Привязываем к ЭТОЙ карточке, что бы ни лежало в product у скрипта: иначе
+    // upsert по названию мог бы найти чужое изделие и переписать его рецептуру.
+    const body = { ...parsed, mode: "upsert",
+                   product: { ...(parsed.product || {}), title: parsed.product?.title || title,
+                              catalog_item_id: itemId } };
+    if (!Array.isArray(body.lines) || !body.lines.length) { setError("В ведомости нет строк (lines)"); return; }
+    send.mutate(body);
+  };
+
+  return (
+    <Modal size="lg" eyebrow={`ВЕДОМОСТЬ ИЗ BLENDER · ${title.toUpperCase()}`} onClose={onClose}
+      onCancel={onClose} onSave={res ? onDone : run}
+      saveLabel={res ? "Готово" : "Загрузить"} saving={send.isPending}
+      canSave={res ? true : raw.trim().length > 0}>
+      <div style={{ padding: "16px 24px 20px" }}>
+        {!res && (
+          <>
+            <div style={{ fontSize: 12, color: "#6B6355", lineHeight: 1.6, marginBottom: 12 }}>
+              Ведомость из Blender в формате JSON. Цены подставятся из живых прайсов и ставок —
+              присылать их не нужно.
+            </div>
+            <div style={{ padding: "9px 11px", background: "#FFF4EE", borderLeft: "2px solid #E8592A",
+                          fontSize: 11, color: "#6B6355", lineHeight: 1.6, marginBottom: 12 }}>
+              Строки рецептуры этого изделия будут <b>заменены целиком</b>, а не дополнены.
+            </div>
+            <input type="file" accept=".json,application/json"
+              onChange={e => { const f = e.target.files?.[0]; if (f) f.text().then(t => { setRaw(t); setError(""); }); }}
+              style={{ fontSize: 12, marginBottom: 10, fontFamily: "inherit" }} />
+            <textarea value={raw} onChange={e => setRaw(e.target.value)} rows={8}
+              placeholder={'или вставь JSON сюда: {"product": {...}, "lines": [...]}'}
+              style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6",
+                       padding: "8px 10px", fontSize: 11, outline: "none", fontFamily: MONO,
+                       background: "transparent", color: "#1A1A1A", resize: "vertical" }} />
+          </>
+        )}
+
+        {res && (
+          <div style={{ fontSize: 12, color: "#1A1A1A", lineHeight: 1.9 }}>
+            <div>· Строк в рецептуре: <b>{res.lines_total}</b>, из них с ценой: <b>{res.matched}</b></div>
+            <div>· Себестоимость изделия: <b>{fmt(res.cost_total)}</b></div>
+            {res.created && <div>· Создана новая карточка каталога</div>}
+            {res.unmatched?.length > 0 && (
+              <div style={{ marginTop: 12, padding: "10px 12px", background: "#FFF4EE", borderLeft: "2px solid #E8592A" }}>
+                <div style={{ fontSize: 11, color: "#8B3A3A", marginBottom: 6 }}>
+                  Без цены — {res.unmatched.length}. Импорт не отменён: эти строки всплывут как
+                  «нужен ввод» в себестоимости сметы.
+                </div>
+                {res.unmatched.map((u: any, i: number) => (
+                  <div key={i} style={{ fontSize: 11, color: "#6B6355", lineHeight: 1.7 }}>· {u.ask || u.title}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {error && <div style={{ marginTop: 12, fontSize: 11, color: "#8B3A3A" }}>{error}</div>}
+      </div>
+    </Modal>
+  );
+}
+
 function CalculatorModal({
   item,
   onClose,
@@ -213,6 +301,7 @@ function CalculatorModal({
   // без дрейфа от округлённого %. Правка наценки сбрасывает в null → цена производная.
   const [salePrice, setSalePrice] = useState<number | null>(item?.sale_price ?? null);
   const [notes, setNotes] = useState(item?.notes ?? "");
+  const [bomOpen, setBomOpen] = useState(false);
   const [lines, setLines] = useState<Line[]>(() =>
     item?.lines?.map((l) => ({ _key: newKey(), type: l.type as LineType, title: l.title, qty: l.qty, unit: l.unit, unit_price: l.unit_price, material_id: l.material_id })) ?? []
   );
@@ -277,6 +366,11 @@ function CalculatorModal({
 
   return (
     <>
+      {bomOpen && !isNew && (
+        <BomImportModal itemId={item!.id} title={title}
+          onClose={() => setBomOpen(false)}
+          onDone={() => { setBomOpen(false); qc.invalidateQueries({ queryKey: ["catalog-items"] }); onClose(); }} />
+      )}
       <Modal
         size="lg"
         eyebrow={isNew ? "НОВОЕ ИЗДЕЛИЕ" : "РЕДАКТИРОВАТЬ"}
@@ -318,6 +412,22 @@ function CalculatorModal({
           <CalcSection label="Доставка" addLabel="Добавить доставку" onAdd={() => addLine("delivery")}>
             {deliveryLines.map(renderRow)}
           </CalcSection>
+
+          {/* Ведомость из Blender: заливает рецептуру целиком с живыми ценами.
+              У новой карточки id ещё нет — привязывать импорт не к чему. */}
+          {!isNew && item?.id && (
+            <div style={{ marginTop: 18, display: "flex", alignItems: "center", gap: 10 }}>
+              <button onClick={() => setBomOpen(true)}
+                style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, padding: "5px 11px",
+                         border: "1px solid #EDEBE6", background: "#fff", color: "#6B6355",
+                         cursor: "pointer", fontFamily: "inherit" }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = "#E8592A"; e.currentTarget.style.color = "#E8592A"; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = "#EDEBE6"; e.currentTarget.style.color = "#6B6355"; }}>
+                <UploadSimple size={12} /> Ведомость из Blender
+              </button>
+              <span style={{ fontSize: 10, color: "#A89070" }}>заменит состав целиком</span>
+            </div>
+          )}
 
           {/* Медиатека карточки — базовые картинки изделия (спека 07.08.2026).
               У новой карточки id ещё нет: файл привязывать не к чему. */}

@@ -2,6 +2,7 @@
 // платежи, исполнители) → ИТОГ (план-факт и лестница прибыли). Ось видна всегда:
 // без сметы — CTA создать, с черновиком — плашка «утверди».
 import { useState, useEffect } from "react";
+import { debtColor } from "../components/ui/type";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { MONO } from "../components/ui/Num";
@@ -830,7 +831,10 @@ export default function OrderDetail() {
                         {fmtDate(x.created_at)}
                         {x.note && <> · {x.note}</>}
                         {" · "}
-                        оплачено <span style={{ fontFamily: MONO, color: x.rest > 0 ? "#8B3A3A" : "#4A7C59" }}>{fmtMoney(x.paid)}</span>
+                        {/* Красили сумму оплаты цветом ОСТАТКА — разводим: оплата
+                            нейтральна, а неоплаченный остаток это дебиторка (зелёная). */}
+                        оплачено <span style={{ fontFamily: MONO }}>{fmtMoney(x.paid)}</span>
+                        {x.rest > 0 && <> · остаток <span style={{ fontFamily: MONO, color: debtColor(x.rest, "in") }}>{fmtMoney(x.rest)}</span></>}
                         {x.cost_fact > 0 && <> · факт затрат <span style={{ fontFamily: MONO }}>{fmtMoney(x.cost_fact)}</span></>}
                       </div>
                     </div>

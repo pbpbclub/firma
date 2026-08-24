@@ -235,6 +235,20 @@ export function CostingBlock({ setId, editable, onChanged }: {
               <span style={{ fontSize: 9, color: "#A89070", border: "1px solid #EDEBE6", padding: "1px 6px" }}>
                 {SOURCE_LABEL[l.source] || l.source}{l.proposal?.price_supplier ? ` · ${l.proposal.price_supplier}` : ""}
               </span>
+              {/* Точечно: cost-fill принимает only=[line_id] с самого начала, фронт
+                  всегда слал {} и заполнял всю смету. expand_items:false обязателен —
+                  only фильтрует только заполнение строк, разворот позиций из каталога
+                  отработал бы всё равно. */}
+              {editable && (
+                <button onClick={() => fill.mutate({ only: [l.line_id], expand_items: false })}
+                  disabled={fill.isPending}
+                  title="Подставить цену только в эту строку, остальную смету не трогать"
+                  style={{ marginLeft: "auto", fontSize: 10, padding: "2px 8px", border: "1px solid #EDEBE6",
+                           background: "#fff", color: "#6B6355", cursor: "pointer",
+                           fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0 }}>
+                  только эту
+                </button>
+              )}
             </div>
           ))}
 
@@ -260,7 +274,10 @@ export function CostingBlock({ setId, editable, onChanged }: {
                     <MissingMaterialForm m={m} onDone={afterChange} />
                   )}
                   {editable && m.scope === "line" && (m.kind === "no_rate" || m.kind === "no_work_type" || m.kind === "variable_rate") && (
-                    <MissingRateForm m={m} onDone={() => fill.mutate({})} />
+                    // only + expand_items:false — заполняем ТОЛЬКО эту строку.
+                    // Без expand_items:false шаг разворота позиций из каталога
+                    // отработал бы всё равно: only фильтрует лишь заполнение строк.
+                    <MissingRateForm m={m} onDone={() => fill.mutate({ only: [m.id], expand_items: false })} />
                   )}
                 </div>
               ))}

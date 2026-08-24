@@ -11,7 +11,7 @@ import { ColumnFilter, AmountFilter, PeriodFilter } from "../components/TableFil
 import { Modal } from "../components/ui/Modal";
 import { MONO } from "../components/ui/Num";
 import { IconButton } from "../components/ui/IconButton";
-import { T, POLARITY } from "../components/ui/type";
+import { T, POLARITY, debtColor } from "../components/ui/type";
 import { DeadlinePill } from "../components/ui/Pill";
 import { Button } from "../components/ui/Button";
 
@@ -392,9 +392,9 @@ function DebtorsTab() {
           <div style={{ padding: "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
             <div style={{ display: "flex", gap: 10, fontSize: 11, color: "#6B6355", alignItems: "center" }}>
               {selectedIds.size > 0 && <span style={{ color: "#E8592A", fontWeight: 600 }}>Выбрано {selectedIds.size}</span>}
-              {selectedIds.size > 0 && selDebt > 0 && <span style={{ color: "#E8592A" }}>долг {fmt(selDebt)}</span>}
+              {selectedIds.size > 0 && selDebt > 0 && <span style={{ color: debtColor(selDebt, "in") }}>долг {fmt(selDebt)}</span>}
               {selectedIds.size === 0 && <span>{filtered.length} позиций</span>}
-              {selectedIds.size === 0 && hasFilters && total > 0 && <span style={{ color: "#E8592A" }}>долг {fmt(total)}</span>}
+              {selectedIds.size === 0 && hasFilters && total > 0 && <span style={{ color: debtColor(total, "in") }}>долг {fmt(total)}</span>}
             </div>
             <button onClick={canClear ? clearFilters : undefined} style={{ fontSize: 10, color: canClear ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: canClear ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
               <X size={10} /> Сбросить
@@ -459,7 +459,7 @@ function DebtorsTab() {
                 <span style={{ fontSize: 13, color: "#4A7C59" }}>{fmt(d.paid_total)}</span>
                 {d.paid_bank > 0 && <Bank size={11} style={{ color: "#4A7C59" }} />}
               </div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#E8592A" }}>{fmt(d.debt)}</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: debtColor(d.debt, "in") }}>{fmt(d.debt)}</div>
               <div><DeadlinePill date={d.deadline} /></div>
               <div style={{ display: "flex", justifyContent: "center" }}>
                 <IconButton icon={LinkSimple} title="Связать с транзакцией" size={24} iconSize={13}
@@ -481,7 +481,7 @@ function DebtorsTab() {
             <div />
             <div style={{ fontSize: 12, color: "#6B6355", fontWeight: 500 }}>{fmt(totalPlan)}</div>
             <div style={{ fontSize: 12, color: "#4A7C59", fontWeight: 500 }}>{fmt(totalPaid)}</div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#E8592A" }}>{fmt(total)}</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: debtColor(total, "in") }}>{fmt(total)}</div>
             <div /><div />
           </div>
         </>
@@ -1071,7 +1071,11 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
                 )}
               </div>
               <div style={{ fontSize: 13, fontWeight: 700,
-                            color: c.debt <= 0 ? "#4A7C59" : scope === "plan" ? "#B8860B" : "#8B3A3A" }}>
+                            // Золото у плана — НЕ упущение: план закупок это ещё не долг
+                    // (CLAUDE.md, 04.08.2026), подрядчикам ничего не заказано и в сальдо
+                    // это не идёт. Правило «мы должны — красное» на него не распространяется.
+                    color: scope === "plan" ? (c.debt > 0 ? "#B8860B" : POLARITY.neutral.color)
+                                            : debtColor(c.debt, "out") }}>
                 {c.debt > 0 ? fmt(c.debt) : "Закрыт"}
               </div>
               <div><DeadlinePill date={c.due_date} /></div>

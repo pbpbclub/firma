@@ -32,7 +32,7 @@ const statusCell = (label?: string, color?: string) =>
     : <span style={{ color: "#C8C0B0" }}>—</span>;
 import { ClientDetail, CLIENT_FIELDS, CUSTOMER_STATUS_COLORS, customerStatusLabel } from "./ClientDetail";
 import { ContractorDetail, CONTRACTOR_FIELDS, STATUS_COLORS, CONTRACTOR_STATUS_LABELS } from "./ContractorDetail";
-import { PRICE_SUPPLIER_LABELS } from "./SupplierDetail";
+import { PRICE_SUPPLIER_LABELS } from "./PriceSync";
 import { BrandDetail, BrandModal } from "./BrandDetail";
 import { UnitDetail, UnitModal } from "./UnitDetail";
 

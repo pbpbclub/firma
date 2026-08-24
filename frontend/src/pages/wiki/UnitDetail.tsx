@@ -154,21 +154,8 @@ export function UnitModal({ row, onClose }: { row: any; onClose: () => void }) {
               <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 6 }}>СЧЕТА</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {accounts.map((a: any) => (
-                  <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 8, border: "1px solid #F2EFE9", padding: "7px 10px" }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 12, color: "#1A1A1A" }}>{a.name}</div>
-                      <div style={{ fontSize: 10, color: "#A89070" }}>
-                        {ACCOUNT_SOURCES.find(s => s.v === a.source)?.l || a.source}{a.number ? ` · ${a.number}` : ""}
-                      </div>
-                    </div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(a.balance || 0)}</div>
-                    <button onClick={async () => { await businessUnitsApi.deleteAccount(a.id); refresh(); onClose(); }}
-                      style={{ background: "none", border: "none", cursor: "pointer", color: "#D0C8C0", padding: 0, display: "flex" }}
-                      onMouseEnter={e => (e.currentTarget.style.color = "#8B3A3A")}
-                      onMouseLeave={e => (e.currentTarget.style.color = "#D0C8C0")}>
-                      <Trash size={13} />
-                    </button>
-                  </div>
+                  <AccountRow key={a.id} a={a}
+                    onChanged={() => { refresh(); onClose(); }} />
                 ))}
                 <AddAccountRow unitId={unit.id} onAdded={() => { refresh(); onClose(); }} />
               </div>
@@ -177,6 +164,61 @@ export function UnitModal({ row, onClose }: { row: any; onClose: () => void }) {
           {isNew && <div style={{ fontSize: 11, color: "#A89070" }}>Счета можно добавить после создания.</div>}
         </div>
     </Modal>
+  );
+}
+
+/** Строка счёта юрлица с правкой на месте.
+ *
+ *  Раньше счёт был read-only: поправить название, тип или номер можно было только
+ *  «удалить и завести заново» — при том что PATCH /business-units/accounts/{id}
+ *  существует (обёртка updateAccount была мёртвой). Поля те же, что при добавлении. */
+function AccountRow({ a, onChanged }: { a: any; onChanged: () => void }) {
+  const [edit, setEdit] = useState(false);
+  const [name, setName] = useState(a.name || "");
+  const [source, setSource] = useState(a.source || "bank");
+  const [number, setNumber] = useState(a.number || "");
+  const [busy, setBusy] = useState(false);
+  const inp: React.CSSProperties = { boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "6px 9px", fontSize: 12, outline: "none" };
+
+  if (edit) {
+    return (
+      <div style={{ display: "flex", gap: 6, alignItems: "center", border: "1px solid #E8592A", padding: "7px 10px" }}>
+        <input value={name} onChange={e => setName(e.target.value)} style={{ ...inp, flex: 1 }} autoFocus />
+        <select value={source} onChange={e => setSource(e.target.value)} style={{ ...inp, background: "#fff" }}>
+          {ACCOUNT_SOURCES.map(s => <option key={s.v} value={s.v}>{s.l}</option>)}
+        </select>
+        {source === "bank" && <input placeholder="№ счёта" value={number} onChange={e => setNumber(e.target.value)} style={{ ...inp, width: 130 }} />}
+        <button disabled={!name.trim() || busy} onClick={async () => {
+          setBusy(true);
+          try {
+            await businessUnitsApi.updateAccount(a.id, {
+              name: name.trim(), source, number: number.trim() || null,
+            });
+            onChanged();
+          } finally { setBusy(false); }
+        }} style={{ padding: "6px 12px", border: "none", background: "#E8592A", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 600, opacity: name.trim() ? 1 : 0.5 }}>
+          {busy ? "..." : "OK"}
+        </button>
+        <button onClick={() => setEdit(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", fontSize: 12, fontFamily: "inherit" }}>Отмена</button>
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, border: "1px solid #F2EFE9", padding: "7px 10px" }}>
+      <div style={{ flex: 1, cursor: "pointer" }} onClick={() => setEdit(true)} title="Нажми, чтобы поправить">
+        <div style={{ fontSize: 12, color: "#1A1A1A" }}>{a.name}</div>
+        <div style={{ fontSize: 10, color: "#A89070" }}>
+          {ACCOUNT_SOURCES.find(s => s.v === a.source)?.l || a.source}{a.number ? ` · ${a.number}` : ""}
+        </div>
+      </div>
+      <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(a.balance || 0)}</div>
+      <button onClick={async () => { await businessUnitsApi.deleteAccount(a.id); onChanged(); }}
+        style={{ background: "none", border: "none", cursor: "pointer", color: "#D0C8C0", padding: 0, display: "flex" }}
+        onMouseEnter={e => (e.currentTarget.style.color = "#8B3A3A")}
+        onMouseLeave={e => (e.currentTarget.style.color = "#D0C8C0")}>
+        <Trash size={13} />
+      </button>
+    </div>
   );
 }
 

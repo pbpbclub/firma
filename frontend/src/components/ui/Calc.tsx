@@ -60,6 +60,21 @@ export function CalcSection({ label, addLabel, onAdd, children, readOnly }: {
   );
 }
 
+/** Самая дешёвая цена по каждому ПОСТАВЩИКУ.
+ *
+ *  materials.search.alternatives — это вся история цен по коду, отсортированная по
+ *  возрастанию: один поставщик встречается там много раз с разными датами. Показывать
+ *  список как есть — шум; нужен один ряд на поставщика. */
+function bySupplier(m: any): any[] {
+  const best = new Map<string, any>();
+  for (const a of (m.alternatives || [])) {
+    if (a.price == null) continue;
+    const cur = best.get(a.supplier);
+    if (!cur || a.price < cur.price) best.set(a.supplier, a);
+  }
+  return [...best.values()].sort((x, y) => x.price - y.price);
+}
+
 export function MaterialTitle({ value, materialsFetch, onType, onPick }: {
   value: string;
   materialsFetch: (q?: string) => Promise<any[]>;
@@ -93,7 +108,35 @@ export function MaterialTitle({ value, materialsFetch, onType, onPick }: {
             >
               <span style={{ color: "#1A1A1A" }}>{m.name}</span>
               <span style={{ color: "#A89070", marginLeft: 8 }}>{m.unit} · {m.no_price ? "нет цены" : fmtMoney(m.price)}</span>
-              {m.supplier_label && !m.no_price && <span style={{ color: "#4A7C59", marginLeft: 6, fontSize: 10 }}>{m.supplier_label}{(m.alternatives?.length ?? 0) > 1 ? ` (деш.)` : ""}</span>}
+              {m.supplier_label && !m.no_price && <span style={{ color: "#4A7C59", marginLeft: 6, fontSize: 10 }}>{m.supplier_label}</span>}
+              {/* Раньше здесь стояла глухая пометка «(деш.)»: система знала цены всех
+                  поставщиков и не показывала ни одной. Данные приходят в том же ответе
+                  (materials.search.alternatives) — второго запроса не нужно. */}
+              {bySupplier(m).length > 1 && (
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
+                  {bySupplier(m).map((alt: any) => {
+                    const active = alt.supplier === m.supplier && alt.price === m.price;
+                    return (
+                      <span key={alt.supplier}
+                        onMouseDown={e => {
+                          e.stopPropagation();
+                          setSearch(m.name); setShow(false);
+                          // Выбор поставщика = выбор его цены: пишем в строку сметы
+                          // именно её, а не самую дешёвую по умолчанию.
+                          onPick({ ...m, price: alt.price, unit: alt.unit || m.unit,
+                                   supplier: alt.supplier, supplier_label: alt.supplier_label,
+                                   price_date: alt.price_date });
+                        }}
+                        title={`Взять цену: ${alt.supplier_label} ${fmtMoney(alt.price)}${alt.price_date ? ` от ${alt.price_date}` : ""}`}
+                        style={{ fontSize: 10, padding: "2px 6px", border: "1px solid",
+                          borderColor: active ? "#4A7C59" : "#EDEBE6",
+                          color: active ? "#4A7C59" : "#6B6355", background: "#fff" }}>
+                        {alt.supplier_label} {fmtMoney(alt.price)}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           ))}
         </div>

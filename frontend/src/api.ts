@@ -82,12 +82,9 @@ export const brandsApi = {
   delete: (id: string) => api.delete(`/brands/${id}`).then((r) => r.data),
 };
 
-export const suppliersApi = {
-  list: () => api.get("/suppliers").then((r) => r.data),
-  create: (data: Record<string, any>) => api.post("/suppliers", data).then((r) => r.data),
-  update: (id: string, data: Record<string, any>) => api.patch(`/suppliers/${id}`, data).then((r) => r.data),
-  delete: (id: string) => api.delete(`/suppliers/${id}`).then((r) => r.data),
-};
+// suppliersApi убран (24.08.2026): во фронте поставщики — это masters с role="Поставщик"
+// (wiki/registry.tsx), отдельная таблица suppliers из интерфейса не используется.
+// Ручки /api/suppliers на бэке остаются — их зовут агенты.
 
 export const businessUnitsApi = {
   list: () => api.get("/business-units").then((r) => r.data),
@@ -171,6 +168,9 @@ export const catalogApi = {
     delete: (id: string)            => api.delete(`/catalog/items/${id}`).then((r) => r.data),
     costHistory: (id: string)       => api.get(`/catalog/items/${id}/cost-history`).then((r) => r.data),
   },
+  // Ведомость материалов из Blender → рецептура изделия. Контракт: docs/bom-contract.md.
+  // mode=upsert ЗАМЕНЯЕТ строки рецептуры целиком, а не дополняет.
+  importBom: (body: Record<string, any>) => api.post("/catalog/import-bom", body).then((r) => r.data),
   deleteByTitles: (titles: string[]) =>
     api.delete("/catalog/by-titles", { data: { titles } }).then((r) => r.data),
 };
@@ -251,16 +251,6 @@ export const fundsApi = {
   deleteTx:     (txId: string)                       => api.delete(`/funds/transactions/${txId}`).then(r => r.data),
 };
 
-// Справочник ставок работ (costing): дыры видны на вкладке «Готовность»
-export const ratesApi = {
-  list:   ()             => api.get("/work-rates").then(r => r.data),
-  create: (data: { work_type_id?: string; work_type_name?: string; master_id?: string;
-                   scheme: string; rate: number; unit?: string; note?: string; source?: string }) =>
-    api.post("/work-rates", data).then(r => r.data),
-  delete: (id: string)   => api.delete(`/work-rates/${id}`).then(r => r.data),
-  // История цен на работы: цена разовая, справочник ставок её не описывает
-  prices: ()             => api.get("/work-prices").then(r => r.data),
-};
 
 export const estimatesApi = {
   createSet:   (orderId: string, data?: any) => api.post("/estimates/sets", { order_id: orderId, ...data }).then(r => r.data),
@@ -314,6 +304,9 @@ export const workRatesApi = {
   addTier: (rateId: string, data: { min_qty: number; rate: number; note?: string | null }) =>
     api.post(`/work-rates/${rateId}/tiers`, data).then(r => r.data),
   deleteTier: (tierId: string) => api.delete(`/work-rate-tiers/${tierId}`).then(r => r.data),
+  // История цен на работы: цена разовая, справочник ставок её не описывает.
+  // Переехало из ratesApi — тот был дублем этой же обёртки над /work-rates (24.08.2026).
+  prices: () => api.get("/work-prices").then(r => r.data),
 };
 
 export const priceBookApi = {
@@ -489,9 +482,8 @@ export const mediaApi = {
   },
   patch: (id: string, data: Record<string, any>) => api.patch(`/media/${id}`, data).then((r) => r.data),
   remove: (id: string) => api.delete(`/media/${id}`).then((r) => r.data),
-  // Подстановка в документ: сначала позиция сметы, нет — карточка каталога
-  pick: (params: { purpose?: "kp" | "spec"; estimate_item_id?: string; catalog_item_id?: string }) =>
-    api.get("/media/pick", { params }).then((r) => r.data),
+  // GET /api/media/pick обёртки нет намеренно: ручку зовёт генератор КП фин-агента
+  // (/opt/fin-agent/tools/kp_doc.py), фронт картинку в документ не подставляет.
   fileUrl: (id: string) => `/api/media/${id}/file?token=${encodeURIComponent(getToken() || "")}`,
   thumbUrl: (id: string) => `/api/media/${id}/thumb?token=${encodeURIComponent(getToken() || "")}`,
 };

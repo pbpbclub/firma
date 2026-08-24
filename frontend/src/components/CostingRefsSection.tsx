@@ -4,7 +4,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { Plus, ArrowsClockwise, Trash, X } from "@phosphor-icons/react";
-import { workRatesApi, priceBookApi, workTypesApi, mastersApi } from "../api";
+import { workRatesApi, priceBookApi, workTypesApi, mastersApi, costingRulesApi } from "../api";
 import { MONO } from "./ui/Num";
 import { fmtMoney } from "./ui/format";
 
@@ -16,6 +16,12 @@ const SOURCE_LABEL: Record<string, string> = {
 };
 
 const label = { fontSize: 10, color: "#A89070", letterSpacing: "0.08em", fontWeight: 600 } as React.CSSProperties;
+// Виды правил сопоставления. Правила kind='work' записать можно, но бэкенд их не
+// читает: find_costing_rule зовётся только из _match_catalog_item и _match_material_code.
+const RULE_KIND_LABEL: Record<string, string> = {
+  material: "МАТЕРИАЛ", catalog: "РЕЦЕПТУРА", work: "РАБОТА",
+};
+
 const inputStyle: React.CSSProperties = { boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "6px 8px", fontSize: 12, outline: "none", fontFamily: "inherit" };
 
 export function CostingRefsSection() {
@@ -59,6 +65,15 @@ export function CostingRefsSection() {
     mutationFn: ({ wt, master }: { wt: string; master: string }) => workTypesApi.unlinkMaster(wt, master),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["masters"] }),
   });
+  // Выученные сопоставления: правило создаётся чекбоксом «запомнить» в смете, а
+  // посмотреть и снять его было негде — ошибочное правило молча подставлялось
+  // в каждую новую смету (list/delete были мёртвыми обёртками).
+  const { data: rules = [] } = useQuery({ queryKey: ["costing-rules"], queryFn: () => costingRulesApi.list() });
+  const delRule = useMutation({
+    mutationFn: (id: number) => costingRulesApi.delete(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["costing-rules"] }),
+  });
+
   const delPrice = useMutation({
     mutationFn: (id: number) => priceBookApi.delete(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["price-book"] }),
@@ -203,6 +218,44 @@ export function CostingRefsSection() {
             );
           })}
         </div>
+      )}
+
+      {/* ── Выученные сопоставления (costing_rules) ── */}
+      {(rules as any[]).length > 0 && (
+        <>
+          <div style={{ ...label, margin: "26px 0 6px" }}>ВЫУЧЕННЫЕ СОПОСТАВЛЕНИЯ</div>
+          <div style={{ fontSize: 11, color: "#A89070", marginBottom: 12, lineHeight: 1.5 }}>
+            Строка сметы с таким названием сама подставит этот материал или рецептуру.
+            Ошиблись один раз — правило будет повторять ошибку в каждой новой смете, пока не снять.
+          </div>
+          <div style={{ border: "1px solid #EDEBE6" }}>
+            {(rules as any[]).map((r: any) => (
+              <div key={r.id} style={{ display: "grid", gridTemplateColumns: "90px 1fr 1fr 90px 40px",
+                     gap: 10, padding: "8px 12px", borderBottom: "1px solid #F2EFE9", alignItems: "center" }}>
+                <span style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>
+                  {RULE_KIND_LABEL[r.kind] || r.kind}
+                </span>
+                <span style={{ fontSize: 12, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                  title={r.pattern}>{r.pattern}</span>
+                <span style={{ fontSize: 12, color: r.target_title ? "#6B6355" : "#C8C0B0",
+                               overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                  title={r.target_title || r.target_id}>
+                  → {r.target_title || r.target_id}
+                </span>
+                <span style={{ fontSize: 10, color: "#A89070" }}>
+                  {r.match_type === "contains" ? "по вхождению" : "точно"}
+                </span>
+                <button onClick={() => delRule.mutate(r.id)} disabled={delRule.isPending}
+                  title="Снять правило — подстановка прекратится"
+                  style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", display: "flex", justifyContent: "flex-end", padding: 2 }}
+                  onMouseEnter={e => (e.currentTarget.style.color = "#8B3A3A")}
+                  onMouseLeave={e => (e.currentTarget.style.color = "#C8C0B0")}>
+                  <Trash size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
       )}
 
       {/* ── Кто что делает: мастера ↔ виды работ ──

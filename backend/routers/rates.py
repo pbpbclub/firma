@@ -10,6 +10,7 @@ costing_rules — «название → номенклатура/рецепту
 Роуты объявлены с полными путями (/api/...) — роутер монтируется без префикса.
 """
 import re
+import sqlite3
 import uuid
 from typing import Optional
 
@@ -17,7 +18,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from audit import current_actor
-from db import get_production, get_analytics_ro
+from db import get_production, get_analytics_ro, get_materials
 
 router = APIRouter()
 
@@ -502,6 +503,43 @@ def find_costing_rule(conn, title: str, kind: str):
     return None
 
 
+def _rule_targets(conn, rows: list) -> dict:
+    """Человекочитаемые названия целей правил: {(kind, target_id): title}.
+
+    В таблице лежит голый target_id — код номенклатуры (materials.db), id рецептуры
+    каталога или id вида работ. Без названия список правил нечитаем: «эта строка →
+    0801-0025» не говорит ничего. Резолвим ПАЧКОЙ по каждому виду, без N+1.
+
+    Прайсы недоступны — не ошибка: правило всё равно надо показать и дать удалить,
+    просто без названия материала."""
+    by_kind = {}
+    for r in rows:
+        by_kind.setdefault(r["kind"], set()).add(str(r["target_id"]))
+    out = {}
+
+    def fill(kind, sql, conn_):
+        ids = list(by_kind.get(kind) or ())
+        if not ids:
+            return
+        ph = ", ".join("?" * len(ids))
+        for row in conn_.execute(sql.format(ph=ph), ids).fetchall():
+            out[(kind, str(row[0]))] = row[1]
+
+    fill("catalog", "SELECT id, title FROM catalog_items WHERE id IN ({ph})", conn)
+    fill("work", "SELECT id, name FROM work_types WHERE id IN ({ph})", conn)
+    if by_kind.get("material"):
+        mconn = None
+        try:
+            mconn = get_materials()
+            fill("material", "SELECT code, title FROM catalog WHERE code IN ({ph})", mconn)
+        except sqlite3.Error:
+            pass
+        finally:
+            if mconn is not None:
+                mconn.close()
+    return out
+
+
 @router.get("/api/costing-rules")
 def list_costing_rules(kind: Optional[str] = None):
     conn = get_production()
@@ -511,7 +549,11 @@ def list_costing_rules(kind: Optional[str] = None):
             sql += " WHERE kind = ?"
             params = [kind]
         sql += " ORDER BY kind, pattern"
-        return [dict(r) for r in conn.execute(sql, params).fetchall()]
+        rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
+        titles = _rule_targets(conn, rows)
+        for r in rows:
+            r["target_title"] = titles.get((r["kind"], str(r["target_id"])))
+        return rows
     finally:
         conn.close()
 

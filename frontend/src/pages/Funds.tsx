@@ -1,4 +1,5 @@
 import { fmtMoney as fmt } from "../components/ui/format";
+import { debtColor } from "../components/ui/type";
 import { useState } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { Loading } from "../components/ui/Loading";
@@ -307,7 +308,8 @@ function AccountableSection() {
             {p.name}
           </button>
           <span style={{ fontSize: 10, color: "#A89070" }}>на руках</span>
-          <span style={{ fontSize: 14, fontWeight: 700, color: p.balance > 0 ? "#E8592A" : "#1A1A1A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(p.balance)}</span>
+          {/* Деньги фирмы на руках у подотчётного — он нам должен отчитаться: зелёное. */}
+          <span style={{ fontSize: 14, fontWeight: 700, color: debtColor(p.balance, "in"), fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(p.balance)}</span>
           <div style={{ flex: 1 }} />
           {opFor?.person.id === p.id ? (
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>

@@ -7,7 +7,7 @@ import { PayeeRulesSection } from "../../components/PayeeRulesSection";
 import { useNavigate } from "react-router-dom";
 import { mastersApi, financeApi, ledgerApi, ordersApi } from "../../api";
 import { ContactStrip, contactHref } from "../../components/ui/ContactLinks";
-import { PriceSync } from "./SupplierDetail";
+import { PriceSync } from "./PriceSync";
 import { Check, User, HandCoins, ArrowsLeftRight, Receipt } from "@phosphor-icons/react";
 import { fmt, fmtDate } from "./helpers";
 import { DetailRow as Row } from "./DetailRow";

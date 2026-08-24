@@ -1,4 +1,5 @@
 import { fmtMoney as fmt } from "../components/ui/format";
+import { debtColor } from "../components/ui/type";
 import { QueryError } from "../components/ui/QueryError";
 import { useQuery } from "@tanstack/react-query";
 import { MONO } from "../components/ui/Num";
@@ -38,14 +39,15 @@ export default function Taxes() {
       <div style={{
         ...section,
         display: "flex", alignItems: "flex-start", gap: 12,
-        borderLeft: `3px solid ${data.tax_to_pay > 0 ? "#E8592A" : "#4A7C59"}`,
+        // Налог к уплате — наш долг государству, то есть кредиторка (правило 24.08.2026).
+        borderLeft: `3px solid ${debtColor(data.tax_to_pay, "out")}`,
       }}>
         {data.tax_to_pay > 0
-          ? <WarningCircle size={17} style={{ color: "#E8592A", flexShrink: 0, marginTop: 1 }} />
+          ? <WarningCircle size={17} style={{ color: debtColor(data.tax_to_pay, "out"), flexShrink: 0, marginTop: 1 }} />
           : <CheckCircle size={17} style={{ color: "#4A7C59", flexShrink: 0, marginTop: 1 }} />
         }
         <div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: data.tax_to_pay > 0 ? "#E8592A" : "#4A7C59" }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: data.tax_to_pay > 0 ? debtColor(data.tax_to_pay, "out") : "#4A7C59" }}>
             {data.tax_to_pay > 0
               ? `К уплате: ${fmt(data.tax_to_pay)} до ${data.deadline}`
               : "Налоги за квартал покрыты взносами"}
