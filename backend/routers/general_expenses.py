@@ -146,21 +146,28 @@ def list_general(
         # интерфейса было нечем (DELETE /write-offs/{expense_id} принимает id ребёнка).
         spent, children = {}, {}
         if with_spent and rows:
-            for r in conn.execute(
-                """SELECT e.id, e.stock_parent_id AS pid, e.amount, e.expense_date,
-                          e.order_id, o.title AS order_title, o.number AS order_number
-                     FROM expenses e LEFT JOIN orders o ON o.id = e.order_id
-                    WHERE e.stock_parent_id IS NOT NULL
-                    ORDER BY e.expense_date DESC"""
-            ).fetchall():
-                d = dict(r)
-                pid = d.pop("pid")
-                agg = spent.setdefault(pid, {"amount": 0.0, "count": 0, "titles": []})
-                agg["amount"] = round(agg["amount"] + (d["amount"] or 0), 2)
-                agg["count"] += 1
-                if d["order_title"] and d["order_title"] not in agg["titles"]:
-                    agg["titles"].append(d["order_title"])
-                children.setdefault(pid, []).append(d)
+            # Только дети строк ЭТОЙ страницы: без фильтра запрос тянул все списания
+            # запаса за всю историю, а отбор шёл уже в Python. Пачками по 500 —
+            # больше в IN(...) SQLite не берёт (лимит переменных).
+            ids = [r["id"] for r in rows]
+            for i in range(0, len(ids), 500):
+                chunk = ids[i:i + 500]
+                ph = ", ".join("?" * len(chunk))
+                for r in conn.execute(
+                    f"""SELECT e.id, e.stock_parent_id AS pid, e.amount, e.expense_date,
+                               e.order_id, o.title AS order_title, o.number AS order_number
+                          FROM expenses e LEFT JOIN orders o ON o.id = e.order_id
+                         WHERE e.stock_parent_id IN ({ph})
+                         ORDER BY e.expense_date DESC""", chunk
+                ).fetchall():
+                    d = dict(r)
+                    pid = d.pop("pid")
+                    agg = spent.setdefault(pid, {"amount": 0.0, "count": 0, "titles": []})
+                    agg["amount"] = round(agg["amount"] + (d["amount"] or 0), 2)
+                    agg["count"] += 1
+                    if d["order_title"] and d["order_title"] not in agg["titles"]:
+                        agg["titles"].append(d["order_title"])
+                    children.setdefault(pid, []).append(d)
         for r in rows:
             s = spent.get(r["id"], {"amount": 0, "count": 0, "titles": []})
             r["written_off"] = s["amount"]
