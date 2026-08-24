@@ -1259,6 +1259,26 @@ def ensure_match_trace_schema():
         conn.close()
 
 
+def ensure_supersede_trace_schema():
+    """След «кто погасил эту смету» — под честное рассогласование (24.08.2026).
+
+    _approve_set помечает прочие сметы заказа superseded. Кнопка «Снять согласование»
+    до этого только меняла статус: прочие сметы так и оставались superseded, is_primary
+    оставался на рассогласованной, план заказа — пересчитанным. Чтобы откатить ровно то,
+    что сделало ЭТО утверждение, нужно знать, какие сметы погасило именно оно: без следа
+    откат не отличит их от погашенных прошлыми утверждениями и поднял бы лишние.
+
+    NULL у старых строк — «неизвестно кем»: такие сметы unapprove не трогает."""
+    conn = get_production()
+    try:
+        info = conn.execute("PRAGMA table_info(estimate_sets)").fetchall()
+        if info and "superseded_by" not in {r[1] for r in info}:
+            conn.execute("ALTER TABLE estimate_sets ADD COLUMN superseded_by TEXT")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_expense_settlement_schema():
     """A1 (ТЗ финагента 24.08.2026): у расхода по заказу два разных факта —
     «работа принята» (себестоимость заказа) и «деньги ушли мастеру» (движение по

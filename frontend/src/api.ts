@@ -24,7 +24,9 @@ export const ordersApi = {
   list: (params?: Record<string, string | boolean>) =>
     api.get("/orders", { params }).then((r) => r.data),
   get: (id: string) => api.get(`/orders/${id}`).then((r) => r.data),
-  planFactSummary: () => api.get("/orders/plan-fact-summary").then((r) => r.data),
+  // scope: active (в работе) | completed (итог закрытых) | all
+  planFactSummary: (scope: "active" | "completed" | "all" = "active") =>
+    api.get("/orders/plan-fact-summary", { params: { scope } }).then((r) => r.data),
   // A8: накладные месяца и их раскладка по заказам в производстве
   overheadSummary: () => api.get("/orders/overhead-summary").then((r) => r.data),
   // «Молчат»: просчёты без движения (правило фин-агента, 14/30/60 дней)
@@ -40,7 +42,9 @@ export const ordersApi = {
   update: (id: string, data: Record<string, any>) => api.patch(`/orders/${id}`, data).then((r) => r.data),
   updateBrand: (id: string, brand: string | null) => api.patch(`/orders/${id}/brand`, { brand }).then((r) => r.data),
   delete: (id: string) => api.delete(`/orders/${id}`).then((r) => r.data),
-  addPayment: (id: string, data: { amount: number; paid_at: string; note?: string; bank_tx_id?: string }) =>
+  // extra_id — платёж по допработе, а не по смете: без него «оплачено» у допа
+  // всегда оставалось нулём, хотя деньги пришли (ТЗ финагента B2).
+  addPayment: (id: string, data: { amount: number; paid_at: string; note?: string; bank_tx_id?: string; extra_id?: string | null }) =>
     api.post(`/orders/${id}/payments`, data).then((r) => r.data),
   deletePayment: (orderId: string, paymentId: string) =>
     api.delete(`/orders/${orderId}/payments/${paymentId}`).then((r) => r.data),
@@ -279,6 +283,8 @@ export const estimatesApi = {
   createObligations: (setId: string)        => api.post(`/estimates/sets/${setId}/create-obligations`).then(r => r.data),
   deleteObligations: (setId: string)        => api.delete(`/estimates/sets/${setId}/obligations`).then(r => r.data),
   approveSet:  (setId: string, force = false) => api.post(`/estimates/sets/${setId}/approve`, { force }).then(r => r.data),
+  // Честный откат утверждения: без confirm вернёт 409 со списком последствий.
+  unapproveSet: (setId: string, confirm = false) => api.post(`/estimates/sets/${setId}/unapprove`, { confirm }).then(r => r.data),
   reviewQueue: ()                           => api.get("/estimates/review-queue").then(r => r.data),
   costCheck:   (setId: string)              => api.get(`/estimates/sets/${setId}/cost-check`).then(r => r.data),
   // Готовность к заполнению: дубли смет, заглушки себестоимости, дыры в ставках
@@ -322,8 +328,10 @@ export const costingRulesApi = {
 export const paymentsApi = {
   inbox: (params?: Record<string, string | number | boolean>) =>
     api.get("/payments/inbox", { params }).then((r) => r.data),
-  fromTx: (data: { tx_id: string; allocations: { order_id: string; amount: number; note?: string | null }[] }) =>
+  fromTx: (data: { tx_id: string; allocations: { order_id: string; amount: number; note?: string | null; extra_id?: string | null }[] }) =>
     api.post("/payments/from-tx", data).then((r) => r.data),
+  // Откат разноски поступления целиком — транзакция возвращается в инбокс.
+  deleteGroup: (groupId: string) => api.delete(`/payments/group/${groupId}`).then((r) => r.data),
   dismiss: (txId: string, reason?: string) =>
     api.post(`/payments/inbox/${txId}/dismiss`, { reason: reason || null }).then((r) => r.data),
   undismiss: (txId: string) =>

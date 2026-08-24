@@ -413,6 +413,12 @@ export default function EstimateEditor() {
   const [invoicing, setInvoicing] = useState(false);
   const [obligating, setObligating] = useState(false);
   const [confirmRevert, setConfirmRevert] = useState(false);
+  // Утверждение и рассогласование — через свои защищённые ручки, а не через
+  // PUT {status}. Раньше кнопка шла в updateSet и проходила мимо гейта нулевых цен
+  // (цена заказа молча становилась 0 ₽), а «снять» меняло одну надпись.
+  const [approveForce, setApproveForce] = useState<string | null>(null);   // текст 409 от бэка
+  const [unapprove, setUnapprove] = useState<any>(null);                   // последствия отката
+  const [setBusy, setSetBusy] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [pendingSwitchId, setPendingSwitchId] = useState<string | null>(null);
   const [editingSetId, setEditingSetId] = useState<string | null>(null);
@@ -503,6 +509,34 @@ export default function EstimateEditor() {
     if (!activeSetId) return;
     await estimatesApi.updateSet(activeSetId, data);
     refetch();
+  };
+
+  const doApprove = async (force = false) => {
+    if (!activeSetId) return;
+    setSetBusy(true);
+    try {
+      await estimatesApi.approveSet(activeSetId, force);
+      setApproveForce(null);
+      refetch();
+    } catch (e: any) {
+      // 409 — «в смете нет продажных цен»: спрашиваем, а не утверждаем молча.
+      if (e?.response?.status === 409) setApproveForce(String(e.response.data?.detail || "Утвердить всё равно?"));
+      else alert(e?.response?.data?.detail || "Не удалось утвердить смету");
+    } finally { setSetBusy(false); }
+  };
+
+  const doUnapprove = async (confirm = false) => {
+    if (!activeSetId) return;
+    setSetBusy(true);
+    try {
+      await estimatesApi.unapproveSet(activeSetId, confirm);
+      setUnapprove(null);
+      refetch();
+    } catch (e: any) {
+      const d = e?.response?.data?.detail;
+      if (e?.response?.status === 409 && d?.code === "unapprove_confirm") setUnapprove(d);
+      else alert(typeof d === "string" ? d : "Не удалось снять согласование");
+    } finally { setSetBusy(false); }
   };
 
   const addItemInline = async () => {
@@ -727,7 +761,8 @@ export default function EstimateEditor() {
 
               {/* Согласовать */}
               <button
-                onClick={() => updateSet({ status: activeSet.status === "approved" ? "draft" : "approved" })}
+                onClick={() => (activeSet.status === "approved" ? doUnapprove(false) : doApprove(false))}
+                disabled={setBusy}
                 title={activeSet.status === "approved" ? "Снять согласование" : "Согласовать"}
                 style={{
                   width: 28, height: 28, padding: 0, border: "none", cursor: "pointer",
@@ -1295,6 +1330,53 @@ export default function EstimateEditor() {
         }}
         onCancel={() => setConfirmRevert(false)}
       />
+    )}
+
+    {/* Утверждение сметы без продажных цен — только осознанно */}
+    {approveForce && (
+      <ConfirmModal
+        message={approveForce}
+        confirmLabel="Всё равно утвердить"
+        onConfirm={() => doApprove(true)}
+        onCancel={() => setApproveForce(null)}
+      />
+    )}
+
+    {/* Рассогласование: показываем последствия ДО нажатия */}
+    {unapprove && (
+      <Modal size="md" eyebrow="СНЯТЬ СОГЛАСОВАНИЕ" onClose={() => setUnapprove(null)}
+             onCancel={() => setUnapprove(null)} onSave={() => doUnapprove(true)}
+             saving={setBusy} saveLabel="Снять согласование">
+        <div style={{ fontSize: 12, color: "#1A1A1A", lineHeight: 1.7 }}>
+          Смета вернётся в черновики, признак основной будет снят, план заказа пересчитается
+          по новой активной смете.
+        </div>
+        <div style={{ marginTop: 14, fontSize: 12, color: "#6B6355", lineHeight: 1.9 }}>
+          {unapprove.restore_sets > 0 && (
+            <div>· Вернётся в черновики других смет: <b>{unapprove.restore_sets}</b></div>
+          )}
+          {unapprove.obligations_delete?.length > 0 && (
+            <div>· Будет удалено обязательств (по ним не было денег): <b>{unapprove.obligations_delete.length}</b></div>
+          )}
+          {unapprove.obligations_keep?.length > 0 && (
+            <div style={{ color: "#8B3A3A" }}>
+              · Останутся — по ним уже прошли деньги: <b>{unapprove.obligations_keep.length}</b>
+            </div>
+          )}
+        </div>
+        {unapprove.obligations_keep?.length > 0 && (
+          <div style={{ marginTop: 12, padding: "10px 12px", background: "#FFF4EE", borderLeft: "2px solid #8B3A3A" }}>
+            {unapprove.obligations_keep.map((o: any) => (
+              <div key={o.id} style={{ fontSize: 11, color: "#6B6355", lineHeight: 1.7 }}>
+                {o.name} — признано {fmt(o.paid || o.covered)}
+              </div>
+            ))}
+            <div style={{ fontSize: 10, color: "#A89070", marginTop: 6, lineHeight: 1.6 }}>
+              Такие обязательства не удаляем: на них держится факт себестоимости заказа.
+            </div>
+          </div>
+        )}
+      </Modal>
     )}
 
     {/* Confirm switching estimate while in edit mode */}

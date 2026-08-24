@@ -6,7 +6,7 @@ import { fmtMoneyDash as fmt } from "../ui/format";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
-import { estimatesApi, ratesApi } from "../../api";
+import { estimatesApi, ratesApi, workRatesApi } from "../../api";
 import { MONO } from "../ui/Num";
 import { Loading } from "../ui/Loading";
 import { Check, Warning } from "@phosphor-icons/react";
@@ -51,6 +51,47 @@ function StubRow({ it, onSaved }: { it: any; onSaved: () => void }) {
       </span>
       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
         <input value={val} onChange={e => setVal(e.target.value)} type="number" placeholder="сколько на самом деле"
+          onKeyDown={e => { if (e.key === "Enter" && ok) save.mutate(); }}
+          style={{ flex: 1, border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 12,
+                   outline: "none", fontFamily: MONO, textAlign: "right", minWidth: 0 }} />
+        <button disabled={!ok || save.isPending} onClick={() => save.mutate()}
+          style={{ fontSize: 11, padding: "4px 10px", border: "none", fontFamily: "inherit", fontWeight: 600,
+                   background: ok ? "#E8592A" : "#EDEBE6", color: ok ? "#fff" : "#A89070",
+                   cursor: ok ? "pointer" : "default" }}>
+          {save.isPending ? "..." : "OK"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Ставка для вида работ без единой ставки — вводом прямо в строке, как StubRow.
+// Дефолт per_unit (₽/ед): fixed задаёт итог строки, и ошибка тут дороже.
+function RateHoleRow({ w, onSaved }: { w: any; onSaved: () => void }) {
+  const [val, setVal] = useState("");
+  const [scheme, setScheme] = useState("per_unit");
+  const save = useMutation({
+    mutationFn: () => workRatesApi.create({
+      work_type_id: w.id, scheme, rate: parseFloat(val),
+      unit: scheme === "hourly" ? "ч" : "шт",
+    }),
+    onSuccess: () => { setVal(""); onSaved(); },
+  });
+  const num = parseFloat(val);
+  const ok = !isNaN(num) && num > 0;
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1.4fr 150px 200px", gap: 10,
+                  alignItems: "center", padding: "9px 0", borderBottom: "1px solid #F2EFE9" }}>
+      <span style={{ fontSize: 13, color: "#1A1A1A" }}>{w.name}</span>
+      <select value={scheme} onChange={e => setScheme(e.target.value)}
+        style={{ border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 12, outline: "none",
+                 fontFamily: "inherit", background: "transparent", color: "#6B6355", cursor: "pointer" }}>
+        <option value="per_unit">₽ за единицу</option>
+        <option value="hourly">₽ за час</option>
+        <option value="fixed">₽ за изделие</option>
+      </select>
+      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <input value={val} onChange={e => setVal(e.target.value)} type="number" placeholder="ставка"
           onKeyDown={e => { if (e.key === "Enter" && ok) save.mutate(); }}
           style={{ flex: 1, border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 12,
                    outline: "none", fontFamily: MONO, textAlign: "right", minWidth: 0 }} />
@@ -124,7 +165,8 @@ export function ReadinessPanel() {
   // и «Всё заполнено» не показываем.
   const degraded: string[] = data?.tx_overspread_degraded ?? [];
   const clean = !s.orders_with_duplicates && !s.invoice_drift && !s.stub_items
-    && !s.rate_holes && !s.suspicious_rates && !s.tx_overspread && !degraded.length;
+    && !s.rate_holes && !s.suspicious_rates && !s.tx_overspread && !s.transit_as_bank
+    && !degraded.length;
 
   return (
     <div style={{ padding: "20px 28px 40px", overflow: "auto" }}>
@@ -132,7 +174,9 @@ export function ReadinessPanel() {
         {[["Дубли смет", s.orders_with_duplicates, "#8B3A3A"],
           ["Расходятся со счётом", s.invoice_drift, "#8B3A3A"],
           ["Разнесено сверх перевода", s.tx_overspread, "#8B3A3A"],
+          ["Транзит помечен безналом", s.transit_as_bank, "#8B3A3A"],
           ["Себестоимость-заглушка", s.stub_items, "#8B3A3A"],
+          ["Дыры в ставках", s.rate_holes, "#E8592A"],
           ["Подозрительные ставки", s.suspicious_rates, "#E8592A"],
           ["Суммы без состава", s.sum_only_items, "#A89070"]].map(([l, v, c]: any) => (
           <div key={l}>
@@ -235,6 +279,35 @@ export function ReadinessPanel() {
                 {d.drift > 0 ? "+" : "−"}{fmt(Math.abs(d.drift)).replace(" ₽", "")} ₽
               </span>
             </div>
+          ))}
+        </Section>
+      )}
+
+      {!!data?.transit_as_bank?.length && (
+        <Section label="ТРАНЗИТ ПОМЕЧЕН БЕЗНАЛОМ" count={data.transit_as_bank.length}
+          hint="У транзита и у безнала разные 13%: у безнала надбавка сверх цены, у транзита — удержание из суммы счёта. Смета транзитного заказа с типом «Безнал» считает цену не по той формуле. Открой смету и переключи тип оплаты на «Транзит».">
+          {data.transit_as_bank.map((t: any) => (
+            <div key={t.set_id} style={{ display: "grid", gridTemplateColumns: "1.6fr 130px 130px",
+                   gap: 10, alignItems: "baseline", padding: "8px 0", borderBottom: "1px solid #F2EFE9" }}>
+              <a href={`/orders/${t.order_id}/estimate`}
+                 style={{ fontSize: 13, color: "#1A1A1A", textDecoration: "none" }}>
+                {t.order_title}
+                <span style={{ color: "#A89070", fontSize: 11 }}> · {ESTIMATE_STATUS[t.set_status]?.label ?? t.set_status}</span>
+              </a>
+              <span style={{ fontSize: 13, textAlign: "right", fontFamily: MONO }}>{fmt(t.price_plan)}</span>
+              <a href={`/orders/${t.order_id}/estimate`}
+                 style={{ fontSize: 11, textAlign: "center", padding: "4px 10px", border: "1px solid #E8592A",
+                          color: "#E8592A", textDecoration: "none", fontWeight: 600 }}>открыть смету</a>
+            </div>
+          ))}
+        </Section>
+      )}
+
+      {!!data?.rate_holes?.length && (
+        <Section label="ВИДЫ РАБОТ БЕЗ СТАВКИ" count={data.rate_holes.length}
+          hint="У этих работ нет ни одной ставки — costing не сможет посчитать себестоимость строки сам и будет спрашивать цену каждый раз. Заведи ставку в справочнике на экране сметы или прямо здесь.">
+          {data.rate_holes.map((w: any) => (
+            <RateHoleRow key={w.id} w={w} onSaved={refresh} />
           ))}
         </Section>
       )}

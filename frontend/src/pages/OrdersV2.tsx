@@ -467,9 +467,12 @@ export default function OrdersV2() {
   const [silentMode, setSilentMode] = useState(false);
   const [reviewMode, setReviewMode] = useState(false);
 
+  // Итог закрытого проекта — то, ради чего сводка и нужна: раньше бэк жёстко
+  // отбрасывал completed, и посмотреть закрытый заказ можно было только поштучно.
+  const [summaryScope, setSummaryScope] = useState<"active" | "completed" | "all">("active");
   const { data: summary } = useQuery({
-    queryKey: ["orders-plan-fact-summary"],
-    queryFn: () => ordersApi.planFactSummary(),
+    queryKey: ["orders-plan-fact-summary", summaryScope],
+    queryFn: () => ordersApi.planFactSummary(summaryScope),
     enabled: summaryMode,
   });
 
@@ -756,19 +759,38 @@ export default function OrdersV2() {
             {!summary ? (
               <Loading compact />
             ) : summary.orders.length === 0 ? (
-              <EmptyState compact title="Нет активных заказов со сметой" />
+              <EmptyState compact title={summaryScope === "completed"
+                ? "Нет завершённых заказов со сметой" : "Нет активных заказов со сметой"} />
             ) : (() => {
               const rows = [...summary.orders].sort((a: any, b: any) => (b.overspent ? 1 : 0) - (a.overspent ? 1 : 0) || b.cost_delta - a.cost_delta);
               const tPlan = rows.reduce((s: number, o: any) => s + o.cost_plan, 0);
               const tFact = rows.reduce((s: number, o: any) => s + o.cost_fact, 0);
-              const tMargin = rows.reduce((s: number, o: any) => s + o.net_forecast, 0);
+              // У завершённого заказа прогноз (max план/факт) занижал бы прибыль,
+              // закрытую дешевле плана — берём факт-чистую, ту же, что в дельте списка.
+              const isDone = (o: any) => o.status === "completed";
+              const netOf = (o: any) => (isDone(o) ? o.net_fact : o.net_forecast);
+              const tMargin = rows.reduce((s: number, o: any) => s + netOf(o), 0);
               const overCount = rows.filter((o: any) => o.overspent).length;
               const SUM_COLS = "1.8fr 1fr 1fr 1fr 1fr";
+              const doneOnly = summaryScope === "completed";
               return (
                 <>
-                  <div style={{ fontSize: 11, color: "#6B6355", padding: "6px 0 12px" }}>
-                    {rows.length} активных со сметой
-                    {overCount > 0 && <span style={{ color: "#8B3A3A", fontWeight: 600 }}> · {overCount} с перерасходом</span>}
+                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between",
+                                gap: 12, padding: "6px 0 12px", flexWrap: "wrap" }}>
+                    <div style={{ fontSize: 11, color: "#6B6355" }}>
+                      {rows.length} {doneOnly ? "завершённых" : summaryScope === "all" ? "заказов" : "активных"} со сметой
+                      {overCount > 0 && <span style={{ color: "#8B3A3A", fontWeight: 600 }}> · {overCount} с перерасходом</span>}
+                    </div>
+                    <div style={{ display: "flex" }}>
+                      {([["active", "В работе"], ["completed", "Завершённые"], ["all", "Все"]] as const).map(([v, l]) => (
+                        <button key={v} onClick={() => setSummaryScope(v)}
+                          style={{ padding: "4px 11px", fontSize: 11, cursor: "pointer", border: "1px solid",
+                            borderColor: summaryScope === v ? "#1A1A1A" : "#EDEBE6",
+                            background: summaryScope === v ? "#1A1A1A" : "transparent",
+                            color: summaryScope === v ? "#FFFFFF" : "#A89070",
+                            marginRight: -1, fontFamily: "inherit" }}>{l}</button>
+                      ))}
+                    </div>
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: SUM_COLS, gap: "0 16px", padding: "8px 0",
                     borderBottom: "1px solid #EDEBE6", fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>
@@ -776,7 +798,7 @@ export default function OrdersV2() {
                     <span style={{ textAlign: "right" }}>СЕБ. ПЛАН</span>
                     <span style={{ textAlign: "right" }}>СЕБ. ФАКТ</span>
                     <span style={{ textAlign: "right" }}>Δ</span>
-                    <span style={{ textAlign: "right" }}>ЧИСТАЯ ПРОГНОЗ</span>
+                    <span style={{ textAlign: "right" }}>{doneOnly ? "ЧИСТАЯ ФАКТ" : "ЧИСТАЯ"}</span>
                   </div>
                   {rows.map((o: any) => (
                     <div key={o.id}
@@ -797,9 +819,14 @@ export default function OrdersV2() {
                         color: o.cost_delta === 0 ? "#A89070" : o.cost_delta > 0 ? "#8B3A3A" : "#4A7C59" }}>
                         {o.cost_delta === 0 ? "—" : (o.cost_delta > 0 ? "+" : "") + fmt(o.cost_delta)}
                       </span>
-                      <span style={{ textAlign: "right", fontSize: 12, fontWeight: 600, color: o.net_forecast < o.net_plan ? "#8B3A3A" : o.net_forecast >= 0 ? "#4A7C59" : "#8B3A3A" }}
-                        title={o.net_forecast < o.net_plan ? `Перерасход съел ${fmt(o.net_plan - o.net_forecast)} от плановой ${fmt(o.net_plan)}` : `План ${fmt(o.net_plan)}`}>
-                        {fmt(o.net_forecast)}
+                      <span style={{ textAlign: "right", fontSize: 12, fontWeight: 600,
+                        color: netOf(o) < o.net_plan ? "#8B3A3A" : netOf(o) >= 0 ? "#4A7C59" : "#8B3A3A" }}
+                        title={isDone(o)
+                          ? `Итог закрытого заказа: выручка − факт − УСН. План был ${fmt(o.net_plan)}`
+                          : netOf(o) < o.net_plan
+                            ? `Перерасход съел ${fmt(o.net_plan - netOf(o))} от плановой ${fmt(o.net_plan)}`
+                            : `План ${fmt(o.net_plan)}`}>
+                        {fmt(netOf(o))}
                       </span>
                     </div>
                   ))}

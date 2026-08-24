@@ -49,8 +49,10 @@ function ObligationPicker({ orderId, categoryLabel, value, amount, onPick }: {
   const all: any[] = data?.items ?? [];
   const activeSet = data?.active_set ?? null;
   // Утвердить смету прямо из разноски — обязательства по строкам генерятся на approve.
+  // Через approveSet, а не PUT {status}: у второй двери нет force-диалога, и смета
+  // без продажных цен обнуляла бы цену заказа молча (24.08.2026).
   const approve = useMutation({
-    mutationFn: () => estimatesApi.updateSet(activeSet.id, { status: "approved" }),
+    mutationFn: () => estimatesApi.approveSet(activeSet.id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["obligations", orderId] }),
   });
   if (isLoading) return null;
@@ -508,11 +510,36 @@ function ActionChip({ icon, label, title, onClick }:
   );
 }
 
+/** «Это по допу, а не по смете» — только если у заказа вообще есть допработы.
+ *  Занимает всю ширину строки разноски (grid-column: 1/-1), чтобы не ломать сетку. */
+function ExtraPicker({ orderId, value, onChange }: {
+  orderId: string; value: string; onChange: (v: string) => void;
+}) {
+  const { data: extras = [] } = useQuery({
+    queryKey: ["order-extras", orderId],
+    queryFn: () => ordersApi.extras(orderId),
+  });
+  const items: any[] = Array.isArray(extras) ? extras : (extras as any)?.items ?? [];
+  if (!items.length) return null;
+  return (
+    <div style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: 8, marginTop: 2 }}>
+      <span style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em" }}>ОТНОСИТСЯ К</span>
+      <select value={value} onChange={e => onChange(e.target.value)}
+        style={{ flex: 1, minWidth: 0, border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 11,
+                 outline: "none", background: "transparent", color: "#6B6355", cursor: "pointer",
+                 fontFamily: "inherit" }}>
+        <option value="">Смета заказа</option>
+        {items.map((x: any) => <option key={x.id} value={x.id}>Доп: {x.title}</option>)}
+      </select>
+    </div>
+  );
+}
+
 function PaymentAllocRow({ tx, onDone, onReservePrompt }: {
   tx: any; onDone: () => void;
   onReservePrompt: (p: { order_id: string; amount: number }) => void;
 }) {
-  const [allocs, setAllocs] = useState<{ order_id: string; amount: string }[]>([]);
+  const [allocs, setAllocs] = useState<{ order_id: string; amount: string; extra_id?: string }[]>([]);
   const [error, setError] = useState("");
   const [hideMode, setHideMode] = useState(false);
   // Плательщик поступления — клиент. Правило запоминает строку банка → клиент,
@@ -541,7 +568,10 @@ function PaymentAllocRow({ tx, onDone, onReservePrompt }: {
   const save = useMutation({
     mutationFn: () => paymentsApi.fromTx({
       tx_id: tx.id,
-      allocations: allocs.map(a => ({ order_id: a.order_id, amount: parseFloat(a.amount) || 0 })),
+      // extra_id — платёж по допработе, а не по смете. Без него «оплачено» у допа
+      // оставалось нулём при пришедших деньгах (ТЗ финагента B2, счёт 081-Н/26).
+      allocations: allocs.map(a => ({ order_id: a.order_id, amount: parseFloat(a.amount) || 0,
+                                      extra_id: a.extra_id || null })),
     }),
     onSuccess: (res: any) => {
       onDone();
@@ -566,6 +596,8 @@ function PaymentAllocRow({ tx, onDone, onReservePrompt }: {
     setAllocs([...allocs, { order_id: orderId, amount: left > 0 ? String(left) : "" }]);
   };
   const patch = (i: number, amount: string) => setAllocs(allocs.map((x, j) => (j === i ? { ...x, amount } : x)));
+  const patchExtra = (i: number, extra_id: string) =>
+    setAllocs(allocs.map((x, j) => (j === i ? { ...x, extra_id } : x)));
 
   const sum = allocs.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
   const diff = Math.round((tx.amount - sum) * 100) / 100;
@@ -629,6 +661,7 @@ function PaymentAllocRow({ tx, onDone, onReservePrompt }: {
               style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 0, display: "flex", justifyContent: "center" }}>
               <X size={12} />
             </button>
+            <ExtraPicker orderId={a.order_id} value={a.extra_id || ""} onChange={v => patchExtra(i, v)} />
           </div>
         );
       })}

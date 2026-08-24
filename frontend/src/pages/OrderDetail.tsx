@@ -8,10 +8,11 @@ import { MONO } from "../components/ui/Num";
 import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { Loading } from "../components/ui/Loading";
 import { Button } from "../components/ui/Button";
+import { IconButton } from "../components/ui/IconButton";
 import { fmtMoney, fmtDate } from "../components/ui/format";
 import { clientPrice } from "../components/ui/priceMath";
 import { ESTIMATE_STATUS } from "../components/domain";
-import { ordersApi, customersApi, estimatesApi, expensesApi } from "../api";
+import { ordersApi, customersApi, estimatesApi, expensesApi, paymentsApi } from "../api";
 import { Plus, CaretRight, Trash, LinkSimple, PencilSimple, Warning, ArrowsSplit } from "@phosphor-icons/react";
 import { ExpenseModal, EXPENSE_CATEGORIES } from "../components/ExpenseModal";
 import { ProfitLadder, PlanFactDuel } from "../components/OrderFinance";
@@ -71,6 +72,64 @@ const SPLIT_TARGETS = [
 ];
 
 // Допработа: что сделали сверх сметы, за сколько и во что обошлось.
+/** Платёж клиента вручную. Ключевое поле — «относится к»: без extra_id платёж
+ *  ложится в смету, и допработа остаётся с «оплачено 0» при пришедших деньгах. */
+function PaymentModal({ extras, saving, onSave, onClose }: {
+  extras: any[]; saving: boolean;
+  onSave: (d: { amount: number; paid_at: string; note: string | null; extra_id: string | null }) => void;
+  onClose: () => void;
+}) {
+  const [amount, setAmount] = useState("");
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [note, setNote] = useState("");
+  const [extraId, setExtraId] = useState("");
+  const amountNum = parseFloat(amount);
+  const valid = !isNaN(amountNum) && amountNum > 0 && !!date;
+  const lbl: React.CSSProperties = { fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 5 };
+  const inp: React.CSSProperties = { width: "100%", padding: "7px 9px", fontSize: 13, border: "1px solid #EDEBE6",
+                                     background: "#fff", color: "#1A1A1A", fontFamily: "inherit", boxSizing: "border-box" };
+  return (
+    <Modal size="md" eyebrow="ПЛАТЁЖ КЛИЕНТА" onClose={onClose} onCancel={onClose}
+      onSave={() => valid && onSave({ amount: amountNum, paid_at: date,
+                                      note: note.trim() || null, extra_id: extraId || null })}
+      saveLabel="Добавить" saving={saving} canSave={valid}>
+      <div style={{ padding: "16px 24px 20px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div>
+            <div style={lbl}>СУММА ₽</div>
+            <input style={{ ...inp, fontFamily: MONO, textAlign: "right" }} autoFocus type="number" min="0" step="0.01"
+              value={amount} onChange={e => setAmount(e.target.value)} placeholder="0" />
+          </div>
+          <div>
+            <div style={lbl}>ДАТА</div>
+            <input style={inp} type="date" value={date} onChange={e => setDate(e.target.value)} />
+          </div>
+        </div>
+        {extras.length > 0 && (
+          <div style={{ marginTop: 14 }}>
+            <div style={lbl}>ОТНОСИТСЯ К</div>
+            <select style={{ ...inp, cursor: "pointer" }} value={extraId} onChange={e => setExtraId(e.target.value)}>
+              <option value="">Смета заказа</option>
+              {extras.map((x: any) => <option key={x.id} value={x.id}>Доп: {x.title}</option>)}
+            </select>
+            <div style={{ fontSize: 10, color: "#A89070", marginTop: 5, lineHeight: 1.5 }}>
+              Счёт часто общий на смету и доп — тогда деньги заводятся двумя строками, каждая на своё.
+            </div>
+          </div>
+        )}
+        <div style={{ marginTop: 14 }}>
+          <div style={lbl}>ПРИМЕЧАНИЕ</div>
+          <input style={inp} value={note} onChange={e => setNote(e.target.value)} placeholder="например: аванс 50%" />
+        </div>
+        <div style={{ fontSize: 10, color: "#A89070", marginTop: 12, lineHeight: 1.6 }}>
+          Платёж из банка лучше заводить в «Разноске» — там он свяжется с выпиской.
+          Эта форма для наличных и для случаев, когда транзакции в банке нет.
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function ExtraModal({ extra, saving, onSave, onClose }: {
   extra?: any; saving: boolean;
   onSave: (d: { title: string; price: number; cost: number; note: string | null }) => void;
@@ -322,6 +381,26 @@ export default function OrderDetail() {
     onSuccess: () => { invalidateFact(); setDelExtra(null); },
   });
 
+  // ── Платежи клиента ────────────────────────────────────────────────────
+  // До 24.08.2026 блок был read-only, и extra_id платежа заполнить было нечем:
+  // «оплачено» у допработы всегда показывало 0, хотя деньги приходили (счёт
+  // 081-Н/26, 8 000 ₽ за двойную печать). Бэк принимал поле с самого начала.
+  const [payModal, setPayModal] = useState<boolean>(false);
+  const [delPayment, setDelPayment] = useState<any>(null);
+
+  const savePayment = useMutation({
+    mutationFn: (d: any) => ordersApi.addPayment(id!, d),
+    onSuccess: () => { invalidateFact(); setPayModal(false); },
+  });
+  const removePayment = useMutation({
+    // Разнесённое поступление откатываем группой — транзакция вернётся в инбокс
+    // «Разноски», как это делает откат расхода (expensesApi.delete с group).
+    mutationFn: (p: any) => p.group_id && p.siblings?.length
+      ? paymentsApi.deleteGroup(p.group_id)
+      : ordersApi.deletePayment(id!, p.id),
+    onSuccess: () => { invalidateFact(); setDelPayment(null); },
+  });
+
   // ── Утверждение сметы (актуализация) ───────────────────────────────────
   const [approveError, setApproveError] = useState("");
   const approveSet = useMutation({
@@ -478,6 +557,27 @@ export default function OrderDetail() {
             confirmLabel={removeExtra.isPending ? "Удаляем..." : "Удалить"}
             onConfirm={() => removeExtra.mutate(delExtra)}
             onCancel={() => setDelExtra(null)}
+          />
+        )}
+
+        {payModal && (
+          <PaymentModal
+            extras={extras}
+            saving={savePayment.isPending}
+            onSave={(d) => savePayment.mutate(d)}
+            onClose={() => setPayModal(false)}
+          />
+        )}
+
+        {delPayment && (
+          <ConfirmModal
+            message={delPayment.siblings?.length
+              ? `Этой же транзакцией оплачены другие заказы (${delPayment.siblings.map((x: any) => x.title).join(", ")}). Разноска откатится целиком, транзакция вернётся в «Разноску».`
+              : `Удалить платёж ${fmtMoney(delPayment.amount)}?`}
+            confirmLabel={removePayment.isPending ? "Удаляем..."
+              : delPayment.siblings?.length ? "Откатить разноску" : "Удалить"}
+            onConfirm={() => removePayment.mutate(delPayment)}
+            onCancel={() => setDelPayment(null)}
           />
         )}
 
@@ -911,7 +1011,12 @@ export default function OrderDetail() {
 
           {/* Платежи клиента */}
           <div style={{ paddingTop: 18, marginBottom: 8 }}>
-            <div style={{ marginBottom: 12 }}><SectionLabel>ПЛАТЕЖИ КЛИЕНТА</SectionLabel></div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+              <SectionLabel>ПЛАТЕЖИ КЛИЕНТА</SectionLabel>
+              <Button size="sm" onClick={() => setPayModal(true)} style={{ fontSize: 12, color: "#6B6355" }}>
+                <Plus size={11} /> Платёж
+              </Button>
+            </div>
             {!order?.payments?.length ? (
               <div style={{ fontSize: 12, color: "#C8C0B0" }}>
                 Платежей нет. Входящие платежи банка разносятся во вкладке «Поступления» Разноски.
@@ -936,7 +1041,12 @@ export default function OrderDetail() {
                       </div>
                     )}
                   </div>
-                  <div style={{ fontSize: 11, color: "#A89070", fontFamily: MONO }}>{fmtDate(p.paid_at)}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontSize: 11, color: "#A89070", fontFamily: MONO }}>{fmtDate(p.paid_at)}</span>
+                    <IconButton icon={Trash} iconSize={13} title={p.siblings?.length
+                      ? "Откатить разноску этой транзакции целиком"
+                      : "Удалить платёж"} tone="danger" onClick={() => setDelPayment(p)} />
+                  </div>
                 </div>
               ))
             )}

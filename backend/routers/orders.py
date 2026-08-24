@@ -909,16 +909,30 @@ def _plan_fact(conn, oid: str, cost_plan: float, paid_total: float, price_plan: 
     }
 
 
+# Что показывает сводка П/Ф. Отменённые не показываем никогда: там нечего сводить.
+SUMMARY_SCOPES = {
+    "active":    "o.status NOT IN ('completed', 'cancelled')",
+    "completed": "o.status = 'completed'",
+    "all":       "o.status != 'cancelled'",
+}
+
+
 @router.get("/plan-fact-summary")
-def plan_fact_summary():
-    """Сводка план/факт по всем активным заказам одним экраном (ТЗ 12)."""
+def plan_fact_summary(scope: str = Query("active", description="active | completed | all")):
+    """Сводка план/факт одним экраном (ТЗ 12).
+
+    scope=completed — итог закрытых проектов: «что заложили, что вышло, сколько
+    заработали». Раньше сводка жёстко отбрасывала completed, и посмотреть закрытый
+    заказ можно было только поштучно в его карточке (запрос Юры 24.08.2026)."""
+    if scope not in SUMMARY_SCOPES:
+        raise HTTPException(status_code=400, detail=f"scope must be {'|'.join(SUMMARY_SCOPES)}")
     conn = get_production()
     try:
         rows = conn.execute(
-            """SELECT o.id, o.number, o.title, o.status, o.price_plan, o.cost_plan,
+            f"""SELECT o.id, o.number, o.title, o.status, o.price_plan, o.cost_plan,
                       COALESCE(SUM(p.amount), 0) AS paid_total
                FROM orders o LEFT JOIN payments p ON p.order_id = o.id
-               WHERE o.status NOT IN ('completed', 'cancelled')
+               WHERE {SUMMARY_SCOPES[scope]}
                GROUP BY o.id ORDER BY o.deadline IS NULL, o.deadline ASC""",
         ).fetchall()
         # Допы — одним запросом на всю сводку: _plan_fact зовётся в цикле, и без
@@ -954,6 +968,12 @@ def plan_fact_summary():
                 # «план без разбивки» вешаем на него, а не на detailed — detailed
                 # бывает true и при частично разобранной смете.
                 "plan_unbroken": pf["plan_unbroken"],
+                # Итог закрытого заказа: у него прогноз бессмыслен, нужна факт-чистая —
+                # ровно то же выражение, что в _order_delta для completed.
+                "net_fact": round(pf["revenue"] - pf["cost_fact"] - pf["tax"], 2),
+                # Касса, а не маржа: сколько пришло минус сколько потрачено. Считалось
+                # в _plan_fact с самого начала и никуда не выводилось.
+                "cash_collected_vs_cost": pf["cash_collected_vs_cost"],
             })
         # Траты вне клиентских заказов — отдельными строками, а не в себестоимости
         # заказов (ТЗ stock_and_samples 01.08.2026). В _plan_fact они не попадают
@@ -1438,7 +1458,7 @@ def delete_order(order_id: str):
         conn.execute("DELETE FROM expenses WHERE order_id = ?", (oid,))  # legacy MES, FK на orders
         # Картинки позиций сметы каскад снимет сам, файлы на диске — нет:
         # собираем пути до удаления, сносим после коммита (media.media_files_of).
-        from media import media_files_of, unlink_files
+        from routers.media import media_files_of, unlink_files
         media_paths = media_files_of(conn, estimate_item_ids=[
             x["id"] for x in conn.execute(
                 """SELECT ei.id FROM estimate_items ei

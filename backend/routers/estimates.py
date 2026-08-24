@@ -265,9 +265,30 @@ def _sync_order_if_approved(conn, item_id: str):
         _sync_order_from_set(conn, row["id"])
 
 
+def _check_sellable(conn, set_id: str, force: bool = False):
+    """Гейт «в смете нет продажных цен»: approve обнулит цену заказа.
+
+    Сметы финагента бывают без sale_price, и _sync_order_from_set проставит заказу
+    price_plan = 0 — молча, без единой ошибки. Проверка обязана стоять на КАЖДОЙ двери
+    к approve: раньше она жила только в approve_set, а редактор смет утверждал через
+    PUT /sets/{id} {status:"approved"} и проходил мимо неё одним кликом (24.08.2026).
+
+    Звать ДО смены статуса. Новая дверь к утверждению — новый вызов этой функции."""
+    if force:
+        return
+    t = set_totals(conn, set_id)
+    if t["price"] <= 0:
+        raise HTTPException(
+            status_code=409,
+            detail="В смете нет продажных цен — после утверждения цена заказа станет 0 ₽. "
+                   "Если так и надо, повтори с force=true.",
+        )
+
+
 def _approve_set(conn, set_id: str) -> dict:
     """Довести утверждение сметы до конца: supersede прочих сетов, синк плана заказа,
-    обязательства. Ожидает, что status='approved' уже проставлен. Единственная точка
+    обязательства. Ожидает, что status='approved' уже проставлен и что вызывающий
+    прошёл _check_sellable. Единственная точка
     «сделать смету актуальной» — её зовут и PUT /sets/{id} (редактор), и
     POST /sets/{id}/approve (массовое ревью, финагент). Идемпотентна.
 
@@ -276,9 +297,12 @@ def _approve_set(conn, set_id: str) -> dict:
     before = conn.execute(
         "SELECT price_plan, cost_plan FROM orders WHERE id = ?", (es["order_id"],)
     ).fetchone()
+    # superseded_by — след «погашено ЭТИМ утверждением»: без него рассогласование
+    # не отличит эти сметы от погашенных прошлыми утверждениями (см. unapprove_set).
     superseded = conn.execute(
-        "UPDATE estimate_sets SET status = 'superseded', updated_at = ? WHERE order_id = ? AND id != ? AND status != 'superseded'",
-        (_now(), es["order_id"], set_id)
+        "UPDATE estimate_sets SET status = 'superseded', superseded_by = ?, updated_at = ? "
+        "WHERE order_id = ? AND id != ? AND status != 'superseded'",
+        (set_id, _now(), es["order_id"], set_id)
     ).rowcount
     # Утверждённая становится и основной: выбор заказчика зафиксирован в данных,
     # а не выведен из даты (см. _active_set).
@@ -371,6 +395,9 @@ class SetUpdate(BaseModel):
     bank_pct: Optional[float] = None
     status: Optional[str] = None
     notes: Optional[str] = None
+    # Не колонка: подтверждение «да, утверждаю смету без продажных цен» (_check_sellable).
+    # Обязателен pop из fields перед UPDATE — иначе уедет в SET-выражение.
+    force: bool = False
 
 
 def _apply_unit_fields(fields: dict, *, quantity: int, payment_type: str, bank_pct) -> None:
@@ -551,12 +578,17 @@ def update_set(set_id: str, body: SetUpdate):
             raise HTTPException(status_code=404, detail="Not found")
         fields = body.model_dump(exclude_unset=True)   # присланный null очищает поле
         move_to = fields.pop("order_id", None)
+        fields.pop("force", None)                      # флаг гейта, а не колонка
         if not fields:
             if move_to:
                 _move_set(conn, set_id, move_to)
                 conn.commit()
                 return dict(conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (set_id,)).fetchone())
             return dict(row)
+        # Вторая дверь к утверждению — тот же гейт, что у POST /approve. Без него
+        # редактор смет обнулял цену заказа одним кликом (см. _check_sellable).
+        if fields.get("status") == "approved" and row["status"] != "approved":
+            _check_sellable(conn, set_id, bool(body.force))
         # У утверждённой сметы суммы согласованы с клиентом: менять payment_type/bank_pct нельзя.
         if row["status"] == "approved" and ("payment_type" in fields or "bank_pct" in fields):
             raise HTTPException(status_code=409, detail="Смета утверждена — тип оплаты и банковский % заморожены. Создай новую версию.")
@@ -631,13 +663,7 @@ def approve_set(set_id: str, body: Optional[ApproveIn] = None):
             raise HTTPException(status_code=404, detail="Set not found")
         already = es["status"] == "approved"
         if not already:
-            t = set_totals(conn, set_id)
-            # Сметы финагента бывают без продажных цен — approve обнулил бы цену заказа.
-            if t["price"] <= 0 and not force:
-                raise HTTPException(
-                    status_code=409,
-                    detail="В смете нет продажных цен — после утверждения цена заказа станет 0 ₽. Если так и надо, повтори с force=true.",
-                )
+            _check_sellable(conn, set_id, force)
             conn.execute(
                 "UPDATE estimate_sets SET status = 'approved', updated_at = ? WHERE id = ?",
                 (_now(), set_id)
@@ -646,6 +672,87 @@ def approve_set(set_id: str, body: Optional[ApproveIn] = None):
         conn.commit()
         diff["already_approved"] = already
         return diff
+    finally:
+        conn.close()
+
+
+class UnapproveIn(BaseModel):
+    confirm: bool = False
+
+
+@router.post("/sets/{set_id}/unapprove")
+def unapprove_set(set_id: str, body: Optional[UnapproveIn] = None):
+    """Рассогласовать смету — честно откатив всё, что сделало утверждение.
+
+    До 24.08.2026 кнопка «Снять согласование» слала PUT {status:'draft'} и меняла
+    ровно одну надпись: прочие сметы оставались superseded, is_primary — на этой,
+    план заказа — пересчитанным, обязательства — созданными. Подпись обещала
+    обратимость, которой не было.
+
+    Откатываем: статус → draft, снимаем is_primary, поднимаем обратно сметы с
+    superseded_by = этот сет, пересчитываем план заказа от новой активной сметы
+    (_resync_order_plan — та же функция, что у переноса).
+
+    Обязательства: те, по которым уже прошли деньги, НЕ удаляются никогда — иначе
+    факт заказа потеряет источник. Без confirm возвращаем 409 со списком и ждём
+    решения (форма ответа как у orders._apply_status → obligations_unpaid)."""
+    confirm = bool(body and body.confirm)
+    conn = get_production()
+    try:
+        es = conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
+        if not es:
+            raise HTTPException(status_code=404, detail="Set not found")
+        if es["status"] != "approved":
+            raise HTTPException(status_code=409, detail="Смета не утверждена — отменять нечего")
+        oid = es["order_id"]
+
+        # Что стало с обязательствами этой сметы. Признак «трогали деньгами» — тот же,
+        # что в обязательствах вообще: paid или покрытие расходом (obligations.coverage).
+        from obligations import coverage as _coverage
+        cov = _coverage(conn, [oid]) if oid else {}
+        creds = [dict(r) for r in conn.execute(
+            """SELECT c.id, c.name, c.description, c.total, c.paid, c.status
+                 FROM creditors c
+                 JOIN estimate_lines el ON el.id = c.estimate_line_id
+                 JOIN estimate_items ei ON ei.id = el.item_id
+                WHERE ei.set_id = ?""", (set_id,)).fetchall()]
+        keep, drop = [], []
+        for c in creds:
+            covered = (cov.get(c["id"]) or {}).get("covered", 0.0)
+            touched = (c["paid"] or 0) > 0 or covered > 0
+            item = {"id": c["id"], "name": c["description"] or c["name"],
+                    "plan": round(c["total"] or 0, 2), "paid": round(c["paid"] or 0, 2),
+                    "covered": round(covered, 2)}
+            (keep if touched else drop).append(item)
+
+        will_restore = conn.execute(
+            "SELECT COUNT(*) FROM estimate_sets WHERE superseded_by = ?", (set_id,)).fetchone()[0]
+
+        if not confirm and (drop or keep or will_restore):
+            raise HTTPException(status_code=409, detail={
+                "code": "unapprove_confirm",
+                "message": "Рассогласование откатит утверждение — подтверди последствия",
+                "restore_sets": will_restore,
+                "obligations_delete": drop,
+                "obligations_keep": keep,
+            })
+
+        for c in drop:
+            conn.execute("DELETE FROM creditors WHERE id = ?", (c["id"],))
+        conn.execute(
+            "UPDATE estimate_sets SET status = 'draft', is_primary = 0, updated_at = ? WHERE id = ?",
+            (_now(), set_id))
+        restored = conn.execute(
+            "UPDATE estimate_sets SET status = 'draft', superseded_by = NULL, updated_at = ? "
+            "WHERE superseded_by = ?", (_now(), set_id)).rowcount
+        plan = _resync_order_plan(conn, oid) if oid else {}
+        audit(conn, "estimate", set_id, "update",
+              f"Рассогласование: смет поднято {restored}, обязательств удалено {len(drop)}, "
+              f"оставлено с фактом {len(keep)}", before_row=es)
+        conn.commit()
+        return {"ok": True, "restored_sets": restored,
+                "obligations_deleted": len(drop), "obligations_kept": keep,
+                "plan": plan}
     finally:
         conn.close()
 
@@ -739,7 +846,7 @@ def delete_set(set_id: str):
         items = conn.execute("SELECT id FROM estimate_items WHERE set_id = ?", (set_id,)).fetchall()
         # Картинки позиций каскад снимет сам, а файлы на диске — нет: пути
         # собираем до удаления, сносим после коммита (media.media_files_of).
-        from media import media_files_of, unlink_files
+        from routers.media import media_files_of, unlink_files
         files = media_files_of(conn, estimate_item_ids=[i["id"] for i in items])
         for item in items:
             conn.execute("DELETE FROM estimate_lines WHERE item_id = ?", (item["id"],))
@@ -975,7 +1082,7 @@ def delete_item(item_id: str):
         _assert_set_editable(conn, set_id)
         _touch_set(conn, item_id)
         before = conn.execute("SELECT * FROM estimate_items WHERE id = ?", (item_id,)).fetchone()
-        from media import media_files_of, unlink_files
+        from routers.media import media_files_of, unlink_files
         files = media_files_of(conn, estimate_item_ids=[item_id])
         conn.execute("DELETE FROM estimate_lines WHERE item_id = ?", (item_id,))
         conn.execute("DELETE FROM estimate_items WHERE id = ?", (item_id,))

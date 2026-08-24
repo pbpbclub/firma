@@ -537,7 +537,7 @@ def delete_item(item_id: str):
             raise HTTPException(status_code=404, detail="Not found")
         # Картинки карточки уносит каскад media.catalog_item_id, файлы на диске —
         # нет: пути собираем до удаления, сносим после коммита.
-        from media import media_files_of, unlink_files
+        from routers.media import media_files_of, unlink_files
         files = media_files_of(conn, catalog_item_ids=[item_id])
         conn.execute("DELETE FROM catalog_item_lines WHERE item_id = ?", (item_id,))
         conn.execute("DELETE FROM catalog_items WHERE id = ?", (item_id,))
@@ -557,7 +557,7 @@ def delete_by_titles(body: DeleteByTitlesBody):
     """Delete all estimate_items (and their lines) matching the given titles."""
     conn = get_production()
     try:
-        from media import media_files_of, unlink_files
+        from routers.media import media_files_of, unlink_files
         deleted, files = 0, []
         for title in body.titles:
             item_ids = [r["id"] for r in conn.execute(
