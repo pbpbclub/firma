@@ -3,7 +3,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loading } from "../components/ui/Loading";
 import { QueryError } from "../components/ui/QueryError";
 import { EmptyState } from "../components/ui/EmptyState";
-import { financeApi, zenmoneyApi, ordersApi } from "../api";
+import { financeApi, zenmoneyApi, ordersApi, paymentsApi, inboxApi } from "../api";
+import { PaymentAllocator, allocReady, allocPayload, type Alloc as PayAlloc } from "../components/money/PaymentAllocator";
 import { MagnifyingGlass, X, LinkSimple } from "@phosphor-icons/react";
 import { ColumnFilter, AmountFilter, PeriodFilter } from "../components/TableFilters";
 import { Modal } from "../components/ui/Modal";
@@ -198,31 +199,31 @@ function LinkOrderModal({ tx, paymentByFinTx, onClose }: {
   onClose: () => void;
 }) {
   const qc = useQueryClient();
-  const [search, setSearch] = useState("");
-  const { data: suggested = [], isFetching } = useQuery({
-    queryKey: ["suggest-orders", tx.id],
-    queryFn: () => ordersApi.suggest(tx.counterparty || tx.purpose || "", tx.amount || 0),
-  });
-
   // Подсказка резерва после привязки платежа: пришли деньги — предложить отложить материалы.
   const [reservePrompt, setReservePrompt] = useState<{ orderId: string; amount: number; title: string } | null>(null);
+
+  // Разноска — той же ручкой, что в «Разноске»: несколько заказов, общий group_id,
+  // привязка к допу. Раньше здесь был ordersApi.addPayment на один заказ и без
+  // группы, поэтому разнесённое из ДДС нельзя было ни разбить, ни откатить.
+  const [allocs, setAllocs] = useState<PayAlloc[]>([]);
+  const [error, setError] = useState("");
 
   const link = useMutation({
     mutationFn: async ({ orderId, txId, title }: { orderId: string | null; txId: string; title?: string }) => {
       if (orderId === null) {
+        // Откат: разнесённое группой снимаем целиком — транзакция вернётся в инбокс.
         const cur = paymentByFinTx.get(String(txId));
-        if (cur) await ordersApi.deletePayment(cur.order_id, cur.payment_id);
+        if (cur?.group_id) await paymentsApi.deleteGroup(cur.group_id);
+        else if (cur) await ordersApi.deletePayment(cur.order_id, cur.payment_id);
         return null;
       }
-      const res = await ordersApi.addPayment(orderId, {
-        amount: tx.amount,
-        paid_at: (tx.date || "").slice(0, 10),
-        note: `ДДС: ${tx.counterparty || tx.purpose || ""}`.trim(),
-        bank_tx_id: String(txId),
-      });
+      const res = await paymentsApi.fromTx({ tx_id: String(txId), allocations: allocPayload(allocs) });
       return { res, orderId, title };
     },
+    onError: (e: any) => setError(e?.response?.data?.detail || "Не удалось разнести платёж"),
     onSuccess: (data: any) => {
+      setError("");
+      setAllocs([]);
       qc.invalidateQueries({ queryKey: ["payments-map"] });
       qc.invalidateQueries({ queryKey: ["free-cash"] });
       // Если по заказу ещё нет резерва, а смета подсказывает материалы — предложить.
@@ -244,11 +245,6 @@ function LinkOrderModal({ tx, paymentByFinTx, onClose }: {
   function fmtAmt(n: number) {
     return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) + " ₽";
   }
-
-  const items: any[] = suggested as any[];
-  const filtered = search
-    ? items.filter((o: any) => ((o.title || "") + " " + (o.customer_name || "")).toLowerCase().includes(search.toLowerCase()))
-    : items;
 
   // После привязки платежа — экран-подсказка резерва вместо списка заказов.
   if (reservePrompt) {
@@ -275,32 +271,27 @@ function LinkOrderModal({ tx, paymentByFinTx, onClose }: {
             <button onClick={() => link.mutate({ orderId: null, txId: String(tx.id) })} style={{ fontSize: 11, color: "#8B3A3A", background: "none", border: "none", cursor: "pointer", padding: 0 }}>Отвязать</button>
           </div>
         )}
-        <div style={{ padding: "8px 20px", borderBottom: "1px solid #F2EFE9" }}>
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Поиск по заказу или клиенту..."
-            style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "5px 10px", fontSize: 12, outline: "none" }} />
-        </div>
-        <div style={{ flex: 1, overflowY: "auto" }}>
-          {isFetching && <Loading compact />}
-          {!isFetching && filtered.length === 0 && <EmptyState compact title="Заказы не найдены" />}
-          {!isFetching && filtered.map((o: any) => (
-            <div key={o.id} onClick={() => link.mutate({ orderId: o.id, txId: String(tx.id), title: o.title })}
-              style={{ display: "grid", gridTemplateColumns: "1fr 100px 80px", padding: "9px 20px", borderBottom: "1px solid #F2EFE9", cursor: "pointer", alignItems: "center", gap: 10 }}
-              onMouseEnter={e => { e.currentTarget.style.background = "#FAF8F5"; }}
-              onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
-            >
-              <div>
-                <div style={{ fontSize: 12, fontWeight: 500, color: "#1A1A1A" }}>{o.title}</div>
-                {o.customer_name && <div style={{ fontSize: 10, color: "#A89070", marginTop: 1 }}>{o.customer_name}</div>}
-              </div>
-              <div style={{ fontSize: 11, color: "#A89070", textAlign: "right" }}>{fmtAmt(o.price_plan || 0)}</div>
-            </div>
-          ))}
+        <div style={{ padding: "14px 20px 18px" }}>
+          <PaymentAllocator tx={tx} allocs={allocs} onChange={setAllocs} />
+          {error && <div style={{ fontSize: 11, color: "#8B3A3A", marginTop: 8 }}>{error}</div>}
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}>
+            <button
+              disabled={!allocReady(allocs, tx.amount) || link.isPending}
+              onClick={() => link.mutate({ orderId: allocs[0]?.order_id ?? null, txId: String(tx.id) })}
+              style={{ fontSize: 12, fontWeight: 600, padding: "7px 16px", border: "none", fontFamily: "inherit",
+                background: allocReady(allocs, tx.amount) ? "#E8592A" : "#EDEBE6",
+                color: allocReady(allocs, tx.amount) ? "#fff" : "#A89070",
+                cursor: allocReady(allocs, tx.amount) ? "pointer" : "default" }}>
+              {link.isPending ? "..." : "Разнести"}
+            </button>
+          </div>
         </div>
     </Modal>
   );
 }
 
 export default function Finance() {
+  const qc = useQueryClient();
   const [direction, setDirection] = useState("");
   const [search, setSearch] = useState("");
   const [accountFilter, setAccountFilter] = useState("");
@@ -342,6 +333,29 @@ const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
     }
     return m;
   }, [paymentsMapData]);
+
+  // Куда разнесены СПИСАНИЯ. Для поступлений такая карта была с самого начала,
+  // для расходов — нет: транзакция выглядела неразнесённой, хотя деньги давно
+  // разложены по заказам, а откатить ошибку можно было только из карточки заказа.
+  const { data: expensesMapData = {} } = useQuery({
+    queryKey: ["expenses-map"],
+    queryFn: inboxApi.map,
+  });
+  const expensesByTx = useMemo(() => {
+    const m = new Map<string, any[]>();
+    for (const [key, rows] of Object.entries(expensesMapData as Record<string, any[]>)) {
+      if (key.startsWith("bank:")) m.set(key.slice(5), rows);
+    }
+    return m;
+  }, [expensesMapData]);
+
+  const undoExpenseGroup = useMutation({
+    mutationFn: (groupId: string) => inboxApi.deleteGroup(groupId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["expenses-map"] });
+      qc.invalidateQueries({ queryKey: ["free-cash"] });
+    },
+  });
 
   const [asOf, setAsOf] = useState(new Date().toISOString().slice(0, 10));
   const { data: balance } = useQuery({ queryKey: ["fin-bal-at", asOf], queryFn: () => financeApi.balanceAtDate(asOf) });
@@ -545,6 +559,21 @@ const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
                   {t.direction === "out" && creditorByFinTx.has(String(t.id)) && (
                     <div style={{ fontSize: 10, color: "#4A7C59", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {creditorByFinTx.get(String(t.id))?.name}
+                    </div>
+                  )}
+                  {t.direction === "out" && expensesByTx.has(String(t.id)) && (
+                    <div style={{ fontSize: 10, color: "#6B6355", marginTop: 2 }}>
+                      {expensesByTx.get(String(t.id))!.map((e: any) => e.order_title || e.purpose || "вне заказов").join(" · ")}
+                      {(() => {
+                        const gid = expensesByTx.get(String(t.id))!.find((e: any) => e.group_id)?.group_id;
+                        return gid ? (
+                          <button onClick={ev => { ev.stopPropagation(); if (confirm("Откатить разноску этого списания целиком? Транзакция вернётся в «Разноску».")) undoExpenseGroup.mutate(gid); }}
+                            title="Откатить разноску целиком"
+                            style={{ marginLeft: 6, fontSize: 10, color: "#8B3A3A", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
+                            откатить
+                          </button>
+                        ) : null;
+                      })()}
                     </div>
                   )}
                   {t.direction === "in" && paymentByFinTx.has(String(t.id)) && (

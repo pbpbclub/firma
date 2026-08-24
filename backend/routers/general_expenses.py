@@ -142,22 +142,31 @@ def list_general(
         rows = [dict(r) for r in conn.execute(" ".join(sql), params).fetchall()]
 
         # Списанное в заказы — одним запросом на все строки (code_rules: без N+1).
-        spent = {}
+        # Отдаём не только сумму, но и сами строки: без их id откатить списание из
+        # интерфейса было нечем (DELETE /write-offs/{expense_id} принимает id ребёнка).
+        spent, children = {}, {}
         if with_spent and rows:
             for r in conn.execute(
-                """SELECT e.stock_parent_id AS pid, SUM(e.amount) AS total, COUNT(*) AS cnt,
-                          GROUP_CONCAT(o.title, ' • ') AS orders
+                """SELECT e.id, e.stock_parent_id AS pid, e.amount, e.expense_date,
+                          e.order_id, o.title AS order_title, o.number AS order_number
                      FROM expenses e LEFT JOIN orders o ON o.id = e.order_id
                     WHERE e.stock_parent_id IS NOT NULL
-                    GROUP BY e.stock_parent_id"""
+                    ORDER BY e.expense_date DESC"""
             ).fetchall():
-                spent[r["pid"]] = {"amount": round(r["total"] or 0, 2),
-                                   "count": r["cnt"], "orders": r["orders"]}
+                d = dict(r)
+                pid = d.pop("pid")
+                agg = spent.setdefault(pid, {"amount": 0.0, "count": 0, "titles": []})
+                agg["amount"] = round(agg["amount"] + (d["amount"] or 0), 2)
+                agg["count"] += 1
+                if d["order_title"] and d["order_title"] not in agg["titles"]:
+                    agg["titles"].append(d["order_title"])
+                children.setdefault(pid, []).append(d)
         for r in rows:
-            s = spent.get(r["id"], {"amount": 0, "count": 0, "orders": None})
+            s = spent.get(r["id"], {"amount": 0, "count": 0, "titles": []})
             r["written_off"] = s["amount"]
             r["written_off_count"] = s["count"]
-            r["written_off_orders"] = s["orders"]
+            r["written_off_orders"] = " • ".join(s["titles"]) or None
+            r["write_offs"] = children.get(r["id"], [])
             r["purpose_label"] = PURPOSE_LABELS.get(r["purpose"] or "", r["purpose"])
         return {
             "items": rows,

@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loading } from "../components/ui/Loading";
 import { EmptyState } from "../components/ui/EmptyState";
-import { financeApi, zenmoneyApi, ordersApi } from "../api";
+import { financeApi, zenmoneyApi, ordersApi, ledgerApi } from "../api";
 import { useNavigate } from "react-router-dom";
 import { Bank, X, Check, Plus, LinkSimple } from "@phosphor-icons/react";
 import { ColumnFilter, AmountFilter, PeriodFilter } from "../components/TableFilters";
@@ -20,6 +20,7 @@ const SANS = "inherit";
 // Полярность вкладки: деньги входят (in) / выходят (out) — задаёт цвет зоны.
 const TAB_POLARITY: Record<string, keyof typeof POLARITY> = {
   debtors: "in", unallocated: "in", creditors: "out", fixed: "out", plan: "out",
+  ledger: "out",
 };
 
 function Checkbox({ checked, indeterminate = false, onChange }: {
@@ -1372,9 +1373,87 @@ function FixedTab() {
 
 // ── Главная страница ────────────────────────────────────────────────────────
 
+/** Сальдо по всем подрядчикам одним экраном (GET /api/ledger/balances).
+ *
+ *  Рядом с «Мы должны» намеренно: там обязательства по сметам — ПЛАН закупок,
+ *  здесь лицевой счёт — сколько мы должны мастеру НА САМОМ ДЕЛЕ, с учётом
+ *  выданных авансов, зачётов и оплат за него третьим лицам. Две разные цифры,
+ *  и вторую до сих пор можно было увидеть только по одному подрядчику за раз. */
+function LedgerTab() {
+  const navigate = useNavigate();
+  const { data, isLoading, error, isError } = useQuery({
+    queryKey: ["ledger-balances"],
+    queryFn: () => ledgerApi.balances(),
+  });
+  if (isError) return <QueryError error={error} what="сальдо подрядчиков" />;
+  if (isLoading) return <Loading />;
+  const items: any[] = data?.items ?? [];
+  if (!items.length) return <EmptyState compact title="Расчётов с подрядчиками нет" />;
+
+  const COLS = "1.6fr 110px 110px 110px 100px 120px 120px";
+  const head: React.CSSProperties = { fontSize: 10, color: "#A89070", letterSpacing: "0.04em", textAlign: "right" };
+  const cell: React.CSSProperties = { fontSize: 12, textAlign: "right", fontFamily: MONO, fontVariantNumeric: "tabular-nums" };
+
+  return (
+    <div style={{ padding: "0 28px 40px" }}>
+      <div style={{ margin: "12px 0 0", padding: "11px 14px", background: "#FAF8F5",
+                    borderLeft: "3px solid #EDEBE6", fontSize: 12, color: "#6B6355", lineHeight: 1.5 }}>
+        Лицевые счета: начислено по сметам минус выплаты, зачёты и оплаты за подрядчика.
+        Плюс — мы должны мастеру, минус — у него наш аванс. Это не то же, что «Мы должны»:
+        там план закупок по сметам, здесь реальный расчёт.
+      </div>
+
+      <div style={{ display: "flex", gap: 36, margin: "18px 0 14px" }}>
+        <div>
+          <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>МЫ ДОЛЖНЫ</div>
+          <div style={{ fontSize: 20, fontWeight: 700, fontFamily: MONO, color: "#8B3A3A" }}>{fmt(data?.we_owe)}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>АВАНСЫ У МАСТЕРОВ</div>
+          <div style={{ fontSize: 20, fontWeight: 700, fontFamily: MONO, color: "#4A7C59" }}>{fmt(data?.they_owe)}</div>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: COLS, gap: "0 14px", padding: "8px 0",
+                    borderBottom: "1px solid #EDEBE6" }}>
+        <span style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>ПОДРЯДЧИК</span>
+        <span style={head}>НАЧИСЛЕНО</span>
+        <span style={head}>ВЫПЛАЧЕНО</span>
+        <span style={head}>ЗА НЕГО</span>
+        <span style={head}>ЗАЧТЕНО</span>
+        <span style={{ ...head }} title="Работы приняты, но закрыты авансом или зачётом либо ещё не оплачены. В сальдо не входит.">ПРИНЯТО</span>
+        <span style={head}>САЛЬДО</span>
+      </div>
+
+      {items.map((m: any) => (
+        <div key={m.master_id} onClick={() => navigate(`/wiki/contractors/${m.master_id}`)}
+          style={{ display: "grid", gridTemplateColumns: COLS, gap: "0 14px", padding: "10px 0",
+                   borderBottom: "1px solid #F7F5F1", cursor: "pointer", alignItems: "baseline" }}
+          onMouseEnter={e => { e.currentTarget.style.background = "#FAF8F5"; }}
+          onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}>
+          <span style={{ fontSize: 13, color: "#1A1A1A" }}>
+            {m.name}
+            {m.role && <span style={{ fontSize: 10, color: "#A89070" }}> · {m.role}</span>}
+          </span>
+          <span style={{ ...cell, color: "#6B6355" }}>{fmt(m.accrued)}</span>
+          <span style={{ ...cell, color: "#6B6355" }}>{fmt(m.paid)}</span>
+          <span style={{ ...cell, color: m.third_party ? "#6B6355" : "#C8C0B0" }}>{m.third_party ? fmt(m.third_party) : "—"}</span>
+          <span style={{ ...cell, color: m.offset ? "#6B6355" : "#C8C0B0" }}>{m.offset ? fmt(m.offset) : "—"}</span>
+          <span style={{ ...cell, color: m.accepted ? "#A89070" : "#C8C0B0" }}>{m.accepted ? fmt(m.accepted) : "—"}</span>
+          <span style={{ ...cell, fontWeight: 700,
+            color: m.balance > 0 ? "#8B3A3A" : m.balance < 0 ? "#4A7C59" : "#A89070" }}>
+            {m.balance === 0 ? "—" : fmt(m.balance)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+
 export default function Debtors() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState<"debtors" | "unallocated" | "creditors" | "plan" | "fixed">("debtors");
+  const [tab, setTab] = useState<"debtors" | "unallocated" | "creditors" | "plan" | "ledger" | "fixed">("debtors");
   const [addCreditorOpen, setAddCreditorOpen] = useState(false);
   const [addReceivableOpen, setAddReceivableOpen] = useState(false);
   const [addFixedOpen, setAddFixedOpen] = useState(false);
@@ -1397,6 +1476,9 @@ export default function Debtors() {
     // План по подрядчикам: обязательства заказов, которые ещё не запущены.
     // В сальдо не идут — подрядчикам ничего не заказано (решение Юры 04.08.2026).
     { id: "plan",        label: "План по подрядчикам" },
+    // Лицевые счета — это НЕ обязательства: там план закупок по сметам, здесь
+    // реальный долг мастеру с учётом авансов, зачётов и оплат за него.
+    { id: "ledger",      label: "Расчёты с подрядчиками" },
     { id: "fixed",       label: "Постоянные" },
     { id: "unallocated", label: openRecCount > 0 ? `Нераспределённые (${openRecCount})` : "Нераспределённые" },
   ];
@@ -1492,7 +1574,11 @@ export default function Debtors() {
             plan: () => navigate("/orders"),
             fixed: () => setAddFixedOpen(true),
             unallocated: () => setAddReceivableOpen(true),
+            // Расчёты — сводка только на чтение: аванс, зачёт и оплату за подрядчика
+            // заводят в его карточке, чтобы оба входа писали одну строку.
+            ledger: null,
           }[tab];
+          if (!onAdd) return null;
           return (
             <Button variant="primary" size="sm" onClick={onAdd}>
               <Plus size={13} weight="bold" /> Добавить
@@ -1516,6 +1602,7 @@ export default function Debtors() {
             <CreditorsTab scope="plan" />
           </>
         )}
+        {tab === "ledger" && <LedgerTab />}
         {tab === "fixed" && <FixedTab />}
       </div>
     </div>

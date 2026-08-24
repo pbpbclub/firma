@@ -3,7 +3,7 @@
 // в смете/у финагента, авто-обучение при утверждении смет.
 import { useState } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
-import { Plus, ArrowsClockwise, Trash } from "@phosphor-icons/react";
+import { Plus, ArrowsClockwise, Trash, X } from "@phosphor-icons/react";
 import { workRatesApi, priceBookApi, workTypesApi, mastersApi } from "../api";
 import { MONO } from "./ui/Num";
 import { fmtMoney } from "./ui/format";
@@ -51,6 +51,14 @@ export function CostingRefsSection() {
     onSuccess: () => { inv(); setTierForm({ min_qty: "", rate: "" }); },
   });
   const delTier = useMutation({ mutationFn: (id: string) => workRatesApi.deleteTier(id), onSuccess: inv });
+  const link = useMutation({
+    mutationFn: ({ wt, master }: { wt: string; master: string }) => workTypesApi.linkMaster(wt, master),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["masters"] }),
+  });
+  const unlink = useMutation({
+    mutationFn: ({ wt, master }: { wt: string; master: string }) => workTypesApi.unlinkMaster(wt, master),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["masters"] }),
+  });
   const delPrice = useMutation({
     mutationFn: (id: number) => priceBookApi.delete(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["price-book"] }),
@@ -196,6 +204,49 @@ export function CostingRefsSection() {
           })}
         </div>
       )}
+
+      {/* ── Кто что делает: мастера ↔ виды работ ──
+          Связки хранит master_work_types; ContractorSelect по ним группирует
+          исполнителей «По этому виду работ» в строке сметы. Привязать существующего
+          мастера из интерфейса было нельзя — связка рождалась только при создании
+          нового мастера прямо из калькулятора. */}
+      <div style={{ ...label, margin: "26px 0 6px" }}>КТО ЧТО ДЕЛАЕТ</div>
+      <div style={{ fontSize: 11, color: "#A89070", marginBottom: 12, lineHeight: 1.5 }}>
+        В смете такие исполнители поднимаются наверх списка для своего вида работ.
+      </div>
+      <div style={{ border: "1px solid #EDEBE6" }}>
+        {(workTypes as any[]).map((wt: any) => {
+          // Источник привязок — work_type_ids из уже загруженного списка мастеров:
+          // запрос /work-types/{id}/masters на каждый вид дал бы N+1.
+          const linked = (masters as any[]).filter((m: any) => (m.work_type_ids || []).includes(wt.id));
+          const free = (masters as any[]).filter((m: any) => !(m.work_type_ids || []).includes(wt.id));
+          return (
+            <div key={wt.id} style={{ display: "grid", gridTemplateColumns: "160px 1fr 190px", gap: 10,
+                   padding: "9px 12px", borderBottom: "1px solid #F2EFE9", alignItems: "center" }}>
+              <div style={{ fontSize: 12, color: "#1A1A1A" }}>{wt.name}</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {linked.length === 0 && <span style={{ fontSize: 11, color: "#C8C0B0" }}>никто не назначен</span>}
+                {linked.map((m: any) => (
+                  <span key={m.id} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11,
+                         border: "1px solid #EDEBE6", padding: "3px 6px 3px 9px", color: "#6B6355" }}>
+                    {m.name}
+                    <button onClick={() => unlink.mutate({ wt: wt.id, master: m.id })} disabled={unlink.isPending}
+                      title="Убрать из этого вида работ"
+                      style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 0, display: "flex" }}>
+                      <X size={10} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <select value="" onChange={e => e.target.value && link.mutate({ wt: wt.id, master: e.target.value })}
+                style={{ ...inputStyle, cursor: "pointer" }}>
+                <option value="">+ добавить исполнителя…</option>
+                {free.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+            </div>
+          );
+        })}
+      </div>
 
       {/* ── Выученные цены (вне прайсов) ── */}
       {(priceBook as any[]).length > 0 && (

@@ -221,6 +221,8 @@ export const inboxApi = {
     }[];
   }) => api.post("/expenses/from-tx", data).then((r) => r.data),
   deleteGroup: (groupId: string) => api.delete(`/expenses/groups/${groupId}`).then((r) => r.data),
+  // Куда разнесены списания: {"bank:<id>"|"zen:<id>": [{order_id, order_title, amount, group_id}]}
+  map: () => api.get("/expenses/map").then((r) => r.data),
   // Скрытие списания из инбокса (внутренний перевод между своими, возврат…)
   dismiss: (txId: string, source: string, reason?: string) =>
     api.post(`/expenses/inbox/${txId}/dismiss`, { source, reason }).then((r) => r.data),
@@ -285,6 +287,10 @@ export const estimatesApi = {
   approveSet:  (setId: string, force = false) => api.post(`/estimates/sets/${setId}/approve`, { force }).then(r => r.data),
   // Честный откат утверждения: без confirm вернёт 409 со списком последствий.
   unapproveSet: (setId: string, confirm = false) => api.post(`/estimates/sets/${setId}/unapprove`, { confirm }).then(r => r.data),
+  // Перенос сметы в другой заказ вместе с обязательствами. 409 target_has_approved —
+  // у приёмника уже есть утверждённая смета, detail здесь ОБЪЕКТ, а не строка.
+  moveSet: (setId: string, orderId: string, confirm = false) =>
+    api.post(`/estimates/sets/${setId}/move`, { order_id: orderId, confirm }).then(r => r.data),
   reviewQueue: ()                           => api.get("/estimates/review-queue").then(r => r.data),
   costCheck:   (setId: string)              => api.get(`/estimates/sets/${setId}/cost-check`).then(r => r.data),
   // Готовность к заполнению: дубли смет, заглушки себестоимости, дыры в ставках
@@ -369,6 +375,8 @@ export const workTypesApi = {
   list: () => api.get("/work-types").then((r) => r.data),
   create: (name: string) => api.post("/work-types", { name }).then((r) => r.data),
   masters: (workTypeId: string) => api.get(`/work-types/${workTypeId}/masters`).then((r) => r.data),
+  unlinkMaster: (workTypeId: string, masterId: string) =>
+    api.delete(`/work-types/${workTypeId}/masters/${masterId}`).then((r) => r.data),
   linkMaster: (workTypeId: string, masterId: string) =>
     api.post(`/work-types/${workTypeId}/masters/${masterId}`).then((r) => r.data),
 };

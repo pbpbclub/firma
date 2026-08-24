@@ -501,6 +501,36 @@ def undismiss_out_tx(tx_id: str, source: str = Query("bank", pattern="^(bank|zen
         conn.close()
 
 
+@router.get("/map")
+def expenses_map():
+    """Куда разнесены СПИСАНИЯ — зеркало orders.payments-map для поступлений.
+
+    В ДДС было видно, к каким заказам привязаны приходы, но не расходы: транзакция
+    выглядела неразнесённой, хотя деньги давно разложены по заказам, а откатить
+    ошибочную разноску можно было только зайдя в один из затронутых заказов.
+
+    Ключ — id транзакции строкой (в finance.db он INTEGER, в zenmoney UUID),
+    с префиксом источника, чтобы id банка и ZenMoney не столкнулись."""
+    conn = get_production()
+    try:
+        rows = conn.execute(
+            """SELECT e.id AS expense_id, e.amount, e.expense_date, e.category, e.title,
+                      e.group_id, e.finance_tx_id, e.zenmoney_tx_id, e.purpose,
+                      o.id AS order_id, o.number, o.title AS order_title
+               FROM expenses e LEFT JOIN orders o ON o.id = e.order_id
+               WHERE e.finance_tx_id IS NOT NULL OR e.zenmoney_tx_id IS NOT NULL"""
+        ).fetchall()
+        out = {}
+        for r in rows:
+            d = dict(r)
+            key = (f"bank:{d['finance_tx_id']}" if d["finance_tx_id"]
+                   else f"zen:{d['zenmoney_tx_id']}")
+            out.setdefault(key, []).append(d)
+        return out
+    finally:
+        conn.close()
+
+
 @router.delete("/groups/{group_id}")
 def delete_group(group_id: str):
     """Откат всей разноски одной поездки/платежа."""

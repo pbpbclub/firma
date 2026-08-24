@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
+from audit import audit
 from db import get_production
 
 router = APIRouter()
@@ -117,12 +118,16 @@ def add_op(master_id: str, body: OpIn):
         if body.via_cash_fund:
             fund_id = _cash_fund_id(conn)
             if fund_id:
+                # accountable_op_id связывает движение с операцией — иначе удаление
+                # операции оставляло бы кассу расходиться с фактом (тот же приём, что
+                # fund_transactions.expense_id у расходов).
                 conn.execute(
-                    """INSERT INTO fund_transactions (id, fund_id, direction, amount, note, date)
-                       VALUES (?, ?, ?, ?, ?, COALESCE(?, date('now')))""",
+                    """INSERT INTO fund_transactions (id, fund_id, direction, amount, note, date,
+                                                      accountable_op_id)
+                       VALUES (?, ?, ?, ?, ?, COALESCE(?, date('now')), ?)""",
                     (str(uuid.uuid4()), fund_id,
                      "out" if body.kind == "issue" else "in",
-                     body.amount, f"{note} — {m['name']}", body.date),
+                     body.amount, f"{note} — {m['name']}", body.date, op_id),
                 )
         conn.commit()
         return {"ok": True, "id": op_id, "balance": _balance(conn, master_id)}
@@ -151,12 +156,29 @@ def list_ops(master_id: str):
 
 @router.delete("/ops/{op_id}")
 def delete_op(op_id: str):
+    """Удалить операцию подотчёта вместе с её движением кассы.
+
+    Баланс «на руках» считается формулой (_balance), а остаток кассы — суммой
+    fund_transactions: удаление одной операции без второй разводило их молча.
+
+    У операций, заведённых до появления связи (accountable_op_id IS NULL), парного
+    движения не найти — удаляем операцию и честно возвращаем fund_unlinked, чтобы
+    интерфейс сказал «остаток кассы поправь руками», а не сделал вид, что всё сошлось."""
     conn = get_production()
     try:
-        cur = conn.execute("DELETE FROM accountable_ops WHERE id = ?", (op_id,))
-        conn.commit()
-        if not cur.rowcount:
+        row = conn.execute("SELECT * FROM accountable_ops WHERE id = ?", (op_id,)).fetchone()
+        if not row:
             raise HTTPException(status_code=404, detail="Not found")
-        return {"ok": True}
+        fund_rows = conn.execute(
+            "DELETE FROM fund_transactions WHERE accountable_op_id = ?", (op_id,)).rowcount
+        conn.execute("DELETE FROM accountable_ops WHERE id = ?", (op_id,))
+        audit(conn, "accountable_op", op_id, "delete",
+              f"Удалена операция подотчёта: {row['kind']} {row['amount']:g} ₽", before_row=row)
+        conn.commit()
+        # Заводилась ли операция через кассу, accountable_ops не помнит — поэтому
+        # не утверждаем «движение осталось», а говорим «парного движения не нашли».
+        # Для операций, заведённых после связи, ноль здесь значит «кассы и не было».
+        return {"ok": True, "balance": _balance(conn, row["master_id"]),
+                "fund_unlinked": fund_rows == 0}
     finally:
         conn.close()

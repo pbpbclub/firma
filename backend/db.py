@@ -1259,6 +1259,29 @@ def ensure_match_trace_schema():
         conn.close()
 
 
+def ensure_accountable_fund_link_schema():
+    """Связь операции подотчёта с её движением кассы (24.08.2026).
+
+    accountable.add_op пишет зеркальное движение в fund_transactions (выдал из кассы —
+    минус кассе), но без всякой ссылки на операцию. Поэтому DELETE /accountable/ops/{id}
+    убирал операцию и оставлял движение: баланс «на руках» пересчитывался, а остаток
+    кассы — нет. Кнопку удаления в UI из-за этого выводить было нельзя.
+
+    Тот же приём, что у расходов: fund_transactions.expense_id связывает движение с
+    расходом (orders._sync_cash_fund). Здесь — accountable_op_id.
+
+    NULL у старых движений: их операции удалить можно, но движение останется —
+    delete_op честно скажет об этом флагом fund_unlinked."""
+    conn = get_production()
+    try:
+        info = conn.execute("PRAGMA table_info(fund_transactions)").fetchall()
+        if info and "accountable_op_id" not in {r[1] for r in info}:
+            conn.execute("ALTER TABLE fund_transactions ADD COLUMN accountable_op_id TEXT")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_supersede_trace_schema():
     """След «кто погасил эту смету» — под честное рассогласование (24.08.2026).
 

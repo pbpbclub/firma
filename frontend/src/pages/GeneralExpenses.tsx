@@ -6,7 +6,7 @@
  * списывается в конкретный заказ — датой ИСПОЛЬЗОВАНИЯ, а не покупки: тогда
  * себестоимость ложится туда, где материал реально израсходован.
  */
-import { useState } from "react";
+import { useState, Fragment } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { Plus, Trash, ArrowRight, PencilSimple } from "@phosphor-icons/react";
 
@@ -201,6 +201,12 @@ export default function GeneralExpenses() {
   const [purpose, setPurpose] = useState("");
   const [form, setForm] = useState<{ item: any | null } | null>(null);
   const [writeOff, setWriteOff] = useState<any>(null);
+  // Раскрытие строки запаса: показать сами списания, чтобы ошибочное можно было
+  // откатить. Раньше отдавалась только сумма, и id ребёнка взять было неоткуда.
+  const [openRows, setOpenRows] = useState<Set<string>>(new Set());
+  const toggleRow = (id: string) => setOpenRows(prev => {
+    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n;
+  });
 
   const { data, isLoading } = useQuery({
     queryKey: ["general-expenses", purpose],
@@ -212,6 +218,10 @@ export default function GeneralExpenses() {
   });
   const del = useMutation({
     mutationFn: (id: string) => generalExpensesApi.delete(id),
+    onSuccess: () => refresh(),
+  });
+  const undo = useMutation({
+    mutationFn: (expenseId: string) => generalExpensesApi.undoWriteOff(expenseId),
     onSuccess: () => refresh(),
   });
 
@@ -281,7 +291,8 @@ export default function GeneralExpenses() {
             </thead>
             <tbody>
               {items.map(it => (
-                <tr key={it.id} style={{ borderTop: "1px solid #F2EFE9", fontSize: 12 }}>
+                <Fragment key={it.id}>
+                <tr style={{ borderTop: "1px solid #F2EFE9", fontSize: 12 }}>
                   <td style={{ padding: "11px 28px", color: "#6B6355", fontFamily: MONO, whiteSpace: "nowrap" }}>
                     {fmtDate(it.expense_date)}
                   </td>
@@ -296,10 +307,15 @@ export default function GeneralExpenses() {
                                color: it.amount > 0 ? "#1A1A1A" : "#C8C0B0" }}>
                     {fmt(it.amount)}
                   </td>
-                  <td style={{ padding: "11px 8px", textAlign: "right", fontFamily: MONO, color: "#4A7C59" }}>
+                  <td onClick={() => it.write_offs?.length && toggleRow(it.id)}
+                    style={{ padding: "11px 8px", textAlign: "right", fontFamily: MONO, color: "#4A7C59",
+                             cursor: it.write_offs?.length ? "pointer" : "default" }}
+                    title={it.write_offs?.length ? "Показать списания — их можно откатить" : undefined}>
                     {it.written_off ? fmt(it.written_off) : "—"}
                     {it.written_off_orders && (
-                      <div style={{ fontSize: 10, color: "#A89070", fontFamily: "inherit" }}>{it.written_off_orders}</div>
+                      <div style={{ fontSize: 10, color: "#A89070", fontFamily: "inherit" }}>
+                        {openRows.has(it.id) ? "▾ " : "▸ "}{it.written_off_orders}
+                      </div>
                     )}
                   </td>
                   <td style={{ padding: "9px 28px", textAlign: "right", whiteSpace: "nowrap" }}>
@@ -322,6 +338,28 @@ export default function GeneralExpenses() {
                     </button>
                   </td>
                 </tr>
+                {openRows.has(it.id) && (it.write_offs || []).map((w: any) => (
+                  <tr key={w.id} style={{ background: "#FAF8F5" }}>
+                    <td style={{ padding: "8px 28px", fontSize: 11, color: "#A89070", fontFamily: MONO }}>
+                      {fmtDate(w.expense_date)}
+                    </td>
+                    <td colSpan={2} style={{ padding: "8px", fontSize: 12, color: "#6B6355" }}>
+                      → {w.order_title || w.order_number || "заказ удалён"}
+                    </td>
+                    <td style={{ padding: "8px", textAlign: "right", fontFamily: MONO, fontSize: 12, color: "#4A7C59" }}>
+                      {fmt(w.amount)}
+                    </td>
+                    <td style={{ padding: "8px 28px", textAlign: "right" }}>
+                      <button onClick={() => undo.mutate(w.id)} disabled={undo.isPending}
+                        title="Вернуть сумму в запас и убрать расход из заказа"
+                        style={{ fontSize: 11, padding: "4px 10px", border: "1px solid #EDEBE6", background: "#fff",
+                                 color: "#6B6355", cursor: "pointer", fontFamily: "inherit" }}>
+                        {undo.isPending ? "..." : "Вернуть в запас"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                </Fragment>
               ))}
             </tbody>
           </table>

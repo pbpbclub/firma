@@ -1,6 +1,6 @@
 import { fmtMoney as fmt } from "../components/ui/format";
 import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { Loading } from "../components/ui/Loading";
 import { EmptyState } from "../components/ui/EmptyState";
 import { MONO } from "../components/ui/Num";
@@ -262,10 +262,24 @@ function AccountableSection() {
   const [amount, setAmount] = useState("");
   const [saving, setSaving] = useState(false);
 
+  const [unlinkedWarn, setUnlinkedWarn] = useState(false);
+
   const { data: hist } = useQuery({
     queryKey: ["accountable-ops", histFor?.id],
     queryFn: () => accountableApi.ops(histFor!.id),
     enabled: !!histFor,
+  });
+
+  const delOp = useMutation({
+    mutationFn: (opId: string) => accountableApi.deleteOp(opId),
+    onSuccess: (res: any) => {
+      // fund_unlinked — у операции не нашлось парного движения кассы (заведена до
+      // появления связи либо шла мимо кассы). Молчать нельзя: остаток мог поехать.
+      setUnlinkedWarn(!!res?.fund_unlinked);
+      qc.invalidateQueries({ queryKey: ["accountable"] });
+      qc.invalidateQueries({ queryKey: ["accountable-ops", histFor?.id] });
+      qc.invalidateQueries({ queryKey: ["funds"] });
+    },
   });
 
   const doOp = async () => {
@@ -323,20 +337,35 @@ function AccountableSection() {
 
       {/* История операций лица */}
       {histFor && (
-        <Modal size="md" eyebrow={`ПОД ОТЧЁТОМ · ${histFor.name.toUpperCase()}`} onClose={() => setHistFor(null)} onCancel={() => setHistFor(null)}>
+        <Modal size="md" eyebrow={`ПОД ОТЧЁТОМ · ${histFor.name.toUpperCase()}`} onClose={() => { setHistFor(null); setUnlinkedWarn(false); }} onCancel={() => { setHistFor(null); setUnlinkedWarn(false); }}>
           <div style={{ padding: "16px 24px 20px" }}>
             <div style={{ fontSize: 12, color: "#6B6355", marginBottom: 12 }}>
               На руках: <span style={{ fontFamily: MONO, fontWeight: 700, color: "#1A1A1A" }}>{fmt(hist?.balance ?? histFor.balance)}</span>
             </div>
             {(hist?.ops ?? []).map((o: any) => (
-              <div key={o.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "7px 0", borderBottom: "1px solid #F2EFE9", fontSize: 12 }}>
+              <div key={o.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "7px 0", borderBottom: "1px solid #F2EFE9", fontSize: 12 }}>
                 <span style={{ color: "#A89070", fontFamily: MONO }}>{o.date}</span>
                 <span style={{ flex: 1, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.note || (o.kind === "issue" ? "Выдача" : "Возврат")}</span>
                 <span style={{ fontFamily: MONO, fontWeight: 600, color: o.kind === "issue" ? "#4A7C59" : "#8B3A3A" }}>
                   {o.kind === "issue" ? "+" : "−"}{fmt(o.amount)}
                 </span>
+                {/* Удаление сносит и парное движение кассы (fund_transactions.
+                    accountable_op_id) — иначе «на руках» и остаток кассы разъезжались. */}
+                <button onClick={() => delOp.mutate(o.id)} disabled={delOp.isPending}
+                  title="Удалить операцию — вместе с её движением кассы"
+                  style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: "2px 4px", display: "flex" }}>
+                  <Trash size={12} />
+                </button>
               </div>
             ))}
+            {unlinkedWarn && (
+              <div style={{ marginTop: 10, padding: "9px 11px", background: "#FFF4EE", borderLeft: "2px solid #E8592A",
+                            fontSize: 11, color: "#6B6355", lineHeight: 1.6 }}>
+                Операция удалена, но парного движения кассы у неё не нашлось — она заведена
+                до того, как появилась связь. Если та выдача шла через кассу, поправь остаток
+                вручную в списке фондов.
+              </div>
+            )}
             {(hist?.expenses ?? []).map((e: any) => (
               <div key={e.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "7px 0", borderBottom: "1px solid #F2EFE9", fontSize: 12 }}>
                 <span style={{ color: "#A89070", fontFamily: MONO }}>{e.date}</span>

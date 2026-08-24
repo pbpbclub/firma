@@ -1,7 +1,7 @@
 import { fmtMoneyDash as fmt } from "../components/ui/format";
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { EmptyState } from "../components/ui/EmptyState";
 import { ordersApi, estimatesApi, catalogApi, mastersApi, workTypesApi, materialsApi } from "../api";
 import { useNavigationGuard, NavigationGuardModal } from "../components/NavigationGuard";
@@ -18,8 +18,70 @@ const SANS = "inherit";
 import {
   Plus, Trash, Package, Cube,
   FileText, DotsSixVertical, PencilSimple, FloppyDisk, ListChecks, CheckCircle, Circle,
-  Article } from "@phosphor-icons/react";
+  Article, Copy, ArrowsLeftRight } from "@phosphor-icons/react";
 
+
+/** Перенос сметы в другой заказ. Бэкенд (_move_set) увозит вместе со сметой её
+ *  обязательства и пересчитывает планы ОБОИХ заказов — поэтому после успеха
+ *  показываем итог, а не просто закрываем окно.
+ *
+ *  409 target_has_approved: у приёмника уже есть утверждённая смета, она станет
+ *  заменённой. detail тут объект {error, message, sets[]}, а не строка. */
+function MoveSetModal({ setId, setTitle, currentOrderId, onClose, onMoved }: {
+  setId: string; setTitle: string; currentOrderId: string;
+  onClose: () => void; onMoved: (res: any) => void;
+}) {
+  const [orderId, setOrderId] = useState("");
+  const [conflict, setConflict] = useState<any>(null);
+  const [error, setError] = useState("");
+  const { data: orders = [] } = useQuery({ queryKey: ["orders-lite"], queryFn: () => ordersApi.list() });
+  const targets = (orders as any[]).filter((o: any) => o.id !== currentOrderId);
+
+  const move = useMutation({
+    mutationFn: (confirm: boolean) => estimatesApi.moveSet(setId, orderId, confirm),
+    onSuccess: (res: any) => {
+      if (res?.moved === false) { setError("Это тот же заказ — переносить некуда."); return; }
+      onMoved(res);
+    },
+    onError: (e: any) => {
+      const d = e?.response?.data?.detail;
+      if (e?.response?.status === 409 && d?.error === "target_has_approved") setConflict(d);
+      else setError(typeof d === "string" ? d : "Не удалось перенести смету");
+    },
+  });
+
+  const lbl: React.CSSProperties = { fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 };
+  const inp: React.CSSProperties = { width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6",
+    padding: "7px 10px", fontSize: 12, outline: "none", background: "transparent", color: "#1A1A1A" };
+
+  return (
+    <Modal size="md" eyebrow="ПЕРЕНЕСТИ СМЕТУ" onClose={onClose} onCancel={onClose}
+      onSave={() => orderId && move.mutate(!!conflict)}
+      canSave={!!orderId} saving={move.isPending}
+      saveLabel={conflict ? "Перенести всё равно" : "Перенести"}>
+      <div style={{ fontSize: 12, color: "#6B6355", lineHeight: 1.6, marginBottom: 14 }}>
+        Смета «{setTitle}» уедет в другой заказ вместе со своими обязательствами.
+        Планы обоих заказов пересчитаются.
+      </div>
+      <div style={lbl}>ЗАКАЗ-ПРИЁМНИК</div>
+      <select style={{ ...inp, cursor: "pointer" }} value={orderId}
+              onChange={e => { setOrderId(e.target.value); setConflict(null); setError(""); }}>
+        <option value="">— выбери заказ —</option>
+        {targets.map((o: any) => <option key={o.id} value={o.id}>{o.title}</option>)}
+      </select>
+
+      {conflict && (
+        <div style={{ marginTop: 14, padding: "10px 12px", background: "#FFF4EE", borderLeft: "2px solid #8B3A3A" }}>
+          <div style={{ fontSize: 11, color: "#8B3A3A", lineHeight: 1.6 }}>{conflict.message}</div>
+          {(conflict.sets || []).map((x: any) => (
+            <div key={x.id} style={{ fontSize: 11, color: "#6B6355", marginTop: 4 }}>· {x.title || x.number}</div>
+          ))}
+        </div>
+      )}
+      {error && <div style={{ marginTop: 12, fontSize: 11, color: "#8B3A3A" }}>{error}</div>}
+    </Modal>
+  );
+}
 
 // sale_price храним с копейками: введённое клиентское «к оплате» первично, и
 // round(sale × (1+банк%)) обязан воспроизводить его точно. Округление sale до
@@ -416,6 +478,8 @@ export default function EstimateEditor() {
   // Утверждение и рассогласование — через свои защищённые ручки, а не через
   // PUT {status}. Раньше кнопка шла в updateSet и проходила мимо гейта нулевых цен
   // (цена заказа молча становилась 0 ₽), а «снять» меняло одну надпись.
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [moveResult, setMoveResult] = useState<any>(null);
   const [approveForce, setApproveForce] = useState<string | null>(null);   // текст 409 от бэка
   const [unapprove, setUnapprove] = useState<any>(null);                   // последствия отката
   const [setBusy, setSetBusy] = useState(false);
@@ -673,6 +737,14 @@ export default function EstimateEditor() {
                             whiteSpace: "nowrap",
                           }}
                         >{label}</button>
+                        {/* Какой вариант основной и какой утверждён — видно, не открывая */}
+                        {s.status === "approved" && (
+                          <span title="Утверждённая смета" style={{ color: "#4A7C59", fontSize: 10, paddingRight: 6 }}>✓</span>
+                        )}
+                        {s.status !== "approved" && !!s.is_primary && (
+                          <span title="Основная: план заказа считается по ней"
+                            style={{ color: "#E8592A", fontSize: 14, lineHeight: 1, paddingRight: 6 }}>•</span>
+                        )}
                         {editMode && isActive && (
                           <button
                             onClick={() => setConfirmDeleteSet(true)}
@@ -829,23 +901,59 @@ export default function EstimateEditor() {
 
               <div style={{ width: 1, height: 18, background: "#EDEBE6", margin: "0 2px" }} />
 
-              {/* Утверждённая смета заморожена — правки только новой версией */}
-              {isApproved ? (
+              {/* Копия сметы. Бэк умеет делать версию с ЛЮБОГО статуса, но кнопка
+                  жила только в ветке isApproved — вариант №2 из черновика приходилось
+                  набирать заново. У утверждённой подпись прежняя: для неё это
+                  единственный способ правки (смета заморожена). */}
+              <button
+                onClick={async () => {
+                  const nv = await estimatesApi.newVersion(activeSet.id);
+                  await refetch();
+                  setSelectedSetId(nv.id);
+                  setEditMode(true);
+                }}
+                title={isApproved
+                  ? "Смета согласована и заморожена. Создать редактируемую версию"
+                  : "Сделать копию этой сметы отдельным вариантом"}
+                style={{ padding: "5px 12px", border: "1px solid #EDEBE6", background: "transparent", color: "#6B6355", fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}
+                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "#1A1A1A"; (e.currentTarget as HTMLElement).style.color = "#1A1A1A"; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "#EDEBE6"; (e.currentTarget as HTMLElement).style.color = "#6B6355"; }}
+              >
+                <Copy size={14} /> {isApproved ? "Новая версия" : "Копия"}
+              </button>
+
+              {/* Перенести смету в другой заказ (просчёт завели отдельным заказом,
+                  а это часть проекта). Ручка есть с 07.08, входа в UI не было. */}
+              <button
+                onClick={() => setMoveOpen(true)}
+                title="Перенести смету в другой заказ вместе с обязательствами"
+                style={{ width: 28, height: 28, padding: 0, border: "1px solid #EDEBE6", background: "transparent", color: "#6B6355", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = "#1A1A1A"; (e.currentTarget as HTMLElement).style.borderColor = "#1A1A1A"; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = "#6B6355"; (e.currentTarget as HTMLElement).style.borderColor = "#EDEBE6"; }}
+              >
+                <ArrowsLeftRight size={16} />
+              </button>
+
+              {/* A3: основная смета — ручной выбор Юры; переключается там же, где
+                  ты между вариантами и ходишь. Утверждённая основная всегда. */}
+              {activeSet.status === "draft" && visibleSets.length > 1 && (
                 <button
-                  onClick={async () => {
-                    const nv = await estimatesApi.newVersion(activeSet.id);
-                    await refetch();
-                    setSelectedSetId(nv.id);
-                    setEditMode(true);
-                  }}
-                  title="Смета согласована и заморожена. Создать редактируемую версию"
-                  style={{ padding: "5px 12px", border: "1px solid #EDEBE6", background: "transparent", color: "#6B6355", fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}
-                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "#1A1A1A"; (e.currentTarget as HTMLElement).style.color = "#1A1A1A"; }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "#EDEBE6"; (e.currentTarget as HTMLElement).style.color = "#6B6355"; }}
+                  onClick={() => (activeSet.is_primary
+                    ? estimatesApi.unsetPrimary(activeSet.id).then(() => refetch())
+                    : estimatesApi.setPrimary(activeSet.id).then(() => refetch()))}
+                  title={activeSet.is_primary
+                    ? "Снять ручной выбор — активной снова станет последняя по дате"
+                    : "Показывать эту смету как основную: план заказа считается по ней"}
+                  style={{ padding: "5px 10px", fontSize: 11, cursor: "pointer", whiteSpace: "nowrap",
+                    border: "1px solid", borderColor: activeSet.is_primary ? "#E8592A" : "#EDEBE6",
+                    background: "transparent", color: activeSet.is_primary ? "#E8592A" : "#6B6355",
+                    fontFamily: "inherit" }}
                 >
-                  <PencilSimple size={14} /> Новая версия
+                  {activeSet.is_primary ? "Основная ×" : "Сделать основной"}
                 </button>
-              ) : editMode ? (
+              )}
+
+              {editMode ? (
                 <button
                   onClick={() => setEditMode(false)}
                   title="Сохранить"
@@ -1333,6 +1441,36 @@ export default function EstimateEditor() {
     )}
 
     {/* Утверждение сметы без продажных цен — только осознанно */}
+    {moveOpen && activeSet && (
+      <MoveSetModal
+        setId={activeSet.id}
+        setTitle={activeSet.title || "Смета"}
+        currentOrderId={String(orderId)}
+        onClose={() => setMoveOpen(false)}
+        onMoved={(res) => { setMoveOpen(false); setMoveResult(res); }}
+      />
+    )}
+
+    {moveResult && (
+      <Modal size="md" eyebrow="СМЕТА ПЕРЕНЕСЕНА" onClose={() => setMoveResult(null)}
+        onCancel={() => setMoveResult(null)}
+        onSave={() => navigate(`/orders/${moveResult.to_order?.id}`)} saveLabel="Открыть заказ">
+        <div style={{ fontSize: 12, color: "#1A1A1A", lineHeight: 1.9 }}>
+          <div>· Заказ-приёмник: <b>{moveResult.to_order?.title}</b> — план {fmt(moveResult.to_order?.cost_before)} → <b>{fmt(moveResult.to_order?.cost_after)}</b></div>
+          <div>· Заказ-донор: {moveResult.from_order?.title} — план {fmt(moveResult.from_order?.cost_before)} → <b>{fmt(moveResult.from_order?.cost_after)}</b></div>
+          {moveResult.obligations_moved > 0 && <div>· Переехало обязательств: <b>{moveResult.obligations_moved}</b></div>}
+          {moveResult.obligations_created ? <div>· Создано обязательств у приёмника: <b>{moveResult.obligations_created}</b></div> : null}
+        </div>
+        {moveResult.donor_empty && (
+          <div style={{ marginTop: 12, padding: "10px 12px", background: "#FFF8F5", borderLeft: "2px solid #E8592A",
+                        fontSize: 11, color: "#6B6355", lineHeight: 1.6 }}>
+            У заказа «{moveResult.from_order?.title}» не осталось ни одной сметы, его план обнулён.
+            Архивировать или удалить его — на твоё усмотрение, система сама этого не делает.
+          </div>
+        )}
+      </Modal>
+    )}
+
     {approveForce && (
       <ConfirmModal
         message={approveForce}
