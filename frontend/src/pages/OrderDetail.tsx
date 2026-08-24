@@ -22,6 +22,27 @@ import type { OrderFormState } from "../components/order/OrderParams";
 import { useNavigationGuard, NavigationGuardModal } from "../components/NavigationGuard";
 import { Breadcrumbs } from "../components/ui/Breadcrumbs";
 
+// A1/A2 (ТЗ 24.08.2026): «чем закрыт расход». cash и пустое — обычная оплата,
+// бейджа не требует; остальное стоит отметить, иначе строка читается как выплата.
+const SETTLED_BADGES: Record<string, { l: string; hint: string }> = {
+  advance:     { l: "авансом",  hint: "Закрыто ранее выданным авансом: себестоимость выросла, сальдо подрядчика не двигалось" },
+  offset:      { l: "зачётом",  hint: "Взаимозачёт: денег не было, наш долг подрядчику погашен" },
+  third_party: { l: "за него",  hint: "Закрыто оплатой, которую мы сделали за него третьему лицу" },
+  none:        { l: "не оплачено", hint: "Работа принята, деньги не уходили — долг остаётся" },
+};
+
+/** «деньгами 4 000 · зачётом 1 400» — из obligations[].settled. */
+function settledSummary(settled?: Record<string, number>): string {
+  const labels: Record<string, string> = {
+    cash: "деньгами", advance: "авансом", offset: "зачётом",
+    third_party: "за него", none: "не оплачено",
+  };
+  const parts = Object.entries(settled || {}).filter(([, v]) => v > 0);
+  // Одна строка «деньгами N» ничего не добавляет к сумме факта рядом — молчим.
+  if (parts.length < 2 && parts[0]?.[0] === "cash") return "";
+  return parts.map(([k, v]) => `${labels[k] ?? k} ${fmtMoney(v)}`).join(" · ");
+}
+
 // Заголовок стадии оси: ПЛАН → ФАКТ → ИТОГ.
 function StageHeader({ n, title, hint }: { n: string; title: string; hint?: string }) {
   return (
@@ -784,6 +805,14 @@ export default function OrderDetail() {
                             <span title="Оплата обязательства — в факте учтена один раз"
                               style={{ fontSize: 9, color: "#4A7C59", marginLeft: 5 }}>обяз.</span>
                           )}
+                          {/* A1: расход, закрытый не новыми деньгами. Себестоимость
+                              заказа он поднял, а лицевой счёт подрядчика не двигал. */}
+                          {SETTLED_BADGES[e.settled_by as string] && (
+                            <span title={SETTLED_BADGES[e.settled_by as string].hint}
+                              style={{ fontSize: 9, color: "#6B6355", background: "#F2EFE9", padding: "1px 5px", marginLeft: 5 }}>
+                              {SETTLED_BADGES[e.settled_by as string].l}
+                            </span>
+                          )}
                           {e.payment_source === "cash_fund" && (
                             <span title="Оплачено наличными из кассы"
                               style={{ fontSize: 9, color: "#A89070", background: "#F2EFE9", padding: "1px 5px", marginLeft: 5 }}>нал</span>
@@ -867,6 +896,11 @@ export default function OrderDetail() {
                       <div style={{ fontSize: 13, fontFamily: MONO, fontVariantNumeric: "tabular-nums", color: paidColor }}>{fmtMoney(o.paid)}</div>
                       {o.remaining > 0 && o.paid > 0 && (
                         <div style={{ fontSize: 10, color: "#A89070", fontFamily: MONO }}>ост. {fmtMoney(o.remaining)}</div>
+                      )}
+                      {/* A2 п.3: чем закрыто — деньгами, зачётом, авансом, оплатой за
+                          него. Одно обязательство закрывается несколькими способами. */}
+                      {settledSummary(o.settled) && (
+                        <div style={{ fontSize: 10, color: "#6B6355", marginTop: 1 }}>{settledSummary(o.settled)}</div>
                       )}
                     </div>
                   </div>

@@ -339,6 +339,9 @@ export const ledgerApi = {
   createEntry: (data: Record<string, any>) => api.post("/ledger/entries", data).then((r) => r.data),
   deleteEntry: (entryId: string) => api.delete(`/ledger/entries/${entryId}`).then((r) => r.data),
   contractorPay: (data: Record<string, any>) => api.post("/ledger/contractor-pay", data).then((r) => r.data),
+  // Зачёт. С order_id — расход по заказу (гасит обязательство и растит
+  // себестоимость), без него — строка регистра, двигающая только сальдо.
+  offset: (data: Record<string, any>) => api.post("/ledger/offset", data).then((r) => r.data),
 };
 
 export const mastersApi = {

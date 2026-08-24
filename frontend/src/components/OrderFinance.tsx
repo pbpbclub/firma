@@ -71,6 +71,10 @@ export function PlanFactDuel({ planFact }: { planFact: any }) {
   // 01.08.2026): иначе транспорт на доработку читался бы как перерасход по заказу.
   // Без неё сумма строк не сходилась бы с cost_plan/cost_fact панели.
   const ex = pf.extras;
+  // A3 (ТЗ 24.08.2026): план позиций без состава в категории не раскладывается —
+  // он отдельной строкой ниже. Раньше падал в «Прочее», и разбивка показывала два
+  // зеркальных перекоса (у ORD-024 по 16 000 ₽), которые читались как ошибка разноски.
+  const unbroken = pf.plan_unbroken ?? 0;
   const cats = [
     ...(pf.categories || []).filter((c: any) => c.plan > 0 || c.fact > 0),
     ...(ex?.count && (ex.cost_plan > 0 || ex.cost_fact > 0)
@@ -85,17 +89,21 @@ export function PlanFactDuel({ planFact }: { planFact: any }) {
     const planPct = Math.min(100, (c.plan / base) * 100);
     const factPct = Math.min(100, (c.fact / base) * 100);
     const over = c.fact > c.plan;
-    const factColor = !pf.has_facts || c.fact === 0 ? "#C8C0B0" : over ? "#8B3A3A" : "#4A7C59";
+    // Факт есть, а плана в этой категории нет только потому, что план взят одной
+    // суммой — это не перерасход. Красить красным и показывать «+16 000» нельзя.
+    const noBase = c.plan === 0 && unbroken > 0;
+    const factColor = !pf.has_facts || c.fact === 0 ? "#C8C0B0"
+      : noBase ? "#6B6355" : over ? "#8B3A3A" : "#4A7C59";
     return (
       <div style={{ marginBottom: 13 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 5 }}>
           <span style={{ fontSize: 12, color: "#1A1A1A", flex: 1 }}>{c.category}</span>
-          <span style={{ fontSize: 11, color: "#A89070", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(c.plan)}</span>
+          <span style={{ fontSize: 11, color: "#A89070", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{noBase ? "—" : fmt(c.plan)}</span>
           <span style={{ fontSize: 11, color: "#C8C0B0" }}>→</span>
           <span style={{ fontSize: 12, fontWeight: 700, color: factColor, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{c.fact ? fmt(c.fact) : "—"}</span>
           <span style={{ fontSize: 11, fontWeight: 600, minWidth: 58, textAlign: "right", fontFamily: MONO, fontVariantNumeric: "tabular-nums",
             color: c.delta === 0 || c.fact === 0 ? "#D0C8C0" : c.delta > 0 ? "#8B3A3A" : "#4A7C59" }}>
-            {c.delta === 0 || c.fact === 0 ? "" : (c.delta > 0 ? "+" : "−") + fmt(Math.abs(c.delta))}
+            {noBase || c.delta === 0 || c.fact === 0 ? "" : (c.delta > 0 ? "+" : "−") + fmt(Math.abs(c.delta))}
           </span>
         </div>
         <div style={{ height: 7, background: "#EDEBE6", position: "relative" }}>
@@ -104,7 +112,7 @@ export function PlanFactDuel({ planFact }: { planFact: any }) {
           {/* факт — цветная заливка поверх */}
           <div style={{ position: "absolute", inset: 0, width: `${factPct}%`, background: factColor, transition: "width 0.4s" }} />
           {/* риска плана */}
-          {c.plan > 0 && <div style={{ position: "absolute", top: -2, bottom: -2, width: 2, background: "#1A1A1A", left: `calc(${planPct}% - 1px)` }} />}
+          {c.plan > 0 && !noBase && <div style={{ position: "absolute", top: -2, bottom: -2, width: 2, background: "#1A1A1A", left: `calc(${planPct}% - 1px)` }} />}
         </div>
       </div>
     );
@@ -116,9 +124,9 @@ export function PlanFactDuel({ planFact }: { planFact: any }) {
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 12 }}>
         <div>
           <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.08em" }}>ПЛАН ⇄ ФАКТ</div>
-          {(pf.plan_unbroken ?? 0) > 0 && (
+          {unbroken > 0 && (
             <div style={{ fontSize: 10, color: "#A89070", marginTop: 3 }}>
-              {fmt(pf.plan_unbroken)} в смете {pf.detailed ? "не разбиты" : "не разбито"} по категориям — {pf.detailed ? "они" : "весь план"} в «Прочее»
+              {fmt(unbroken)} плана {pf.detailed ? "взяты" : "взят"} одной суммой — {pf.detailed ? "их" : "его"} не с чем сравнивать по категориям
             </div>
           )}
         </div>
@@ -164,6 +172,20 @@ export function PlanFactDuel({ planFact }: { planFact: any }) {
 
       {/* Категории */}
       {cats.map((c: any) => <CatRow key={c.category} c={c} />)}
+
+      {/* A3: неразобранный план — своей строкой, без бара. Сравнивать его не с чем:
+          у позиции нет состава, а факт по ней разнесён настоящей категорией выше. */}
+      {unbroken > 0 && (
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 13,
+          paddingTop: 9, borderTop: "1px dashed #EDEBE6" }}
+          title="Позиции сметы без строк состава: план известен одной суммой, поэтому по категориям не раскладывается">
+          <span style={{ fontSize: 12, color: "#6B6355", flex: 1 }}>План без разбивки</span>
+          <span style={{ fontSize: 11, color: "#A89070", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(unbroken)}</span>
+          <span style={{ fontSize: 11, color: "#C8C0B0" }}>→</span>
+          <span style={{ fontSize: 12, color: "#C8C0B0" }}>—</span>
+          <span style={{ minWidth: 58 }} />
+        </div>
+      )}
 
       {/* Финал: маржа */}
       <div style={{ borderTop: "1px solid #EDEBE6", paddingTop: 10, marginTop: 2 }}>

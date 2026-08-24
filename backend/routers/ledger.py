@@ -26,21 +26,49 @@ from pydantic import BaseModel
 from typing import Optional
 from uuid import uuid4
 
+from audit import audit
 from db import get_production
 
 router = APIRouter()
 
-# Знак оборота: +1 — мы должны больше, −1 — наш долг гасится.
-KIND_SIGN = {"accrual": 1, "payment": -1, "third_party": -1, "offset": -1, "adjust": 1}
+# Знак оборота: +1 — мы должны больше, −1 — наш долг гасится, 0 — справка.
+KIND_SIGN = {"accrual": 1, "payment": -1, "third_party": -1, "offset": -1, "adjust": 1,
+             "accepted": 0}
 KIND_LABELS = {
     "accrual":     "Начислено",
     "payment":     "Выплачено",
     "third_party": "Оплачено за него",
     "offset":      "Зачёт",
     "adjust":      "Корректировка",
+    "accepted":    "Принято, не оплачено",
 }
+# Виды, которые можно завести руками (POST /entries). «accepted» сюда не входит:
+# это не оборот, а справочная строка, и master_ledger.kind под CHECK без неё.
+MANUAL_KINDS = tuple(k for k in KIND_SIGN if k != "accepted")
 # purpose расходов, относящихся к лицевому счёту, а не к заказам
 LEDGER_PURPOSES = ("contractor_pay", "contractor_third_party")
+
+# A1 (ТЗ 24.08.2026): расход по заказу — это «работа принята». Двинул ли он деньги
+# мастеру, говорит expenses.settled_by. Движение по лицевому счёту рождают только
+# cash и offset; advance/third_party значат «минус уже проведён в другом месте»
+# (выдачей аванса, оплатой за него), none — «ещё должны».
+# NULL у старых строк = cash: миграция не меняет ни одного сальдо.
+SETTLED_KIND = {
+    None:          "payment",
+    "":            "payment",
+    "cash":        "payment",
+    "offset":      "offset",
+    "advance":     "accepted",
+    "third_party": "accepted",
+    "none":        "accepted",
+}
+SETTLED_LABELS = {
+    "cash":        "деньгами",
+    "offset":      "зачётом",
+    "advance":     "авансом",
+    "third_party": "оплатой за него",
+    "none":        "не оплачено",
+}
 
 
 def _master(conn, master_id: str) -> dict:
@@ -76,10 +104,12 @@ def _entries(conn, master: dict) -> list[dict]:
            WHERE el.master_id = ?
               OR (c.name = ? AND (el.master_id IS NULL OR el.master_id = ?))""",
         (mid, name, mid)).fetchall()]
+    # Только явный master_id (ТЗ A1 п.3 от 24.08.2026). Фолбэк по e.supplier
+    # раньше тянул в выплаты чужие расходы: supplier — свободный текст («Ант Сервис
+    # (Денис Мельничук)»), совпадение с именем мастера случайно. Подсказку «похоже,
+    # это он — привязать?» даёт интерфейс, сальдо на догадках не строится.
     expenses = [dict(r) for r in conn.execute(
-        _EXPENSE_SQL + """
-           WHERE e.master_id = ? OR (COALESCE(e.master_id,'') = '' AND e.supplier = ?)""",
-        (mid, name)).fetchall()]
+        _EXPENSE_SQL + " WHERE e.master_id = ?", (mid,)).fetchall()]
     manual = [dict(r) for r in conn.execute(
         _MANUAL_SQL + " WHERE m.master_id = ?", (mid,)).fetchall()]
 
@@ -116,8 +146,6 @@ def _entries_bulk(conn, masters: list[dict]) -> dict[str, list[dict]]:
         row = dict(r)
         if row.get("master_id"):
             put(exp, [row["master_id"]] if row["master_id"] in known_ids else [], row)
-        elif row.get("supplier"):
-            put(exp, by_name.get(row["supplier"], []), row)
     for r in conn.execute(_MANUAL_SQL).fetchall():
         row = dict(r)
         put(man, [row["master_id"]] if row["master_id"] in known_ids else [], row)
@@ -174,12 +202,21 @@ def _build_entries(creditors: list[dict], expenses: list[dict], manual: list[dic
             order_number=c.get("order_number"), order_title=c.get("order_title"))
 
     for e in expenses:
-        kind = "third_party" if e.get("purpose") == "contractor_third_party" else "payment"
+        purpose = e.get("purpose")
+        settled = e.get("settled_by")
+        if purpose == "contractor_third_party":
+            kind = "third_party"        # расход вне заказа: мы заплатили за мастера
+        elif purpose == "contractor_pay":
+            kind = "payment"            # расход вне заказа: выдали аванс деньгами
+        else:
+            # Расход по заказу. Двинул ли он деньги — решает settled_by (A1).
+            kind = SETTLED_KIND.get(settled, "payment")
         add(kind, e["amount"], e.get("expense_date") or e.get("created_at"),
-            e.get("title") or "Выплата",
+            e.get("title") or KIND_LABELS[kind],
             source="expense", ref_id=e["id"], order_id=e.get("order_id"),
             order_number=e.get("order_number"), order_title=e.get("order_title"),
-            purpose=e.get("purpose"), supplier=e.get("supplier"),
+            purpose=purpose, supplier=e.get("supplier"),
+            settled_by=settled, settled_label=SETTLED_LABELS.get(settled or "cash"),
             finance_tx_id=e.get("finance_tx_id"), zenmoney_tx_id=e.get("zenmoney_tx_id"),
             group_id=e.get("group_id"))
 
@@ -187,8 +224,13 @@ def _build_entries(creditors: list[dict], expenses: list[dict], manual: list[dic
     covered_ids = {e["creditor_id"] for e in expenses if e.get("creditor_id")}
     covered_fin = {e["finance_tx_id"] for e in expenses if e.get("finance_tx_id")}
     covered_zen = {e["zenmoney_tx_id"] for e in expenses if e.get("zenmoney_tx_id")}
+    # Расход, закрытый авансом/зачётом/ничем, денег не двигал — он не может гасить
+    # и creditors.paid. Иначе зачёт списывал бы долг дважды: строкой offset и
+    # «оплатой обязательства», которую он же и подавил.
+    settled_ids = {e["creditor_id"] for e in expenses if e.get("creditor_id")
+                   and SETTLED_KIND.get(e.get("settled_by"), "payment") == "payment"}
     for c in creditors:
-        if not c["paid"] or c["id"] in covered_ids:
+        if not c["paid"] or c["id"] in settled_ids:
             continue
         if c.get("finance_tx_id") and c["finance_tx_id"] in covered_fin:
             continue
@@ -235,6 +277,9 @@ def _totals(entries: list[dict]) -> dict:
         "third_party": s("third_party"),
         "offset": s("offset"),
         "adjust": round(sum(e["effect"] for e in entries if e["kind"] == "adjust"), 2),
+        # Справка, а не оборот: работы приняты, но закрыты авансом/зачётом или ещё
+        # не оплачены. В сальдо не входит (sign = 0), видно «за что мы ещё должны».
+        "accepted": s("accepted"),
         "balance": round(sum(e["effect"] for e in entries), 2),
     }
 
@@ -326,8 +371,8 @@ def create_entry(body: EntryIn):
     Для оборотов, за которыми стоят реальные деньги, это НЕ тот вход — заводи расход
     (POST /api/ledger/contractor-pay либо разноску транзакции), иначе оборот
     задвоится: регистр видит и расход, и ручную строку."""
-    if body.kind not in KIND_SIGN:
-        raise HTTPException(status_code=400, detail=f"kind must be one of {'|'.join(KIND_SIGN)}")
+    if body.kind not in MANUAL_KINDS:
+        raise HTTPException(status_code=400, detail=f"kind must be one of {'|'.join(MANUAL_KINDS)}")
     if body.amount is None or (body.amount <= 0 and body.kind != "adjust"):
         raise HTTPException(status_code=400, detail="amount must be > 0 (отрицательная — только у adjust)")
     conn = get_production()
@@ -380,6 +425,107 @@ def delete_entry(entry_id: str):
     return {"ok": True}
 
 
+def _settle_on_order(conn, *, master: dict, order_id: str, amount: float, settled_by: str,
+                     creditor_id: Optional[str] = None, title: Optional[str] = None,
+                     category: Optional[str] = None, happened_at: Optional[str] = None) -> dict:
+    """Расход по заказу, закрытый НЕ новыми деньгами (A2, ТЗ 24.08.2026).
+
+    Себестоимость заказа растёт (работа принята), а лицевой счёт либо получает
+    минус «зачёт», либо не двигается вовсе — решает settled_by (SETTLED_KIND).
+
+    Почему расход, а не строка master_ledger: обязательство гасит покрытие L1
+    (obligations.coverage смотрит expenses.creditor_id), и факт заказа берётся из
+    expenses — ручная строка регистра не делает ни того, ни другого. Поэтому оба
+    входа (форма расхода в карточке заказа и карточка подрядчика) пишут ОДНО и то
+    же: один расход. Иначе зачёт по ORD-023 двигал бы сальдо, но 18 800 ₽ по-прежнему
+    показывались бы в плане-факте Ильинского нулём."""
+    from routers.orders import EXPENSE_CATEGORIES
+    o = conn.execute("SELECT id, number, title FROM orders WHERE id = ? OR number = ?",
+                     (order_id, order_id)).fetchone()
+    if not o:
+        raise HTTPException(status_code=404, detail="Заказ не найден")
+    oid = o["id"]
+    cat, cred_desc = category, None
+    if creditor_id:
+        # Обязательство обязано принадлежать ЭТОМУ заказу — иначе зачёт погасил бы
+        # чужой долг, и обе карточки показали бы одни деньги как свои (тот же
+        # контроль, что у extra_id в orders._check_extra).
+        c = conn.execute(
+            """SELECT c.id, c.description, c.name, c.order_id, el.type AS line_type
+                 FROM creditors c LEFT JOIN estimate_lines el ON el.id = c.estimate_line_id
+                WHERE c.id = ?""", (creditor_id,)).fetchone()
+        if not c:
+            raise HTTPException(status_code=404, detail="Обязательство не найдено")
+        if c["order_id"] != oid:
+            raise HTTPException(status_code=400, detail="Обязательство принадлежит другому заказу")
+        cred_desc = c["description"] or c["name"]
+        if not cat and c["line_type"] in EXPENSE_CATEGORIES:
+            cat = c["line_type"]
+    cat = cat if cat in EXPENSE_CATEGORIES else "work"
+    label = SETTLED_LABELS.get(settled_by, settled_by)
+    eid = str(uuid4())
+    conn.execute(
+        """INSERT INTO expenses (id, order_id, title, amount, category, supplier, master_id,
+                                 expense_date, source, creditor_id, settled_by,
+                                 match_status, matched_by, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), 'manual', ?, ?,
+                   'manual', 'ledger', datetime('now'))""",
+        (eid, oid, title or f"{cred_desc or 'Работы'} — {label} ({master['name']})",
+         amount, cat, master["name"], master["id"], happened_at, creditor_id, settled_by))
+    audit(conn, "expense", eid, "create",
+          f"Расход {amount:g} ₽ по {o['number']}, закрыт {label} ({master['name']})")
+    return {"id": eid, "order_id": oid, "order_number": o["number"], "creditor_id": creditor_id}
+
+
+class OffsetIn(BaseModel):
+    master_id: str
+    amount: float
+    order_id: Optional[str] = None      # есть → расход по заказу, нет → строка регистра
+    creditor_id: Optional[str] = None
+    happened_at: Optional[str] = None
+    title: Optional[str] = None
+    category: Optional[str] = None
+    note: Optional[str] = None
+
+
+@router.post("/offset", status_code=201)
+def create_offset(body: OffsetIn):
+    """Взаимозачёт с подрядчиком.
+
+    С order_id — расход по заказу (settled_by='offset'): гасит обязательство и растёт
+    себестоимость заказа, в лицевом счёте минус «Зачёт».
+    Без order_id — строка регистра: сальдо двигается, себестоимость ничья не растёт
+    (зачёт вне заказов — например, встречная услуга)."""
+    if not body.amount or body.amount <= 0:
+        raise HTTPException(status_code=400, detail="amount must be > 0")
+    conn = get_production()
+    try:
+        master = _master(conn, body.master_id)
+        if body.order_id:
+            res = _settle_on_order(
+                conn, master=master, order_id=body.order_id, amount=body.amount,
+                settled_by="offset", creditor_id=body.creditor_id,
+                title=body.title or body.note, category=body.category,
+                happened_at=body.happened_at)
+            conn.commit()
+            return {"kind": "expense", **res,
+                    "hint": "обязательство закрыто зачётом, себестоимость заказа выросла"}
+        if body.creditor_id:
+            raise HTTPException(status_code=400,
+                                detail="creditor_id без order_id: укажи заказ, которому принадлежит обязательство")
+        eid = str(uuid4())
+        conn.execute(
+            """INSERT INTO master_ledger (id, master_id, kind, amount, happened_at, note, source)
+               VALUES (?, ?, 'offset', ?, COALESCE(?, date('now')), ?, 'manual')""",
+            (eid, body.master_id, body.amount, body.happened_at,
+             body.note or body.title or "Взаимозачёт"))
+        conn.commit()
+        return {"kind": "ledger", "id": eid,
+                "hint": "зачёт вне заказов: сальдо сдвинулось, себестоимость заказов не менялась"}
+    finally:
+        conn.close()
+
+
 class ContractorPayIn(BaseModel):
     """Оплата, относящаяся к лицевому счёту, а не к заказу.
 
@@ -398,6 +544,12 @@ class ContractorPayIn(BaseModel):
     payment_source: Optional[str] = None          # cash_fund | accountable
     accountable_person_id: Optional[str] = None   # обязателен при accountable
     note: Optional[str] = None
+    # A2: чем эта оплата закрывается у нас. Указан order_id — рядом с расходом вне
+    # заказа появится парный расход ПО ЗАКАЗУ (settled_by='third_party'|'advance'):
+    # он гасит обязательство и растит себестоимость, но лицевой счёт второй раз не
+    # двигает (SETTLED_KIND: движение уже дал расход вне заказа).
+    order_id: Optional[str] = None
+    creditor_id: Optional[str] = None
 
 
 @router.post("/contractor-pay", status_code=201)
@@ -461,9 +613,22 @@ def contractor_pay(body: ContractorPayIn):
              body.accountable_person_id if body.payment_source == "accountable" else None,
              purpose))
         _sync_cash(conn, eid, body.payment_source, body.amount, title, body.expense_date)
+        settled = None
+        if body.order_id:
+            # Парный расход по заказу: деньги ушли выше, здесь только себестоимость
+            # и погашение обязательства. Кейс ORD-023: скань «Верна» за 11 600 ₽ —
+            # оплачена за Кебру, а обязательство «подушки» висело непокрытым.
+            settled = _settle_on_order(
+                conn, master=master, order_id=body.order_id, amount=body.amount,
+                settled_by="third_party" if body.kind == "third_party" else "advance",
+                creditor_id=body.creditor_id, category=body.category,
+                happened_at=body.expense_date)
+        elif body.creditor_id:
+            raise HTTPException(status_code=400,
+                                detail="creditor_id без order_id: укажи заказ, которому принадлежит обязательство")
         conn.commit()
         row = dict(conn.execute("SELECT * FROM expenses WHERE id = ?", (eid,)).fetchone())
     finally:
         conn.close()
-    return {"expense": row, "purpose": purpose,
+    return {"expense": row, "purpose": purpose, "settled_on_order": settled,
             "hint": "оборот виден в GET /api/ledger/masters/{master_id}"}

@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Modal } from "./ui/Modal";
 import { PayeePicker } from "./ui/PayeePicker";
 import { MONO } from "./ui/Num";
-import { mastersApi, financeApi, accountableApi } from "../api";
+import { mastersApi, financeApi, accountableApi, ledgerApi } from "../api";
 
 // Источник оплаты (наличный контур): безнал — как раньше; касса — спишется из
 // фонда «Касса (наличные)»; подотчётник — оплатило доверенное лицо из выданных
@@ -22,6 +22,19 @@ export const EXPENSE_CATEGORIES = [
   { v: "delivery", l: "Доставка" },
   { v: "other",    l: "Прочее" },
 ];
+
+// A1 (ТЗ 24.08.2026): расход по заказу — это «работа принята». Двинул ли он деньги
+// подрядчику, отдельный вопрос: до этого поля лицевой счёт считал выплатой любой
+// расход, и разноска ORD-024 перевернула сальдо Кебры с «мы должны 1 800» на
+// «должен отработать 22 200», хотя в тот день никто ничего не переводил.
+const SETTLEMENTS = [
+  { v: "cash",        l: "Деньгами",       hint: "Деньги ушли этим расходом — обычный случай." },
+  { v: "advance",     l: "Авансом",        hint: "Закрыто ранее выданным авансом: себестоимость вырастет, сальдо не сдвинется." },
+  { v: "offset",      l: "Зачётом",        hint: "Взаимозачёт встречных работ: денег не было, наш долг гасится." },
+  { v: "third_party", l: "Оплатой за него", hint: "Закрыто оплатой, которую мы сделали за него третьему лицу." },
+  { v: "none",        l: "Ещё должны",     hint: "Работа принята, деньги не уходили и долг остаётся." },
+];
+const NON_CASH = ["advance", "offset", "third_party", "none"];
 
 const lbl: React.CSSProperties = { fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 };
 const inp: React.CSSProperties = {
@@ -48,6 +61,7 @@ export function ExpenseModal({ orderId, expense, existingExpenses = [], extras =
   const [accountableId, setAccountableId] = useState(expense?.accountable_person_id ?? "");
   const [dupConfirmed, setDupConfirmed] = useState(false);
   const [extraId, setExtraId] = useState<string>(expense?.extra_id ?? "");
+  const [settledBy, setSettledBy] = useState<string>(expense?.settled_by ?? "cash");
 
   const { data: masters = [] } = useQuery({ queryKey: ["masters"], queryFn: mastersApi.list });
   const { data: accountables = [] } = useQuery({ queryKey: ["accountable"], queryFn: accountableApi.list });
@@ -67,9 +81,21 @@ export function ExpenseModal({ orderId, expense, existingExpenses = [], extras =
     c.order_id && String(c.order_id) === String(orderId) && supplier && c.name === supplier
   );
 
+  // Сальдо подрядчика — чтобы «закрыто авансом» не оказалось закрытием
+  // несуществующего аванса. balance < 0 = у него наши деньги.
+  const noCash = NON_CASH.includes(settledBy);
+  const { data: ledger } = useQuery({
+    queryKey: ["ledger", "master", masterId],
+    queryFn: () => ledgerApi.master(masterId),
+    enabled: !!masterId && settledBy === "advance",
+  });
+  const advanceLeft = ledger?.balance != null ? Math.max(0, -ledger.balance) : null;
+
   const amountNum = parseFloat(amount);
   const valid = title.trim().length > 0 && !isNaN(amountNum) && amountNum > 0
-    && (paySource !== "accountable" || !!accountableId);
+    && (paySource !== "accountable" || !!accountableId)
+    // Без подрядчика непонятно, чей аванс/зачёт закрывает расход — бэк такое отвергает.
+    && (!noCash || !!masterId);
 
   // Похоже на дубль: та же сумма (±1 ₽) и тот же поставщик/название, дата ±3 дня.
   const dupCandidate = !expense && valid ? (existingExpenses as any[]).find((e: any) => {
@@ -91,9 +117,11 @@ export function ExpenseModal({ orderId, expense, existingExpenses = [], extras =
       master_id: masterId || null,
       expense_date: date || null,
       creditor_id: creditorId,
-      payment_source: paySource || null,
-      accountable_person_id: paySource === "accountable" ? accountableId : null,
+      // Денег не было — не было и наличного контура (бэк это тоже проверяет).
+      payment_source: noCash ? null : (paySource || null),
+      accountable_person_id: !noCash && paySource === "accountable" ? accountableId : null,
       extra_id: extraId || null,
+      settled_by: settledBy,
     });
   };
 
@@ -144,6 +172,38 @@ export function ExpenseModal({ orderId, expense, existingExpenses = [], extras =
         </div>
 
         <div style={{ marginTop: 14 }}>
+          <div style={lbl}>ЧЕМ ЗАКРЫТО</div>
+          <div style={{ display: "flex", flexWrap: "wrap" }}>
+            {SETTLEMENTS.map(p => (
+              <button key={p.v} onClick={() => setSettledBy(p.v)} title={p.hint}
+                style={{
+                  padding: "5px 11px", fontSize: 11, cursor: "pointer", border: "1px solid",
+                  borderColor: settledBy === p.v ? "#1A1A1A" : "#EDEBE6",
+                  background: settledBy === p.v ? "#1A1A1A" : "transparent",
+                  color: settledBy === p.v ? "#FFFFFF" : "#A89070",
+                  marginRight: -1, fontFamily: "inherit",
+                }}>{p.l}</button>
+            ))}
+          </div>
+          <div style={{ fontSize: 10, color: "#A89070", marginTop: 5, lineHeight: 1.5 }}>
+            {SETTLEMENTS.find(p => p.v === settledBy)?.hint}
+          </div>
+          {noCash && !masterId && (
+            <div style={{ fontSize: 10, color: "#8B3A3A", marginTop: 4 }}>
+              Укажи подрядчика ниже — иначе непонятно, чей аванс или зачёт это закрывает.
+            </div>
+          )}
+          {settledBy === "advance" && masterId && advanceLeft != null && (
+            <div style={{ fontSize: 10, marginTop: 4, color: advanceLeft >= (amountNum || 0) ? "#4A7C59" : "#8B3A3A" }}>
+              {advanceLeft > 0
+                ? `У подрядчика аванс ${new Intl.NumberFormat("ru-RU").format(advanceLeft)} ₽`
+                : "У подрядчика нет невыбранного аванса — сальдо уйдёт в минус"}
+              {advanceLeft > 0 && (amountNum || 0) > advanceLeft && " — этого расхода он не покрывает"}
+            </div>
+          )}
+        </div>
+
+        {!noCash && <div style={{ marginTop: 14 }}>
           <div style={lbl}>ИСТОЧНИК ОПЛАТЫ</div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <div style={{ display: "flex" }}>
@@ -171,7 +231,7 @@ export function ExpenseModal({ orderId, expense, existingExpenses = [], extras =
           {paySource === "cash_fund" && (
             <div style={{ fontSize: 10, color: "#A89070", marginTop: 5 }}>Спишется из кассы наличных — остаток виден в Фондах.</div>
           )}
-        </div>
+        </div>}
 
         {/* Трата по допработе не идёт в план-факт основной сметы: транспорт на
             доработку не должен занижать маржу заказа (ТЗ extra_works 01.08.2026). */}

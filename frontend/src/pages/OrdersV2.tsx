@@ -435,7 +435,7 @@ export default function OrdersV2() {
   const [customerFilter, setCustomerFilter] = useState("");
   const [titleFilter, setTitleFilter] = useState("");
   const [brandFilter, setBrandFilter] = useState("");
-  const clearFilters = () => { setCustomerFilter(""); setTitleFilter(""); setStatusFilter(""); setAmountMin(""); setAmountMax(""); setDebtMin(""); setDebtMax(""); setBrandFilter(""); setPage(0); setSelectedIds(new Set()); };
+  const clearFilters = () => { setCustomerFilter(""); setTitleFilter(""); setStatusFilter(""); setAmountMin(""); setAmountMax(""); setFactMin(""); setFactMax(""); setBrandFilter(""); setPage(0); setSelectedIds(new Set()); };
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -459,8 +459,8 @@ export default function OrdersV2() {
   const [amountMin, setAmountMin] = useState("");
   const [amountMax, setAmountMax] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const [debtMin, setDebtMin] = useState("");
-  const [debtMax, setDebtMax] = useState("");
+  const [factMin, setFactMin] = useState("");
+  const [factMax, setFactMax] = useState("");
   const [showNewOrder, setShowNewOrder] = useState(false);
   const [summaryMode, setSummaryMode] = useState(false);
   const [readyMode, setReadyMode] = useState(false);
@@ -544,17 +544,20 @@ export default function OrdersV2() {
     if (brandFilter) r = r.filter((o: any) => o.brand === brandFilter);
     if (amountMin) r = r.filter((o: any) => (o.price_plan || 0) >= parseFloat(amountMin));
     if (amountMax) r = r.filter((o: any) => (o.price_plan || 0) <= parseFloat(amountMax));
-    if (debtMin) r = r.filter((o: any) => (o.debt || 0) >= parseFloat(debtMin));
-    if (debtMax) r = r.filter((o: any) => (o.debt || 0) <= parseFloat(debtMax));
+    if (factMin) r = r.filter((o: any) => (o.cost_fact || 0) >= parseFloat(factMin));
+    if (factMax) r = r.filter((o: any) => (o.cost_fact || 0) <= parseFloat(factMax));
     return r;
-  }, [allData, customerFilter, titleFilter, statusFilter, brandFilter, amountMin, amountMax, debtMin, debtMax]);
+  }, [allData, customerFilter, titleFilter, statusFilter, brandFilter, amountMin, amountMax, factMin, factMax]);
   const totalCount = filteredData.length;
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
   const pageData = filteredData.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
+  // Себестоимость план/факт прямо в таблице (запрос Юры 24.08.2026): «сколько
+  // заложили» и «сколько уже потратили» видно по всем заказам сразу, без захода в
+  // карточку. При открытой панели показываем только факт — план и Δ не влезают.
   const cols = selected
-    ? "28px 2fr 1.2fr 100px 120px 40px"
-    : "28px 2fr 1.5fr 120px 130px 120px 110px 40px";
+    ? "28px 2fr 1.2fr 100px 120px 110px 40px"
+    : "28px 1.8fr 1.2fr 110px 120px 115px 115px 110px 40px";
 
   function renderPageNums() {
     const pages: (number | "…")[] = [];
@@ -786,7 +789,7 @@ export default function OrdersV2() {
                     >
                       <div>
                         <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A", fontFamily: "inherit" }}>{o.title}</div>
-                        <div style={{ fontSize: 9, color: "#A89070", marginTop: 2 }}>{o.status_label}{!o.detailed && " · план без разбивки"}</div>
+                        <div style={{ fontSize: 9, color: "#A89070", marginTop: 2 }}>{o.status_label}{(o.plan_unbroken ?? 0) > 0 && ` · без разбивки ${fmt(o.plan_unbroken)}`}</div>
                       </div>
                       <span style={{ textAlign: "right", fontSize: 12, color: "#6B6355" }}>{fmt(o.cost_plan)}</span>
                       <span style={{ textAlign: "right", fontSize: 12, color: o.overspent ? "#8B3A3A" : "#1A1A1A", fontWeight: o.overspent ? 700 : 400 }}>{fmt(o.cost_fact)}</span>
@@ -844,7 +847,7 @@ export default function OrdersV2() {
         ) : (<>
         {/* Filter / selection bar — always visible to prevent layout shift */}
         {(() => {
-          const hasFilters = !!(titleFilter || customerFilter || statusFilter || brandFilter || amountMin || amountMax || debtMin || debtMax);
+          const hasFilters = !!(titleFilter || customerFilter || statusFilter || brandFilter || amountMin || amountMax || factMin || factMax);
           const canClear = hasFilters || selectedIds.size > 0;
           const sum = filteredData.reduce((s: number, o: any) => s + (o.price_plan || 0), 0);
           const selSum = filteredData.filter((o: any) => selectedIds.has(o.id)).reduce((s: number, o: any) => s + (o.price_plan || 0), 0);
@@ -908,7 +911,8 @@ export default function OrdersV2() {
           <div><ColumnFilter label="КЛИЕНТ" options={uniqueCustomers} value={customerFilter} onChange={(v) => { setCustomerFilter(v); setPage(0); }} /></div>
           <div><ColumnFilter label="СТАТУС" options={uniqueStatuses} value={statusFilter} onChange={(v) => { setStatusFilter(v); setPage(0); }} /></div>
           <div><AmountFilter label="СУММА" min={amountMin} max={amountMax} onChange={(mn, mx) => { setAmountMin(mn); setAmountMax(mx); setPage(0); }} /></div>
-          {!selected && <div><AmountFilter label="К ПОЛУЧЕНИЮ" min={debtMin} max={debtMax} onChange={(mn, mx) => { setDebtMin(mn); setDebtMax(mx); setPage(0); }} /></div>}
+          {!selected && <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", textAlign: "right" }} title="Плановая себестоимость: сумма активной сметы плюс плановая себестоимость допработ">СЕБ. ПЛАН</div>}
+          <div style={{ textAlign: "right" }}><AmountFilter label="СЕБ. ФАКТ" min={factMin} max={factMax} onChange={(mn, mx) => { setFactMin(mn); setFactMax(mx); setPage(0); }} /></div>
           {!selected && <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", textAlign: "right" }} title="Чистая после УСН: план у смет и ждущих, прогноз в работе, факт у завершённых">Δ</div>}
           <div />
         </div>
@@ -925,6 +929,9 @@ export default function OrdersV2() {
             pageData.map((o: any) => {
               const st = STATUS_MAP[o.status] || { label: o.status, color: "#A89070" };
               const isActive = selected?.id === o.id;
+              // Перерасход: факт перевалил плановую себестоимость. Метка на строке —
+              // чтобы «где течёт» было видно, не открывая карточку.
+              const overspent = (o.cost_fact || 0) > (o.cost_plan || 0) && (o.cost_plan || 0) > 0;
               return (
                 <div
                   key={o.id}
@@ -995,11 +1002,26 @@ export default function OrdersV2() {
                   <div style={{ fontSize: 13, fontWeight: 600, color: isActive ? "#FFFFFF" : "#1A1A1A", lineHeight: 1.4, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
                     {fmt(o.price_plan)}
                   </div>
+                  {/* Себестоимость: план серым, факт чёрным, перерасход красным.
+                      Обе цифры считает бэк одним предрасчётом (_fact_costs пачкой +
+                      транзит из _transit_facts) — на строку запросов нет. */}
                   {!selected && (
-                    <div style={{ fontSize: 13, fontWeight: 600, color: isActive ? "#FFFFFF" : (o.debt > 0 ? "#E8592A" : "#C8C0B0"), lineHeight: 1.4, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
-                      {o.debt > 0 ? fmt(o.debt) : "—"}
+                    <div style={{ textAlign: "right", fontSize: 13, fontWeight: 500, lineHeight: 1.4, fontFamily: MONO, fontVariantNumeric: "tabular-nums",
+                      color: isActive ? "rgba(255,255,255,0.7)" : "#6B6355" }}>
+                      {o.cost_plan ? fmt(o.cost_plan) : "—"}
                     </div>
                   )}
+                  <div style={{ textAlign: "right", lineHeight: 1.3 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, fontFamily: MONO, fontVariantNumeric: "tabular-nums",
+                      color: isActive ? "#FFFFFF" : !o.cost_fact ? "#C8C0B0" : overspent ? "#8B3A3A" : "#1A1A1A" }}>
+                      {o.cost_fact ? fmt(o.cost_fact) : "—"}
+                    </div>
+                    {overspent && (
+                      <div style={{ fontSize: 9, color: isActive ? "rgba(255,255,255,0.7)" : "#8B3A3A" }}>
+                        +{fmt(o.cost_delta)}
+                      </div>
+                    )}
+                  </div>
                   {/* Дельта — ориентир Юры: план/прогноз/факт считает бэк (_order_delta),
                       здесь только цвет и подпись источника. «по плану» у завершённых —
                       предупреждение: траты не внесены, плюс не подтверждён. */}

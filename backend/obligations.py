@@ -105,7 +105,7 @@ def coverage(conn, order_ids: Optional[list] = None) -> dict:
 
     exps = [dict(r) for r in conn.execute(f"""
         SELECT e.id, e.order_id, e.amount, e.category, e.supplier, e.master_id,
-               e.creditor_id, e.finance_tx_id, e.zenmoney_tx_id,
+               e.creditor_id, e.finance_tx_id, e.zenmoney_tx_id, e.settled_by,
                e.expense_date, e.created_at, e.title,
                m.name AS master_name
           FROM expenses e
@@ -139,8 +139,11 @@ def coverage(conn, order_ids: Optional[list] = None) -> dict:
             return 0.0
         wallet[exp["id"]] = round(wallet[exp["id"]] - amount, 2)
         res = out[cred["id"]]
+        # settled_by — «чем закрыто» (A1): карточка обязательства показывает не только
+        # сколько покрыто, но и деньгами это было, зачётом, авансом или оплатой за него.
         res["sources"].append({"expense_id": exp["id"], "title": exp["title"],
                                "amount": round(amount, 2), "level": level,
+                               "settled_by": exp.get("settled_by") or "cash",
                                "date": exp["expense_date"]})
         if res["level"] is None:
             res["level"] = level

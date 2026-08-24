@@ -196,13 +196,21 @@ class TestПлан:
         assert by["Материалы"] == 3_000
         assert by["Работы"] == 1_500
 
-    def test_позиция_без_строк_идёт_своей_суммой(self, conn):
+    def test_позиция_без_строк_идёт_отдельной_строкой_а_не_в_категорию(self, conn):
+        """A3 (ТЗ 24.08.2026): план позиции без состава в категории НЕ раскладывается.
+
+        Раньше он падал в категорию позиции, а факт по ней разносился настоящей
+        категорией расхода — у ORD-024 разбивка показывала «Работы: план 0 / факт
+        16 000» и «Прочее: план 16 000 / факт 0», два перекоса на ровном месте.
+        Итог плана при этом обязан остаться прежним."""
         oid = _order(conn)
         sid = _set(conn, oid)
         _item(conn, sid, "IT-1", category="delivery", qty=1, cost_total=7_000)
         res = _plan_fact(conn, oid, 60_000, 0, 100_000)
-        by = {c["category"]: c["plan"] for c in res["categories"]}
-        assert by["Доставка"] == 7_000
+        assert res["plan_unbroken"] == 7_000
+        assert res["cost_plan"] == 7_000                      # итог не потерялся
+        assert res["cost_plan_estimate"] == 7_000
+        assert {c["category"] for c in res["categories"]} == set()   # категорий нет
 
     def test_частичная_разбивка_не_схлопывает_план(self, conn):
         """Инцидент Горбачёва: одна разобранная позиция из двух выключала фолбэк,
@@ -214,12 +222,17 @@ class TestПлан:
         _item(conn, sid, "IT-2", category="labor", qty=1, cost_total=130_600)
         res = _plan_fact(conn, oid, 60_000, 0, 100_000)
         assert res["cost_plan"] == 149_867
+        # A3: разобранная часть — в категориях, неразобранная — отдельной строкой.
+        assert res["plan_unbroken"] == 130_600
+        assert sum(c["plan"] for c in res["categories"]) == 19_267
 
     def test_без_сметы_план_берётся_из_заказа(self, conn):
+        """Фолбэк без сметы — тоже неразобранный план (A3), а не категория «Прочее»."""
         oid = _order(conn)
         res = _plan_fact(conn, oid, 60_000, 0, 100_000)
         assert res["cost_plan"] == 60_000
-        assert {c["category"]: c["plan"] for c in res["categories"]}["Прочее"] == 60_000
+        assert res["plan_unbroken"] == 60_000
+        assert [c for c in res["categories"] if c["plan"]] == []
 
 
 class TestТранзитныйФакт:

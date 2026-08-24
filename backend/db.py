@@ -1259,6 +1259,47 @@ def ensure_match_trace_schema():
         conn.close()
 
 
+def ensure_expense_settlement_schema():
+    """A1 (ТЗ финагента 24.08.2026): у расхода по заказу два разных факта —
+    «работа принята» (себестоимость заказа) и «деньги ушли мастеру» (движение по
+    лицевому счёту). До этой колонки лицевой счёт считал выплатой ЛЮБОЙ расход,
+    сопоставленный с мастером: разноска ORD-024 (16 000 + 8 000 Кебре) перевернула
+    сальдо с «мы должны 1 800» на «должен отработать 22 200», хотя денег в тот день
+    не переводили — работы были закрыты авансом и зачётом.
+
+    settled_by — «чем закрыт этот расход»:
+      cash (и NULL у старых строк) — деньги ушли ЭТИМ расходом  → ledger: payment
+      offset       — взаимозачёт                                → ledger: offset
+      advance      — закрыто ранее выданным авансом             → ledger: ничего
+      third_party  — закрыто ранее сделанной оплатой за него    → ledger: ничего
+      none         — работа принята, ещё должны                 → ledger: ничего
+
+    Правило одной строкой: движение по лицевому счёту рождают только cash и offset;
+    остальные значат «минус уже проведён в другом месте, здесь только себестоимость».
+
+    На _plan_fact и obligations.coverage НЕ влияет: себестоимость растёт всегда,
+    работа принята независимо от того, чем закрыта. Это и есть развод двух фактов.
+
+    NULL у всех существующих строк ⇒ читается как cash ⇒ ни одно текущее сальдо и
+    ни один текущий факт миграцией не меняются. Бэкфилла нет.
+
+    Не путать с payment_source (откуда деньги: касса/подотчёт/безнал — осмысленно
+    только при cash) и с purpose contractor_pay/contractor_third_party (те живут на
+    расходах ВНЕ заказов, это сама выдача аванса / оплата за мастера)."""
+    conn = get_production()
+    try:
+        info = conn.execute("PRAGMA table_info(expenses)").fetchall()
+        if info and "settled_by" not in {r[1] for r in info}:
+            # SQLite разрешает CHECK у ADD COLUMN — полная пересборка таблицы
+            # (_rebuild_table_with_ddl) здесь не нужна.
+            conn.execute(
+                "ALTER TABLE expenses ADD COLUMN settled_by TEXT CHECK (settled_by IS NULL "
+                "OR settled_by IN ('cash','advance','offset','third_party','none'))")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_rate_history_schema():
     """A2 (лёгкая версия): история ставок и наценок одной таблицей.
 

@@ -1,17 +1,151 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { MONO } from "../../components/ui/Num";
 import { useNavigationGuard, NavigationGuardModal } from "../../components/NavigationGuard";
 import { EditModal, type FieldDef } from "../../components/EditModal";
 import { PayeeRulesSection } from "../../components/PayeeRulesSection";
 import { useNavigate } from "react-router-dom";
-import { mastersApi, financeApi, ledgerApi } from "../../api";
+import { mastersApi, financeApi, ledgerApi, ordersApi } from "../../api";
 import { ContactStrip, contactHref } from "../../components/ui/ContactLinks";
 import { PriceSync } from "./SupplierDetail";
-import { Check, User } from "@phosphor-icons/react";
+import { Check, User, HandCoins, ArrowsLeftRight, Receipt } from "@phosphor-icons/react";
 import { fmt, fmtDate } from "./helpers";
 import { DetailRow as Row } from "./DetailRow";
 import { DetailShell, DetailSection, NoteBlock, type DetailMetric } from "./DetailShell";
+import { Modal } from "../../components/ui/Modal";
+
+const LEDGER_ACTIONS = {
+  advance: {
+    label: "Выдать аванс", eyebrow: "АВАНС ПОДРЯДЧИКУ",
+    hint: "Деньги ушли подрядчику вперёд. Пока заказ не указан — это просто минус по лицевому счёту; укажешь заказ, и аванс закроет обязательство по нему.",
+  },
+  third_party: {
+    label: "Оплатить за него", eyebrow: "ОПЛАТА ЗА ПОДРЯДЧИКА",
+    hint: "Мы заплатили третьему лицу по его просьбе (скань, ткань для его заказа). Деньги наши, себестоимость — не наша, пока не привяжешь к заказу.",
+  },
+  offset: {
+    label: "Провести зачёт", eyebrow: "ВЗАИМОЗАЧЁТ",
+    hint: "Денег не было: встречные работы гасят наш долг. С заказом — закроет обязательство и поднимет себестоимость заказа.",
+  },
+} as const;
+type LedgerAction = keyof typeof LEDGER_ACTIONS;
+
+function ActionChip({ icon, label, onClick }:
+  { icon: ReactNode; label: string; onClick: () => void }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button onClick={onClick}
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{
+        display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, lineHeight: 1,
+        padding: "5px 10px", cursor: "pointer", fontFamily: "inherit",
+        border: `1px solid ${hover ? "#E8592A" : "#EDEBE6"}`,
+        background: hover ? "#FFF4EE" : "#fff", color: hover ? "#E8592A" : "#6B6355",
+      }}>
+      {icon} {label}
+    </button>
+  );
+}
+
+const lgInp: React.CSSProperties = {
+  width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6",
+  padding: "7px 10px", fontSize: 12, outline: "none", background: "transparent", color: "#1A1A1A",
+};
+const lgLbl: React.CSSProperties = { fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 };
+
+/** Аванс / оплата за подрядчика / зачёт — из карточки подрядчика.
+ *
+ *  Второй вход в тот же механизм, что «ЧЕМ ЗАКРЫТО» в форме расхода: при указанном
+ *  заказе бэк создаёт РАСХОД ПО ЗАКАЗУ (settled_by), а не строку регистра. Поэтому
+ *  два экрана не могут разъехаться — пишут в одну таблицу. */
+function LedgerActionModal({ action, master, creditors, onClose, onDone }: {
+  action: LedgerAction; master: any; creditors: any[];
+  onClose: () => void; onDone: () => void;
+}) {
+  const cfg = LEDGER_ACTIONS[action];
+  const [amount, setAmount] = useState("");
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [orderId, setOrderId] = useState("");
+  const [creditorId, setCreditorId] = useState("");
+  const [note, setNote] = useState("");
+  const [error, setError] = useState("");
+
+  const { data: orders = [] } = useQuery({ queryKey: ["orders-lite"], queryFn: () => ordersApi.list() });
+  // Обязательства только выбранного заказа: чужое бэк и так отвергнет (400),
+  // но показывать его в списке — приглашение к ошибке.
+  const orderCreditors = creditors.filter(
+    (c: any) => orderId && String(c.order_id) === String(orderId) && c.status !== "closed" && c.status !== "cancelled");
+
+  const amountNum = parseFloat(amount);
+  const valid = !isNaN(amountNum) && amountNum > 0;
+
+  const save = useMutation({
+    mutationFn: () => {
+      const base: Record<string, any> = {
+        master_id: master.id, amount: amountNum,
+        order_id: orderId || null, creditor_id: creditorId || null,
+        note: note.trim() || null,
+      };
+      return action === "offset"
+        ? ledgerApi.offset({ ...base, happened_at: date })
+        : ledgerApi.contractorPay({ ...base, kind: action, expense_date: date, category: "work" });
+    },
+    onSuccess: () => { onDone(); onClose(); },
+    onError: (e: any) => setError(e?.response?.data?.detail || "Не удалось сохранить"),
+  });
+
+  return (
+    <Modal size="md" eyebrow={`${cfg.eyebrow} · ${master.name}`} onClose={onClose} onCancel={onClose}
+           onSave={() => valid && save.mutate()} canSave={valid} saving={save.isPending} saveLabel="Провести">
+      <div style={{ fontSize: 11, color: "#6B6355", lineHeight: 1.6, marginBottom: 14 }}>{cfg.hint}</div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <div>
+          <div style={lgLbl}>СУММА ₽</div>
+          <input style={lgInp} value={amount} onChange={e => setAmount(e.target.value)} autoFocus placeholder="0" />
+        </div>
+        <div>
+          <div style={lgLbl}>ДАТА</div>
+          <input style={lgInp} type="date" value={date} onChange={e => setDate(e.target.value)} />
+        </div>
+      </div>
+
+      <div style={{ marginTop: 14 }}>
+        <div style={lgLbl}>ЗАКАЗ — НЕОБЯЗАТЕЛЬНО</div>
+        <select style={{ ...lgInp, cursor: "pointer" }} value={orderId}
+                onChange={e => { setOrderId(e.target.value); setCreditorId(""); }}>
+          <option value="">— только лицевой счёт, себестоимость не трогаем —</option>
+          {(orders as any[]).map((o: any) => <option key={o.id} value={o.id}>{o.title}</option>)}
+        </select>
+      </div>
+
+      {orderId && (
+        <div style={{ marginTop: 14 }}>
+          <div style={lgLbl}>ОБЯЗАТЕЛЬСТВО — НЕОБЯЗАТЕЛЬНО</div>
+          <select style={{ ...lgInp, cursor: "pointer" }} value={creditorId} onChange={e => setCreditorId(e.target.value)}>
+            <option value="">— не привязывать —</option>
+            {orderCreditors.map((c: any) => (
+              <option key={c.id} value={c.id}>{c.description || c.name} · остаток {fmt(c.debt)}</option>
+            ))}
+          </select>
+          {orderCreditors.length === 0 && (
+            <div style={{ fontSize: 10, color: "#A89070", marginTop: 4 }}>
+              У этого заказа нет открытых обязательств перед подрядчиком — расход просто добавится в себестоимость.
+            </div>
+          )}
+        </div>
+      )}
+
+      <div style={{ marginTop: 14 }}>
+        <div style={lgLbl}>ПРИМЕЧАНИЕ</div>
+        <input style={lgInp} value={note} onChange={e => setNote(e.target.value)}
+               placeholder={action === "offset" ? "за что зачёт" : "за что платим"} />
+      </div>
+
+      {error && <div style={{ marginTop: 12, fontSize: 11, color: "#8B3A3A" }}>{error}</div>}
+    </Modal>
+  );
+}
 
 export const STATUS_COLORS: Record<string, string> = {
   favorite: "#E8592A", stable: "#4A7C59", available: "#A89070", risk: "#8B3A3A",
@@ -66,6 +200,7 @@ export function ContractorDetail({ id, onClose }: { id: string; onClose: () => v
   const nav = useNavigate();
   const [editing, setEditing] = useState(false);
   const [editCreditor, setEditCreditor] = useState<any>(null);
+  const [ledgerAction, setLedgerAction] = useState<LedgerAction | null>(null);
   const blocker = useNavigationGuard(editing || !!editCreditor);
 
   const { data, isLoading } = useQuery({
@@ -207,8 +342,15 @@ export function ContractorDetail({ id, onClose }: { id: string; onClose: () => v
           </DetailSection>
         )}
 
-        {ledger && ledger.entries?.length > 0 && (
+        {ledger && (
           <DetailSection label="ЛИЦЕВОЙ СЧЁТ">
+            {/* Аванс / оплата за него / зачёт: до этого всё заводилось через API
+                руками — ledgerApi.contractorPay во фронте не вызывался ниоткуда. */}
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+              <ActionChip icon={<HandCoins size={12} />} label="Выдать аванс" onClick={() => setLedgerAction("advance")} />
+              <ActionChip icon={<Receipt size={12} />} label="Оплатить за него" onClick={() => setLedgerAction("third_party")} />
+              <ActionChip icon={<ArrowsLeftRight size={12} />} label="Провести зачёт" onClick={() => setLedgerAction("offset")} />
+            </div>
             <Row label={ledger.balance >= 0 ? "Мы должны" : "Аванс у мастера"}
                  value={fmt(Math.abs(ledger.balance))} mono
                  valueColor={ledger.balance > 0 ? "#8B3A3A" : ledger.balance < 0 ? "#4A7C59" : undefined} />
@@ -216,8 +358,11 @@ export function ContractorDetail({ id, onClose }: { id: string; onClose: () => v
             <Row label="Выплачено" value={fmt(ledger.paid)} mono />
             {ledger.third_party > 0 && <Row label="Оплачено за него" value={fmt(ledger.third_party)} mono />}
             {ledger.offset > 0 && <Row label="Зачтено" value={fmt(ledger.offset)} mono />}
+            {/* A1: работы приняты, но закрыты авансом/зачётом или ещё не оплачены.
+                В сальдо не входит (знак 0) — это справка «за что мы ещё должны». */}
+            {ledger.accepted > 0 && <Row label="Принято, не оплачено" value={fmt(ledger.accepted)} mono />}
             <div style={{ marginTop: 10 }}>
-              {ledger.entries.slice(0, 8).map((e: any, i: number) => (
+              {(ledger.entries || []).slice(0, 8).map((e: any, i: number) => (
                 <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "6px 0",
                                       borderBottom: "1px solid #F2EFE9" }}>
                   <span style={{ fontFamily: MONO, fontSize: 11, color: "#A89070", minWidth: 74 }}>{fmtDate(e.date)}</span>
@@ -226,8 +371,9 @@ export function ContractorDetail({ id, onClose }: { id: string; onClose: () => v
                                  textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {e.order_title || e.title}
                   </span>
-                  <span style={{ fontFamily: MONO, fontSize: 12, color: e.sign > 0 ? "#8B3A3A" : "#4A7C59" }}>
-                    {e.sign > 0 ? "+" : "−"}{fmt(e.amount)}
+                  <span style={{ fontFamily: MONO, fontSize: 12,
+                                 color: e.sign > 0 ? "#8B3A3A" : e.sign < 0 ? "#4A7C59" : "#A89070" }}>
+                    {e.sign > 0 ? "+" : e.sign < 0 ? "−" : ""}{fmt(e.amount)}
                   </span>
                 </div>
               ))}
@@ -355,6 +501,21 @@ export function ContractorDetail({ id, onClose }: { id: string; onClose: () => v
 
         <PayeeRulesSection entityType="master" entityId={id} />
       </DetailShell>
+
+      {ledgerAction && master && (
+        <LedgerActionModal
+          action={ledgerAction} master={master} creditors={creditors}
+          onClose={() => setLedgerAction(null)}
+          onDone={() => {
+            // Проводка меняет и лицевой счёт, и — при указанном заказе — факт
+            // себестоимости: обновляем оба контура, иначе экраны разъедутся.
+            qc.invalidateQueries({ queryKey: ["ledger", "master", id] });
+            qc.invalidateQueries({ queryKey: ["master", id] });
+            qc.invalidateQueries({ queryKey: ["orders"] });
+            qc.invalidateQueries({ queryKey: ["orders-plan-fact-summary"] });
+          }}
+        />
+      )}
 
       <NavigationGuardModal blocker={blocker} />
     </>
