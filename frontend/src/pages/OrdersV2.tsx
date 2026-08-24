@@ -15,7 +15,6 @@ import { ReadinessPanel } from "../components/order/ReadinessPanel";
 import { SilentPanel } from "../components/order/SilentPanel";
 import { StatusPicker } from "../components/order/StatusPicker";
 import { EstimateReviewQueue } from "../components/EstimateReviewQueue";
-import { Breadcrumbs } from "../components/ui/Breadcrumbs";
 
 // Статусы и бренды — из domain.ts (аудит 29.07: локальные копии разъезжались).
 import { ORDER_STATUS_MAP as STATUS_MAP, BRANDS, BRAND_COLOR, ESTIMATE_STATUS } from "../components/domain";
@@ -29,6 +28,10 @@ const STATUSES = [
   { value: "awaiting_payment", label: "Ждут оплату" },
   { value: "completed", label: "Завершён" },
 ];
+
+// Разделы экрана заказов. Взаимоисключающие по смыслу — поэтому одно значение,
+// а не набор булевых: два раздела сразу теперь невозможны по устройству.
+type OrdersMode = "list" | "review" | "summary" | "ready" | "silent" | "archive";
 
 const PAGE_SIZE = 10;
 
@@ -430,12 +433,11 @@ export default function OrdersV2() {
   const [selected, setSelected] = useState<any>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [page, setPage] = useState(0);
-  const [archiveMode, setArchiveMode] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [customerFilter, setCustomerFilter] = useState("");
   const [titleFilter, setTitleFilter] = useState("");
   const [brandFilter, setBrandFilter] = useState("");
-  const clearFilters = () => { setCustomerFilter(""); setTitleFilter(""); setStatusFilter(""); setAmountMin(""); setAmountMax(""); setFactMin(""); setFactMax(""); setBrandFilter(""); setPage(0); setSelectedIds(new Set()); };
+  const clearFilters = () => { setCustomerFilter(""); setTitleFilter(""); setStatusFilter(""); setAmountMin(""); setAmountMax(""); setFactMin(""); setFactMax(""); setBrandFilter(""); setPage(0); setSelectedIds(new Set()); setSelected(null); };
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -462,10 +464,29 @@ export default function OrdersV2() {
   const [factMin, setFactMin] = useState("");
   const [factMax, setFactMax] = useState("");
   const [showNewOrder, setShowNewOrder] = useState(false);
-  const [summaryMode, setSummaryMode] = useState(false);
-  const [readyMode, setReadyMode] = useState(false);
-  const [silentMode, setSilentMode] = useState(false);
-  const [reviewMode, setReviewMode] = useState(false);
+
+  // Какой раздел экрана открыт. ОДНО значение, а не пять булевых флагов: раньше
+  // клик по статус-вкладке менял только status и не гасил флаг режима, а рендер
+  // проверял режимы раньше таблицы — «Готовность» не отпускала экран, и выйти
+  // можно было лишь повторным кликом по той же вкладке (баг Юры 24.08.2026).
+  const [mode, setMode] = useState<OrdersMode>("list");
+  const archiveMode = mode === "archive";
+
+  /** Единственный вход для смены раздела.
+   *
+   *  Сбрасывает выделение и страницу ВСЕГДА — чтобы новая вкладка не могла
+   *  «забыть» сброс: именно забытый сброс и был багом. Статус: в списке —
+   *  явный или «в работе», в архиве — пустой (там показываем все статусы),
+   *  в остальных разделах не трогаем, он там ни на что не влияет. */
+  const goto = (next: OrdersMode, nextStatus?: string) => {
+    setMode(next);
+    setSelected(null);
+    setPage(0);
+    if (next === "list") setStatus(nextStatus ?? "in_production");
+    else if (next === "archive") setStatus("");
+  };
+  /** Клик по вкладке-разделу: повторный клик возвращает к списку. */
+  const toggleMode = (m: OrdersMode) => goto(mode === m ? "list" : m);
 
   // Итог закрытого проекта — то, ради чего сводка и нужна: раньше бэк жёстко
   // отбрасывал completed, и посмотреть закрытый заказ можно было только поштучно.
@@ -473,7 +494,7 @@ export default function OrdersV2() {
   const { data: summary } = useQuery({
     queryKey: ["orders-plan-fact-summary", summaryScope],
     queryFn: () => ordersApi.planFactSummary(summaryScope),
-    enabled: summaryMode,
+    enabled: mode === "summary",
   });
 
   // Всегда включён: счётчик в ярлыке вкладки должен быть виден без захода в неё.
@@ -631,7 +652,12 @@ export default function OrdersV2() {
                   }}
                   placeholder="Поиск..."
                   value={search}
-                  onChange={(e) => { setSearch(e.target.value); setPage(0); }}
+                  onChange={(e) => {
+                    setSearch(e.target.value); setPage(0);
+                    // Поиск подразумевает список: в режиме «Молчат» ввод уходил в
+                    // пустоту — запрос шёл, а на экране оставалась чужая панель.
+                    if (mode !== "list") goto("list");
+                  }}
                   onKeyDown={(e) => { if (e.key === "Escape") { setSearchOpen(false); setSearch(""); setPage(0); } }}
                 />
               </div>
@@ -646,25 +672,22 @@ export default function OrdersV2() {
 
           {/* Status tabs */}
           <div style={{ display: "flex", gap: 24, borderBottom: "1px solid #EDEBE6", alignItems: "baseline" }}>
-            {/* Режим-таб активен → статус-табы спрятаны; крошки дают выход одной кнопкой */}
-            {(archiveMode || summaryMode || reviewMode) && (
-              <div style={{ paddingBottom: 12 }}>
-                <Breadcrumbs items={[
-                  { label: "Заказы", onClick: () => { setReviewMode(false); setSummaryMode(false); setArchiveMode(false); setSilentMode(false); setStatus("in_production"); setPage(0); } },
-                  { label: reviewMode ? "К утверждению" : summaryMode ? "Сводка П/Ф" : "Архив" },
-                ]} />
-              </div>
-            )}
-            {!archiveMode && !summaryMode && !reviewMode && STATUSES.map((s) => (
+            {/* Статус-вкладки видны ВСЕГДА и всегда возвращают к списку. Раньше в
+                трёх режимах они прятались за крошки, а в двух оставались на экране
+                кликабельными, но мёртвыми — эта асимметрия и была багом. Активный
+                раздел и так подсвечен своей вкладкой, крошки не нужны. */}
+            {STATUSES.map((s) => (
               <button
                 key={s.value}
-                onClick={() => { setStatus(s.value); setPage(0); }}
+                onClick={() => goto("list", s.value)}
                 style={{
                   fontSize: 13, padding: "0 0 12px",
                   border: "none", background: "none", cursor: "pointer",
-                  color: status === s.value ? "#1A1A1A" : "#A89070",
-                  fontWeight: status === s.value ? 600 : 400,
-                  borderBottom: status === s.value ? "2px solid #E8592A" : "2px solid transparent",
+                  // Активна только когда мы действительно в списке: иначе подсветка
+                  // спорила бы с активной вкладкой раздела (две активные разом).
+                  color: mode === "list" && status === s.value ? "#1A1A1A" : "#A89070",
+                  fontWeight: mode === "list" && status === s.value ? 600 : 400,
+                  borderBottom: mode === "list" && status === s.value ? "2px solid #E8592A" : "2px solid transparent",
                   marginBottom: -1,
                   transition: "all 0.15s",
                 }}
@@ -673,28 +696,28 @@ export default function OrdersV2() {
               </button>
             ))}
             <button
-              onClick={() => { setReviewMode(!reviewMode); setReadyMode(false); setSummaryMode(false); setArchiveMode(false); setSilentMode(false); setStatus(reviewMode ? "in_production" : ""); setPage(0); setSelected(null); }}
+              onClick={() => toggleMode("review")}
               style={{
                 fontSize: 13, padding: "0 0 12px",
                 border: "none", background: "none", cursor: "pointer",
-                color: reviewMode ? "#1A1A1A" : reviewCount > 0 ? "#E8592A" : "#A89070",
-                fontWeight: reviewMode || reviewCount > 0 ? 600 : 400,
-                borderBottom: reviewMode ? "2px solid #E8592A" : "2px solid transparent",
+                color: mode === "review" ? "#1A1A1A" : reviewCount > 0 ? "#E8592A" : "#A89070",
+                fontWeight: mode === "review" || reviewCount > 0 ? 600 : 400,
+                borderBottom: mode === "review" ? "2px solid #E8592A" : "2px solid transparent",
                 marginBottom: -1,
-                marginLeft: (archiveMode || summaryMode || reviewMode) ? 0 : "auto",
+                marginLeft: "auto",
                 transition: "all 0.15s",
               }}
             >
               К утверждению{reviewCount > 0 ? ` (${reviewCount})` : ""}
             </button>
             <button
-              onClick={() => { setSummaryMode(!summaryMode); setReadyMode(false); setArchiveMode(false); setReviewMode(false); setSilentMode(false); setStatus(summaryMode ? "in_production" : ""); setPage(0); setSelected(null); }}
+              onClick={() => toggleMode("summary")}
               style={{
                 fontSize: 13, padding: "0 0 12px",
                 border: "none", background: "none", cursor: "pointer",
-                color: summaryMode ? "#1A1A1A" : "#A89070",
-                fontWeight: summaryMode ? 600 : 400,
-                borderBottom: summaryMode ? "2px solid #E8592A" : "2px solid transparent",
+                color: mode === "summary" ? "#1A1A1A" : "#A89070",
+                fontWeight: mode === "summary" ? 600 : 400,
+                borderBottom: mode === "summary" ? "2px solid #E8592A" : "2px solid transparent",
                 marginBottom: -1,
                 transition: "all 0.15s",
               }}
@@ -702,13 +725,13 @@ export default function OrdersV2() {
               Сводка П/Ф
             </button>
             <button
-              onClick={() => { setReadyMode(!readyMode); setSummaryMode(false); setArchiveMode(false); setReviewMode(false); setSilentMode(false); setSelected(null); }}
+              onClick={() => toggleMode("ready")}
               style={{
                 fontSize: 13, padding: "0 0 12px",
                 border: "none", background: "none", cursor: "pointer",
-                color: readyMode ? "#1A1A1A" : "#A89070",
-                fontWeight: readyMode ? 600 : 400,
-                borderBottom: readyMode ? "2px solid #E8592A" : "2px solid transparent",
+                color: mode === "ready" ? "#1A1A1A" : "#A89070",
+                fontWeight: mode === "ready" ? 600 : 400,
+                borderBottom: mode === "ready" ? "2px solid #E8592A" : "2px solid transparent",
                 marginBottom: -1,
                 transition: "all 0.15s",
               }}
@@ -716,13 +739,13 @@ export default function OrdersV2() {
               Готовность
             </button>
             <button
-              onClick={() => { setSilentMode(!silentMode); setReadyMode(false); setSummaryMode(false); setArchiveMode(false); setReviewMode(false); setSelected(null); }}
+              onClick={() => toggleMode("silent")}
               style={{
                 fontSize: 13, padding: "0 0 12px",
                 border: "none", background: "none", cursor: "pointer",
-                color: silentMode ? "#1A1A1A" : silentCount > 0 ? "#E8592A" : "#A89070",
-                fontWeight: silentMode || silentCount > 0 ? 600 : 400,
-                borderBottom: silentMode ? "2px solid #E8592A" : "2px solid transparent",
+                color: mode === "silent" ? "#1A1A1A" : silentCount > 0 ? "#E8592A" : "#A89070",
+                fontWeight: mode === "silent" || silentCount > 0 ? 600 : 400,
+                borderBottom: mode === "silent" ? "2px solid #E8592A" : "2px solid transparent",
                 marginBottom: -1,
                 transition: "all 0.15s",
               }}
@@ -730,13 +753,13 @@ export default function OrdersV2() {
               Молчат{silentCount > 0 ? ` (${silentCount})` : ""}
             </button>
             <button
-              onClick={() => { setArchiveMode(!archiveMode); setReadyMode(false); setSummaryMode(false); setReviewMode(false); setSilentMode(false); setStatus(""); setPage(0); setSelected(null); }}
+              onClick={() => toggleMode("archive")}
               style={{
                 fontSize: 13, padding: "0 0 12px",
                 border: "none", background: "none", cursor: "pointer",
-                color: archiveMode ? "#1A1A1A" : "#A89070",
-                fontWeight: archiveMode ? 600 : 400,
-                borderBottom: archiveMode ? "2px solid #A89070" : "2px solid transparent",
+                color: mode === "archive" ? "#1A1A1A" : "#A89070",
+                fontWeight: mode === "archive" ? 600 : 400,
+                borderBottom: mode === "archive" ? "2px solid #A89070" : "2px solid transparent",
                 marginBottom: -1,
                 transition: "all 0.15s",
                 display: "flex", alignItems: "center", gap: 5,
@@ -748,13 +771,15 @@ export default function OrdersV2() {
           </div>
         </div>
 
-        {silentMode ? (
+        {/* Один раздел за раз — по значению mode, а не по очереди булевых флагов,
+            где таблица была последней и недостижимой ветвью. */}
+        {mode === "silent" ? (
           <SilentPanel />
-        ) : readyMode ? (
+        ) : mode === "ready" ? (
           <ReadinessPanel />
-        ) : reviewMode ? (
+        ) : mode === "review" ? (
           <EstimateReviewQueue />
-        ) : summaryMode ? (
+        ) : mode === "summary" ? (
           <div style={{ flex: 1, overflow: "auto", padding: "8px 28px 24px" }}>
             {!summary ? (
               <Loading compact />
@@ -802,7 +827,7 @@ export default function OrdersV2() {
                   </div>
                   {rows.map((o: any) => (
                     <div key={o.id}
-                      onClick={() => { setSummaryMode(false); setStatus("in_production"); setSelected(o); }}
+                      onClick={() => { goto("list"); setSelected(o); }}
                       style={{ display: "grid", gridTemplateColumns: SUM_COLS, gap: "0 16px", padding: "11px 0",
                         borderBottom: "1px solid #F7F5F1", cursor: "pointer", alignItems: "center",
                         background: o.overspent ? "#FFF8F5" : "transparent", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}

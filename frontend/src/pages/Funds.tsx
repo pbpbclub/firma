@@ -304,7 +304,7 @@ function AccountableSection() {
       </div>
       {(people as any[]).map((p: any) => (
         <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "9px 0", borderBottom: "1px solid #F2EFE9" }}>
-          <button onClick={() => setHistFor(p)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 13, color: "#1A1A1A", textDecoration: "underline", textDecorationColor: "#EDEBE6", fontFamily: "inherit" }}>
+          <button onClick={() => { setOpFor(null); setAmount(""); setHistFor(p); }} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 13, color: "#1A1A1A", textDecoration: "underline", textDecorationColor: "#EDEBE6", fontFamily: "inherit" }}>
             {p.name}
           </button>
           <span style={{ fontSize: 10, color: "#A89070" }}>на руках</span>

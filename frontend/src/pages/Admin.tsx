@@ -631,7 +631,9 @@ function PayeeRulesSection() {
     <div style={{ marginBottom: 40 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
         <SectionLabel>ПРАВИЛА СОПОСТАВЛЕНИЯ ПЛАТЕЖЕЙ</SectionLabel>
-        <button onClick={() => { setEditId(null); setForm({ pattern: "", match_type: "exact", display_name: "", entity_type: "label", entity_id: "", entity_name: "" }); setAdding(v => !v); }}
+        <button onClick={() => { setEditId(null); setForm({ pattern: "", match_type: "exact", display_name: "", entity_type: "label", entity_id: "", entity_name: "" }); // Тумблер только из состояния «создание»: при открытой правке клик по
+          // «Добавить» закрывал панель вместо переключения на создание.
+          setAdding(editId ? true : !adding); }}
           style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 5, background: "none", border: "1px solid #EDEBE6", padding: "4px 10px", fontSize: 11, cursor: "pointer", color: "#6B6355", fontFamily: "inherit" }}>
           <Plus size={11} /> Добавить
         </button>

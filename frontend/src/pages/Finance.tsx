@@ -300,7 +300,7 @@ export default function Finance() {
   const [descFilter, setDescFilter] = useState("");
   const [amountMin, setAmountMin] = useState("");
   const [amountMax, setAmountMax] = useState("");
-  const clearFilters = () => { setAccountFilter(""); setDateFrom(""); setDateTo(""); setDescFilter(""); setAmountMin(""); setAmountMax(""); setSelectedIds(new Set()); };
+  const clearFilters = () => { setAccountFilter(""); setDateFrom(""); setDateTo(""); setDescFilter(""); setAmountMin(""); setAmountMax(""); setDirection(""); setSelectedIds(new Set()); };
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [linkModal, setLinkModal] = useState<any>(null);
@@ -419,7 +419,7 @@ const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
             {FILTERS.map((f) => (
               <button
                 key={f.v}
-                onClick={() => setDirection(f.v)}
+                onClick={() => { setDirection(f.v); setSelectedIds(new Set()); }}
                 style={{
                   fontSize: 13, padding: "0 0 12px",
                   border: "none", background: "none", cursor: "pointer",

@@ -504,6 +504,9 @@ export default function Catalog() {
   const [confirmSmetsDelete, setConfirmSmetsDelete] = useState(false);
   const [smetsDeleting, setSmetsDeleting] = useState(false);
 
+  // ВНИМАНИЕ: здесь в selectedIds лежат НАЗВАНИЯ позиций (вкладка «Из смет»,
+  // toggleSelect(rowId), rowId = item.title), а в bulkDelete ниже — id изделий.
+  // Набор общий, поэтому он обнуляется при смене вкладки — иначе сюда придут id.
   const smetsDelete = async () => {
     setSmetsDeleting(true);
     try {
@@ -515,6 +518,8 @@ export default function Catalog() {
     }
   };
 
+  // Здесь в selectedIds — id изделий каталога (бренд-вкладки). См. смену вкладки:
+  // набор чистится, чтобы сюда не попали названия из «Из смет».
   const bulkDelete = async () => {
     setBulkDeleting(true);
     try {
@@ -639,7 +644,14 @@ export default function Catalog() {
           {tabs.map((t) => (
             <button
               key={t}
-              onClick={() => setTab(t)}
+              onClick={() => {
+                // Выделение НЕ переносится между вкладками: бренд-вкладки кладут в
+                // selectedIds id изделий, а «Из смет» — их названия. Уцелевший набор
+                // уходил в чужую операцию удаления (id в deleteByTitles и наоборот).
+                setSelectedIds(new Set());
+                setBulkCatOpen(false);
+                setTab(t);
+              }}
               style={{
                 padding: "8px 18px",
                 background: "none", border: "none", cursor: "pointer",

@@ -125,7 +125,11 @@ function ObligationPicker({ orderId, categoryLabel, value, amount, onPick }: {
 
 function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
   const [title, setTitle] = useState(tx.counterparty || tx.purpose || "");
-  const [hideMode, setHideMode] = useState(false);
+  // Режим строки — ОДНО значение, а не три булевых. Сейчас два режима сразу не
+  // включить только потому, что кнопки входа отрисованы в else-ветке: добавь
+  // кто-нибудь четвёртую кнопку в тулбар — и получится залипание, как было у
+  // «Готовности» в заказах (24.08.2026).
+  const [rowMode, setRowMode] = useState<"none" | "hide" | "personal" | "accountable">("none");
   // Каждая строка — свой заказ, сумма, категория, подрядчик и (опц.) обязательство.
   const [allocs, setAllocs] = useState<Alloc[]>([]);
   const [error, setError] = useState("");
@@ -195,7 +199,6 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
   // Личное: не бизнес-расход (друг, разовая покупка). В личном ZM-леджере трата
   // остаётся, из Разноски убираем. «Запомнить» → правило entity_type='personal':
   // будущие платежи этому контрагенту авто-скрываются (инбокс их отсеивает).
-  const [personalMode, setPersonalMode] = useState(false);
   const [rememberPersonal, setRememberPersonal] = useState(false);
   const [personalSubcat, setPersonalSubcat] = useState("Прочее");
   const markPersonal = useMutation({
@@ -211,7 +214,6 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
 
   // Выдача под отчёт: перевод доверенному лицу — НЕ расход по заказу (расход
   // возникнет при его оплате поставщику). Баланс лица «на руках» вырастет.
-  const [accountableMode, setAccountableMode] = useState(false);
   const [accountablePick, setAccountablePick] = useState<string>(tx.master_id || tx.master_suggested?.id || "");
   const issueAccountable = useMutation({
     mutationFn: () => accountableApi.issueFromTx({
@@ -393,7 +395,7 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #EDEBE6", paddingTop: 10, gap: 12, flexWrap: "wrap" }}>
         {/* Скрыть: перевод между своими счетами, возврат — не расход бизнеса */}
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          {hideMode ? (
+          {rowMode === "hide" ? (
             <>
               <span style={{ fontSize: 10, color: "#A89070" }}>Скрыть:</span>
               {DISMISS_REASONS.map(r => (
@@ -402,11 +404,11 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
                   {r}
                 </button>
               ))}
-              <button onClick={() => setHideMode(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}>
+              <button onClick={() => setRowMode("none")} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}>
                 <X size={11} />
               </button>
             </>
-          ) : accountableMode ? (
+          ) : rowMode === "accountable" ? (
             <>
               <span style={{ fontSize: 10, color: "#A89070" }}>Под отчёт:</span>
               <select value={accountablePick} onChange={e => setAccountablePick(e.target.value)}
@@ -419,11 +421,11 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
                   color: accountablePick ? "#fff" : "#A89070", cursor: accountablePick ? "pointer" : "default", fontFamily: "inherit", fontWeight: 600 }}>
                 {issueAccountable.isPending ? "..." : "Выдать"}
               </button>
-              <button onClick={() => setAccountableMode(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}>
+              <button onClick={() => setRowMode("none")} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}>
                 <X size={11} />
               </button>
             </>
-          ) : personalMode ? (
+          ) : rowMode === "personal" ? (
             <>
               <span style={{ fontSize: 10, color: "#A89070" }}>Личное:</span>
               {PERSONAL_SUBCATS.map(sc => {
@@ -447,7 +449,7 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
                 style={{ fontSize: 10, padding: "3px 10px", border: "none", background: "#E8592A", color: "#fff", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
                 {markPersonal.isPending ? "..." : (rememberPersonal && payeeStr ? "Запомнить" : "Скрыть")}
               </button>
-              <button onClick={() => setPersonalMode(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}>
+              <button onClick={() => setRowMode("none")} style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 2, display: "flex" }}>
                 <X size={11} />
               </button>
             </>
@@ -455,13 +457,13 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
             <>
               <ActionChip icon={<EyeSlash size={12} />} label="Не расход"
                 title="Скрыть: перевод между своими, возврат — не расход бизнеса"
-                onClick={() => setHideMode(true)} />
+                onClick={() => setRowMode("hide")} />
               <ActionChip icon={<HandCoins size={12} />} label="Под отчёт"
                 title="Перевод доверенному лицу: не расход по заказу — деньги выданы под отчёт"
-                onClick={() => setAccountableMode(true)} />
+                onClick={() => setRowMode("accountable")} />
               <ActionChip icon={<User size={12} />} label="Личное"
                 title="Личная трата (не бизнес): убрать из Разноски. В личном ZenMoney остаётся."
-                onClick={() => setPersonalMode(true)} />
+                onClick={() => setRowMode("personal")} />
             </>
           )}
         </div>

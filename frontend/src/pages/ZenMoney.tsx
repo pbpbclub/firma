@@ -514,7 +514,20 @@ export default function ZenMoneyPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [bankFilter, setBankFilter] = useState("");
-  const clearFilters = () => { setBankFilter(""); setCatFilter(""); setPayeeFilter(""); setAmountMin(""); setAmountMax(""); setDateFrom(""); setDateTo(""); setSelectedIds(new Set()); };
+  const clearFilters = () => { setBankFilter(""); setCatFilter(""); setPayeeFilter(""); setAmountMin(""); setAmountMax(""); setDateFrom(""); setDateTo(""); setDirection(""); setSelectedIds(new Set()); };
+
+  /** Переключение «Все» ↔ «Бизнес» — это смена набора данных целиком.
+   *
+   *  Подвкладки Все/Поступления/Списания в режиме «Бизнес» не рисуются, а фильтр
+   *  direction применялся всё равно: «Списания» → «Бизнес» молча урезали ленту, и
+   *  снять это было нечем — контрола на экране нет. Категории и контрагенты из
+   *  личной ленты в бизнес-ленте тоже бессмысленны. Сбрасываем всё. */
+  const switchFeed = (business: boolean) => {
+    setShowBusiness(business);
+    setDirection("");
+    setCatFilter(""); setPayeeFilter(""); setBankFilter("");
+    setSelectedIds(new Set());
+  };
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [linkModal, setLinkModal] = useState<any>(null);
@@ -721,7 +734,7 @@ export default function ZenMoneyPage() {
 
               {/* Toggle */}
               <button
-                onClick={() => setShowBusiness(false)}
+                onClick={() => switchFeed(false)}
                 style={{
                   padding: "4px 12px", fontSize: 12,
                   border: "1px solid #EDEBE6",
@@ -733,7 +746,7 @@ export default function ZenMoneyPage() {
                 Все
               </button>
               <button
-                onClick={() => setShowBusiness(true)}
+                onClick={() => switchFeed(true)}
                 style={{
                   padding: "4px 12px", fontSize: 12,
                   border: `1px solid ${showBusiness ? "#E8592A" : "#EDEBE6"}`,
@@ -755,7 +768,7 @@ export default function ZenMoneyPage() {
               {DIR_FILTERS.map((f) => (
                 <button
                   key={f.v}
-                  onClick={() => setDirection(f.v)}
+                  onClick={() => { setDirection(f.v); setSelectedIds(new Set()); }}
                   style={{
                     fontSize: 13, padding: "0 0 12px",
                     border: "none", background: "none", cursor: "pointer",

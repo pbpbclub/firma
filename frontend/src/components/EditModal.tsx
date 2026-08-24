@@ -71,7 +71,9 @@ export function EditModal({
         <ConfirmModal
           message="Запись будет удалена. Это действие нельзя отменить."
           confirmLabel="Да, удалить"
-          onConfirm={() => onDelete?.()}
+          // Закрываем ДО вызова: если onDelete упал, окно висело навсегда, а
+          // повторный клик отправлял удаление второй раз.
+          onConfirm={() => { setConfirmDelete(false); onDelete?.(); }}
           onCancel={() => setConfirmDelete(false)}
         />
       )}
