@@ -12,6 +12,8 @@ import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { MONO } from "../components/ui/Num";
 import { OrderLink } from "../components/ui/links";
 import { useTableSort } from "../components/ui/sort";
+import { useIsMobile, M, HScroll } from "../components/ui/responsive";
+import { RowCard } from "../components/ui/RowCard";
 import { IconButton } from "../components/ui/IconButton";
 import { T, POLARITY, debtColor } from "../components/ui/type";
 import { DeadlinePill } from "../components/ui/Pill";
@@ -325,6 +327,7 @@ function PayCreditorModal({ item, onClose }: { item: any; onClose: () => void })
 const debtorCols = "28px 2fr 1fr 130px 150px 130px 100px 28px";
 
 function DebtorsTab() {
+  const isMobile = useIsMobile();
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { data, isLoading, isError, error } = useQuery({ queryKey: ["debtors"], queryFn: financeApi.debtors });
@@ -394,7 +397,7 @@ function DebtorsTab() {
         const canClear = hasFilters || selectedIds.size > 0;
         const selDebt = filtered.filter((d: any) => selectedIds.has(String(d.id || d.number))).reduce((s: number, d: any) => s + (d.debt || 0), 0);
         return (
-          <div style={{ padding: "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+          <div style={{ padding: isMobile ? "8px 16px" : "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0, flexWrap: isMobile ? "wrap" : undefined, gap: isMobile ? 6 : 0 }}>
             <div style={{ display: "flex", gap: 10, fontSize: 11, color: "#6B6355", alignItems: "center" }}>
               {selectedIds.size > 0 && <span style={{ color: "#E8592A", fontWeight: 600 }}>Выбрано {selectedIds.size}</span>}
               {selectedIds.size > 0 && selDebt > 0 && <span style={{ color: debtColor(selDebt, "in") }}>долг {fmt(selDebt)}</span>}
@@ -408,8 +411,8 @@ function DebtorsTab() {
         );
       })()}
 
-      <div style={{ display: "grid", gridTemplateColumns: debtorCols, padding: "8px 28px", borderBottom: "1px solid #EDEBE6", alignItems: "center" }}>
-        <div style={{ display: "flex", alignItems: "center" }}>
+      <div style={isMobile ? M.filterRow : { display: "grid", gridTemplateColumns: debtorCols, padding: "8px 28px", borderBottom: "1px solid #EDEBE6", alignItems: "center" }}>
+        {!isMobile && <div style={{ display: "flex", alignItems: "center" }}>
           <Checkbox
             checked={filtered.length > 0 && filtered.every((d: any) => selectedIds.has(String(d.id || d.number)))}
             indeterminate={filtered.some((d: any) => selectedIds.has(String(d.id || d.number))) && !filtered.every((d: any) => selectedIds.has(String(d.id || d.number)))}
@@ -418,7 +421,7 @@ function DebtorsTab() {
               setSelectedIds(allSel ? new Set() : new Set(filtered.map((d: any) => String(d.id || d.number))));
             }}
           />
-        </div>
+        </div>}
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <ColumnFilter label="КЛИЕНТ" options={uniqueClients} value={clientFilter} onChange={setClientFilter} />
           <ColumnFilter label="ЗАКАЗ" options={uniqueOrders} value={orderFilter} onChange={setOrderFilter} />
@@ -428,7 +431,7 @@ function DebtorsTab() {
         <div><AmountFilter label="ОПЛАЧЕНО" min={paidMin} max={paidMax} onChange={(mn, mx) => { setPaidMin(mn); setPaidMax(mx); }} /></div>
         <div><AmountFilter label="ОЖИДАЕМ" min={debtMin} max={debtMax} onChange={(mn, mx) => { setDebtMin(mn); setDebtMax(mx); }} /></div>
         <div><PeriodFilter label="ДЕДЛАЙН" from={dlFrom} to={dlTo} onChange={(f, t) => { setDlFrom(f); setDlTo(t); }} align="right" /></div>
-        <div />
+        {!isMobile && <div />}
       </div>
 
       {filtered.length === 0 ? (
@@ -437,7 +440,17 @@ function DebtorsTab() {
         <>
           {filtered.map((d: any, i: number) => {
             const rowId = String(d.id || d.number || i);
-            return (
+            return isMobile ? (
+              <RowCard key={i} onClick={() => navigate(`/orders/${d.number}`)}
+                title={d.customer_name || "—"} sub={d.title}
+                right={<span style={{ color: debtColor(d.debt, "in") }}>{fmt(d.debt)}</span>}
+                rightSub={<>из {fmt(d.price_plan)}</>}
+                badge={<><span style={{ fontSize: 11, color: "#6B6355" }}>{d.status_label || d.status}</span><DeadlinePill date={d.deadline} /></>}
+                meta={<>оплачено <span style={{ color: "#4A7C59", fontFamily: MONO }}>{fmt(d.paid_total)}</span></>}
+                trailing={<IconButton icon={LinkSimple} title="Связать с транзакцией" size={36} iconSize={15}
+                  color={d.finance_tx_id ? "#4A7C59" : "#C8C0B0"} onClick={e => { e.stopPropagation(); setLinkItem(d); }} />}
+              />
+            ) : (
             <div
               key={i}
               onClick={() => navigate(`/orders/${d.number}`)}
@@ -480,6 +493,7 @@ function DebtorsTab() {
             padding: "10px 28px", borderTop: `2px solid ${POLARITY.in.rail}`,
             alignItems: "center", background: POLARITY.in.tint,
             fontFamily: MONO, fontVariantNumeric: "tabular-nums",
+            ...(isMobile ? { display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 16px" } : null),
           }}>
             <div />
             <div style={{ fontSize: 11, color: "#A89070", fontFamily: SANS }}>{filtered.length} заказов</div>
@@ -889,6 +903,7 @@ function LinkTxModal({ creditor, onClose }: { creditor: any; onClose: () => void
 const creditorCols = "28px 1.8fr 1.5fr 110px 130px 110px 90px 28px";
 
 function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
+  const isMobile = useIsMobile();
   const qc = useQueryClient();
   const [addOpen, setAddOpen] = useState(false);
   const [editItem, setEditItem] = useState<any>(null);
@@ -1035,7 +1050,7 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
         const canClear = hasFilters || selectedIds.size > 0;
         const selDebt = filteredItems.filter((c: any) => selectedIds.has(String(c.id))).reduce((s: number, c: any) => s + (c.debt || 0), 0);
         return (
-          <div style={{ padding: "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+          <div style={{ padding: isMobile ? "8px 16px" : "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0, flexWrap: isMobile ? "wrap" : undefined, gap: isMobile ? 6 : 0 }}>
             <div style={{ display: "flex", gap: 10, fontSize: 11, color: "#6B6355", alignItems: "center" }}>
               {selectedIds.size > 0 && <span style={{ color: "#E8592A", fontWeight: 600 }}>Выбрано {selectedIds.size}</span>}
               {selectedIds.size > 0 && selDebt > 0 && <span style={{ color: "#8B3A3A" }}>{fmt(selDebt)}</span>}
@@ -1062,8 +1077,8 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
         );
       })()}
 
-      <div style={{ display: "grid", gridTemplateColumns: creditorCols, padding: "8px 28px", borderBottom: "1px solid #EDEBE6", alignItems: "center" }}>
-        <div style={{ display: "flex", alignItems: "center" }}>
+      <div style={isMobile ? M.filterRow : { display: "grid", gridTemplateColumns: creditorCols, padding: "8px 28px", borderBottom: "1px solid #EDEBE6", alignItems: "center" }}>
+        {!isMobile && <div style={{ display: "flex", alignItems: "center" }}>
           <Checkbox
             checked={filteredItems.length > 0 && filteredItems.every((c: any) => selectedIds.has(String(c.id)))}
             indeterminate={filteredItems.some((c: any) => selectedIds.has(String(c.id))) && !filteredItems.every((c: any) => selectedIds.has(String(c.id)))}
@@ -1072,14 +1087,14 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
               setSelectedIds(allSel ? new Set() : new Set(filteredItems.map((c: any) => String(c.id))));
             }}
           />
-        </div>
+        </div>}
         <div><ColumnFilter label="КОНТРАГЕНТ" options={uniqueContragents} value={contragentFilter} onChange={setContragentFilter} sort={{ colKey: "name", sort, onToggle: toggleSort }} /></div>
         <div><ColumnFilter label="ЗА ЧТО" options={uniqueDescriptions} value={descFilter} onChange={setDescFilter} sort={{ colKey: "description", sort, onToggle: toggleSort }} /></div>
         <div><AmountFilter label="ПЛАН" min={cPlanMin} max={cPlanMax} onChange={(mn, mx) => { setCPlanMin(mn); setCPlanMax(mx); }} sort={{ colKey: "plan", sort, onToggle: toggleSort }} /></div>
         <div><AmountFilter label="ФАКТ" min={cPaidMin} max={cPaidMax} onChange={(mn, mx) => { setCPaidMin(mn); setCPaidMax(mx); }} sort={{ colKey: "fact", sort, onToggle: toggleSort }} /></div>
         <div><AmountFilter label="ОСТАТОК" min={cDebtMin} max={cDebtMax} onChange={(mn, mx) => { setCDebtMin(mn); setCDebtMax(mx); }} sort={{ colKey: "debt", sort, onToggle: toggleSort }} /></div>
         <div><PeriodFilter label="СРОК" from={dueFrom} to={dueTo} onChange={(f, t) => { setDueFrom(f); setDueTo(t); }} align="right" /></div>
-        <div />
+        {!isMobile && <div />}
       </div>
 
       {filteredItems.length === 0 ? (
@@ -1088,7 +1103,23 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
         <>
           {filteredItems.map((c: any, i: number) => {
             const rowId = String(c.id);
-            return (
+            return isMobile ? (
+              <RowCard key={i} onClick={() => setEditItem(c)}
+                title={c.name}
+                sub={<>{c.order_title ? <OrderLink id={c.order_id}>{c.order_title}</OrderLink> : c.estimate_item_title ? `← Смета: ${c.estimate_item_title}` : null}
+                  {c.order_status === "completed" && <span style={{ marginLeft: 6, color: "#B8860B" }}>· заказ завершён</span>}</>}
+                right={<span style={{ color: scope === "plan" ? (c.debt > 0 ? "#B8860B" : POLARITY.neutral.color) : debtColor(c.debt, "out") }}>{c.debt > 0 ? fmt(c.debt) : "Закрыт"}</span>}
+                rightSub={<>план {fmt(c.amount_plan ?? c.total)}</>}
+                badge={<>
+                  {(c.fact ?? c.paid) > 0 && <span style={{ fontSize: 11, color: "#4A7C59", fontFamily: MONO }}>факт {fmt(c.fact ?? c.paid)}</span>}
+                  {c.ambiguous && <span style={{ fontSize: 10, color: "#B8860B" }}>≈ похоже, закрыто</span>}
+                  <DeadlinePill date={c.due_date} />
+                </>}
+                meta={c.description || undefined}
+                trailing={<IconButton icon={LinkSimple} title="Связать с транзакцией" size={36} iconSize={15}
+                  color={(c.finance_tx_id || c.zenmoney_tx_id) ? "#4A7C59" : "#C8C0B0"} onClick={e => { e.stopPropagation(); setLinkItem(c); }} />}
+              />
+            ) : (
             <div
               key={i}
               onClick={() => setEditItem(c)}
@@ -1159,6 +1190,7 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
             padding: "10px 28px", borderTop: `2px solid ${POLARITY.out.rail}`,
             alignItems: "center", background: POLARITY.out.tint,
             fontFamily: MONO, fontVariantNumeric: "tabular-nums",
+            ...(isMobile ? { display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 16px" } : null),
           }}>
             <div />
             <div style={{ fontSize: 11, color: "#A89070", fontFamily: SANS }}>{filteredItems.length} записей</div>
@@ -1538,6 +1570,7 @@ function LedgerTab() {
 
 
 export default function Debtors() {
+  const isMobile = useIsMobile();
   const navigate = useNavigate();
   const [tab, setTab] = useState<"debtors" | "unallocated" | "creditors" | "plan" | "ledger" | "fixed">("debtors");
   const [addCreditorOpen, setAddCreditorOpen] = useState(false);
@@ -1573,16 +1606,16 @@ export default function Debtors() {
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
 
       {/* Header */}
-      <div style={{ padding: "24px 28px 0", borderBottom: "1px solid #EDEBE6", flexShrink: 0 }}>
-        <div style={{ ...T.pageTitle, marginBottom: 16 }}>Обязательства</div>
+      <div style={{ padding: isMobile ? "16px 16px 0" : "24px 28px 0", borderBottom: "1px solid #EDEBE6", flexShrink: 0 }}>
+        <div style={{ ...T.pageTitle, fontSize: isMobile ? 22 : 26, marginBottom: 16 }}>Обязательства</div>
 
         {/* Сигнатура «весы обязательств»: входящий поток · чистая позиция · исходящий */}
         <div style={{
-          display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "stretch",
-          border: "1px solid #EDEBE6", marginBottom: 20,
+          display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr auto 1fr", alignItems: "stretch",
+          border: "1px solid #EDEBE6", marginBottom: isMobile ? 14 : 20,
         }}>
           {/* Нам должны — деньги входят */}
-          <div style={{ borderLeft: `3px solid ${POLARITY.in.rail}`, background: POLARITY.in.tint, padding: "14px 18px" }}>
+          <div style={{ borderLeft: `3px solid ${POLARITY.in.rail}`, background: POLARITY.in.tint, padding: isMobile ? "12px 14px" : "14px 18px" }}>
             <div style={{ ...T.sectionLabel, color: POLARITY.in.color, display: "flex", alignItems: "center", gap: 6 }}>
               Нам должны <span style={{ fontSize: 13 }}>→</span>
             </div>
@@ -1602,7 +1635,7 @@ export default function Debtors() {
             const net = receivable - payable;
             const c = net >= 0 ? POLARITY.in.color : POLARITY.out.color;
             return (
-              <div style={{ padding: "14px 24px", textAlign: "center", borderLeft: "1px solid #EDEBE6", borderRight: "1px solid #EDEBE6", display: "flex", flexDirection: "column", justifyContent: "center", minWidth: 160 }}>
+              <div style={{ padding: isMobile ? "10px 16px" : "14px 24px", textAlign: "center", borderLeft: isMobile ? "none" : "1px solid #EDEBE6", borderRight: isMobile ? "none" : "1px solid #EDEBE6", borderTop: isMobile ? "1px solid #EDEBE6" : "none", display: "flex", flexDirection: "column", justifyContent: "center", minWidth: isMobile ? 0 : 160, gridColumn: isMobile ? "1 / -1" : undefined, gridRow: isMobile ? 2 : undefined }}>
                 <div style={{ ...T.colLabel }}>Чистая позиция</div>
                 <div style={{ ...T.num, fontSize: 20, fontWeight: 700, color: c, marginTop: 6 }}>
                   {net >= 0 ? "+" : "−"}{fmt(Math.abs(net))}
@@ -1612,7 +1645,7 @@ export default function Debtors() {
           })()}
 
           {/* Мы должны — деньги выходят */}
-          <div style={{ borderRight: `3px solid ${POLARITY.out.rail}`, background: POLARITY.out.tint, padding: "14px 18px", textAlign: "right" }}>
+          <div style={{ borderRight: `3px solid ${POLARITY.out.rail}`, background: POLARITY.out.tint, padding: isMobile ? "12px 14px" : "14px 18px", textAlign: "right", gridRow: isMobile ? 1 : undefined, gridColumn: isMobile ? 2 : undefined }}>
             <div style={{ ...T.sectionLabel, color: POLARITY.out.color, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
               <span style={{ fontSize: 13 }}>←</span> Мы должны
             </div>
@@ -1621,7 +1654,7 @@ export default function Debtors() {
         </div>
 
         {/* Tabs — активная тонируется в свой полярный цвет */}
-        <div style={{ display: "flex", gap: 24 }}>
+        <div style={{ display: "flex", gap: isMobile ? 18 : 24, ...(isMobile ? M.tabStrip : null) }}>
           {TABS.map((t) => {
             const pol = POLARITY[TAB_POLARITY[t.id]];
             const active = tab === t.id;
@@ -1651,7 +1684,7 @@ export default function Debtors() {
       {addFixedOpen && <AddFixedModal onClose={() => setAddFixedOpen(false)} />}
 
       {/* Toolbar */}
-      <div style={{ padding: "12px 28px", borderBottom: "1px solid #EDEBE6", display: "flex", justifyContent: "flex-end", flexShrink: 0 }}>
+      <div style={{ padding: isMobile ? "10px 16px" : "12px 28px", borderBottom: "1px solid #EDEBE6", display: "flex", justifyContent: "flex-end", flexShrink: 0 }}>
         {(() => {
           const onAdd = {
             debtors: () => navigate("/orders"),
@@ -1676,7 +1709,7 @@ export default function Debtors() {
       {/* Content */}
       <div style={{ flex: 1, overflowY: "auto" }}>
         {tab === "debtors" && <DebtorsTab />}
-        {tab === "unallocated" && <UnallocatedTab />}
+        {tab === "unallocated" && <HScroll><UnallocatedTab /></HScroll>}
         {tab === "creditors" && <CreditorsTab />}
         {tab === "plan" && (
           <>
@@ -1688,8 +1721,8 @@ export default function Debtors() {
             <CreditorsTab scope="plan" />
           </>
         )}
-        {tab === "ledger" && <LedgerTab />}
-        {tab === "fixed" && <FixedTab />}
+        {tab === "ledger" && <HScroll><LedgerTab /></HScroll>}
+        {tab === "fixed" && <HScroll><FixedTab /></HScroll>}
       </div>
     </div>
   );

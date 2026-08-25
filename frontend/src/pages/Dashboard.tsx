@@ -11,6 +11,7 @@ import { POLARITY, debtColor } from "../components/ui/type";
 import { CircleProgress } from "../components/ui/CircleProgress";
 import { CardButton } from "../components/CardButton";
 import { OrderLink } from "../components/ui/links";
+import { useIsMobile, M } from "../components/ui/responsive";
 
 
 function ThinBar({ pct, color = "#E8592A" }: { pct: number; color?: string }) {
@@ -61,7 +62,12 @@ export default function Dashboard() {
   const taxQuarter = taxes.data?.tax_quarter ?? 1;
   const taxPaidPct = taxQuarter > 0 ? Math.min(100, ((taxQuarter - taxToPay) / taxQuarter) * 100) : 100;
 
-  const section = { padding: "20px 28px", borderBottom: "1px solid #EDEBE6" };
+  // Телефон: гаттер 16, подписи секций («ЭТОТ МЕСЯЦ», «ПО БРЕНДАМ») стопкой над
+  // содержимым вместо колонки width:80 + gap:48 — из 358px они съедали 128.
+  const isMobile = useIsMobile();
+  const section = { padding: isMobile ? "16px 16px" : "20px 28px", borderBottom: "1px solid #EDEBE6" };
+  const labeled = { ...section, display: "flex", gap: 48, alignItems: "flex-start", ...(isMobile ? M.labeled : null) } as const;
+  const labelStyle = { fontSize: 11, color: "#A89070", letterSpacing: "0.04em", width: isMobile ? "auto" : 80, paddingTop: 2 } as const;
 
   // ── Что горит: цифры уже посчитаны бэком, здесь только собраны в строку ──
   const rs = readiness.data?.summary ?? {};
@@ -93,9 +99,9 @@ export default function Dashboard() {
       {failed && <QueryError error={(failed as any).error} what="часть сводки" />}
 
       {/* Header */}
-      <div style={{ padding: "24px 28px 20px", borderBottom: "1px solid #EDEBE6" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
-          <div style={{ fontSize: 26, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em" }}>
+      <div style={{ padding: isMobile ? "16px 16px 14px" : "24px 28px 20px", borderBottom: "1px solid #EDEBE6" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: isMobile ? "wrap" : undefined }}>
+          <div style={{ fontSize: isMobile ? 22 : 26, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em" }}>
             {new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })}
           </div>
           {/* Тот же срез, что финагент присылает в Telegram: деньги месяца, заказы, долги. */}
@@ -152,7 +158,7 @@ export default function Dashboard() {
       })()}
 
       {/* 4 stat columns */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", borderBottom: "1px solid #EDEBE6" }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)", borderBottom: "1px solid #EDEBE6" }}>
         {[
           // Плитки — двери на свои экраны. До этого кликались только резервы.
           { label: "НА СЧЕТАХ", value: fmt(balanceTotal), color: balanceTotal > 0 ? "#4A7C59" : "#8B3A3A", pct: 100, to: "/finance" },
@@ -165,8 +171,9 @@ export default function Dashboard() {
             onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")}
             onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
             style={{
-            padding: "20px 24px",
-            borderRight: i < 3 ? "1px solid #EDEBE6" : "none",
+            padding: isMobile ? "14px 16px" : "20px 24px",
+            borderRight: (isMobile ? i % 2 === 0 : i < 3) ? "1px solid #EDEBE6" : "none",
+            borderBottom: isMobile && i < 2 ? "1px solid #EDEBE6" : "none",
             cursor: "pointer",
           }}>
             <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10 }}>{item.label}</div>
@@ -177,9 +184,9 @@ export default function Dashboard() {
       </div>
 
       {/* Month DDS */}
-      <div style={{ ...section, display: "flex", gap: 48, alignItems: "flex-start" }}>
-        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em", width: 80, paddingTop: 2 }}>ЭТОТ МЕСЯЦ</div>
-        <div style={{ display: "flex", gap: 48, flex: 1 }}>
+      <div style={labeled}>
+        <div style={labelStyle}>ЭТОТ МЕСЯЦ</div>
+        <div style={{ display: "flex", gap: isMobile ? 16 : 48, flex: 1, width: isMobile ? "100%" : undefined }}>
           {[
             { label: "Поступило", value: fmt(monthIncome), color: "#4A7C59", pct: 100 },
             { label: "Выбыло", value: fmt(monthExpense), color: "#8B3A3A", pct: monthIncome > 0 ? (monthExpense / monthIncome) * 100 : 0 },
@@ -202,13 +209,14 @@ export default function Dashboard() {
       {/* Что горит: то, что требует решения. Ни одна из этих цифр не новая —
           они лежали за двумя кликами внутри Заказов и на главную не попадали. */}
       {todo.length > 0 && (
-        <div style={{ ...section, display: "flex", gap: 48, alignItems: "flex-start" }}>
-          <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em", width: 80, paddingTop: 2 }}>ЧТО ДЕЛАТЬ</div>
+        <div style={labeled}>
+          <div style={labelStyle}>ЧТО ДЕЛАТЬ</div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", flex: 1 }}>
             {todo.map(t => (
               <button type="button" key={t.label} onClick={() => navigate(t.to)}
-                style={{ border: "1px solid #EDEBE6", background: "#fff", padding: "8px 14px",
-                         cursor: "pointer", textAlign: "left", fontFamily: "inherit", minWidth: 150 }}
+                style={{ border: "1px solid #EDEBE6", background: "#fff", padding: isMobile ? "10px 14px" : "8px 14px",
+                         cursor: "pointer", textAlign: "left", fontFamily: "inherit", minWidth: 150,
+                         flex: isMobile ? "1 1 150px" : undefined }}
                 onMouseEnter={e => (e.currentTarget.style.borderColor = t.tone)}
                 onMouseLeave={e => (e.currentTarget.style.borderColor = "#EDEBE6")}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
@@ -227,9 +235,9 @@ export default function Dashboard() {
         const rows = ((byBrand.data ?? []) as any[]).filter(b => b.income || b.expense || b.price_plan);
         if (rows.length === 0) return null;
         return (
-          <div style={{ ...section, display: "flex", gap: 48, alignItems: "flex-start" }}>
-            <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em", width: 80, paddingTop: 2 }}>ПО БРЕНДАМ</div>
-            <div style={{ display: "flex", gap: 36, flex: 1, flexWrap: "wrap" }}>
+          <div style={labeled}>
+            <div style={labelStyle}>ПО БРЕНДАМ</div>
+            <div style={{ display: "flex", gap: isMobile ? 20 : 36, flex: 1, flexWrap: "wrap" }}>
               {rows.map((b: any) => (
                 <div key={b.brand} style={{ minWidth: 150 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
@@ -254,9 +262,9 @@ export default function Dashboard() {
       })()}
 
       {/* Circular indicators */}
-      <div style={{ ...section, display: "flex", gap: 48, alignItems: "center" }}>
-        <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em", width: 80 }}>ПОКАЗАТЕЛИ</div>
-        <div style={{ display: "flex", gap: 40 }}>
+      <div style={{ ...labeled, alignItems: isMobile ? "flex-start" : "center" }}>
+        <div style={{ ...labelStyle, paddingTop: 0 }}>ПОКАЗАТЕЛИ</div>
+        <div style={{ display: "flex", gap: isMobile ? 16 : 40, flexWrap: isMobile ? "wrap" : undefined }}>
           {[
             { label: "Порог 300к", pct: threshold300k, sub: fmt(incomeYear) },
             { label: `Q${taxes.data?.quarter ?? "?"} налог`, pct: taxPaidPct, sub: taxToPay > 0 ? fmt(taxToPay) : "Покрыт" },

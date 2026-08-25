@@ -7,6 +7,8 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { MONO } from "../components/ui/Num";
 import { DeadlinePill } from "../components/ui/Pill";
 import { useTableSort, SortHeader } from "../components/ui/sort";
+import { useIsMobile, M, HScroll } from "../components/ui/responsive";
+import { RowCard } from "../components/ui/RowCard";
 import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ordersApi, customersApi, brandsApi, estimatesApi, financeApi } from "../api";
@@ -469,6 +471,8 @@ export default function OrdersV2() {
   // можно было лишь повторным кликом по той же вкладке (баг Юры 24.08.2026).
   // Режим можно задать ссылкой (?mode=silent) — с дашборда «что делать» ведёт
   // прямо в нужную вкладку, а не «в Заказы, дальше сам».
+  // Телефон: строки карточками, тап ведёт сразу в карточку заказа (правой панели нет).
+  const isMobile = useIsMobile();
   const [params, setParams] = useSearchParams();
   const urlMode = params.get("mode") as OrdersMode | null;
   const [mode, setMode] = useState<OrdersMode>(
@@ -639,18 +643,18 @@ export default function OrdersV2() {
 
       {/* ── Left: table panel ───────────────────────────── */}
       <div style={{
-        flex: selected ? "0 0 58%" : "1 1 0",
+        flex: selected && !isMobile ? "0 0 58%" : "1 1 0",
         display: "flex",
         flexDirection: "column",
         minWidth: 0,
-        borderRight: selected ? "1px solid #EDEBE6" : "none",
+        borderRight: selected && !isMobile ? "1px solid #EDEBE6" : "none",
         transition: "flex 0.2s ease",
       }}>
 
         {/* Panel header */}
-        <div style={{ padding: "24px 28px 0" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-            <div style={{ fontSize: 26, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em" }}>
+        <div style={{ padding: isMobile ? "16px 16px 0" : "24px 28px 0" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: isMobile ? 14 : 20 }}>
+            <div style={{ fontSize: isMobile ? 22 : 26, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em" }}>
               Заказы
             </div>
             {/* Action buttons */}
@@ -664,7 +668,7 @@ export default function OrdersV2() {
                     border: "1px solid #EDEBE6",
                     background: "transparent",
                     fontSize: 12, color: "#1A1A1A",
-                    outline: "none", width: 180,
+                    outline: "none", width: isMobile ? 150 : 180,
                     borderRadius: 0,
                   }}
                   placeholder="Поиск..."
@@ -681,14 +685,14 @@ export default function OrdersV2() {
             ) : (
               <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                 <IconBtn onClick={() => setSearchOpen(true)}><MagnifyingGlass size={14} /></IconBtn>
-                <IconBtn><Files size={14} /></IconBtn>
+                {!isMobile && <IconBtn><Files size={14} /></IconBtn>}
                 <IconBtn orange onClick={() => setShowNewOrder(true)}><Plus size={14} /></IconBtn>
               </div>
             )}
           </div>
 
           {/* Status tabs */}
-          <div style={{ display: "flex", gap: 24, borderBottom: "1px solid #EDEBE6", alignItems: "baseline" }}>
+          <div style={{ display: "flex", gap: isMobile ? 18 : 24, borderBottom: "1px solid #EDEBE6", alignItems: "baseline", ...(isMobile ? M.tabStrip : null) }}>
             {/* Статус-вкладки видны ВСЕГДА и всегда возвращают к списку. Раньше в
                 трёх режимах они прятались за крошки, а в двух оставались на экране
                 кликабельными, но мёртвыми — эта асимметрия и была багом. Активный
@@ -790,12 +794,13 @@ export default function OrdersV2() {
 
         {/* Один раздел за раз — по значению mode, а не по очереди булевых флагов,
             где таблица была последней и недостижимой ветвью. */}
+        {/* Панели Молчат/Готовность/Проверка — desktop-only: на телефоне прокрутка вбок. */}
         {mode === "silent" ? (
-          <SilentPanel />
+          <HScroll minWidth={640}><SilentPanel /></HScroll>
         ) : mode === "ready" ? (
-          <ReadinessPanel />
+          <HScroll minWidth={900}><ReadinessPanel /></HScroll>
         ) : mode === "review" ? (
-          <EstimateReviewQueue />
+          <HScroll minWidth={720}><EstimateReviewQueue /></HScroll>
         ) : mode === "summary" ? (
           <div style={{ flex: 1, overflow: "auto", padding: "8px 28px 24px" }}>
             {!summary ? (
@@ -975,8 +980,8 @@ export default function OrdersV2() {
         })()}
 
         {/* Column headers */}
-        <div style={{ display: "grid", gridTemplateColumns: cols, padding: "8px 28px", borderBottom: "1px solid #F7F5F1", alignItems: "center" }}>
-          <div style={{ display: "flex", alignItems: "center" }}>
+        <div style={isMobile ? M.filterRow : { display: "grid", gridTemplateColumns: cols, padding: "8px 28px", borderBottom: "1px solid #F7F5F1", alignItems: "center" }}>
+          {!isMobile && <div style={{ display: "flex", alignItems: "center" }}>
             <Checkbox
               checked={pageData.length > 0 && pageData.every((o: any) => selectedIds.has(o.id))}
               indeterminate={pageData.some((o: any) => selectedIds.has(o.id)) && !pageData.every((o: any) => selectedIds.has(o.id))}
@@ -985,15 +990,15 @@ export default function OrdersV2() {
                 setSelectedIds(allSel ? new Set() : new Set(pageData.map((o: any) => o.id)));
               }}
             />
-          </div>
+          </div>}
           <div><ColumnFilter label="НАЗВАНИЕ" options={uniqueTitles} value={titleFilter} onChange={(v) => { setTitleFilter(v); setPage(0); }} sort={{ colKey: "title", sort, onToggle: toggleSort }} /></div>
           <div><ColumnFilter label="КЛИЕНТ" options={uniqueCustomers} value={customerFilter} onChange={(v) => { setCustomerFilter(v); setPage(0); }} sort={{ colKey: "customer", sort, onToggle: toggleSort }} /></div>
           <div><ColumnFilter label="СТАТУС" options={uniqueStatuses} value={statusFilter} onChange={(v) => { setStatusFilter(v); setPage(0); }} sort={{ colKey: "status", sort, onToggle: toggleSort }} /></div>
           <div><AmountFilter label="СУММА" min={amountMin} max={amountMax} onChange={(mn, mx) => { setAmountMin(mn); setAmountMax(mx); setPage(0); }} sort={{ colKey: "price", sort, onToggle: toggleSort }} /></div>
-          {!selected && <div style={{ textAlign: "right" }}><SortHeader label="СЕБ. ПЛАН" colKey="cost_plan" sort={sort} onToggle={toggleSort} align="right" title="Плановая себестоимость: сумма активной сметы плюс плановая себестоимость допработ" /></div>}
+          {!selected && !isMobile && <div style={{ textAlign: "right" }}><SortHeader label="СЕБ. ПЛАН" colKey="cost_plan" sort={sort} onToggle={toggleSort} align="right" title="Плановая себестоимость: сумма активной сметы плюс плановая себестоимость допработ" /></div>}
           <div style={{ textAlign: "right" }}><AmountFilter label="СЕБ. ФАКТ" min={factMin} max={factMax} onChange={(mn, mx) => { setFactMin(mn); setFactMax(mx); setPage(0); }} sort={{ colKey: "cost_fact", sort, onToggle: toggleSort }} /></div>
-          {!selected && <div style={{ textAlign: "right" }}><SortHeader label="Δ" colKey="delta" sort={sort} onToggle={toggleSort} align="right" title="Чистая после УСН: план у смет и ждущих, прогноз в работе, факт у завершённых" /></div>}
-          <div />
+          {!selected && !isMobile && <div style={{ textAlign: "right" }}><SortHeader label="Δ" colKey="delta" sort={sort} onToggle={toggleSort} align="right" title="Чистая после УСН: план у смет и ждущих, прогноз в работе, факт у завершённых" /></div>}
+          {!isMobile && <div />}
         </div>
 
         {/* Rows */}
@@ -1011,7 +1016,20 @@ export default function OrdersV2() {
               // Перерасход: факт перевалил плановую себестоимость. Метка на строке —
               // чтобы «где течёт» было видно, не открывая карточку.
               const overspent = (o.cost_fact || 0) > (o.cost_plan || 0) && (o.cost_plan || 0) > 0;
-              return (
+              return isMobile ? (
+                <RowCard key={o.id}
+                  onClick={() => navigate(`/orders/${o.id}`)}
+                  title={<>{o.title}{o.brand && <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.05em", color: BRAND_COLOR[o.brand] || "#A89070", fontFamily: MONO, marginLeft: 8 }}>{o.brand}</span>}</>}
+                  sub={o.customer_name || "—"}
+                  right={fmt(o.price_plan)}
+                  rightSub={o.cost_fact ? <span style={{ color: overspent ? "#8B3A3A" : "#A89070", fontFamily: MONO }}>факт {fmt(o.cost_fact)}</span> : undefined}
+                  badge={<>
+                    <span style={{ fontSize: 11, color: st.color, fontWeight: 500 }}>{st.label}</span>
+                    {o.deadline && !["completed", "cancelled"].includes(o.status) && <DeadlinePill date={o.deadline} />}
+                    {o.delta ? <span style={{ fontSize: 11, fontFamily: MONO, color: o.delta > 0 ? "#4A7C59" : "#8B3A3A", marginLeft: "auto" }}>{o.delta > 0 ? "+" : "−"}{fmt(Math.abs(o.delta))} · {o.delta_source === "fact" ? "факт" : "прогноз"}</span> : null}
+                  </>}
+                />
+              ) : (
                 <div
                   key={o.id}
                   onClick={() => setSelected(isActive ? null : o)}
@@ -1168,7 +1186,7 @@ export default function OrdersV2() {
       </div>
 
       {/* ── Right: detail panel ─────────────────────────── */}
-      {selected && (
+      {selected && !isMobile && (
         <div style={{
           flex: "0 0 42%",
           display: "flex",

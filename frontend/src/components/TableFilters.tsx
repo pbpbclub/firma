@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { SortMark, type SortState } from "./ui/sort";
+import { useIsMobile } from "./ui/responsive";
 
 // Опциональная сортировка колонки: стрелка справа от заголовка-фильтра.
 // Клик по самому заголовку занят поповером фильтра, поэтому — отдельная кнопка.
@@ -29,11 +30,23 @@ function useClickOutside(open: boolean, onClose: () => void) {
   return ref;
 }
 
-const popBase = (align?: "left" | "right"): React.CSSProperties => ({
-  position: "absolute", top: "calc(100% + 4px)", [align === "right" ? "right" : "left"]: 0,
-  zIndex: 200, background: "#FFFFFF", border: "1px solid #EDEBE6",
-  boxShadow: "0 4px 16px rgba(0,0,0,0.10)",
-});
+const popBase = (align?: "left" | "right", isMobile = false): React.CSSProperties => isMobile
+  // Телефон: лист над нижней панелью, на всю ширину. Абсолютный поповер с
+  // minWidth 180–230 у правых колонок уходил за край экрана внутри overflow:auto
+  // и был недостижим.
+  ? { position: "fixed", left: 12, right: 12, bottom: "calc(56px + env(safe-area-inset-bottom) + 8px)",
+      zIndex: 300, background: "#FFFFFF", border: "1px solid #EDEBE6", maxHeight: "60dvh", overflowY: "auto",
+      boxShadow: "0 -4px 24px rgba(0,0,0,0.14)" }
+  : { position: "absolute", top: "calc(100% + 4px)", [align === "right" ? "right" : "left"]: 0,
+      zIndex: 200, background: "#FFFFFF", border: "1px solid #EDEBE6",
+      boxShadow: "0 4px 16px rgba(0,0,0,0.10)" };
+
+// Подложка под мобильным листом. Рендерится ВНУТРИ ref-контейнера, чтобы
+// useClickOutside не считал тап по ней «снаружи» и не закрывал лист дважды.
+const Backdrop = ({ onClose }: { onClose: () => void }) => (
+  <div onClick={(e) => { e.stopPropagation(); onClose(); }}
+    style={{ position: "fixed", inset: 0, zIndex: 299, background: "rgba(0,0,0,0.25)" }} />
+);
 
 // ─── Категориальный фильтр ───────────────────────────────────────────────────
 
@@ -48,6 +61,7 @@ export function ColumnFilter({ label, options, value, onChange, align, maxHeight
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  const isMobile = useIsMobile();
   const ref = useClickOutside(open, () => setOpen(false));
   useEffect(() => { if (!open) setQ(""); }, [open]);
   const filtered = q ? options.filter(o => o.toLowerCase().includes(q.toLowerCase())) : options;
@@ -57,17 +71,18 @@ export function ColumnFilter({ label, options, value, onChange, align, maxHeight
         {label}
       </button>
       {sort && <SortMark colKey={sort.colKey} sort={sort.sort} onToggle={sort.onToggle} />}
+      {open && isMobile && <Backdrop onClose={() => setOpen(false)} />}
       {open && (
-        <div style={{ ...popBase(align), minWidth: 180 }}>
+        <div style={{ ...popBase(align, isMobile), minWidth: 180 }}>
           <div style={{ padding: "5px 8px", borderBottom: "1px solid #F2EFE9" }}>
-            <input autoFocus value={q} onChange={e => setQ(e.target.value)} onClick={e => e.stopPropagation()}
+            <input autoFocus={!isMobile} value={q} onChange={e => setQ(e.target.value)} onClick={e => e.stopPropagation()}
               placeholder="Поиск..." style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 12, outline: "none", fontFamily: "inherit" }} />
           </div>
           <div style={{ maxHeight: maxHeight ?? 200, overflowY: "auto" }}>
-            <div onClick={() => { onChange(""); setOpen(false); }} style={{ padding: "8px 12px", fontSize: 12, cursor: "pointer", color: !value ? "#E8592A" : "#1A1A1A", fontWeight: !value ? 600 : 400, borderBottom: "1px solid #F2EFE9" }}
+            <div onClick={() => { onChange(""); setOpen(false); }} style={{ padding: isMobile ? "12px 14px" : "8px 12px", fontSize: isMobile ? 14 : 12, cursor: "pointer", color: !value ? "#E8592A" : "#1A1A1A", fontWeight: !value ? 600 : 400, borderBottom: "1px solid #F2EFE9" }}
               onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>Все</div>
             {filtered.map(opt => (
-              <div key={opt} onClick={() => { onChange(opt); setOpen(false); }} style={{ padding: "8px 12px", fontSize: 12, cursor: "pointer", color: value === opt ? "#E8592A" : "#1A1A1A", fontWeight: value === opt ? 600 : 400 }}
+              <div key={opt} onClick={() => { onChange(opt); setOpen(false); }} style={{ padding: isMobile ? "12px 14px" : "8px 12px", fontSize: isMobile ? 14 : 12, cursor: "pointer", color: value === opt ? "#E8592A" : "#1A1A1A", fontWeight: value === opt ? 600 : 400 }}
                 onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>{opt}</div>
             ))}
             {filtered.length === 0 && <div style={{ padding: "8px 12px", fontSize: 12, color: "#C8C0B0" }}>Не найдено</div>}
@@ -88,6 +103,7 @@ export function AmountFilter({ label, min, max, onChange, align, sort }: {
   sort?: HeaderSort;
 }) {
   const [open, setOpen] = useState(false);
+  const isMobile = useIsMobile();
   const ref = useClickOutside(open, () => setOpen(false));
   const active = !!min || !!max;
   return (
@@ -96,14 +112,15 @@ export function AmountFilter({ label, min, max, onChange, align, sort }: {
         {label}
       </button>
       {sort && <SortMark colKey={sort.colKey} sort={sort.sort} onToggle={sort.onToggle} />}
+      {open && isMobile && <Backdrop onClose={() => setOpen(false)} />}
       {open && (
-        <div style={{ ...popBase(align), padding: "10px 12px", minWidth: 210 }}>
+        <div style={{ ...popBase(align, isMobile), padding: "10px 12px", minWidth: 210 }}>
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <input type="number" placeholder="От" value={min} onChange={e => onChange(e.target.value, max)} autoFocus
-              style={{ width: 84, border: "1px solid #EDEBE6", padding: "5px 8px", fontSize: 12, outline: "none" }} />
+            <input type="number" placeholder="От" value={min} onChange={e => onChange(e.target.value, max)} autoFocus={!isMobile}
+              style={{ width: isMobile ? "100%" : 84, minWidth: 0, border: "1px solid #EDEBE6", padding: "5px 8px", fontSize: 12, outline: "none" }} />
             <span style={{ fontSize: 12, color: "#A89070" }}>—</span>
             <input type="number" placeholder="До" value={max} onChange={e => onChange(min, e.target.value)}
-              style={{ width: 84, border: "1px solid #EDEBE6", padding: "5px 8px", fontSize: 12, outline: "none" }} />
+              style={{ width: isMobile ? "100%" : 84, minWidth: 0, border: "1px solid #EDEBE6", padding: "5px 8px", fontSize: 12, outline: "none" }} />
           </div>
           {active && (
             <button type="button" onClick={() => { onChange("", ""); setOpen(false); }}
@@ -126,6 +143,7 @@ export function PeriodFilter({ label, from, to, onChange, align }: {
   align?: "left" | "right";
 }) {
   const [open, setOpen] = useState(false);
+  const isMobile = useIsMobile();
   const ref = useClickOutside(open, () => setOpen(false));
   const active = !!from || !!to;
   function iso(d: Date) { return d.toISOString().slice(0, 10); }
@@ -144,13 +162,14 @@ export function PeriodFilter({ label, from, to, onChange, align }: {
       <button type="button" onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }} style={triggerStyle(active, align)}>
         {label}
       </button>
+      {open && isMobile && <Backdrop onClose={() => setOpen(false)} />}
       {open && (
-        <div style={{ ...popBase(align), minWidth: 230 }}>
+        <div style={{ ...popBase(align, isMobile), minWidth: 230 }}>
           <div style={{ padding: "8px 10px 6px", borderBottom: "1px solid #F2EFE9", display: "flex", flexWrap: "wrap", gap: 4 }}>
             {PRESETS.map(p => (
               <button type="button" key={p.label}
                 onClick={() => { const [f,t] = p.get(); onChange(f,t); setOpen(false); }}
-                style={{ fontSize: 10, padding: "3px 8px", border: "1px solid #EDEBE6", background: "none", cursor: "pointer", color: "#6B6355" }}
+                style={{ fontSize: isMobile ? 12 : 10, padding: isMobile ? "8px 12px" : "3px 8px", border: "1px solid #EDEBE6", background: "none", cursor: "pointer", color: "#6B6355" }}
                 onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")}
                 onMouseLeave={e => (e.currentTarget.style.background = "none")}
               >{p.label}</button>

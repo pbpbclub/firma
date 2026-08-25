@@ -3,6 +3,7 @@
 //   ghost   — нейтральная с бордером, второстепенные действия;
 //   danger  — бордовая, удаление/необратимое.
 import React from "react";
+import { useIsMobile } from "./responsive";
 
 type Props = React.ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: "primary" | "ghost" | "danger";
@@ -16,14 +17,16 @@ const VARIANTS: Record<string, React.CSSProperties> = {
 };
 
 export function Button({ variant = "ghost", size = "md", style, disabled, children, ...rest }: Props) {
+  const isMobile = useIsMobile();   // под палец: ≥40px высоты, шрифт 14
   return (
     <button type="button"
       {...rest}
       disabled={disabled}
       style={{
         ...VARIANTS[variant],
-        padding: size === "sm" ? "5px 12px" : "7px 20px",
-        fontSize: size === "sm" ? 12 : 13,
+        padding: isMobile ? (size === "sm" ? "9px 14px" : "12px 20px") : (size === "sm" ? "5px 12px" : "7px 20px"),
+        fontSize: isMobile ? 14 : (size === "sm" ? 12 : 13),
+        minHeight: isMobile ? 40 : undefined,
         fontWeight: 600,
         cursor: disabled ? "default" : "pointer",
         opacity: disabled ? 0.45 : 1,

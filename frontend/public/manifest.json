@@ -1,0 +1,12 @@
+{
+  "name": "Firma",
+  "short_name": "Firma",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#E8E4DA",
+  "theme_color": "#FFFFFF",
+  "icons": [
+    { "src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }
+  ]
+}

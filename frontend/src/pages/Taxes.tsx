@@ -4,6 +4,7 @@ import { QueryError } from "../components/ui/QueryError";
 import { useQuery } from "@tanstack/react-query";
 import { MONO } from "../components/ui/Num";
 import { taxApi } from "../api";
+import { useIsMobile, M } from "../components/ui/responsive";
 import { WarningCircle, CheckCircle } from "@phosphor-icons/react";
 
 
@@ -17,13 +18,14 @@ function ThinBar({ pct, color = "#E8592A" }: { pct: number; color?: string }) {
 
 export default function Taxes() {
   const { data, isLoading, isError, error } = useQuery({ queryKey: ["taxes"], queryFn: taxApi.summary });
+  const isMobile = useIsMobile();   // хуки — до ранних return
 
   if (isLoading) return <div style={{ padding: 48, color: "#A89070", fontSize: 13 }}>Загружаем...</div>;
   if (isError) return <QueryError error={error} what="налоговую сводку" />;
   if (!data) return null;
 
   const threshold300k = Math.min(100, (data.income_year / 300000) * 100);
-  const section = { padding: "20px 28px", borderBottom: "1px solid #EDEBE6" };
+  const section = { padding: isMobile ? "16px 16px" : "20px 28px", borderBottom: "1px solid #EDEBE6" };
 
   return (
     <div style={{ display: "flex", flexDirection: "column" }}>
@@ -59,14 +61,16 @@ export default function Taxes() {
       </div>
 
       {/* 4 metric columns */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", borderBottom: "1px solid #EDEBE6" }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)", borderBottom: "1px solid #EDEBE6" }}>
         {[
           { label: "ДОХОДЫ ЗА ГОД", value: fmt(data.income_year), sub: `Налог: ${fmt(data.tax_year)}`, pct: 100 },
           { label: "ДОХОДЫ ЗА КВАРТАЛ", value: fmt(data.income_quarter), sub: `6% = ${fmt(data.tax_quarter)}`, pct: data.income_year > 0 ? (data.income_quarter / data.income_year) * 100 : 0 },
           { label: "СТРАХОВЫЕ ВЗНОСЫ", value: fmt(data.insurance_fixed), sub: `Уплачено: ${fmt(data.insurance_paid)}`, pct: data.insurance_fixed > 0 ? Math.min(100, (data.insurance_paid / data.insurance_fixed) * 100) : 0 },
           { label: "ВЫЧЕТ ВЗНОСОВ", value: `−${fmt(data.insurance_deduction)}`, sub: "уменьшает налог", color: "#4A7C59", pct: data.tax_quarter > 0 ? Math.min(100, (data.insurance_deduction / data.tax_quarter) * 100) : 0 },
         ].map((item, i) => (
-          <div key={item.label} style={{ padding: "20px 24px", borderRight: i < 3 ? "1px solid #EDEBE6" : "none" }}>
+          <div key={item.label} style={{ padding: isMobile ? "14px 16px" : "20px 24px",
+                                          borderRight: (isMobile ? i % 2 === 0 : i < 3) ? "1px solid #EDEBE6" : "none",
+                                          borderBottom: isMobile && i < 2 ? "1px solid #EDEBE6" : "none" }}>
             <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 8 }}>{item.label}</div>
             <div style={{ fontSize: 19, fontWeight: 700, color: item.color ?? "#1A1A1A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{item.value}</div>
             <div style={{ fontSize: 11, color: "#A89070", marginTop: 6 }}>{item.sub}</div>
@@ -77,8 +81,8 @@ export default function Taxes() {
 
       {/* 300k threshold */}
       <div style={section}>
-        <div style={{ display: "flex", gap: 48, alignItems: "flex-start" }}>
-          <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em", width: 80, paddingTop: 2 }}>ПОРОГ 300К</div>
+        <div style={{ display: "flex", gap: 48, alignItems: "flex-start", ...(isMobile ? M.labeled : null) }}>
+          <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.04em", width: isMobile ? "auto" : 80, paddingTop: 2 }}>ПОРОГ 300К</div>
           <div style={{ flex: 1, maxWidth: 480 }}>
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#1A1A1A", marginBottom: 8 }}>
               <span style={{ fontWeight: 600, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(data.income_year)}</span>
@@ -110,7 +114,7 @@ export default function Taxes() {
             <div style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.06em" }}>ОПЛАЧЕНО В ФНС</div>
             <div style={{ fontSize: 10, color: "#C8C0B0" }}>платежи Казначейству/ФНС распознаются автоматически, в Разноску не попадают</div>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 220px))", gap: "0 24px", margin: "12px 0 6px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(3, minmax(0, 220px))", gap: isMobile ? "12px 16px" : "0 24px", margin: "12px 0 6px" }}>
             {[
               { label: `ЗА ${data.year} ГОД`, value: fmt(data.tax_paid_year), color: "#1A1A1A" },
               { label: "ЗА ВСЁ ВРЕМЯ", value: fmt(data.tax_paid_total), color: "#1A1A1A" },

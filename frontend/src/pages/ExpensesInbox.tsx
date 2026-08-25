@@ -1,4 +1,5 @@
 import { fmtMoneyDash as fmt } from "../components/ui/format";
+import { useIsMobile, M } from "../components/ui/responsive";
 import { useState, type ReactNode } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { MONO } from "../components/ui/Num";
@@ -125,6 +126,7 @@ function ObligationPicker({ orderId, categoryLabel, value, amount, onPick }: {
 }
 
 function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
+  const isMobile = useIsMobile();
   const [title, setTitle] = useState(tx.counterparty || tx.purpose || "");
   // Режим строки — ОДНО значение, а не три булевых. Сейчас два режима сразу не
   // включить только потому, что кнопки входа отрисованы в else-ветке: добавь
@@ -255,7 +257,7 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
   const ordersById = new Map((suggestions as any[]).map((o: any) => [o.id, o]));
 
   return (
-    <div style={{ padding: "14px 28px 18px", background: "#FAF8F5", borderBottom: "1px solid #EDEBE6" }}>
+    <div style={{ padding: isMobile ? "12px 16px 16px" : "14px 28px 18px", background: "#FAF8F5", borderBottom: "1px solid #EDEBE6" }}>
 
       {/* Получатель: кому ушли деньги. Правило — уверенно, похожесть — предложение. */}
       <div style={{ marginBottom: 14, padding: "10px 12px", background: "#fff", border: "1px solid #EDEBE6" }}>
@@ -269,13 +271,13 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
             onChange={setPayeeMaster}
             suggestName={payeeStr}
             highlight={tx.match_source === "suggest"}
-            style={{ flex: 1, minWidth: 260 }}
+            style={{ flex: 1, minWidth: isMobile ? "100%" : 260 }}
           />
           {/* Запомнить привязку сразу — не дожидаясь разноски платежа */}
           {payeeMaster && payeeStr && !ruleSaved && (
             <button type="button" onClick={() => saveRule.mutate()} disabled={saveRule.isPending}
               title={`Запомнить: все платежи «${payeeStr}» → ${masterName(payeeMaster)}`}
-              style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, padding: "5px 10px",
+              style={{ display: "flex", alignItems: "center", gap: 5, fontSize: isMobile ? 13 : 10.5, padding: isMobile ? "9px 12px" : "5px 10px",
                        border: "1px solid #E8592A", background: "#fff", color: "#E8592A",
                        cursor: saveRule.isPending ? "default" : "pointer", fontFamily: "inherit",
                        fontWeight: 600, whiteSpace: "nowrap", flexShrink: 0 }}>
@@ -319,7 +321,7 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
         const genLabel = a.purpose ? GENERAL_TARGETS.find(t => t.v === a.purpose)?.l : null;
         return (
           <div key={a.order_id || "p:" + a.purpose} style={{ background: "#fff", border: "1px solid #EDEBE6", padding: "8px 10px", marginBottom: 8 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 120px 24px", gap: 8, alignItems: "center" }}>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 110px 36px" : "1fr 120px 24px", gap: 8, alignItems: "center" }}>
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 12, fontWeight: 500, color: genLabel ? "#E8592A" : "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {genLabel ? genLabel + " · без заказа" : (o?.title ?? a.order_id)}
@@ -333,8 +335,8 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
               <MoneyInput value={a.amount} onChange={v => patch(i, { amount: v })} placeholder="сумма"
                 style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "5px 8px", fontSize: 12, outline: "none" }} />
               <button type="button" onClick={() => setAllocs(allocs.filter((_, j) => j !== i))}
-                style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 0, display: "flex", justifyContent: "center" }}>
-                <X size={12} />
+                style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: isMobile ? 8 : 0, display: "flex", justifyContent: "center" }}>
+                <X size={isMobile ? 16 : 12} />
               </button>
             </div>
             <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -343,7 +345,7 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
                 {EXPENSE_CATEGORIES.map(c => (
                   <button type="button" key={c.v} onClick={() => patch(i, { category: c.v, creditor_id: null })}
                     style={{
-                      padding: "3px 9px", fontSize: 10, cursor: "pointer", border: "1px solid",
+                      padding: isMobile ? "9px 12px" : "3px 9px", fontSize: isMobile ? 13 : 10, cursor: "pointer", border: "1px solid",
                       borderColor: a.category === c.v ? "#1A1A1A" : "#EDEBE6",
                       background: a.category === c.v ? "#1A1A1A" : "#fff",
                       color: a.category === c.v ? "#FFFFFF" : "#A89070", marginRight: -1, fontFamily: "inherit",
@@ -352,7 +354,7 @@ function AllocRow({ tx, onDone }: { tx: any; onDone: () => void }) {
               </div>
               {/* Контрагент строки: может отличаться от получателя платежа */}
               <PayeePicker value={a.master_id} onChange={v => patch(i, { master_id: v })}
-                suggestName={payeeStr} style={{ flex: 1, minWidth: 220 }} />
+                suggestName={payeeStr} style={{ flex: 1, minWidth: isMobile ? "100%" : 220 }} />
             </div>
             {/* Обязательства бывают только у заказов — строке «без заказа» гасить нечего */}
             {!a.purpose && <ObligationPicker
@@ -545,6 +547,7 @@ function PaymentAllocRow({ tx, onDone, onReservePrompt }: {
   tx: any; onDone: () => void;
   onReservePrompt: (p: { order_id: string; amount: number }) => void;
 }) {
+  const isMobile = useIsMobile();
   const [allocs, setAllocs] = useState<PayAlloc[]>([]);
   const [error, setError] = useState("");
   const [hideMode, setHideMode] = useState(false);
@@ -587,7 +590,7 @@ function PaymentAllocRow({ tx, onDone, onReservePrompt }: {
   const ready = allocReady(allocs, tx.amount);
 
   return (
-    <div style={{ padding: "14px 28px 18px", background: "#FAF8F5", borderBottom: "1px solid #EDEBE6" }}>
+    <div style={{ padding: isMobile ? "12px 16px 16px" : "14px 28px 18px", background: "#FAF8F5", borderBottom: "1px solid #EDEBE6" }}>
       {/* Плательщик: кто прислал деньги. Правило учит систему узнавать его впредь. */}
       <div style={{ marginBottom: 14, padding: "10px 12px", background: "#fff", border: "1px solid #EDEBE6" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -595,11 +598,11 @@ function PaymentAllocRow({ tx, onDone, onReservePrompt }: {
           <div style={{ fontSize: 12, color: "#1A1A1A", flex: "0 0 auto" }}>{payerStr || "—"}</div>
           <span style={{ color: "#C8C0B0" }}>→</span>
           <CustomerPicker value={payerCustomer} onChange={setPayerCustomer} suggestName={payerStr}
-            highlight={tx.match_source === "suggest"} style={{ flex: 1, minWidth: 260 }} />
+            highlight={tx.match_source === "suggest"} style={{ flex: 1, minWidth: isMobile ? "100%" : 260 }} />
           {payerCustomer && payerStr && !payerSaved && (
             <button type="button" onClick={() => savePayerRule.mutate()} disabled={savePayerRule.isPending}
               title={`Запомнить: все платежи от «${payerStr}» → ${customerName(payerCustomer)}`}
-              style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, padding: "5px 10px",
+              style={{ display: "flex", alignItems: "center", gap: 5, fontSize: isMobile ? 13 : 10.5, padding: isMobile ? "9px 12px" : "5px 10px",
                        border: "1px solid #E8592A", background: "#fff", color: "#E8592A",
                        cursor: savePayerRule.isPending ? "default" : "pointer", fontFamily: "inherit",
                        fontWeight: 600, whiteSpace: "nowrap", flexShrink: 0 }}>
@@ -664,6 +667,7 @@ function PaymentAllocRow({ tx, onDone, onReservePrompt }: {
 // ── Страница ─────────────────────────────────────────────────────────────────
 export default function ExpensesInbox() {
   const qc = useQueryClient();
+  const isMobile = useIsMobile();
   const [source, setSource] = useState<"bank" | "zen" | "in">("bank");
   const [search, setSearch] = useState("");
   const [from, setFrom] = useState("");
@@ -728,17 +732,17 @@ export default function ExpensesInbox() {
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
 
       {/* Шапка */}
-      <div style={{ padding: "24px 28px 0" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-          <div style={{ fontSize: 26, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em" }}>Разноска</div>
+      <div style={{ padding: isMobile ? "14px 16px 0" : "24px 28px 0" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: isMobile ? 10 : 16 }}>
+          <div style={{ fontSize: isMobile ? 22 : 26, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em" }}>Разноска</div>
           <div style={{ position: "relative" }}>
             <MagnifyingGlass size={13} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "#A89070" }} />
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Контрагент..."
-              style={{ paddingLeft: 28, paddingRight: 10, paddingTop: 6, paddingBottom: 6, border: "1px solid #EDEBE6", background: "transparent", fontSize: 12, color: "#1A1A1A", outline: "none", width: 200, borderRadius: 0 }} />
+              style={{ paddingLeft: 28, paddingRight: 10, paddingTop: 6, paddingBottom: 6, border: "1px solid #EDEBE6", background: "transparent", fontSize: 12, color: "#1A1A1A", outline: "none", width: isMobile ? 150 : 200, borderRadius: 0 }} />
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: 24, borderBottom: "1px solid #EDEBE6" }}>
+        <div style={{ display: "flex", gap: isMobile ? 18 : 24, borderBottom: "1px solid #EDEBE6", ...(isMobile ? M.tabStrip : null) }}>
           {SOURCES.map(s => (
             <button type="button" key={s.id} onClick={() => { setSource(s.id); setOpenId(null); }}
               style={{
@@ -753,8 +757,8 @@ export default function ExpensesInbox() {
       </div>
 
       {/* Панель фильтров */}
-      <div style={{ padding: "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
-        <div style={{ display: "flex", gap: 16, alignItems: "center", fontSize: 11, color: "#6B6355" }}>
+      <div style={{ padding: isMobile ? "8px 16px" : "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0, flexWrap: isMobile ? "wrap" : undefined, gap: isMobile ? 6 : 0 }}>
+        <div style={{ display: "flex", gap: isMobile ? 10 : 16, alignItems: "center", fontSize: 11, color: "#6B6355", flexWrap: isMobile ? "wrap" : undefined }}>
           <span>{items.length}{truncated ? "+" : ""} неразнесённых</span>
           {/* Личные по умолчанию окном в 90 дней — раньше это был просто текст, теперь кнопка */}
           {source === "zen" && !from && (
@@ -787,7 +791,7 @@ export default function ExpensesInbox() {
       )}
 
       {/* Заголовки = фильтры (единый формат таблиц: название столбца открывает фильтр) */}
-      <div style={{ display: "grid", gridTemplateColumns: "80px 1fr 130px", gap: 12, padding: "8px 28px", borderBottom: "1px solid #F7F5F1" }}>
+      <div style={isMobile ? M.filterRow : { display: "grid", gridTemplateColumns: "80px 1fr 130px", gap: 12, padding: "8px 28px", borderBottom: "1px solid #F7F5F1" }}>
         <div><PeriodFilter label="ДАТА" from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} /></div>
         <div><ColumnFilter label="КОНТРАГЕНТ / НАЗНАЧЕНИЕ" options={uniqueCps} value={cpFilter} onChange={setCpFilter} /></div>
         <div style={{ textAlign: "right" }}><AmountFilter label="СУММА" min={amtMin} max={amtMax} onChange={(mn, mx) => { setAmtMin(mn); setAmtMax(mx); }} align="right" /></div>
@@ -805,16 +809,16 @@ export default function ExpensesInbox() {
           <div key={t.id}>
             <div onClick={() => { if (!degraded) setOpenId(openId === t.id ? null : t.id); }}
               style={{
-                display: "grid", gridTemplateColumns: "80px 1fr 130px", gap: 12, padding: "11px 28px",
+                display: "grid", gridTemplateColumns: isMobile ? "1fr auto" : "80px 1fr 130px", gap: isMobile ? "2px 12px" : 12, padding: isMobile ? "12px 16px" : "11px 28px",
                 borderBottom: "1px solid #F7F5F1", cursor: degraded ? "default" : "pointer", alignItems: "center",
                 background: openId === t.id ? "#FFF8F5" : "transparent",
                 opacity: t.dismissed_reason ? 0.55 : (degraded ? 0.6 : 1),
               }}
               onMouseEnter={e => { if (openId !== t.id) e.currentTarget.style.background = "#FAF8F5"; }}
               onMouseLeave={e => { if (openId !== t.id) e.currentTarget.style.background = "transparent"; }}>
-              <div style={{ fontSize: 11, color: "#A89070", fontFamily: MONO }}>{fmtDate(t.date)}</div>
+              <div style={{ fontSize: 11, color: "#A89070", fontFamily: MONO, ...(isMobile ? { gridColumn: "1 / -1", order: 2 } : null) }}>{fmtDate(t.date)}</div>
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 12, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <div style={{ fontSize: isMobile ? 14 : 12, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {t.counterparty || "—"}
                   {/* Зелёное — привязка подтверждена правилом; оранжевое с «?» — только догадка */}
                   {t.payee_hint && t.payee_hint !== t.counterparty && (

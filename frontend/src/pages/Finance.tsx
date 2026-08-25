@@ -10,6 +10,8 @@ import { ColumnFilter, AmountFilter, PeriodFilter } from "../components/TableFil
 import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { MONO } from "../components/ui/Num";
 import { AllocNote } from "../components/money/AllocNote";
+import { useIsMobile, M } from "../components/ui/responsive";
+import { RowCard } from "../components/ui/RowCard";
 import { IconButton } from "../components/ui/IconButton";
 
 function Checkbox({ checked, indeterminate = false, onChange }: {
@@ -294,6 +296,9 @@ function LinkOrderModal({ tx, paymentByFinTx, onClose }: {
 export default function Finance() {
   const qc = useQueryClient();
   const [direction, setDirection] = useState("");
+  // Телефон: сводка (правая колонка 280px) сворачивается в строку над лентой.
+  const isMobile = useIsMobile();
+  const [summaryOpen, setSummaryOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [accountFilter, setAccountFilter] = useState("");
   const [dateFrom, setDateFrom] = useState("");
@@ -405,19 +410,29 @@ const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
   const totalOut = summary?.total_out ?? 0;
 
   return (
-    <div style={{ display: "flex", height: "100%", minHeight: 0 }}>
+    <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", height: "100%", minHeight: 0 }}>
+
+      {/* Телефон: сводка — строкой над лентой, раскрывается по тапу */}
+      {isMobile && (
+        <button type="button" onClick={() => setSummaryOpen(v => !v)}
+          style={{ order: -2, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px",
+                   background: "#FAF8F5", border: "none", borderBottom: "1px solid #EDEBE6", fontFamily: "inherit", cursor: "pointer", flexShrink: 0 }}>
+          <span style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>ИТОГО НА СЧЕТАХ · {summaryOpen ? "свернуть" : "сводка"}</span>
+          <span style={{ fontSize: 16, fontWeight: 700, fontFamily: MONO, color: (balance?.total ?? 0) >= 0 ? "#4A7C59" : "#8B3A3A" }}>{fmt(balance?.total ?? 0)}</span>
+        </button>
+      )}
 
       {/* ── Left: transactions ──────────────────────────── */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, borderRight: "1px solid #EDEBE6" }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, borderRight: isMobile ? "none" : "1px solid #EDEBE6" }}>
 
         {/* Header */}
-        <div style={{ padding: "24px 28px 0", flexShrink: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-            <div style={{ fontSize: 26, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em" }}>ДДС</div>
+        <div style={{ padding: isMobile ? "14px 16px 0" : "24px 28px 0", flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: isMobile ? 10 : 16 }}>
+            <div style={{ fontSize: isMobile ? 22 : 26, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em" }}>ДДС</div>
           </div>
 
           {/* Filter tabs */}
-          <div style={{ display: "flex", gap: 24, borderBottom: "1px solid #EDEBE6" }}>
+          <div style={{ display: "flex", gap: 24, borderBottom: "1px solid #EDEBE6", flexWrap: isMobile ? "wrap" : undefined }}>
             {FILTERS.map((f) => (
               <button type="button"
                 key={f.v}
@@ -434,14 +449,14 @@ const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
                 {f.l}
               </button>
             ))}
-            <div style={{ marginLeft: "auto", paddingBottom: 8, display: "flex", alignItems: "center" }}>
-              <div style={{ position: "relative" }}>
+            <div style={{ marginLeft: "auto", paddingBottom: 8, display: "flex", alignItems: "center", flexBasis: isMobile ? "100%" : undefined }}>
+              <div style={{ position: "relative", width: isMobile ? "100%" : undefined }}>
                 <MagnifyingGlass size={13} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "#A89070" }} />
                 <input
                   style={{
                     paddingLeft: 28, paddingRight: 10, paddingTop: 5, paddingBottom: 5,
                     border: "1px solid #EDEBE6", background: "transparent",
-                    fontSize: 12, color: "#1A1A1A", outline: "none", width: 180, borderRadius: 0,
+                    fontSize: 12, color: "#1A1A1A", outline: "none", width: isMobile ? "100%" : 180, borderRadius: 0, boxSizing: "border-box",
                   }}
                   placeholder="Поиск..."
                   value={search}
@@ -465,7 +480,7 @@ const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
           const selNet = selIn - selOut;
           const net = fIn - fOut;
           return (
-            <div style={{ padding: "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+            <div style={{ padding: isMobile ? "8px 16px" : "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0, flexWrap: isMobile ? "wrap" : undefined, gap: isMobile ? 6 : 0 }}>
               <div style={{ display: "flex", gap: 10, fontSize: 11, color: "#6B6355", alignItems: "center" }}>
                 {selectedIds.size > 0 && <span style={{ color: "#E8592A", fontWeight: 600 }}>Выбрано {selectedIds.size}</span>}
                 {selectedIds.size > 0 && selIn > 0 && <span style={{ color: "#4A7C59" }}>+{fmt(selIn)}</span>}
@@ -484,8 +499,8 @@ const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
         })()}
 
         {/* Column headers */}
-        <div style={{ display: "grid", gridTemplateColumns: FIN_GRID, padding: "8px 28px", borderBottom: "1px solid #EDEBE6", flexShrink: 0, alignItems: "center" }}>
-          <div style={{ display: "flex", alignItems: "center" }}>
+        <div style={isMobile ? M.filterRow : { display: "grid", gridTemplateColumns: FIN_GRID, padding: "8px 28px", borderBottom: "1px solid #EDEBE6", flexShrink: 0, alignItems: "center" }}>
+          {!isMobile && <div style={{ display: "flex", alignItems: "center" }}>
             <Checkbox
               checked={filteredTxs.length > 0 && filteredTxs.every((t: any) => selectedIds.has(String(t.id)))}
               indeterminate={filteredTxs.some((t: any) => selectedIds.has(String(t.id))) && !filteredTxs.every((t: any) => selectedIds.has(String(t.id)))}
@@ -494,12 +509,12 @@ const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
                 setSelectedIds(allSel ? new Set() : new Set(filteredTxs.map((t: any) => String(t.id))));
               }}
             />
-          </div>
+          </div>}
           <div><PeriodFilter label="ДАТА" from={dateFrom} to={dateTo} onChange={(f, t) => { setDateFrom(f); setDateTo(t); }} /></div>
           <div><ColumnFilter label="ОПИСАНИЕ" options={uniqueDescs} value={descFilter} onChange={setDescFilter} /></div>
           <div><ColumnFilter label="СЧЁТ" options={["Т-Банк", "Сбербанк", "Фонды"]} value={accountFilter} onChange={setAccountFilter} /></div>
           <div><AmountFilter label="СУММА" min={amountMin} max={amountMax} onChange={(mn, mx) => { setAmountMin(mn); setAmountMax(mx); }} /></div>
-          <div />
+          {!isMobile && <div />}
         </div>
 
         {/* Rows */}
@@ -511,7 +526,21 @@ const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
           ) : filteredTxs.length === 0 ? (
             <EmptyState title="Транзакций нет" />
           ) : (
-            filteredTxs.map((t: any, i: number) => (
+            filteredTxs.map((t: any, i: number) => isMobile ? (
+              <RowCard key={t.id || i}
+                title={<span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><BankBadge bank={t.bank || t.source || ""} />
+                  <span>{t.source === "fund" ? (t.counterparty || t.purpose || `Фонд: ${t.fund_name}`) : (t.counterparty || t.purpose || "—")}</span></span>}
+                sub={<>{fmtDate(t.date)} · {t.source === "fund" ? t.fund_name : t.bank === "tbank" ? "Т-Банк" : t.bank === "sber" ? "Сбербанк" : t.bank || "—"}
+                  {t.is_transfer && <> · перевод</>}{t.is_tax && <> · налог</>}{t.is_fee && <> · комиссия</>}</>}
+                right={<span style={{ color: t.direction === "in" ? "#4A7C59" : "#8B3A3A" }}>{t.direction === "in" ? "+" : "−"}{fmt(t.amount)}</span>}
+                rightSub={t.direction === "out" && creditorByFinTx.has(String(t.id)) ? <span style={{ color: "#4A7C59" }}>{creditorByFinTx.get(String(t.id))?.name}</span>
+                  : t.direction === "in" && paymentByFinTx.has(String(t.id)) ? <span style={{ color: "#4A7C59" }}>{paymentByFinTx.get(String(t.id))?.title}</span> : undefined}
+                meta={t.direction === "out" && expensesByTx.has(String(t.id)) ? <AllocNote rows={expensesByTx.get(String(t.id))!} onUndo={setUndoGroup} /> : undefined}
+                trailing={t.source !== "fund" ? (t.direction === "out"
+                  ? <IconButton icon={LinkSimple} title="Привязать к обязательству" size={36} iconSize={15} color={creditorByFinTx.has(String(t.id)) ? "#4A7C59" : "#C8C0B0"} onClick={e => { e.stopPropagation(); setLinkModal(t); }} />
+                  : <IconButton icon={LinkSimple} title="Привязать к заказу" size={36} iconSize={15} color={paymentByFinTx.has(String(t.id)) ? "#4A7C59" : "#C8C0B0"} onClick={e => { e.stopPropagation(); setLinkOrderModal(t); }} />) : undefined}
+              />
+            ) : (
               <div
                 key={t.id || i}
                 style={{
@@ -616,7 +645,9 @@ const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
       </div>
 
       {/* ── Right: summary panel ────────────────────────── */}
-      <div style={{ width: 280, flexShrink: 0, display: "flex", flexDirection: "column", overflowY: "auto" }}>
+      {(!isMobile || summaryOpen) && (
+      <div style={{ width: isMobile ? "100%" : 280, flexShrink: 0, display: "flex", flexDirection: "column", overflowY: "auto",
+                    order: isMobile ? -1 : undefined, maxHeight: isMobile ? "55dvh" : undefined, borderBottom: isMobile ? "1px solid #EDEBE6" : "none" }}>
 
         {/* Business balance as of date */}
         <div style={{ padding: "20px 20px 16px", borderBottom: "1px solid #EDEBE6" }}>
@@ -711,6 +742,7 @@ const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

@@ -11,6 +11,8 @@ import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { Loading } from "../components/ui/Loading";
 import { Button } from "../components/ui/Button";
 import { IconButton } from "../components/ui/IconButton";
+import { useIsMobile } from "../components/ui/responsive";
+import { RowCard } from "../components/ui/RowCard";
 import { fmtMoney, fmtDate } from "../components/ui/format";
 import { clientPrice } from "../components/ui/priceMath";
 import { ESTIMATE_STATUS } from "../components/domain";
@@ -504,6 +506,9 @@ export default function OrderDetail() {
     ?? (estimates as any[]).find((s: any) => s.is_primary && s.status !== "superseded")?.id
     ?? activeDraft?.id;
 
+  // Телефон: одна колонка, табло сверху, строки таблиц — карточками.
+  const isMobile = useIsMobile();
+
   if (isLoading || !form) {
     return <Loading />;
   }
@@ -513,13 +518,14 @@ export default function OrderDetail() {
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
 
       {/* Top bar */}
-      <div style={{ padding: "16px 28px", borderBottom: "1px solid #EDEBE6", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div style={{ padding: isMobile ? "10px 16px" : "16px 28px", borderBottom: "1px solid #EDEBE6", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between",
+                    flexWrap: isMobile ? "wrap" : undefined, gap: isMobile ? 8 : 0 }}>
         {/* Крошки: Заказы › {название} · номер — выход всегда одной кнопкой */}
         <Breadcrumbs
           items={[{ label: "Заказы", to: "/orders" }, { label: order?.title || "…" }]}
           tail={<span style={{ fontSize: 10, color: "#C8C0B0", fontFamily: MONO }}>{order?.number}</span>}
         />
-        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: isMobile ? "wrap" : undefined }}>
           {/* Выгрузки PDF. «КП» жила только в редакторе сметы, хотя ищут её здесь;
               в редакторе она осталась — там она рядом со строками, которые уходят
               заказчику. Активная смета = утверждённая, иначе основная. */}
@@ -635,7 +641,7 @@ export default function OrderDetail() {
       {/* Scrollable body: слева рабочий поток (ПЛАН → ФАКТ), справа sticky-табло
           (сводка + дуэль план⇄факт + лестница) — фин-картина видна при любом скролле */}
       <div style={{ flex: 1, overflow: "auto" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(460px, 1fr) minmax(330px, 400px)", gap: 48, alignItems: "start", maxWidth: 1400, padding: "28px 36px 48px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(460px, 1fr) minmax(330px, 400px)", gap: isMobile ? 24 : 48, alignItems: "start", maxWidth: 1400, padding: isMobile ? "16px 16px 32px" : "28px 36px 48px" }}>
         <div style={{ minWidth: 0 }}>
 
           {/* Editable title */}
@@ -643,7 +649,7 @@ export default function OrderDetail() {
             value={form.title}
             onChange={e => field({ title: e.target.value })}
             onKeyDown={e => e.key === "Enter" && handleSave()}
-            style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.03em", color: "#1A1A1A", border: "none", borderBottom: "2px solid transparent", outline: "none", background: "transparent", width: "100%", padding: "0 0 4px", fontFamily: "inherit", marginBottom: 20, boxSizing: "border-box" }}
+            style={{ fontSize: isMobile ? 22 : 26, fontWeight: 700, letterSpacing: "-0.03em", color: "#1A1A1A", border: "none", borderBottom: "2px solid transparent", outline: "none", background: "transparent", width: "100%", padding: "0 0 4px", fontFamily: "inherit", marginBottom: 20, boxSizing: "border-box" }}
             onFocus={e => (e.currentTarget.style.borderBottomColor = "#EDEBE6")}
             onBlur={e => (e.currentTarget.style.borderBottomColor = "transparent")}
           />
@@ -698,7 +704,7 @@ export default function OrderDetail() {
                 <div
                   key={s.id}
                   onClick={() => navigate(`/orders/${id}/estimate?set=${s.id}`)}
-                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, padding: "12px 10px", borderBottom: "1px solid #F2EFE9", cursor: "pointer", opacity: s.status === "superseded" ? 0.55 : 1 }}
+                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: isMobile ? 8 : 16, padding: isMobile ? "12px 0" : "12px 10px", borderBottom: "1px solid #F2EFE9", cursor: "pointer", opacity: s.status === "superseded" ? 0.55 : 1, flexWrap: isMobile ? "wrap" : undefined }}
                   onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")}
                   onMouseLeave={e => (e.currentTarget.style.background = "")}
                 >
@@ -840,7 +846,7 @@ export default function OrderDetail() {
               </div>
             ) : (
               <>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 96px 96px 96px 30px", gap: 10,
+                <div style={{ display: isMobile ? "none" : "grid", gridTemplateColumns: "1fr 96px 96px 96px 30px", gap: 10,
                               fontSize: 9, color: "#A89070", letterSpacing: "0.05em", paddingBottom: 6, borderBottom: "1px solid #EDEBE6" }}>
                   <div>ЧТО · КОГДА</div>
                   <div style={{ textAlign: "right" }}>ЦЕНА</div>
@@ -848,7 +854,20 @@ export default function OrderDetail() {
                   <div style={{ textAlign: "right" }}>МАРЖА</div>
                   <div />
                 </div>
-                {extras.map((x: any) => (
+                {extras.map((x: any) => isMobile ? (
+                  <RowCard key={x.id}
+                    title={x.title}
+                    sub={<>{fmtDate(x.created_at)}{x.note && <> · {x.note}</>} · оплачено <span style={{ fontFamily: MONO }}>{fmtMoney(x.paid)}</span>
+                      {x.rest > 0 && <> · остаток <span style={{ fontFamily: MONO, color: debtColor(x.rest, "in") }}>{fmtMoney(x.rest)}</span></>}</>}
+                    right={fmtMoney(x.price)}
+                    rightSub={<span style={{ color: x.gross >= 0 ? "#4A7C59" : "#8B3A3A", fontFamily: MONO, fontWeight: 600 }}>маржа {fmtMoney(x.gross)}</span>}
+                    meta={<>себест. <span style={{ fontFamily: MONO }}>{fmtMoney(Math.max(x.cost || 0, x.cost_fact || 0))}</span>{x.cost_fact > 0 && <> · факт затрат <span style={{ fontFamily: MONO }}>{fmtMoney(x.cost_fact)}</span></>}</>}
+                    actions={<>
+                      <IconButton icon={PencilSimple} title="Изменить доп" size={36} iconSize={15} onClick={() => setExtraModal({ open: true, item: x })} />
+                      <IconButton icon={Trash} title="Удалить доп" tone="danger" size={36} iconSize={15} onClick={() => setDelExtra(x)} />
+                    </>}
+                  />
+                ) : (
                   <div key={x.id} style={{ display: "grid", gridTemplateColumns: "1fr 96px 96px 96px 30px", gap: 10,
                                            alignItems: "center", padding: "9px 0", borderBottom: "1px solid #F2EFE9" }}>
                     <div style={{ minWidth: 0 }}>
@@ -922,7 +941,24 @@ export default function OrderDetail() {
               <>
                 {expensesData.items.map((e: any) => {
                   const cat = EXPENSE_CATEGORIES.find(c => c.v === e.category);
-                  return (
+                  return isMobile ? (
+                    <RowCard key={e.id}
+                      title={<>{e.title}{(e.finance_tx_id || e.zenmoney_tx_id) && <LinkSimple size={10} style={{ color: "#4A7C59", marginLeft: 5 }} />}</>}
+                      sub={<>{fmtDate(e.expense_date)}{e.supplier && <> · <MasterLink id={e.master_id}>{e.supplier}</MasterLink></>} · {cat?.l ?? e.category}</>}
+                      right={<span style={{ color: "#8B3A3A" }}>−{fmtMoney(e.amount)}</span>}
+                      badge={(e.creditor_id || SETTLED_BADGES[e.settled_by as string] || e.payment_source === "cash_fund" || e.payment_source === "accountable") ? <>
+                        {e.creditor_id && <span style={{ fontSize: 10, color: "#4A7C59" }}>обязательство</span>}
+                        {SETTLED_BADGES[e.settled_by as string] && <span style={{ fontSize: 10, color: "#6B6355", background: "#F2EFE9", padding: "2px 6px" }}>{SETTLED_BADGES[e.settled_by as string].l}</span>}
+                        {e.payment_source === "cash_fund" && <span style={{ fontSize: 10, color: "#A89070", background: "#F2EFE9", padding: "2px 6px" }}>нал</span>}
+                        {e.payment_source === "accountable" && <span style={{ fontSize: 10, color: "#A89070", background: "#F2EFE9", padding: "2px 6px" }}>под отчёт</span>}
+                      </> : undefined}
+                      actions={<>
+                        <IconButton icon={PencilSimple} title="Изменить" size={36} iconSize={15} onClick={() => setExpenseModal({ open: true, item: e })} />
+                        <IconButton icon={ArrowsSplit} title="Разбить на категории" size={36} iconSize={15} onClick={() => setSplitExpense(e)} />
+                        <IconButton icon={Trash} title="Удалить" tone="danger" size={36} iconSize={15} onClick={() => setDelExpense(e)} />
+                      </>}
+                    />
+                  ) : (
                     <div key={e.id}
                       style={{ display: "grid", gridTemplateColumns: "78px 1fr 96px 110px 74px",
                                gap: 10, alignItems: "center", padding: "9px 0", borderBottom: "1px solid #F2EFE9" }}>
@@ -1093,7 +1129,7 @@ export default function OrderDetail() {
         </div>
 
         {/* ═══ Табло: сводка + дуэль план⇄факт + лестница (sticky) ═══ */}
-        <div style={{ position: "sticky", top: 0, minWidth: 0 }}>
+        <div style={{ position: isMobile ? "static" : "sticky", top: 0, minWidth: 0, order: isMobile ? -1 : undefined }}>
           {order && <OrderSummaryStrip order={order} paidTotal={paidTotal} compact />}
 
           {!order?.plan_fact?.has_estimate ? (

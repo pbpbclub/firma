@@ -1,40 +1,19 @@
 import { useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
-import {
-  SquaresFour,
-  FileText,
-  TrendUp,
-  Package,
-  Calculator,
-  CurrencyDollar,
-  BookOpen,
-  SignOut,
-  List,
-  Vault,
-  HandCoins,
-  Receipt,
-  Stack,
-} from "@phosphor-icons/react";
+import { SignOut, List } from "@phosphor-icons/react";
 import { getUser, logout } from "../auth";
-
-const nav = [
-  { to: "/", icon: SquaresFour, label: "Главная" },
-  { to: "/orders", icon: FileText, label: "Заказы" },
-  { to: "/finance", icon: TrendUp, label: "ДДС" },
-  { to: "/zenmoney", icon: HandCoins, label: "Личные" },
-  { to: "/expenses", icon: Receipt, label: "Разноска" },
-  { to: "/general-expenses", icon: Stack, label: "Запас" },
-  { to: "/debtors", icon: CurrencyDollar, label: "Обязательства" },
-  { to: "/wiki", icon: BookOpen, label: "Вики" },
-  { to: "/catalog", icon: Package, label: "Каталог" },
-  { to: "/taxes", icon: Calculator, label: "Налоги" },
-  { to: "/funds", icon: Vault, label: "Фонды" },
-];
+import { NAV as nav } from "./nav";
+import { MobileShell } from "./MobileShell";
+import { useIsMobile } from "./ui/responsive";
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const user = getUser();
   const location = useLocation();
   const [expanded, setExpanded] = useState(false);
+  // Телефон — свой каркас (нижняя панель вместо сайдбара, без бежевой рамки).
+  // Десктопная ветка ниже не меняется.
+  const isMobile = useIsMobile();
+  if (isMobile) return <MobileShell>{children}</MobileShell>;
   const initials = user?.name ? user.name.slice(0, 2).toUpperCase() : "YN";
   const W = expanded ? 200 : 60;
   const isAdmin = location.pathname === "/admin";

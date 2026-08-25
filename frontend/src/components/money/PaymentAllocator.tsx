@@ -20,6 +20,7 @@ import { ordersApi } from "../../api";
 import { MONO } from "../ui/Num";
 import { fmtMoneyDash as fmt } from "../ui/format";
 import { debtColor } from "../ui/type";
+import { useIsMobile } from "../ui/responsive";
 
 export type Alloc = { order_id: string; amount: string; extra_id?: string; note?: string };
 
@@ -72,6 +73,7 @@ export function PaymentAllocator({ tx, allocs, onChange, label = "ПЛАТЁЖ �
   onChange: (next: Alloc[]) => void;
   label?: string;
 }) {
+  const isMobile = useIsMobile();
   // Скоринг заказов по контрагенту и сумме против долга — считает бэкенд.
   const { data: suggestions = [] } = useQuery({
     queryKey: ["order-suggest-in", tx.counterparty, tx.amount],
@@ -101,7 +103,7 @@ export function PaymentAllocator({ tx, allocs, onChange, label = "ПЛАТЁЖ �
         const o = ordersById.get(a.order_id);
         return (
           <div key={a.order_id} style={{ background: "#fff", border: "1px solid #EDEBE6", padding: "8px 10px", marginBottom: 8,
-            display: "grid", gridTemplateColumns: "1fr 120px 24px", gap: 8, alignItems: "center" }}>
+            display: "grid", gridTemplateColumns: isMobile ? "1fr 110px 36px" : "1fr 120px 24px", gap: 8, alignItems: "center" }}>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 12, fontWeight: 500, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {o?.title ?? a.order_id}
@@ -122,8 +124,8 @@ export function PaymentAllocator({ tx, allocs, onChange, label = "ПЛАТЁЖ �
             <MoneyInput value={a.amount} onChange={v => patch(i, "amount", v)} placeholder="сумма"
               style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "5px 8px", fontSize: 12, outline: "none" }} />
             <button type="button" onClick={() => onChange(allocs.filter((_, j) => j !== i))}
-              style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 0, display: "flex", justifyContent: "center" }}>
-              <X size={12} />
+              style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: isMobile ? 8 : 0, display: "flex", justifyContent: "center" }}>
+              <X size={isMobile ? 16 : 12} />
             </button>
             <ExtraPicker orderId={a.order_id} value={a.extra_id || ""} onChange={v => patch(i, "extra_id", v)} />
             <input value={a.note || ""} onChange={e => patch(i, "note", e.target.value)}

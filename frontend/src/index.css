@@ -128,3 +128,12 @@
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+/* ─── Телефон (парная константа BP_MOBILE в components/ui/responsive.tsx) ─────
+   Стили в проекте инлайновые, и это единственный @media: 186 полей с fontSize
+   11–13 иначе не перекрыть, а iOS Safari принудительно зумит страницу при фокусе
+   в поле меньше 16px — и обратно не отзумливает. */
+@media (max-width: 767px) {
+  input, select, textarea { font-size: 16px !important; }
+  html, body { overscroll-behavior-y: none; }
+  * { -webkit-tap-highlight-color: transparent; }
+}
