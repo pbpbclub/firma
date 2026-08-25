@@ -1,8 +1,26 @@
 // Снимки всех роутов на десктопе (1500×900) и iPhone 14 (390). Десктопные PNG
 // сравниваются побайтно до/после; на мобиле — проверка переполнений и мелких мишеней.
+//
+// Коды выхода (нужны крону и глазам: вывод в stdout регрессию не отличал):
+//   0 — чисто; 1 — найдены дефекты (переполнения вне overflow-контейнеров,
+//   PAGEERROR); 2 — скрипт не смог отработать (нет ключа, упал браузер).
+// Мелкие мишени (<36px) остаются справочной цифрой и код выхода НЕ красят:
+// у части иконок это осознанно, иначе прогон был бы красным всегда.
 const { chromium, devices } = require('/home/claude-runner/firma/node_modules/playwright');
 const crypto = require('crypto'), fs = require('fs'), path = require('path');
-const SECRET = fs.readFileSync('/opt/firma/backend/.env','utf8').match(/^FIRMA_SECRET_KEY=(.+)$/m)[1].trim();
+
+const die = (msg) => { console.error('mobile_check: ' + msg); process.exit(2); };
+// Причина сбоя должна читаться словами: `.match(...)[1]` на отсутствующем ключе
+// падал TypeError и выглядел как поломка самого скрипта.
+const readSecret = (p = '/opt/firma/backend/.env') => {
+  let txt;
+  try { txt = fs.readFileSync(p, 'utf8'); }
+  catch (e) { die(`не прочитать ${p} (${e.code}) — запускать на сервере, под пользователем с доступом к .env бэкенда`); }
+  const m = txt.match(/^FIRMA_SECRET_KEY=(.+)$/m);
+  if (!m) die(`в ${p} нет строки FIRMA_SECRET_KEY= — JWT собрать нечем`);
+  return m[1].trim();
+};
+const SECRET = readSecret();
 const b64 = b => Buffer.from(b).toString('base64').replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_');
 const si = b64(JSON.stringify({alg:'HS256',typ:'JWT'})) + '.' + b64(JSON.stringify({sub:'yuranek@pbpb.club', exp: Math.floor(Date.now()/1000)+86400}));
 const token = si + '.' + b64(crypto.createHmac('sha256', SECRET).update(si).digest());
@@ -16,6 +34,9 @@ const ROUTES = ['/', '/orders', '/orders?mode=silent', '/orders?mode=ready', '/o
   `/orders/${ORD}`, `/orders/${ORD}/estimate`, '/finance', '/debtors', '/expenses',
   '/wiki/clients', `/wiki/contractors/${MASTER}`, '/catalog', '/taxes', '/funds', '/zenmoney',
   '/general-expenses', '/admin'];
+
+const defects = [];   // жёсткие дефекты: попадут в код выхода
+let smallTotal = 0;   // мелкие мишени — справочно, код выхода не красят
 
 (async () => {
   const browser = await chromium.launch({ headless: true, args: ['--host-resolver-rules=MAP firma.yuranek.com 127.0.0.1'] });
@@ -51,12 +72,21 @@ const ROUTES = ['/', '/orders', '/orders?mode=silent', '/orders?mode=ready', '/o
           return { bad: [...new Set(bad)].slice(0, 8), small };
         });
         report = ` bad=${o.bad.length ? JSON.stringify(o.bad) : '[]'} small=${o.small}`;
+        if (o.bad.length) defects.push(`${r}: переполнение ${JSON.stringify(o.bad)}`);
+        smallTotal += o.small;
       }
       await page.screenshot({ path: file, animations: 'disabled' });
       console.log(`${name} ${r}${report}`);
     }
-    if (errs.length) console.log('ERRORS:', errs.slice(0, 5).join(' | '));
+    if (errs.length) {
+      console.log('ERRORS:', errs.slice(0, 5).join(' | '));
+      defects.push(...errs.map(e => `${name}: ${e}`));
+    }
     await ctx.close();
   }
   await browser.close();
-})();
+  console.log(defects.length
+    ? `ИТОГ: дефектов ${defects.length} (мелких мишеней ${smallTotal}, смотреть глазами)`
+    : `ИТОГ: чисто (мелких мишеней ${smallTotal}, смотреть глазами)`);
+  process.exit(defects.length ? 1 : 0);
+})().catch(e => die('прогон не завершён: ' + (e && e.message ? e.message : e)));

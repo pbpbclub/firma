@@ -37,7 +37,13 @@ def list_orders(
     brand: Optional[str] = None,
     archived: bool = False,
     limit: int = Query(50, le=200),
+    offset: int = Query(0, ge=0),
 ):
+    """Список заказов страницами. Потолок limit — 200, поэтому полноту выборки
+    даёт offset, а не подобранный клиентом limit: дефолт фронта, равный потолку,
+    лишь сдвигал тихое обрезание на 201-й заказ (code_rules 25.08.2026).
+    Признак «есть ещё» — страница, вернувшая ровно limit строк (так и листает
+    ordersApi.list)."""
     conn = get_production()
     try:
         sql = """
@@ -74,8 +80,8 @@ def list_orders(
         if search:
             sql += " AND (o.title LIKE ? OR o.number LIKE ? OR c.name LIKE ?)"
             params += [f"%{search}%"] * 3
-        sql += " GROUP BY o.id ORDER BY o.created_at DESC LIMIT ?"
-        params.append(limit)
+        sql += " GROUP BY o.id ORDER BY o.created_at DESC LIMIT ? OFFSET ?"
+        params += [limit, offset]
 
         rows = conn.execute(sql, params).fetchall()
         # Факты транзита — одним проходом на весь список: иначе на каждый заказ
@@ -1740,8 +1746,20 @@ def order_timeline(order_id: str, limit: int = Query(50, le=200)):
     история копится в audit_log (пишут 27 вызовов audit() в 7 роутерах), но
     журнал ключуется сущностью, а не заказом. Здесь события собираются по связям:
     payment/expense/creditor → order_id живой строки, сметы — через estimate_sets,
-    позиции — через set_id. Удалённая строка джойном не доедет — её order_id
-    достаётся из снимка `changes` (audit пишет полный JSON строки ДО изменения).
+    позиции — через set_id.
+
+    Удалённая строка джойном не доедет — её order_id достаётся из снимка `changes`
+    (audit пишет полный JSON строки ДО изменения). Снимок — состояние ДО правки,
+    поэтому по нему связываем ТОЛЬКО то, чего джойном не достать (code_rules
+    25.08.2026): удаление (строки уже нет) и перенос сметы (донору нужно видеть,
+    куда она ушла). Иначе строка, переехавшая на другой заказ, висела бы в ленте
+    прежнего владельца вечно, а снимок любой сущности с полем order_id (подотчёт,
+    общие расходы) молча попадал бы в историю заказа. Такие записи помечены
+    `from_snapshot: 1` — связь восстановлена по снимку, а не по живой строке.
+
+    Ветки собраны UNION ALL, а не цепочкой OR: OR с json_extract заставлял
+    сканировать весь журнал на каждое открытие ленты, здесь каждая ветка идёт по
+    idx_audit_entity(entity_type, entity_id), а снимки — в границах своего типа.
 
     Summary в журнале уже человекочитаемые («Утверждена смета…», «Платёж N ₽…») —
     отдаём как есть, не переписываем."""
@@ -1749,26 +1767,59 @@ def order_timeline(order_id: str, limit: int = Query(50, le=200)):
     try:
         oid = _resolve_order(conn, order_id)
         rows = conn.execute(
-            """SELECT a.created_at, a.action, a.entity_type, a.summary
-                 FROM audit_log a
-                WHERE (a.entity_type = 'order' AND a.entity_id = :oid)
-                   OR (a.entity_type = 'payment' AND a.entity_id IN
-                        (SELECT id FROM payments WHERE order_id = :oid))
-                   OR (a.entity_type = 'expense' AND a.entity_id IN
-                        (SELECT id FROM expenses WHERE order_id = :oid))
-                   OR (a.entity_type = 'creditor' AND a.entity_id IN
-                        (SELECT id FROM creditors WHERE order_id = :oid))
-                   OR (a.entity_type = 'estimate' AND a.entity_id IN
-                        (SELECT id FROM estimate_sets WHERE order_id = :oid))
-                   OR (a.entity_type = 'estimate_item' AND a.entity_id IN
+            """WITH ev AS (
+                 SELECT a.id, a.created_at, a.action, a.entity_type, a.summary, 0 AS snap
+                   FROM audit_log a
+                  WHERE a.entity_type = 'order' AND a.entity_id = :oid
+                 UNION ALL
+                 SELECT a.id, a.created_at, a.action, a.entity_type, a.summary, 0
+                   FROM audit_log a
+                  WHERE a.entity_type = 'payment' AND a.entity_id IN
+                        (SELECT id FROM payments WHERE order_id = :oid)
+                 UNION ALL
+                 SELECT a.id, a.created_at, a.action, a.entity_type, a.summary, 0
+                   FROM audit_log a
+                  WHERE a.entity_type = 'expense' AND a.entity_id IN
+                        (SELECT id FROM expenses WHERE order_id = :oid)
+                 UNION ALL
+                 SELECT a.id, a.created_at, a.action, a.entity_type, a.summary, 0
+                   FROM audit_log a
+                  WHERE a.entity_type = 'creditor' AND a.entity_id IN
+                        (SELECT id FROM creditors WHERE order_id = :oid)
+                 UNION ALL
+                 SELECT a.id, a.created_at, a.action, a.entity_type, a.summary, 0
+                   FROM audit_log a
+                  WHERE a.entity_type = 'estimate' AND a.entity_id IN
+                        (SELECT id FROM estimate_sets WHERE order_id = :oid)
+                 UNION ALL
+                 SELECT a.id, a.created_at, a.action, a.entity_type, a.summary, 0
+                   FROM audit_log a
+                  WHERE a.entity_type = 'estimate_item' AND a.entity_id IN
                         (SELECT i.id FROM estimate_items i
                           JOIN estimate_sets s ON s.id = i.set_id
-                         WHERE s.order_id = :oid))
-                   OR json_extract(a.changes, '$.order_id') = :oid
-                   OR (a.entity_type = 'estimate_item'
-                       AND json_extract(a.changes, '$.set_id') IN
-                        (SELECT id FROM estimate_sets WHERE order_id = :oid))
-                ORDER BY a.created_at DESC LIMIT :lim""",
+                         WHERE s.order_id = :oid)
+                 UNION ALL
+                 SELECT a.id, a.created_at, a.action, a.entity_type, a.summary, 1
+                   FROM audit_log a
+                  WHERE a.action = 'delete'
+                    AND a.entity_type IN ('payment', 'expense', 'creditor', 'estimate')
+                    AND json_extract(a.changes, '$.order_id') = :oid
+                 UNION ALL
+                 SELECT a.id, a.created_at, a.action, a.entity_type, a.summary, 1
+                   FROM audit_log a
+                  WHERE a.action = 'delete' AND a.entity_type = 'estimate_item'
+                    AND json_extract(a.changes, '$.set_id') IN
+                        (SELECT id FROM estimate_sets WHERE order_id = :oid)
+                 UNION ALL
+                 SELECT a.id, a.created_at, a.action, a.entity_type, a.summary, 1
+                   FROM audit_log a
+                  WHERE a.action = 'move' AND a.entity_type = 'estimate'
+                    AND json_extract(a.changes, '$.order_id') = :oid
+               )
+               SELECT id, created_at, action, entity_type, summary,
+                      MIN(snap) AS from_snapshot
+                 FROM ev GROUP BY id
+                ORDER BY created_at DESC LIMIT :lim""",
             {"oid": oid, "lim": limit},
         ).fetchall()
         return {"items": [dict(r) for r in rows], "count": len(rows)}

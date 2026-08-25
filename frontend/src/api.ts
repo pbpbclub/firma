@@ -21,10 +21,30 @@ api.interceptors.response.use(
 );
 
 export const ordersApi = {
-  // limit по умолчанию 200 (потолок бэка): без него сервер отдаёт 50, и на 51-м
-  // заказе списки и справочники выбора заказа молча обрезались бы.
-  list: (params?: Record<string, string | boolean | number>) =>
-    api.get("/orders", { params: { limit: 200, ...params } }).then((r) => r.data),
+  // Полнота выборки — страницами по 200 (потолок бэка), а не подобранным limit:
+  // клиентский дефолт, равный потолку, лишь сдвигал тихое обрезание на 201-й
+  // заказ (code_rules 25.08.2026). Признак «есть ещё» — полная страница.
+  // Явный limit от вызывающего уважаем как есть: он просил ровно столько.
+  list: async (params?: Record<string, string | boolean | number>) => {
+    if (params && params.limit != null)
+      return api.get("/orders", { params }).then((r) => r.data);
+    const PAGE = 200;
+    const out: any[] = [];
+    const seen = new Set<string>();
+    for (let offset = 0; offset <= 5000; offset += PAGE) {
+      const page = await api
+        .get("/orders", { params: { ...params, limit: PAGE, offset } })
+        .then((r) => r.data);
+      if (!Array.isArray(page)) return page;
+      // Дедуп по id — и порядок, и страховка от бэкенда без offset (старая
+      // сборка вернула бы ту же страницу, и цикл крутил бы дубли до потолка).
+      const fresh = page.filter((o: any) => o?.id && !seen.has(o.id));
+      fresh.forEach((o: any) => seen.add(o.id));
+      out.push(...fresh);
+      if (page.length < PAGE || fresh.length === 0) break;
+    }
+    return out;
+  },
   get: (id: string) => api.get(`/orders/${id}`).then((r) => r.data),
   // scope: active (в работе) | completed (итог закрытых) | all
   planFactSummary: (scope: "active" | "completed" | "all" = "active") =>
