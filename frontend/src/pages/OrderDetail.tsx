@@ -708,7 +708,7 @@ export default function OrderDetail() {
                   onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")}
                   onMouseLeave={e => (e.currentTarget.style.background = "")}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0, flexWrap: isMobile ? "wrap" : undefined }}>
                     <span style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>
                       {s.title || `Смета ${i + 1}`}
                     </span>

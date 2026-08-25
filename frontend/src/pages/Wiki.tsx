@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useIsMobile, M } from "../components/ui/responsive";
 import { useNavigate, useParams } from "react-router-dom";
 import { Loading } from "../components/ui/Loading";
 import { EmptyState } from "../components/ui/EmptyState";
@@ -39,6 +40,8 @@ function WikiCategoryView({ cat, id, navigate }: { cat: WikiCategory; id?: strin
   const [creatingModal, setCreatingModal] = useState(false); // создание через свою модалку (бренды/юрлица)
 
   const rightOpen = !!id;   // панель у всех категорий
+  // Телефон: список компактный (аватар + имя — готовый рецепт rightOpen), деталь — на весь экран.
+  const isMobile = useIsMobile();
 
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ["wiki", cat.key, cat.adapter.serverSearch ? search : ""],
@@ -77,7 +80,7 @@ function WikiCategoryView({ cat, id, navigate }: { cat: WikiCategory; id?: strin
 
   // grid: [аватар?] + колонки; при открытой панели — только аватар + имя.
   const avatarCol = cat.avatar ? "32px " : "";
-  const cols = rightOpen
+  const cols = (rightOpen || isMobile)
     ? `${avatarCol}1fr`
     : avatarCol + cat.columns.map((c) => c.width).join(" ");
 
@@ -125,13 +128,13 @@ function WikiCategoryView({ cat, id, navigate }: { cat: WikiCategory; id?: strin
     <div style={{ display: "flex", height: "100%", minHeight: 0 }}>
       {/* Левая панель */}
       <div style={{
-        flex: rightOpen ? "0 0 50%" : "1 1 0",
-        display: "flex", flexDirection: "column", minWidth: 0,
-        borderRight: rightOpen ? "1px solid #EDEBE6" : "none",
+        flex: rightOpen && !isMobile ? "0 0 50%" : "1 1 0",
+        display: rightOpen && isMobile ? "none" : "flex", flexDirection: "column", minWidth: 0,
+        borderRight: rightOpen && !isMobile ? "1px solid #EDEBE6" : "none",
       }}>
-        <div style={{ padding: "24px 28px 0" }}>
+        <div style={{ padding: isMobile ? "16px 16px 0" : "24px 28px 0" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-            <div style={{ fontSize: 26, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em" }}>Вики</div>
+            <div style={{ fontSize: isMobile ? 22 : 26, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em" }}>Вики</div>
             {searchOpen ? (
               <div style={{ position: "relative" }}>
                 <MagnifyingGlass size={13} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "#A89070" }} />
@@ -150,7 +153,7 @@ function WikiCategoryView({ cat, id, navigate }: { cat: WikiCategory; id?: strin
           </div>
 
           {/* Вкладки категорий */}
-          <div style={{ display: "flex", gap: 18, borderBottom: "1px solid #EDEBE6" }}>
+          <div style={{ display: "flex", gap: 18, borderBottom: "1px solid #EDEBE6", ...(isMobile ? M.tabStrip : null) }}>
             {WIKI_CATEGORIES.map((c) => {
               const active = c.key === cat.key;
               return (
@@ -174,7 +177,7 @@ function WikiCategoryView({ cat, id, navigate }: { cat: WikiCategory; id?: strin
         </div>
 
         {/* Заголовки колонок */}
-        {!rightOpen && (
+        {!rightOpen && !isMobile && (
           <div style={{ display: "grid", gridTemplateColumns: cols, gap: 12, padding: "8px 28px", borderBottom: "1px solid #F7F5F1", alignItems: "center" }}>
             {cat.avatar && <div />}
             {cat.columns.map((c) => (
@@ -220,7 +223,7 @@ function WikiCategoryView({ cat, id, navigate }: { cat: WikiCategory; id?: strin
                   )
                 )}
 
-                {rightOpen ? (
+                {(rightOpen || isMobile) ? (
                   <div style={{ fontSize: 13, fontWeight: 500, color: active ? "#fff" : "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {item.name}
                   </div>
@@ -274,7 +277,7 @@ function WikiCategoryView({ cat, id, navigate }: { cat: WikiCategory; id?: strin
 
       {/* Правая панель — у всех категорий (единая навигация) */}
       {rightOpen && DetailComp && (
-        <div key={id} style={{ flex: "0 0 50%", display: "flex", flexDirection: "column", animation: "wikiFade 0.12s ease-out", minWidth: 0 }}>
+        <div key={id} style={{ flex: isMobile ? "1 1 0" : "0 0 50%", display: "flex", flexDirection: "column", animation: "wikiFade 0.12s ease-out", minWidth: 0 }}>
           <DetailComp id={id} row={selectedRow} onClose={() => navigate(`/wiki/${cat.key}`)} onDeleted={() => navigate(`/wiki/${cat.key}`)} />
         </div>
       )}

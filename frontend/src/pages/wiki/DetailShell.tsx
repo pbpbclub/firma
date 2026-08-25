@@ -3,6 +3,7 @@
 // Все 5 категорий рендерятся через него — расходится только содержимое (metrics,
 // секции), а вид (типографика, отступы, крестик) единый.
 import type { ReactNode } from "react";
+import { useIsMobile } from "../../components/ui/responsive";
 import { PencilSimple, X } from "@phosphor-icons/react";
 import { IconButton } from "../../components/ui/IconButton";
 import { MONO } from "../../components/ui/Num";
@@ -29,6 +30,7 @@ export function DetailShell({
   onClose: () => void;
   children: ReactNode;
 }) {
+  const isMobile = useIsMobile();
   return (
     <>
       {/* Шапка */}
@@ -45,7 +47,7 @@ export function DetailShell({
           ))}
           <div style={{ minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <div style={{ ...T.detailTitle, maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</div>
+              <div style={{ ...T.detailTitle, maxWidth: isMobile ? "100%" : 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: isMobile ? "normal" : "nowrap" }}>{title}</div>
               {status && (
                 <span style={{
                   fontSize: 11, fontWeight: 600, color: status.color || "#A89070",
@@ -71,7 +73,7 @@ export function DetailShell({
       <div style={{ flex: 1, overflowY: "auto", padding: PAD.panel }}>
         {hero && <div style={{ marginBottom: 20 }}>{hero}</div>}
         {metrics && metrics.length > 0 && (
-          <div style={{ display: "grid", gridTemplateColumns: `repeat(${metrics.length}, 1fr)`, gap: 10, marginBottom: 20 }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : `repeat(${metrics.length}, 1fr)`, gap: 10, marginBottom: 20 }}>
             {metrics.map((m, i) => (
               <div key={i} style={{ background: "#FAF8F5", padding: "9px 11px" }}>
                 <div style={{ ...T.metricLabel, marginBottom: 3 }}>{m.label}</div>

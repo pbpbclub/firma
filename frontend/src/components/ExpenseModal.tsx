@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useIsMobile } from "./ui/responsive";
 import { MoneyInput, parseMoney } from "./ui/MoneyInput";
 import { useQuery } from "@tanstack/react-query";
 import { Modal } from "./ui/Modal";
@@ -52,6 +53,7 @@ export function ExpenseModal({ orderId, expense, existingExpenses = [], extras =
   onClose: () => void;
   saving?: boolean;
 }) {
+  const isMobile = useIsMobile();
   const [title, setTitle]       = useState(expense?.title ?? "");
   const [amount, setAmount]     = useState(expense?.amount != null ? String(expense.amount) : "");
   // Последняя категория запоминается по заказу: десять расходов «Работы» подряд
@@ -168,7 +170,7 @@ export function ExpenseModal({ orderId, expense, existingExpenses = [], extras =
             {EXPENSE_CATEGORIES.map(c => (
               <button type="button" key={c.v} onClick={() => setCategory(c.v)}
                 style={{
-                  padding: "5px 12px", fontSize: 11, cursor: "pointer", border: "1px solid",
+                  padding: isMobile ? "9px 12px" : "5px 12px", fontSize: isMobile ? 13 : 11, cursor: "pointer", border: "1px solid",
                   borderColor: category === c.v ? "#1A1A1A" : "#EDEBE6",
                   background: category === c.v ? "#1A1A1A" : "transparent",
                   color: category === c.v ? "#FFFFFF" : "#A89070",
@@ -217,7 +219,7 @@ export function ExpenseModal({ orderId, expense, existingExpenses = [], extras =
               {PAYMENT_SOURCES.map(p => (
                 <button type="button" key={p.v} onClick={() => setPaySource(p.v)}
                   style={{
-                    padding: "5px 12px", fontSize: 11, cursor: "pointer", border: "1px solid",
+                    padding: isMobile ? "9px 12px" : "5px 12px", fontSize: isMobile ? 13 : 11, cursor: "pointer", border: "1px solid",
                     borderColor: paySource === p.v ? "#1A1A1A" : "#EDEBE6",
                     background: paySource === p.v ? "#1A1A1A" : "transparent",
                     color: paySource === p.v ? "#FFFFFF" : "#A89070",

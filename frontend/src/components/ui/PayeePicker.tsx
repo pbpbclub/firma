@@ -2,6 +2,7 @@
 // мастера и поставщика. Умеет завести нового прямо на месте — из Разноски
 // платёж новому поставщику не должен требовать похода в Вики.
 import { useState } from "react";
+import { useIsMobile } from "./responsive";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { Plus, X } from "@phosphor-icons/react";
 import { mastersApi, customersApi } from "../../api";
@@ -37,6 +38,7 @@ export function PayeePicker({ value, onChange, suggestName, placeholder = "— �
   style?: React.CSSProperties;
   highlight?: boolean;              // рамка-акцент (например, когда сработала подсказка)
 }) {
+  const isMobile = useIsMobile();
   const qc = useQueryClient();
   const { data: masters = [] } = useQuery({ queryKey: ["masters"], queryFn: mastersApi.list });
   const [adding, setAdding] = useState(false);
@@ -63,7 +65,7 @@ export function PayeePicker({ value, onChange, suggestName, placeholder = "— �
     return (
       <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", ...style }}>
         <input value={name} onChange={e => setName(e.target.value)} autoFocus placeholder="название контрагента"
-          style={{ border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 12, outline: "none", minWidth: 220, flex: 1, fontFamily: "inherit" }} />
+          style={{ border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 12, outline: "none", minWidth: isMobile ? "100%" : 220, flex: 1, fontFamily: "inherit" }} />
         <div style={{ display: "flex" }}>
           {PAYEE_ROLES.map(r => (
             <button type="button" key={r} onClick={() => setRole(r)}
@@ -132,6 +134,7 @@ export function CustomerPicker({ value, onChange, suggestName, placeholder = "�
   style?: React.CSSProperties;
   highlight?: boolean;
 }) {
+  const isMobile = useIsMobile();
   const qc = useQueryClient();
   const { data: customers = [] } = useQuery({ queryKey: ["customers", ""], queryFn: () => customersApi.list("") });
   const [adding, setAdding] = useState(false);
@@ -152,7 +155,7 @@ export function CustomerPicker({ value, onChange, suggestName, placeholder = "�
     return (
       <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", ...style }}>
         <input value={name} onChange={e => setName(e.target.value)} autoFocus placeholder="название клиента"
-          style={{ border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 12, outline: "none", minWidth: 220, flex: 1, fontFamily: "inherit" }} />
+          style={{ border: "1px solid #EDEBE6", padding: "4px 8px", fontSize: 12, outline: "none", minWidth: isMobile ? "100%" : 220, flex: 1, fontFamily: "inherit" }} />
         <button type="button" disabled={!name.trim() || create.isPending} onClick={() => create.mutate()}
           style={{ fontSize: 11, padding: "5px 10px", border: "none", fontFamily: "inherit", fontWeight: 600,
                    background: name.trim() ? "#E8592A" : "#EDEBE6", color: name.trim() ? "#fff" : "#A89070",

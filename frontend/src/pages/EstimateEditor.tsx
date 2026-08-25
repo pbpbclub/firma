@@ -14,6 +14,8 @@ import { markupToPct, pctToMarkup, clientPrice, cashFromClient, taxFor } from ".
 import { Breadcrumbs } from "../components/ui/Breadcrumbs";
 import { downloadBlob } from "../components/ui/download";
 import { MONO } from "../components/ui/Num";
+import { useIsMobile } from "../components/ui/responsive";
+import { EstimateMobile } from "./estimate/EstimateMobile";
 
 const SANS = "inherit";
 import {
@@ -474,6 +476,7 @@ export default function EstimateEditor() {
   const [open, setOpen] = useState<{ id: string; readOnly: boolean } | null>(null);
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [invoicing, setInvoicing] = useState(false);
+  const isMobile = useIsMobile();
   const [obligating, setObligating] = useState(false);
   const [confirmRevert, setConfirmRevert] = useState(false);
   // Утверждение и рассогласование — через свои защищённые ручки, а не через
@@ -665,6 +668,15 @@ export default function EstimateEditor() {
 
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+
+  // Телефон: редактор (11 колонок, DnD) несовместим с тачем — read-only вид со Счётом/КП.
+  if (isMobile) {
+    return (
+      <EstimateMobile order={order} orderId={String(orderId)} sets={sets as any[]} activeSet={activeSet} items={items}
+        isBank={isBank} bankPct={bankPct} totalCost={totalCost} totalClient={totalClient}
+        onInvoice={generateInvoice} onKp={generateKp} invoicing={invoicing} kping={kping} error={topError} />
+    );
+  }
 
   return (
     <>

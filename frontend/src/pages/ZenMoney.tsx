@@ -5,6 +5,8 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { Briefcase, MagnifyingGlass, X, ArrowsClockwise, Tag, PencilSimple, Trash, LinkSimple } from "@phosphor-icons/react";
 import { zenmoneyApi, payeeRulesApi, mastersApi, customersApi, financeApi, inboxApi } from "../api";
 import { AllocNote } from "../components/money/AllocNote";
+import { useIsMobile, M } from "../components/ui/responsive";
+import { RowCard } from "../components/ui/RowCard";
 import { ColumnFilter, PeriodFilter, AmountFilter } from "../components/TableFilters";
 import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { MONO } from "../components/ui/Num";
@@ -492,6 +494,9 @@ function PersonalSpendingSection() {
 
 export default function ZenMoneyPage() {
   const queryClient = useQueryClient();
+  // Телефон: правая сводка (320px) — строкой над лентой, строки карточками.
+  const isMobile = useIsMobile();
+  const [zmSummaryOpen, setZmSummaryOpen] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth);
   const [showBusiness, setShowBusiness] = useState(false);
 
@@ -672,23 +677,34 @@ export default function ZenMoneyPage() {
     .reduce((s: number, t: any) => s + t.income, 0);
 
   return (
-    <div style={{ display: "flex", height: "100%", minHeight: 0 }}>
+    <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", height: "100%", minHeight: 0 }}>
+
+      {isMobile && (
+        <button type="button" onClick={() => setZmSummaryOpen(v => !v)}
+          style={{ order: -2, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px",
+                   background: "#FAF8F5", border: "none", borderBottom: "1px solid #EDEBE6", fontFamily: "inherit", cursor: "pointer", flexShrink: 0 }}>
+          <span style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>ИТОГО ПО СЧЕТАМ · {zmSummaryOpen ? "свернуть" : "сводка"}</span>
+          <span style={{ fontSize: 16, fontWeight: 700, fontFamily: MONO, color: "#1A1A1A" }}>
+            {fmt((accounts as any[]).reduce((sum: number, a: any) => sum + (a.balance || 0), 0))} ₽
+          </span>
+        </button>
+      )}
 
       {/* ── Left: transactions panel ──────────────────────────── */}
       <div style={{
         flex: "1 1 0",
         display: "flex",
         flexDirection: "column",
-        minWidth: 0,
-        borderRight: "1px solid #EDEBE6",
+        minWidth: 0, minHeight: 0,
+        borderRight: isMobile ? "none" : "1px solid #EDEBE6",
       }}>
         {/* Header */}
-        <div style={{ padding: "24px 28px 0", flexShrink: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
-            <div style={{ fontSize: 26, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em" }}>
+        <div style={{ padding: isMobile ? "14px 16px 0" : "24px 28px 0", flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: isMobile ? 12 : 20, flexWrap: isMobile ? "wrap" : undefined }}>
+            <div style={{ fontSize: isMobile ? 22 : 26, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em" }}>
               Личные финансы
             </div>
-            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ marginLeft: isMobile ? 0 : "auto", display: "flex", alignItems: "center", gap: 8, flexWrap: isMobile ? "wrap" : undefined, flexBasis: isMobile ? "100%" : undefined }}>
               {/* Sync button */}
               <button type="button"
                 onClick={() => syncMutation.mutate()}
@@ -789,7 +805,7 @@ export default function ZenMoneyPage() {
 
           {/* Direction sub-tabs: Все / Поступления / Списания */}
           {!showBusiness && (
-            <div style={{ display: "flex", gap: 24, borderBottom: "1px solid #EDEBE6", marginBottom: 16 }}>
+            <div style={{ display: "flex", gap: isMobile ? 18 : 24, borderBottom: "1px solid #EDEBE6", marginBottom: 16, ...(isMobile ? M.tabStrip : null) }}>
               {DIR_FILTERS.map((f) => (
                 <button type="button"
                   key={f.v}
@@ -899,14 +915,14 @@ export default function ZenMoneyPage() {
           })()}
 
           {/* Table header */}
-          <div style={{
+          <div style={isMobile ? M.filterRow : {
             display: "grid",
             gridTemplateColumns: ZM_GRID,
             padding: "10px 0 6px",
             borderBottom: "1px solid #EDEBE6",
             alignItems: "center",
           }}>
-            <div style={{ display: "flex", alignItems: "center" }}>
+            {!isMobile && <div style={{ display: "flex", alignItems: "center" }}>
               <Checkbox
                 checked={filteredTx.length > 0 && filteredTx.every((t: any) => selectedIds.has(String(t.id)))}
                 indeterminate={filteredTx.some((t: any) => selectedIds.has(String(t.id))) && !filteredTx.every((t: any) => selectedIds.has(String(t.id)))}
@@ -915,7 +931,7 @@ export default function ZenMoneyPage() {
                   setSelectedIds(allSel ? new Set() : new Set(filteredTx.map((t: any) => String(t.id))));
                 }}
               />
-            </div>
+            </div>}
             <div><PeriodFilter label="ДАТА" from={dateFrom} to={dateTo} onChange={(f, t) => { setDateFrom(f); setDateTo(t); }} /></div>
             <div style={{ display: "flex", alignItems: "center" }}>
               <ColumnFilter label="БАНК" options={uniqueBanks} value={bankFilter} onChange={setBankFilter} />
@@ -928,7 +944,7 @@ export default function ZenMoneyPage() {
         </div>
 
         {/* Transactions scroll area */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "0 28px 24px" }}>
+        <div style={{ flex: 1, overflowY: "auto", padding: isMobile ? "0 0 24px" : "0 28px 24px" }}>
           {filteredTx.length === 0 && (
             <EmptyState title="Нет операций" />
           )}
@@ -938,7 +954,23 @@ export default function ZenMoneyPage() {
             const amount = isExpense ? tx.outcome : tx.income;
             const isBiz = !!tx.matched_contractor || tx.is_business_income;
 
-            return (
+            return isMobile ? (
+              <RowCard key={tx.id}
+                title={tx.payee || tx.comment || "—"}
+                sub={<>{String(tx.date || "").slice(0, 10)}{(tx.display_category || (tx.tags as string[])?.[0]) ? <> · {tx.display_category || (tx.tags as string[])?.[0]}</> : null}
+                  {tx.payee && tx.comment ? <> · {tx.comment}</> : null}</>}
+                right={<span style={{ color: isIncome ? "#4A7C59" : "#1A1A1A" }}>{isIncome ? "+" : "−"}{fmt(amount)} ₽</span>}
+                rightSub={creditorByZenTx.has(String(tx.id)) ? <span style={{ color: "#4A7C59" }}>{creditorByZenTx.get(String(tx.id))?.name}</span> : undefined}
+                badge={isBiz && (tx.matched_contractor || tx.is_business_income) ? <>
+                  {tx.matched_contractor && <span style={{ fontSize: 10, color: tx.matched_via === "rule" ? "#4A7C59" : "#E8592A", border: `1px solid ${tx.matched_via === "rule" ? "#D0E0D4" : "#F0D8D0"}`, padding: "2px 6px" }}>{tx.matched_contractor}</span>}
+                  {tx.is_business_income && <span style={{ fontSize: 10, color: "#4A7C59", background: "#EFF5F1", padding: "2px 6px" }}>от ИП</span>}
+                </> : undefined}
+                meta={expensesByZenTx.has(String(tx.id)) ? <AllocNote rows={expensesByZenTx.get(String(tx.id))!} onUndo={setUndoGroup} /> : undefined}
+                trailing={isExpense ? <IconButton icon={LinkSimple} title="Привязать к обязательству" size={36} iconSize={15}
+                  color={creditorByZenTx.has(String(tx.id)) ? "#4A7C59" : "#C8C0B0"} onClick={e => { e.stopPropagation(); setLinkModal(tx); }} /> : undefined}
+                tint={isBiz ? "#FFFBF5" : undefined}
+              />
+            ) : (
               <div
                 key={tx.id}
                 style={{
@@ -1059,14 +1091,17 @@ export default function ZenMoneyPage() {
       </div>
 
       {/* ── Right: stats panel ───────────────────────────────── */}
+      {(!isMobile || zmSummaryOpen) && (
       <div style={{
-        width: 320,
-        minWidth: 320,
+        width: isMobile ? "100%" : 320,
+        minWidth: isMobile ? 0 : 320,
         display: "flex",
         flexDirection: "column",
         overflowY: "auto",
-        padding: "24px 24px",
+        padding: isMobile ? "16px 16px" : "24px 24px",
         gap: 0,
+        order: isMobile ? -1 : undefined, maxHeight: isMobile ? "55dvh" : undefined,
+        borderBottom: isMobile ? "1px solid #EDEBE6" : "none",
       }}>
 
         {/* Total balance */}
@@ -1188,6 +1223,7 @@ export default function ZenMoneyPage() {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

@@ -1,4 +1,6 @@
 import { ORDER_STATUS_MAP } from "../components/domain";
+import { useIsMobile } from "../components/ui/responsive";
+import { RowCard } from "../components/ui/RowCard";
 import { fmtMoneyDash as fmt } from "../components/ui/format";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -478,6 +480,7 @@ const catalogCols = "28px 2fr 1fr 130px 130px 120px";
 const fromSmetsCols = "28px 2fr 1fr 80px 140px 120px 120px";
 
 export default function Catalog() {
+  const isMobile = useIsMobile();
   const qc = useQueryClient();
   const [tab, setTab] = useState<string>("");   // "" → первая бренд-вкладка (крупнейшая)
   const [search, setSearch] = useState("");
@@ -603,7 +606,7 @@ export default function Catalog() {
     <div style={{ display: "flex", flexDirection: "column" }}>
 
       {/* Header */}
-      <div style={{ padding: "24px 28px 0", borderBottom: "1px solid #EDEBE6" }}>
+      <div style={{ padding: isMobile ? "16px 16px 0" : "24px 28px 0", borderBottom: "1px solid #EDEBE6" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16 }}>
           <div>
             <div style={{ fontSize: 26, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em" }}>Каталог</div>
@@ -615,7 +618,7 @@ export default function Catalog() {
                   <MagnifyingGlass size={13} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "#A89070" }} />
                   <input
                     autoFocus
-                    style={{ paddingLeft: 28, paddingRight: 10, paddingTop: 6, paddingBottom: 6, border: "1px solid #EDEBE6", background: "transparent", fontSize: 12, color: "#1A1A1A", outline: "none", width: 180, borderRadius: 0 }}
+                    style={{ paddingLeft: 28, paddingRight: 10, paddingTop: 6, paddingBottom: 6, border: "1px solid #EDEBE6", background: "transparent", fontSize: 12, color: "#1A1A1A", outline: "none", width: isMobile ? 150 : 180, borderRadius: 0 }}
                     placeholder="Поиск..."
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
@@ -741,7 +744,7 @@ export default function Catalog() {
                   );
                 })()}
 
-                <div style={{ display: "grid", gridTemplateColumns: catalogCols, padding: "8px 28px", borderBottom: "1px solid #EDEBE6", alignItems: "center" }}>
+                <div style={{ display: isMobile ? "none" : "grid", gridTemplateColumns: catalogCols, padding: "8px 28px", borderBottom: "1px solid #EDEBE6", alignItems: "center" }}>
                   <div style={{ display: "flex", alignItems: "center" }}>
                     <Checkbox
                       checked={filteredItems.length > 0 && filteredItems.every(i => selectedIds.has(i.id))}
@@ -765,7 +768,18 @@ export default function Catalog() {
                 ) : (() => {
                   // Разбивка по категориям: сначала известные (в порядке подсказок),
                   // затем прочие по алфавиту, «Без категории» — последней.
-                  const renderItem = (item: CatalogItem) => (
+                  const renderItem = (item: CatalogItem) => isMobile ? (
+                    <RowCard key={item.id} onClick={() => openEdit(item)}
+                      title={item.title} sub={item.category || "—"}
+                      right={<span style={{ color: "#E8592A" }}>{fmt(item.sale_price)}</span>}
+                      rightSub={<>себест. {fmt(item.cost_total)}</>}
+                      meta={item.sale_price ? (() => {
+                        const delta = (item.sale_price || 0) - (item.cost_total || 0);
+                        const pct = item.sale_price > 0 ? Math.round((delta / item.sale_price) * 100) : 0;
+                        return <span style={{ fontFamily: MONO, color: delta > 0 ? "#4A7C59" : "#8B3A3A" }}>{delta > 0 ? "+" : ""}{fmt(delta)} · {pct}%</span>;
+                      })() : undefined}
+                    />
+                  ) : (
                     <div
                       key={item.id}
                       onClick={() => openEdit(item)}

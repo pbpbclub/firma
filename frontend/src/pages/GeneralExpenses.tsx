@@ -7,6 +7,7 @@
  * себестоимость ложится туда, где материал реально израсходован.
  */
 import { useState, Fragment } from "react";
+import { useIsMobile } from "../components/ui/responsive";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { Plus, Trash, ArrowRight, PencilSimple } from "@phosphor-icons/react";
 
@@ -204,6 +205,7 @@ function WriteOffModal({ item, onClose, onDone }: { item: any; onClose: () => vo
 
 export default function GeneralExpenses() {
   const qc = useQueryClient();
+  const isMobile = useIsMobile();
   const [purpose, setPurpose] = useState("");
   const [form, setForm] = useState<{ item: any | null } | null>(null);
   const [writeOff, setWriteOff] = useState<any>(null);
@@ -248,7 +250,7 @@ export default function GeneralExpenses() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div style={{ padding: "24px 28px 20px", borderBottom: "1px solid #EDEBE6", display: "flex",
+      <div style={{ padding: isMobile ? "16px 16px 14px" : "24px 28px 20px", borderBottom: "1px solid #EDEBE6", display: "flex", flexWrap: isMobile ? "wrap" : undefined, gap: isMobile ? 10 : 0,
                     justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
         <div>
           <div style={{ fontSize: 26, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em" }}>Запас и образцы</div>
@@ -264,9 +266,9 @@ export default function GeneralExpenses() {
       </div>
 
       {/* Сводка — те самые отдельные строки отчёта */}
-      <div style={{ display: "flex", borderBottom: "1px solid #EDEBE6", flexShrink: 0 }}>
+      <div style={{ display: "flex", borderBottom: "1px solid #EDEBE6", flexShrink: 0, flexWrap: isMobile ? "wrap" : undefined }}>
         {metrics.map(m => (
-          <div key={m.label} style={{ flex: 1, padding: "14px 28px", borderRight: "1px solid #F2EFE9" }}>
+          <div key={m.label} style={{ flex: isMobile ? "1 1 45%" : 1, padding: isMobile ? "10px 16px" : "14px 28px", borderRight: "1px solid #F2EFE9", borderBottom: isMobile ? "1px solid #F2EFE9" : undefined }}>
             <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>{m.label}</div>
             <div style={{ fontSize: 18, fontWeight: 700, color: m.value ? m.color : "#C8C0B0", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
               {fmt(m.value)}
@@ -275,7 +277,7 @@ export default function GeneralExpenses() {
         ))}
       </div>
 
-      <div style={{ padding: "12px 28px", borderBottom: "1px solid #EDEBE6", display: "flex", gap: 0, flexShrink: 0 }}>
+      <div style={{ padding: isMobile ? "10px 16px" : "12px 28px", borderBottom: "1px solid #EDEBE6", display: "flex", gap: 0, flexShrink: 0, overflowX: isMobile ? "auto" : undefined }}>
         <Chips options={[{ v: "", l: "Все" }, ...PURPOSES]} value={purpose} onPick={setPurpose} />
       </div>
 
@@ -284,7 +286,9 @@ export default function GeneralExpenses() {
           hint="Сюда попадают закупки впрок, собственные образцы и общехозяйственные траты. Часть перевода можно отправить сюда прямо из детализации расхода заказа." />
       ) : (
         <div style={{ flex: 1, overflow: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          {/* Телефон: таблица прокручивается вбок внутри контейнера (desktop-only вид) */}
+          <div style={{ overflowX: isMobile ? "auto" : undefined }}>
+          <table style={{ width: "100%", minWidth: isMobile ? 640 : undefined, borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", textAlign: "left" }}>
                 <th style={{ padding: "10px 28px", fontWeight: 400 }}>ДАТА</th>
@@ -369,6 +373,7 @@ export default function GeneralExpenses() {
               ))}
             </tbody>
           </table>
+          </div>
           {del.isError && (
             <div style={{ padding: "10px 28px", fontSize: 11, color: "#8B3A3A" }}>
               {(del.error as any)?.response?.data?.detail || "Не удалось удалить"}

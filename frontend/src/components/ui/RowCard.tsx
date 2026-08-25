@@ -33,7 +33,7 @@ export function RowCard({ title, sub, right, rightSub, badge, meta, actions, tra
         cursor: onClick ? "pointer" : "default", opacity: muted ? 0.55 : 1,
       }}>
       <div style={{ minWidth: 0, fontSize: 14, fontWeight: 500, color: "#1A1A1A", lineHeight: 1.35,
-                    overflow: "hidden", textOverflow: "ellipsis" }}>{title}</div>
+                    overflow: "hidden", textOverflow: "ellipsis", overflowWrap: "anywhere" }}>{title}</div>
       {right !== undefined && (
         <div style={{ fontFamily: MONO, fontVariantNumeric: "tabular-nums", fontSize: 14, fontWeight: 600,
                       color: "#1A1A1A", textAlign: "right", whiteSpace: "nowrap" }}>{right}</div>
@@ -43,7 +43,9 @@ export function RowCard({ title, sub, right, rightSub, badge, meta, actions, tra
           style={{ gridColumn: 3, gridRow: "1 / span 2", alignSelf: "center", display: "flex", marginRight: -8 }}>{trailing}</div>
       )}
       {sub && <div style={{ minWidth: 0, fontSize: 11, color: "#A89070", lineHeight: 1.4, gridColumn: right !== undefined ? "1" : "1 / -1", gridRow: 2 }}>{sub}</div>}
-      {rightSub && <div style={{ fontSize: 11, color: "#A89070", textAlign: "right", whiteSpace: "nowrap", gridColumn: sub ? "2" : "1 / -1", gridRow: 2 }}>{rightSub}</div>}
+      {/* rightSub переносится и ограничен по ширине: nowrap-подпись «Привязано: длинное
+          название» растягивала правую колонку и выдавливала левую в ноль. */}
+      {rightSub && <div style={{ fontSize: 11, color: "#A89070", textAlign: "right", maxWidth: 180, marginLeft: "auto", lineHeight: 1.35, gridColumn: sub ? "2" : "1 / -1", gridRow: 2 }}>{rightSub}</div>}
       {badge && <div style={{ gridColumn: "1 / -1", display: "flex", flexWrap: "wrap", gap: 6, marginTop: 4, alignItems: "center" }}>{badge}</div>}
       {meta && <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "#6B6355", marginTop: 2, lineHeight: 1.4 }}>{meta}</div>}
       {actions && (

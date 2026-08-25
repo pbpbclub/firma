@@ -528,8 +528,8 @@ const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
           ) : (
             filteredTxs.map((t: any, i: number) => isMobile ? (
               <RowCard key={t.id || i}
-                title={<span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><BankBadge bank={t.bank || t.source || ""} />
-                  <span>{t.source === "fund" ? (t.counterparty || t.purpose || `Фонд: ${t.fund_name}`) : (t.counterparty || t.purpose || "—")}</span></span>}
+                title={<span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}><BankBadge bank={t.bank || t.source || ""} />
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{t.source === "fund" ? (t.counterparty || t.purpose || `Фонд: ${t.fund_name}`) : (t.counterparty || t.purpose || "—")}</span></span>}
                 sub={<>{fmtDate(t.date)} · {t.source === "fund" ? t.fund_name : t.bank === "tbank" ? "Т-Банк" : t.bank === "sber" ? "Сбербанк" : t.bank || "—"}
                   {t.is_transfer && <> · перевод</>}{t.is_tax && <> · налог</>}{t.is_fee && <> · комиссия</>}</>}
                 right={<span style={{ color: t.direction === "in" ? "#4A7C59" : "#8B3A3A" }}>{t.direction === "in" ? "+" : "−"}{fmt(t.amount)}</span>}

@@ -1,4 +1,5 @@
 import { fmtMoney as fmt } from "../components/ui/format";
+import { useIsMobile } from "../components/ui/responsive";
 import { debtColor } from "../components/ui/type";
 import { useState } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
@@ -389,6 +390,7 @@ function AccountableSection() {
 
 export default function Funds() {
   const qc = useQueryClient();
+  const isMobile = useIsMobile();
   const [detailFund, setDetailFund] = useState<any>(null);
   const [txModal, setTxModal]       = useState<{ fund: any; mode: "deposit" | "withdraw" } | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -410,8 +412,8 @@ export default function Funds() {
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
 
       {/* Header */}
-      <div style={{ padding: "24px 28px 20px", borderBottom: "1px solid #EDEBE6", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
-        <div style={{ fontSize: 26, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em" }}>Фонды</div>
+      <div style={{ padding: isMobile ? "16px 16px 14px" : "24px 28px 20px", borderBottom: "1px solid #EDEBE6", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0, flexWrap: isMobile ? "wrap" : undefined, gap: isMobile ? 10 : 0 }}>
+        <div style={{ fontSize: isMobile ? 22 : 26, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em" }}>Фонды</div>
         <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
           <div style={{ textAlign: "right" }}>
             <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 2 }}>ВСЕГО В ФОНДАХ</div>
@@ -440,7 +442,7 @@ export default function Funds() {
           {/* Карточки фондов */}
           <div style={{
             display: "grid",
-            gridTemplateColumns: `repeat(${Math.min(fundList.length, 4)}, 1fr)`,
+            gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : `repeat(${Math.min(fundList.length, 4)}, 1fr)`,
             borderBottom: "1px solid #EDEBE6",
           }}>
             {fundList.map((f: any) => (
