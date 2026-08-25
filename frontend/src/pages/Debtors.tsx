@@ -11,6 +11,7 @@ import { ColumnFilter, AmountFilter, PeriodFilter } from "../components/TableFil
 import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { MONO } from "../components/ui/Num";
 import { OrderLink } from "../components/ui/links";
+import { useTableSort } from "../components/ui/sort";
 import { IconButton } from "../components/ui/IconButton";
 import { T, POLARITY, debtColor } from "../components/ui/type";
 import { DeadlinePill } from "../components/ui/Pill";
@@ -910,11 +911,41 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const { data, isLoading } = useQuery({ queryKey: ["creditors"], queryFn: () => financeApi.creditors() });
 
+  // Массовые действия к выделению. Чекбоксы и «выделить всё» были с самого
+  // начала, но действий к ним не было ни одного — выделил 12 обязательств и
+  // мог только посмотреть на сумму. Цикл по существующим ручкам — тот же
+  // приём, что bulkDelete в списке заказов.
+  const [bulkAction, setBulkAction] = useState<"close" | "delete" | null>(null);
+  const bulkMutation = useMutation({
+    mutationFn: async ({ ids, action }: { ids: string[]; action: "close" | "delete" }) => {
+      for (const id of ids) {
+        if (action === "close") await financeApi.updateCreditor(id, { status: "closed" });
+        else await financeApi.deleteCreditor(id);
+      }
+    },
+    onSuccess: () => {
+      setBulkAction(null);
+      setSelectedIds(new Set());
+      qc.invalidateQueries({ queryKey: ["creditors"] });
+      qc.invalidateQueries({ queryKey: ["orders-v2"] });
+    },
+    onError: () => setBulkAction(null),
+  });
+
   // scope с бэка: debt — живые заказы (производство, завершённые) и ручные;
   // plan — обязательства незапущенных заказов, это план закупок, не долг.
   const items: any[] = (data?.items || []).filter((c: any) => (c.scope ?? "debt") === scope);
   const uniqueContragents = useMemo(() => [...new Set(items.map((c: any) => c.name).filter(Boolean))].sort() as string[], [items]);
   const uniqueDescriptions = useMemo(() => [...new Set(items.map((c: any) => c.description).filter(Boolean))].sort() as string[], [items]);
+  const { sort, toggle: toggleSort, apply: applySort } = useTableSort();
+  const SORT_GETTERS: Record<string, (c: any) => any> = {
+    name: (c) => c.name,
+    description: (c) => c.description || null,
+    plan: (c) => (c.amount_plan ?? c.total) || 0,
+    fact: (c) => (c.fact ?? c.paid) || 0,
+    debt: (c) => c.debt || 0,
+    due: (c) => c.due_date || null,
+  };
   const filteredItems = useMemo(() => {
     let r = items;
     if (contragentFilter) r = r.filter((c: any) => c.name === contragentFilter);
@@ -927,8 +958,9 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
     if (cDebtMax) r = r.filter((c: any) => (c.debt || 0) <= parseFloat(cDebtMax));
     if (dueFrom) r = r.filter((c: any) => c.due_date && c.due_date.slice(0, 10) >= dueFrom);
     if (dueTo) r = r.filter((c: any) => c.due_date && c.due_date.slice(0, 10) <= dueTo);
-    return r;
-  }, [items, contragentFilter, descFilter, cPlanMin, cPlanMax, cPaidMin, cPaidMax, varMin, varMax, cDebtMin, cDebtMax, dueFrom, dueTo]);
+    return applySort(r, SORT_GETTERS);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, contragentFilter, descFilter, cPlanMin, cPlanMax, cPaidMin, cPaidMax, varMin, varMax, cDebtMin, cDebtMax, dueFrom, dueTo, sort]);
 
   // Итоги — по видимым строкам: серверные спорили бы с включённым фильтром
   // («сумма строк ≠ итог», code_rules 02.08).
@@ -954,6 +986,16 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
       {addOpen && <AddCreditorModal onClose={() => setAddOpen(false)} />}
       {editItem && <PayCreditorModal item={editItem} onClose={() => setEditItem(null)} />}
       {linkItem && <LinkTxModal creditor={linkItem} onClose={() => setLinkItem(null)} />}
+      {bulkAction && (
+        <ConfirmModal
+          message={bulkAction === "close"
+            ? `Закрыть ${selectedIds.size} обязательств(а)? Непокрытые остатки спишутся — расчёты по этим строкам признаются законченными.`
+            : `Удалить ${selectedIds.size} обязательств(а) безвозвратно? Расходы и платежи не затрагиваются — удаляется только строка плана.`}
+          confirmLabel={bulkMutation.isPending ? "Выполняем..." : bulkAction === "close" ? "Закрыть" : "Удалить"}
+          onConfirm={() => bulkMutation.mutate({ ids: [...selectedIds], action: bulkAction })}
+          onCancel={() => setBulkAction(null)}
+        />
+      )}
       {closeOpen && (
         <Modal
           eyebrow="ЗАКРЫТЬ РАСЧЁТЫ ПО ЗАВЕРШЁННЫМ"
@@ -997,6 +1039,20 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
             <div style={{ display: "flex", gap: 10, fontSize: 11, color: "#6B6355", alignItems: "center" }}>
               {selectedIds.size > 0 && <span style={{ color: "#E8592A", fontWeight: 600 }}>Выбрано {selectedIds.size}</span>}
               {selectedIds.size > 0 && selDebt > 0 && <span style={{ color: "#8B3A3A" }}>{fmt(selDebt)}</span>}
+              {selectedIds.size > 0 && (
+                <>
+                  <button type="button" onClick={() => setBulkAction("close")}
+                    style={{ fontSize: 11, padding: "3px 10px", border: "1px solid #4A7C59", background: "none",
+                             color: "#4A7C59", cursor: "pointer", fontFamily: "inherit" }}>
+                    Закрыть выбранные
+                  </button>
+                  <button type="button" onClick={() => setBulkAction("delete")}
+                    style={{ fontSize: 11, padding: "3px 10px", border: "1px solid #8B3A3A", background: "none",
+                             color: "#8B3A3A", cursor: "pointer", fontFamily: "inherit" }}>
+                    Удалить выбранные
+                  </button>
+                </>
+              )}
               {selectedIds.size === 0 && <span>{filteredItems.length} записей</span>}
             </div>
             <button type="button" onClick={canClear ? clearFilters : undefined} style={{ fontSize: 10, color: canClear ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: canClear ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
@@ -1017,11 +1073,11 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
             }}
           />
         </div>
-        <div><ColumnFilter label="КОНТРАГЕНТ" options={uniqueContragents} value={contragentFilter} onChange={setContragentFilter} /></div>
-        <div><ColumnFilter label="ЗА ЧТО" options={uniqueDescriptions} value={descFilter} onChange={setDescFilter} /></div>
-        <div><AmountFilter label="ПЛАН" min={cPlanMin} max={cPlanMax} onChange={(mn, mx) => { setCPlanMin(mn); setCPlanMax(mx); }} /></div>
-        <div><AmountFilter label="ФАКТ" min={cPaidMin} max={cPaidMax} onChange={(mn, mx) => { setCPaidMin(mn); setCPaidMax(mx); }} /></div>
-        <div><AmountFilter label="ОСТАТОК" min={cDebtMin} max={cDebtMax} onChange={(mn, mx) => { setCDebtMin(mn); setCDebtMax(mx); }} /></div>
+        <div><ColumnFilter label="КОНТРАГЕНТ" options={uniqueContragents} value={contragentFilter} onChange={setContragentFilter} sort={{ colKey: "name", sort, onToggle: toggleSort }} /></div>
+        <div><ColumnFilter label="ЗА ЧТО" options={uniqueDescriptions} value={descFilter} onChange={setDescFilter} sort={{ colKey: "description", sort, onToggle: toggleSort }} /></div>
+        <div><AmountFilter label="ПЛАН" min={cPlanMin} max={cPlanMax} onChange={(mn, mx) => { setCPlanMin(mn); setCPlanMax(mx); }} sort={{ colKey: "plan", sort, onToggle: toggleSort }} /></div>
+        <div><AmountFilter label="ФАКТ" min={cPaidMin} max={cPaidMax} onChange={(mn, mx) => { setCPaidMin(mn); setCPaidMax(mx); }} sort={{ colKey: "fact", sort, onToggle: toggleSort }} /></div>
+        <div><AmountFilter label="ОСТАТОК" min={cDebtMin} max={cDebtMax} onChange={(mn, mx) => { setCDebtMin(mn); setCDebtMax(mx); }} sort={{ colKey: "debt", sort, onToggle: toggleSort }} /></div>
         <div><PeriodFilter label="СРОК" from={dueFrom} to={dueTo} onChange={(f, t) => { setDueFrom(f); setDueTo(t); }} align="right" /></div>
         <div />
       </div>

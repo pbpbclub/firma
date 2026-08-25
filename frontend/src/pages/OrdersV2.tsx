@@ -6,6 +6,7 @@ import { Loading } from "../components/ui/Loading";
 import { EmptyState } from "../components/ui/EmptyState";
 import { MONO } from "../components/ui/Num";
 import { DeadlinePill } from "../components/ui/Pill";
+import { useTableSort, SortHeader } from "../components/ui/sort";
 import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ordersApi, customersApi, brandsApi, estimatesApi, financeApi } from "../api";
@@ -564,6 +565,17 @@ export default function OrdersV2() {
   const uniqueCustomers = useMemo(() => [...new Set(allData.map((r: any) => r.customer_name).filter(Boolean))].sort() as string[], [allData]);
   const uniqueTitles = useMemo(() => [...new Set(allData.map((r: any) => r.title).filter(Boolean))].sort() as string[], [allData]);
   const uniqueStatuses = useMemo(() => [...new Set(allData.map((r: any) => (STATUS_MAP[r.status] || {}).label || r.status).filter(Boolean))].sort() as string[], [allData]);
+  // Сортировка кликом по стрелке в заголовке; без неё — порядок бэка (новые сверху).
+  const { sort, toggle: toggleSort, apply: applySort } = useTableSort(() => setPage(0));
+  const SORT_GETTERS: Record<string, (o: any) => any> = {
+    title: (o) => o.title,
+    customer: (o) => o.customer_name || null,
+    status: (o) => (STATUS_MAP[o.status] || {}).label || o.status,
+    price: (o) => o.price_plan || 0,
+    cost_plan: (o) => o.cost_plan || 0,
+    cost_fact: (o) => o.cost_fact || 0,
+    delta: (o) => o.delta ?? null,
+  };
   const filteredData = useMemo(() => {
     let r = allData;
     if (customerFilter) r = r.filter((o: any) => o.customer_name === customerFilter);
@@ -574,8 +586,9 @@ export default function OrdersV2() {
     if (amountMax) r = r.filter((o: any) => (o.price_plan || 0) <= parseFloat(amountMax));
     if (factMin) r = r.filter((o: any) => (o.cost_fact || 0) >= parseFloat(factMin));
     if (factMax) r = r.filter((o: any) => (o.cost_fact || 0) <= parseFloat(factMax));
-    return r;
-  }, [allData, customerFilter, titleFilter, statusFilter, brandFilter, amountMin, amountMax, factMin, factMax]);
+    return applySort(r, SORT_GETTERS);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allData, customerFilter, titleFilter, statusFilter, brandFilter, amountMin, amountMax, factMin, factMax, sort]);
   const totalCount = filteredData.length;
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
   const pageData = filteredData.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
@@ -973,13 +986,13 @@ export default function OrdersV2() {
               }}
             />
           </div>
-          <div><ColumnFilter label="НАЗВАНИЕ" options={uniqueTitles} value={titleFilter} onChange={(v) => { setTitleFilter(v); setPage(0); }} /></div>
-          <div><ColumnFilter label="КЛИЕНТ" options={uniqueCustomers} value={customerFilter} onChange={(v) => { setCustomerFilter(v); setPage(0); }} /></div>
-          <div><ColumnFilter label="СТАТУС" options={uniqueStatuses} value={statusFilter} onChange={(v) => { setStatusFilter(v); setPage(0); }} /></div>
-          <div><AmountFilter label="СУММА" min={amountMin} max={amountMax} onChange={(mn, mx) => { setAmountMin(mn); setAmountMax(mx); setPage(0); }} /></div>
-          {!selected && <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", textAlign: "right" }} title="Плановая себестоимость: сумма активной сметы плюс плановая себестоимость допработ">СЕБ. ПЛАН</div>}
-          <div style={{ textAlign: "right" }}><AmountFilter label="СЕБ. ФАКТ" min={factMin} max={factMax} onChange={(mn, mx) => { setFactMin(mn); setFactMax(mx); setPage(0); }} /></div>
-          {!selected && <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", textAlign: "right" }} title="Чистая после УСН: план у смет и ждущих, прогноз в работе, факт у завершённых">Δ</div>}
+          <div><ColumnFilter label="НАЗВАНИЕ" options={uniqueTitles} value={titleFilter} onChange={(v) => { setTitleFilter(v); setPage(0); }} sort={{ colKey: "title", sort, onToggle: toggleSort }} /></div>
+          <div><ColumnFilter label="КЛИЕНТ" options={uniqueCustomers} value={customerFilter} onChange={(v) => { setCustomerFilter(v); setPage(0); }} sort={{ colKey: "customer", sort, onToggle: toggleSort }} /></div>
+          <div><ColumnFilter label="СТАТУС" options={uniqueStatuses} value={statusFilter} onChange={(v) => { setStatusFilter(v); setPage(0); }} sort={{ colKey: "status", sort, onToggle: toggleSort }} /></div>
+          <div><AmountFilter label="СУММА" min={amountMin} max={amountMax} onChange={(mn, mx) => { setAmountMin(mn); setAmountMax(mx); setPage(0); }} sort={{ colKey: "price", sort, onToggle: toggleSort }} /></div>
+          {!selected && <div style={{ textAlign: "right" }}><SortHeader label="СЕБ. ПЛАН" colKey="cost_plan" sort={sort} onToggle={toggleSort} align="right" title="Плановая себестоимость: сумма активной сметы плюс плановая себестоимость допработ" /></div>}
+          <div style={{ textAlign: "right" }}><AmountFilter label="СЕБ. ФАКТ" min={factMin} max={factMax} onChange={(mn, mx) => { setFactMin(mn); setFactMax(mx); setPage(0); }} sort={{ colKey: "cost_fact", sort, onToggle: toggleSort }} /></div>
+          {!selected && <div style={{ textAlign: "right" }}><SortHeader label="Δ" colKey="delta" sort={sort} onToggle={toggleSort} align="right" title="Чистая после УСН: план у смет и ждущих, прогноз в работе, факт у завершённых" /></div>}
           <div />
         </div>
 

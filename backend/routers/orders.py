@@ -1140,16 +1140,10 @@ def get_order(order_id: str):
             (oid,),
         ).fetchall()
 
-        stages = conn.execute(
-            "SELECT * FROM stages WHERE order_id = ? ORDER BY sort_order",
-            (oid,),
-        ).fetchall()
-
-        events = conn.execute(
-            "SELECT * FROM events WHERE order_id = ? ORDER BY created_at DESC LIMIT 20",
-            (oid,),
-        ).fetchall()
-
+        # stages/events из старого MES здесь больше не читаются: обе таблицы пусты
+        # (0 строк, ни одного INSERT в кодовой базе), фронт ключи не использовал —
+        # два мёртвых запроса на каждое открытие карточки. История заказа — в
+        # /timeline из audit_log.
         paid_total = sum(p["amount"] for p in payments)
         price_plan = order.get("price_plan") or 0
         pf = _plan_fact(conn, oid, order.get("cost_plan") or 0, paid_total, price_plan)
@@ -1200,8 +1194,6 @@ def get_order(order_id: str):
             "extras_total": m["extras"],
             "payments": [dict(p) for p in payments],
             "estimate_sets": [dict(e) for e in estimate_sets],
-            "stages": [dict(s) for s in stages],
-            "events": [dict(e) for e in events],
         }
     finally:
         conn.close()
@@ -1738,6 +1730,50 @@ def order_card(order_id: str):
     )
     return FileResponse(path, media_type="application/pdf",
                         filename=f"plan-fact-{data.get('number') or order_id}.pdf")
+
+
+@router.get("/{order_id}/timeline")
+def order_timeline(order_id: str, limit: int = Query(50, le=200)):
+    """Лента «что происходило с заказом» — из журнала изменений (audit_log).
+
+    Таблицы events/stages из старого MES пусты и никем не пишутся; настоящая
+    история копится в audit_log (пишут 27 вызовов audit() в 7 роутерах), но
+    журнал ключуется сущностью, а не заказом. Здесь события собираются по связям:
+    payment/expense/creditor → order_id живой строки, сметы — через estimate_sets,
+    позиции — через set_id. Удалённая строка джойном не доедет — её order_id
+    достаётся из снимка `changes` (audit пишет полный JSON строки ДО изменения).
+
+    Summary в журнале уже человекочитаемые («Утверждена смета…», «Платёж N ₽…») —
+    отдаём как есть, не переписываем."""
+    conn = get_production()
+    try:
+        oid = _resolve_order(conn, order_id)
+        rows = conn.execute(
+            """SELECT a.created_at, a.action, a.entity_type, a.summary
+                 FROM audit_log a
+                WHERE (a.entity_type = 'order' AND a.entity_id = :oid)
+                   OR (a.entity_type = 'payment' AND a.entity_id IN
+                        (SELECT id FROM payments WHERE order_id = :oid))
+                   OR (a.entity_type = 'expense' AND a.entity_id IN
+                        (SELECT id FROM expenses WHERE order_id = :oid))
+                   OR (a.entity_type = 'creditor' AND a.entity_id IN
+                        (SELECT id FROM creditors WHERE order_id = :oid))
+                   OR (a.entity_type = 'estimate' AND a.entity_id IN
+                        (SELECT id FROM estimate_sets WHERE order_id = :oid))
+                   OR (a.entity_type = 'estimate_item' AND a.entity_id IN
+                        (SELECT i.id FROM estimate_items i
+                          JOIN estimate_sets s ON s.id = i.set_id
+                         WHERE s.order_id = :oid))
+                   OR json_extract(a.changes, '$.order_id') = :oid
+                   OR (a.entity_type = 'estimate_item'
+                       AND json_extract(a.changes, '$.set_id') IN
+                        (SELECT id FROM estimate_sets WHERE order_id = :oid))
+                ORDER BY a.created_at DESC LIMIT :lim""",
+            {"oid": oid, "lim": limit},
+        ).fetchall()
+        return {"items": [dict(r) for r in rows], "count": len(rows)}
+    finally:
+        conn.close()
 
 
 @router.get("/{order_id}/extras")

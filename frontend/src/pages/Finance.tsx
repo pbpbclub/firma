@@ -9,7 +9,7 @@ import { MagnifyingGlass, X, LinkSimple } from "@phosphor-icons/react";
 import { ColumnFilter, AmountFilter, PeriodFilter } from "../components/TableFilters";
 import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { MONO } from "../components/ui/Num";
-import { OrderLink } from "../components/ui/links";
+import { AllocNote } from "../components/money/AllocNote";
 import { IconButton } from "../components/ui/IconButton";
 
 function Checkbox({ checked, indeterminate = false, onChange }: {
@@ -527,22 +527,29 @@ const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
                   <Checkbox checked={selectedIds.has(String(t.id))} onChange={() => toggleSelect(String(t.id))} />
                 </div>
                 <div style={{ fontSize: 12, color: "#A89070", fontFamily: MONO }}>{fmtDate(t.date)}</div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, overflow: "hidden" }}>
-                  <BankBadge bank={t.bank || t.source || ""} />
-                  <div style={{ fontSize: 13, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {t.source === "fund"
-                      ? (t.counterparty || t.purpose || `Фонд: ${t.fund_name}`)
-                      : (t.counterparty || t.purpose || "—")}
-                    {t.is_transfer && (
-                      <span style={{ color: "#A89070", background: "#F2EFE9", padding: "1px 6px", fontSize: 10, fontWeight: 600, marginLeft: 8 }}>перевод</span>
-                    )}
-                    {t.is_tax && (
-                      <span style={{ color: "#A89070", background: "#F2EFE9", padding: "1px 6px", fontSize: 10, fontWeight: 600, marginLeft: 8 }}>налог</span>
-                    )}
-                    {t.is_fee && (
-                      <span style={{ color: "#A89070", background: "#F2EFE9", padding: "1px 6px", fontSize: 10, fontWeight: 600, marginLeft: 8 }}>комиссия</span>
-                    )}
+                <div style={{ overflow: "hidden" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, overflow: "hidden" }}>
+                    <BankBadge bank={t.bank || t.source || ""} />
+                    <div style={{ fontSize: 13, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {t.source === "fund"
+                        ? (t.counterparty || t.purpose || `Фонд: ${t.fund_name}`)
+                        : (t.counterparty || t.purpose || "—")}
+                      {t.is_transfer && (
+                        <span style={{ color: "#A89070", background: "#F2EFE9", padding: "1px 6px", fontSize: 10, fontWeight: 600, marginLeft: 8 }}>перевод</span>
+                      )}
+                      {t.is_tax && (
+                        <span style={{ color: "#A89070", background: "#F2EFE9", padding: "1px 6px", fontSize: 10, fontWeight: 600, marginLeft: 8 }}>налог</span>
+                      )}
+                      {t.is_fee && (
+                        <span style={{ color: "#A89070", background: "#F2EFE9", padding: "1px 6px", fontSize: 10, fontWeight: 600, marginLeft: 8 }}>комиссия</span>
+                      )}
+                    </div>
                   </div>
+                  {/* Подпись разноски — в широкой ячейке: под суммой (120px) длинный
+                      комментарий рвался на пять строк. */}
+                  {t.direction === "out" && expensesByTx.has(String(t.id)) && (
+                    <AllocNote rows={expensesByTx.get(String(t.id))!} onUndo={setUndoGroup} />
+                  )}
                 </div>
                 <div style={{ fontSize: 12 }}>
                   {t.source === "fund"
@@ -561,28 +568,6 @@ const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
                   {t.direction === "out" && creditorByFinTx.has(String(t.id)) && (
                     <div style={{ fontSize: 10, color: "#4A7C59", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {creditorByFinTx.get(String(t.id))?.name}
-                    </div>
-                  )}
-                  {t.direction === "out" && expensesByTx.has(String(t.id)) && (
-                    <div style={{ fontSize: 10, color: "#6B6355", marginTop: 2 }}>
-                      {/* Разнесённые заказы — ссылками: из ДДС было видно, КУДА разнесено,
-                          но дойти до заказа приходилось через список. */}
-                      {expensesByTx.get(String(t.id))!.map((e: any, i: number, arr: any[]) => (
-                        <span key={e.id ?? i}>
-                          <OrderLink id={e.order_id}>{e.order_title || e.purpose || "вне заказов"}</OrderLink>
-                          {i < arr.length - 1 ? " · " : ""}
-                        </span>
-                      ))}
-                      {(() => {
-                        const gid = expensesByTx.get(String(t.id))!.find((e: any) => e.group_id)?.group_id;
-                        return gid ? (
-                          <button type="button" onClick={ev => { ev.stopPropagation(); setUndoGroup(gid); }}
-                            title="Откатить разноску целиком"
-                            style={{ marginLeft: 6, fontSize: 10, color: "#8B3A3A", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
-                            откатить
-                          </button>
-                        ) : null;
-                      })()}
                     </div>
                   )}
                   {t.direction === "in" && paymentByFinTx.has(String(t.id)) && (

@@ -21,8 +21,10 @@ api.interceptors.response.use(
 );
 
 export const ordersApi = {
-  list: (params?: Record<string, string | boolean>) =>
-    api.get("/orders", { params }).then((r) => r.data),
+  // limit по умолчанию 200 (потолок бэка): без него сервер отдаёт 50, и на 51-м
+  // заказе списки и справочники выбора заказа молча обрезались бы.
+  list: (params?: Record<string, string | boolean | number>) =>
+    api.get("/orders", { params: { limit: 200, ...params } }).then((r) => r.data),
   get: (id: string) => api.get(`/orders/${id}`).then((r) => r.data),
   // scope: active (в работе) | completed (итог закрытых) | all
   planFactSummary: (scope: "active" | "completed" | "all" = "active") =>
@@ -32,6 +34,8 @@ export const ordersApi = {
   // Карточка «План / факт» PDF — тем же движком, что КП.
   card: (id: string) =>
     api.post(`/orders/${id}/card`, {}, { responseType: "blob" }).then((r) => r.data),
+  // Лента «что происходило с заказом» — из журнала изменений (audit_log)
+  timeline: (id: string) => api.get(`/orders/${id}/timeline`).then((r) => r.data),
   // «Молчат»: просчёты без движения (правило фин-агента, 14/30/60 дней)
   silent: () => api.get("/orders/silent").then((r) => r.data),
   estimate: (id: string) => api.get(`/orders/${id}/estimate`).then((r) => r.data),

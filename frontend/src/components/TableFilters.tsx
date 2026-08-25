@@ -1,4 +1,9 @@
 import { useState, useRef, useEffect } from "react";
+import { SortMark, type SortState } from "./ui/sort";
+
+// Опциональная сортировка колонки: стрелка справа от заголовка-фильтра.
+// Клик по самому заголовку занят поповером фильтра, поэтому — отдельная кнопка.
+export type HeaderSort = { colKey: string; sort: SortState; onToggle: (key: string) => void };
 
 // Заголовок-кнопка с подчёркиванием: пунктир = фильтруемый, сплошной оранжевый = активный
 function triggerStyle(active: boolean, align?: "left" | "right"): React.CSSProperties {
@@ -32,13 +37,14 @@ const popBase = (align?: "left" | "right"): React.CSSProperties => ({
 
 // ─── Категориальный фильтр ───────────────────────────────────────────────────
 
-export function ColumnFilter({ label, options, value, onChange, align, maxHeight }: {
+export function ColumnFilter({ label, options, value, onChange, align, maxHeight, sort }: {
   label: string;
   options: string[];
   value: string;
   onChange: (v: string) => void;
   align?: "left" | "right";
   maxHeight?: number;
+  sort?: HeaderSort;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -46,10 +52,11 @@ export function ColumnFilter({ label, options, value, onChange, align, maxHeight
   useEffect(() => { if (!open) setQ(""); }, [open]);
   const filtered = q ? options.filter(o => o.toLowerCase().includes(q.toLowerCase())) : options;
   return (
-    <div ref={ref} style={{ position: "relative", display: "inline-flex" }}>
+    <div ref={ref} style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
       <button type="button" onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }} style={triggerStyle(!!value, align)}>
         {label}
       </button>
+      {sort && <SortMark colKey={sort.colKey} sort={sort.sort} onToggle={sort.onToggle} />}
       {open && (
         <div style={{ ...popBase(align), minWidth: 180 }}>
           <div style={{ padding: "5px 8px", borderBottom: "1px solid #F2EFE9" }}>
@@ -73,20 +80,22 @@ export function ColumnFilter({ label, options, value, onChange, align, maxHeight
 
 // ─── Диапазон сумм ───────────────────────────────────────────────────────────
 
-export function AmountFilter({ label, min, max, onChange, align }: {
+export function AmountFilter({ label, min, max, onChange, align, sort }: {
   label: string;
   min: string; max: string;
   onChange: (min: string, max: string) => void;
   align?: "left" | "right";
+  sort?: HeaderSort;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useClickOutside(open, () => setOpen(false));
   const active = !!min || !!max;
   return (
-    <div ref={ref} style={{ position: "relative", display: "inline-flex" }}>
+    <div ref={ref} style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
       <button type="button" onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }} style={triggerStyle(active, align)}>
         {label}
       </button>
+      {sort && <SortMark colKey={sort.colKey} sort={sort.sort} onToggle={sort.onToggle} />}
       {open && (
         <div style={{ ...popBase(align), padding: "10px 12px", minWidth: 210 }}>
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>

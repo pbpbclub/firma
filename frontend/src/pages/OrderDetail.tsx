@@ -26,6 +26,7 @@ import { useNavigationGuard, NavigationGuardModal } from "../components/Navigati
 import { Breadcrumbs } from "../components/ui/Breadcrumbs";
 import { CardButton } from "../components/CardButton";
 import { MasterLink } from "../components/ui/links";
+import { OrderTimeline } from "../components/order/OrderTimeline";
 
 // A1/A2 (ТЗ 24.08.2026): «чем закрыт расход». cash и пустое — обычная оплата,
 // бейджа не требует; остальное стоит отметить, иначе строка читается как выплата.
@@ -1162,6 +1163,7 @@ export default function OrderDetail() {
                 <div style={{ marginBottom: 12 }}><SectionLabel>ЛЕСТНИЦА ПРИБЫЛИ</SectionLabel></div>
                 <ProfitLadder order={order} paidTotal={paidTotal} />
               </div>
+              <OrderTimeline orderId={id!} />
             </>
           )}
         </div>

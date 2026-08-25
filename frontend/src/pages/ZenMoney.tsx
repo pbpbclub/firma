@@ -3,9 +3,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loading } from "../components/ui/Loading";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Briefcase, MagnifyingGlass, X, ArrowsClockwise, Tag, PencilSimple, Trash, LinkSimple } from "@phosphor-icons/react";
-import { zenmoneyApi, payeeRulesApi, mastersApi, customersApi, financeApi } from "../api";
+import { zenmoneyApi, payeeRulesApi, mastersApi, customersApi, financeApi, inboxApi } from "../api";
+import { AllocNote } from "../components/money/AllocNote";
 import { ColumnFilter, PeriodFilter, AmountFilter } from "../components/TableFilters";
-import { Modal } from "../components/ui/Modal";
+import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { MONO } from "../components/ui/Num";
 import { IconButton } from "../components/ui/IconButton";
 
@@ -545,6 +546,30 @@ export default function ZenMoneyPage() {
     return m;
   }, [allCreditors]);
 
+  // Куда разнесены траты. 31 из 33 разнесённых списаний — с личной карты
+  // (ключи zen: в /expenses/map), и до этого лента их никак не отмечала:
+  // разнесённая Яндекс-доставка выглядела ровно как неразобранная.
+  const { data: expensesMapData = {} } = useQuery({
+    queryKey: ["expenses-map"],
+    queryFn: inboxApi.map,
+  });
+  const expensesByZenTx = useMemo(() => {
+    const m = new Map<string, any[]>();
+    for (const [key, rows] of Object.entries(expensesMapData as Record<string, any[]>)) {
+      if (key.startsWith("zen:")) m.set(key.slice(4), rows);
+    }
+    return m;
+  }, [expensesMapData]);
+
+  const [undoGroup, setUndoGroup] = useState<string | null>(null);
+  const undoExpenseGroup = useMutation({
+    mutationFn: (groupId: string) => inboxApi.deleteGroup(groupId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["expenses-map"] });
+      queryClient.invalidateQueries({ queryKey: ["zm-transactions"] });
+    },
+  });
+
   const { data: accounts = [] } = useQuery({
     queryKey: ["zm-accounts"],
     queryFn: zenmoneyApi.accounts,
@@ -982,6 +1007,11 @@ export default function ZenMoneyPage() {
                       onClose={() => setActivePayeePopup(null)}
                     />
                   )}
+                  {/* Заказ + комментарий разноски — тот же формат, что в ДДС (AllocNote).
+                      В широкой ячейке: под суммой (100px) длинный комментарий рвался бы. */}
+                  {expensesByZenTx.has(String(tx.id)) && (
+                    <AllocNote rows={expensesByZenTx.get(String(tx.id))!} onUndo={setUndoGroup} />
+                  )}
                 </div>
                 <div style={{ fontSize: 10, color: "#A89070", paddingTop: 1 }}>
                   {tx.display_category || (tx.tags as string[])?.[0] || ""}
@@ -1015,6 +1045,14 @@ export default function ZenMoneyPage() {
               tx={linkModal}
               creditorByZenTx={creditorByZenTx}
               onClose={() => setLinkModal(null)}
+            />
+          )}
+          {undoGroup && (
+            <ConfirmModal
+              message="Откатить разноску этого списания целиком? Расходы по заказам удалятся, транзакция вернётся в «Разноску»."
+              confirmLabel={undoExpenseGroup.isPending ? "Откатываем..." : "Откатить"}
+              onConfirm={() => { undoExpenseGroup.mutate(undoGroup); setUndoGroup(null); }}
+              onCancel={() => setUndoGroup(null)}
             />
           )}
         </div>
