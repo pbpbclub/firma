@@ -232,9 +232,26 @@ WHERE c.order_id = ?
 собратьев). L1/L2 — «тот же платёж» по общему ключу; L3 — «похоже, тот же». Добавь L3
 в факт — себестоимость просядет, маржа вырастет на пустом месте.
 
-Перевод заказа в «Завершён» закрывает его обязательства (`_apply_status` →
-`close_for_order`): без подтверждения — 409 со списком, Юра решает построчно.
-Возврат в работу переоткрывает только `closed_reason='order_completed'`.
+Перевод заказа в терминал закрывает его обязательства **каждый своей причиной**
+(`obligations.CLOSE_REASONS`, 26.08.2026): завершение → `order_completed`, отмена →
+`order_cancelled` (`orders.TERMINAL_REASONS`, обе через `_apply_status`), архивация →
+`order_archived` (`PATCH /orders/{id}/archive {close_obligations, only_ids}`). Без
+подтверждения — 409 `obligations_unpaid` с `target`, окно одно на все три двери
+(`components/order/ObligationsConfirmModal`). Возврат переоткрывает **только свою
+причину** (`reopen_for_order(reason)`); терминал → терминал причину закрытых не
+переписывает. До этого отмена и архив были голым UPDATE: строки уходили во «План»,
+но начислялись в сальдо подрядчика полным планом (`ledger` не смотрит ни на статус,
+ни на архив) — ORD-005 держал 149 867 ₽ в `we_owe`.
+- Плашки «закрыть по завершённым / отменённым / архивным» — `get_creditors.stale` →
+  `POST /creditors/close-stale {kinds}`; «Закрыть выбранные» → `POST /creditors/close`
+  (`manual`, всё или ничего); `PATCH status=closed` без причины = `manual`.
+- 🔒 `DELETE /creditors/{id}` отвечает 409 `creditor_has_money`, если `paid > 0` или
+  покрыто расходом (`obligations.coverage`) — закрывать, не удалять.
+- **«Расчёты с клиентом закрыты»** — `orders.settled_at/settled_note`
+  (`POST /orders/{id}/settle|unsettle`, только `completed|cancelled`): заказ уходит из
+  «Нам должны» в отдельный список `debtors.settled[]`, цена/платежи/`_margin` НЕ
+  меняются — это не скидка (`discount` режет выручку везде). В UI слово «не
+  привязано», не «списано».
 
 ### ✅ Утверждение сметы: один гейт на все двери (24.08.2026)
 
