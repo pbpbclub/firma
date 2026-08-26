@@ -955,7 +955,7 @@ def close_stale_obligations(body: CloseStaleIn):
     conn = get_production()
     try:
         if body.order_ids is not None and not body.order_ids:
-            return {"ok": True, "closed": 0, "written_off": 0.0, "by_kind": {}}
+            return {"ok": True, "closed": 0, "written_off": 0.0, "by_kind": {}, "nothing_to_close": []}
         targets = []   # (order_row, reason, label)
         seen = set()
         for kind in kinds:
@@ -971,18 +971,28 @@ def close_stale_obligations(body: CloseStaleIn):
             for r in conn.execute(sql, params).fetchall():
                 if r["id"] not in seen:
                     seen.add(r["id"]); targets.append((r, reason, label))
+        empty = []
         if body.order_ids is not None:
             skipped = [i for i in body.order_ids if i not in seen]
             if skipped:
-                # Всё или ничего: частичное списание по «хорошей» половине списка
-                # оставило бы Юру гадать, что именно прошло.
+                # «Заказ подходит, но закрывать уже нечего» — это НЕ ошибка выбора:
+                # повторный клик плашки (или несвежий экран) обязан быть no-op,
+                # иначе успешное закрытие выглядит как сбой данных.
                 holes = ",".join("?" * len(skipped))
-                bad = [dict(r) for r in conn.execute(
-                    f"SELECT id, number, title, status, archived FROM orders WHERE id IN ({holes})", skipped).fetchall()]
-                raise HTTPException(status_code=400, detail={
-                    "error": "Заказ не подходит под выбранный вид закрытия или по нему нет открытых обязательств",
-                    "skipped": bad, "unknown": [i for i in skipped if i not in {b["id"] for b in bad}],
-                })
+                fits = " OR ".join(f"({STALE_KINDS[k][0]})" for k in kinds)
+                empty = [r["id"] for r in conn.execute(
+                    f"SELECT o.id FROM orders o WHERE o.id IN ({holes}) AND ({fits})", skipped).fetchall()]
+                bad_ids = [i for i in skipped if i not in set(empty)]
+                if bad_ids:
+                    # Всё или ничего: частичное списание по «хорошей» половине списка
+                    # оставило бы Юру гадать, что именно прошло.
+                    holes = ",".join("?" * len(bad_ids))
+                    bad = [dict(r) for r in conn.execute(
+                        f"SELECT id, number, title, status, archived FROM orders WHERE id IN ({holes})", bad_ids).fetchall()]
+                    raise HTTPException(status_code=400, detail={
+                        "error": "Заказ не подходит под выбранный вид закрытия",
+                        "skipped": bad, "unknown": [i for i in bad_ids if i not in {b["id"] for b in bad}],
+                    })
         closed, written, by_kind = 0, 0.0, {}
         for o, reason, label in targets:
             res = close_for_order(conn, o["id"], force=True, only_ids=body.only_ids, reason=reason)
@@ -995,7 +1005,9 @@ def close_stale_obligations(body: CloseStaleIn):
             bk = by_kind.setdefault(reason, {"closed": 0, "written_off": 0.0})
             bk["closed"] += res.get("closed", 0); bk["written_off"] = round(bk["written_off"] + res.get("written_off", 0.0), 2)
         conn.commit()
-        return {"ok": True, "closed": closed, "written_off": round(written, 2), "by_kind": by_kind}
+        return {"ok": True, "closed": closed, "written_off": round(written, 2), "by_kind": by_kind,
+                # заказы из списка, где закрывать было нечего (уже закрыто) — не ошибка
+                "nothing_to_close": empty}
     finally:
         conn.close()
 

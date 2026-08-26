@@ -273,15 +273,23 @@ def close_for_order(conn, oid: str, *, force: bool = False, only_ids: Optional[l
             "items": items, "before_rows": before_rows, "reason": reason}
 
 
-def reopen_for_order(conn, oid: str, reason: str = "order_completed") -> dict:
+def reopen_for_order(conn, oid: str, reason="order_completed") -> dict:
     """Заказ вернули из терминального состояния (завершён/отменён/архив) —
-    переоткрыть то, что закрылось ИМЕННО этим переходом. Закрытые вручную и
-    погашенные полностью (paid_in_full) не трогаем."""
-    assert reason in CLOSE_REASONS, reason
+    переоткрыть то, что закрылось ИМЕННО этими переходами. Закрытые вручную и
+    погашенные полностью (paid_in_full) не трогаем.
+
+    `reason` — строка или список причин: терминал → терминал причину закрытых не
+    переписывает (completed → cancelled оставляет строки с order_completed),
+    поэтому возврат в работу обязан переоткрывать ВСЮ цепочку статусных причин,
+    а не только последнюю — иначе закрытое завершением не вернётся никогда
+    (orders.TERMINAL_REASONS)."""
+    reasons = [reason] if isinstance(reason, str) else list(dict.fromkeys(reason))
+    assert reasons and all(r in CLOSE_REASONS for r in reasons), reason
+    holes = ",".join("?" * len(reasons))
     cur = conn.execute(
-        """UPDATE creditors SET status = 'open', closed_at = NULL, closed_reason = NULL
-            WHERE order_id = ? AND status = 'closed' AND closed_reason = ?""",
-        (oid, reason))
+        f"""UPDATE creditors SET status = 'open', closed_at = NULL, closed_reason = NULL
+             WHERE order_id = ? AND status = 'closed' AND closed_reason IN ({holes})""",
+        (oid, *reasons))
     return {"reopened": cur.rowcount}
 
 
@@ -289,6 +297,9 @@ def close_manual(conn, ids: list) -> dict:
     """Кнопка «Закрыть выбранные»: всё или ничего. Любой id, которого нет, который
     уже закрыт или который постоянный (kind='fixed'), — ValueError со списком:
     частичное закрытие оставило бы Юру гадать, что именно прошло."""
+    # Повтор id в теле запроса — не второе закрытие: без дедупа строка попадала
+    # дважды в closed/written_off и дважды в журнал об одном и том же закрытии.
+    ids = list(dict.fromkeys(ids or []))
     if not ids:
         return {"closed": 0, "written_off": 0.0, "items": [], "before_rows": {}}
     holes = ",".join("?" * len(ids))

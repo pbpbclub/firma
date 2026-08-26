@@ -1306,9 +1306,12 @@ def _apply_status(conn, row, new_status: str, *, close_obligations: bool = False
         out = {"closed_obligations": res.get("closed", 0),
                "written_off": res.get("written_off", 0.0)}
     elif was in TERMINAL_REASONS and new_status not in TERMINAL_REASONS:
-        # Вернули в работу: переоткрываем только закрытое этим терминалом —
-        # закрытое вручную и погашенное полностью остаётся закрытым.
-        out = reopen_for_order(conn, row["id"], reason=TERMINAL_REASONS[was])
+        # Вернули в работу: переоткрываем закрытое ЛЮБЫМ статусным терминалом —
+        # закрытое вручную, архивацией и погашенное полностью остаётся закрытым.
+        # Цепочка completed → cancelled → in_production иначе навсегда оставляла
+        # закрытыми строки с order_completed: терминал → терминал причину не
+        # переписывает, и последняя причина знает не про все закрытые строки.
+        out = reopen_for_order(conn, row["id"], reason=list(TERMINAL_REASONS.values()))
     conn.execute("UPDATE orders SET status = ?, updated_at = datetime('now') WHERE id = ?",
                  (new_status, row["id"]))
     summary = (f"«{row['title']}»: {STATUS_LABELS.get(was, was)} → "
