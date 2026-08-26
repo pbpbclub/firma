@@ -50,7 +50,7 @@ def list_orders(
             SELECT
                 o.id, o.number, o.title, o.status, o.priority,
                 o.deadline, o.price_plan, o.cost_plan, o.created_at,
-                o.archived, o.brand,
+                o.archived, o.brand, o.settled_at,
                 c.id AS customer_id,
                 c.name AS customer_name,
                 c.full_name AS customer_full_name,
@@ -1263,6 +1263,10 @@ class StatusUpdate(BaseModel):
 VALID_STATUSES = set(STATUS_LABELS)   # один источник: ярлык есть — статус валиден
 
 
+# Статус → причина закрытия обязательств (obligations.CLOSE_REASONS)
+TERMINAL_REASONS = {"completed": "order_completed", "cancelled": "order_cancelled"}
+
+
 def _apply_status(conn, row, new_status: str, *, close_obligations: bool = False,
                   only_ids: Optional[List[str]] = None) -> dict:
     """Смена статуса заказа + расчёты с подрядчиками.
@@ -1277,27 +1281,34 @@ def _apply_status(conn, row, new_status: str, *, close_obligations: bool = False
     from obligations import close_for_order, reopen_for_order
     out = {}
     was = row["status"]
-    if new_status == "completed" and was != "completed":
-        res = close_for_order(conn, row["id"], force=close_obligations, only_ids=only_ids)
+    # Терминальные статусы закрывают обязательства каждый своей причиной (26.08.2026:
+    # отмена раньше ничего не закрывала, и план отменённого заказа начислялся в сальдо
+    # подрядчика полным планом). Терминал → терминал причину закрытых не переписывает:
+    # закрыто и есть закрыто; переоткрывается только причина ПОСЛЕДНЕГО терминала.
+    if new_status in TERMINAL_REASONS and was != new_status:
+        reason = TERMINAL_REASONS[new_status]
+        res = close_for_order(conn, row["id"], force=close_obligations, only_ids=only_ids, reason=reason)
         if res.get("needs_confirm"):
             raise HTTPException(status_code=409, detail={
                 "code": "obligations_unpaid",
+                "target": new_status,
                 "message": f"По заказу остаются незакрытые обязательства на {res['unpaid_total']:g} ₽",
                 "unpaid_total": res["unpaid_total"],
                 "items": res["items"],
             })
+        how = "завершением" if new_status == "completed" else "отменой"
         for it in res.get("items", []):
             before = res.get("before_rows", {}).get(it["id"])
             audit(conn, "creditor", it["id"], "close",
-                  f"Закрыто завершением заказа {row['number']}: «{it['name']}» "
+                  f"Закрыто {how} заказа {row['number']}: «{it['name']}» "
                   f"план {it['plan']:g} ₽, факт {it['fact']:g} ₽, списано {it['debt']:g} ₽",
                   before_row=before)
         out = {"closed_obligations": res.get("closed", 0),
                "written_off": res.get("written_off", 0.0)}
-    elif was == "completed" and new_status != "completed":
-        # Вернули в работу: переоткрываем только закрытое этим завершением —
+    elif was in TERMINAL_REASONS and new_status not in TERMINAL_REASONS:
+        # Вернули в работу: переоткрываем только закрытое этим терминалом —
         # закрытое вручную и погашенное полностью остаётся закрытым.
-        out = reopen_for_order(conn, row["id"])
+        out = reopen_for_order(conn, row["id"], reason=TERMINAL_REASONS[was])
     conn.execute("UPDATE orders SET status = ?, updated_at = datetime('now') WHERE id = ?",
                  (new_status, row["id"]))
     summary = (f"«{row['title']}»: {STATUS_LABELS.get(was, was)} → "
@@ -1328,30 +1339,133 @@ def update_status(order_id: str, body: StatusUpdate):
         conn.close()
 
 
+class ArchiveIn(BaseModel):
+    close_obligations: Optional[bool] = None
+    only_ids: Optional[List[str]] = None
+
+
 @router.patch("/{order_id}/archive")
-def archive_order(order_id: str):
+def archive_order(order_id: str, body: Optional[ArchiveIn] = None):
+    """В архив = обязательства заказа закрываются (причина order_archived) — с тем же
+    409-подтверждением, что у завершения. До 26.08.2026 архивация была голым
+    UPDATE archived=1: строки уходили с экрана «Мы должны», но продолжали
+    начисляться в сальдо подрядчика полным планом, и следа в журнале не оставалось."""
+    from obligations import close_for_order
+    body = body or ArchiveIn()
     conn = get_production()
     try:
-        r = conn.execute("SELECT id FROM orders WHERE id = ? OR number = ?", (order_id, order_id)).fetchone()
+        r = conn.execute("SELECT * FROM orders WHERE id = ? OR number = ?", (order_id, order_id)).fetchone()
         if not r:
             raise HTTPException(status_code=404, detail="Not found")
+        if r["archived"]:
+            return {"ok": True, "archived": True, "closed_obligations": 0}
+        res = close_for_order(conn, r["id"], force=bool(body.close_obligations),
+                              only_ids=body.only_ids, reason="order_archived")
+        if res.get("needs_confirm"):
+            raise HTTPException(status_code=409, detail={
+                "code": "obligations_unpaid", "target": "archived",
+                "message": f"По заказу остаются незакрытые обязательства на {res['unpaid_total']:g} ₽",
+                "unpaid_total": res["unpaid_total"], "items": res["items"],
+            })
+        for it in res.get("items", []):
+            audit(conn, "creditor", it["id"], "close",
+                  f"Закрыто архивацией заказа {r['number']}: «{it['name']}» "
+                  f"план {it['plan']:g} ₽, факт {it['fact']:g} ₽, списано {it['debt']:g} ₽",
+                  before_row=res.get("before_rows", {}).get(it["id"]))
         conn.execute("UPDATE orders SET archived = 1, updated_at = datetime('now') WHERE id = ?", (r["id"],))
+        summary = f"«{r['title']}»: в архив"
+        if res.get("closed"):
+            summary += f"; закрыто обязательств: {res['closed']} (списано {res['written_off']:g} ₽)"
+        audit(conn, "order", r["id"], "archive", summary, before_row=r)
         conn.commit()
-        return {"ok": True, "archived": True}
+        return {"ok": True, "archived": True, "closed_obligations": res.get("closed", 0),
+                "written_off": res.get("written_off", 0.0)}
     finally:
         conn.close()
 
 
 @router.patch("/{order_id}/unarchive")
 def unarchive_order(order_id: str):
+    from obligations import reopen_for_order
     conn = get_production()
     try:
-        r = conn.execute("SELECT id FROM orders WHERE id = ? OR number = ?", (order_id, order_id)).fetchone()
+        r = conn.execute("SELECT * FROM orders WHERE id = ? OR number = ?", (order_id, order_id)).fetchone()
         if not r:
             raise HTTPException(status_code=404, detail="Not found")
         conn.execute("UPDATE orders SET archived = 0, updated_at = datetime('now') WHERE id = ?", (r["id"],))
+        # Обратно из архива — переоткрывается только закрытое архивацией.
+        re = reopen_for_order(conn, r["id"], reason="order_archived")
+        summary = f"«{r['title']}»: из архива"
+        if re.get("reopened"):
+            summary += f"; переоткрыто обязательств: {re['reopened']}"
+        audit(conn, "order", r["id"], "unarchive", summary, before_row=r)
         conn.commit()
-        return {"ok": True, "archived": False}
+        return {"ok": True, "archived": False, "reopened": re.get("reopened", 0)}
+    finally:
+        conn.close()
+
+
+class SettleIn(BaseModel):
+    note: Optional[str] = None
+
+
+SETTLEABLE = ("completed", "cancelled")
+
+
+def _unlinked(conn, row) -> float:
+    """Сколько по заказу «не привязано»: живая выручка (та же, что в карточке и
+    дебиторке) минус разнесённые платежи."""
+    m = _margin(conn, row["id"], row["price_plan"] or 0, row["cost_plan"] or 0)
+    paid = conn.execute("SELECT COALESCE(SUM(amount),0) FROM payments WHERE order_id = ?",
+                        (row["id"],)).fetchone()[0] or 0
+    return round((m["revenue"] or 0) - paid, 2)
+
+
+@router.post("/{order_id}/settle")
+def settle_order(order_id: str, body: Optional[SettleIn] = None):
+    """«Расчёты с клиентом закрыты»: долг по заказу перестаёт считаться дебиторкой.
+    Цена, платежи, выручка и маржа НЕ меняются — это не скидка (discount), а
+    признание, что оставшееся не привязано и привязано не будет. Только для
+    завершённого/отменённого заказа: у живого долг живой."""
+    body = body or SettleIn()
+    conn = get_production()
+    try:
+        r = conn.execute("SELECT * FROM orders WHERE id = ? OR number = ?", (order_id, order_id)).fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="Not found")
+        if r["status"] not in SETTLEABLE:
+            raise HTTPException(status_code=409, detail={
+                "code": "order_not_final",
+                "message": "Закрыть расчёты можно только по завершённому или отменённому заказу"})
+        if r["settled_at"]:
+            raise HTTPException(status_code=409, detail={"code": "already_settled", "message": "Расчёты уже закрыты"})
+        unlinked = _unlinked(conn, r)
+        note = (body.note or "").strip() or None
+        conn.execute("UPDATE orders SET settled_at = datetime('now'), settled_note = ?, updated_at = datetime('now') WHERE id = ?",
+                     (note, r["id"]))
+        audit(conn, "order", r["id"], "settle",
+              f"«{r['title']}»: расчёты с клиентом закрыты, не привязано {unlinked:g} ₽"
+              + (f" — {note}" if note else ""), before_row=r)
+        conn.commit()
+        return {"ok": True, "unlinked": unlinked}
+    finally:
+        conn.close()
+
+
+@router.post("/{order_id}/unsettle")
+def unsettle_order(order_id: str):
+    conn = get_production()
+    try:
+        r = conn.execute("SELECT * FROM orders WHERE id = ? OR number = ?", (order_id, order_id)).fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="Not found")
+        if not r["settled_at"]:
+            raise HTTPException(status_code=409, detail={"code": "not_settled", "message": "Расчёты не закрыты"})
+        conn.execute("UPDATE orders SET settled_at = NULL, settled_note = NULL, updated_at = datetime('now') WHERE id = ?",
+                     (r["id"],))
+        audit(conn, "order", r["id"], "unsettle", f"«{r['title']}»: расчёты с клиентом снова открыты", before_row=r)
+        conn.commit()
+        return {"ok": True}
     finally:
         conn.close()
 

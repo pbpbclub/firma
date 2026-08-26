@@ -23,6 +23,10 @@ const ACTION_LABELS: Record<string, string> = {
   status: "статус",
   close: "закрытие",
   move: "перенос",
+  settle: "расчёты закрыты",
+  unsettle: "расчёты открыты",
+  archive: "в архив",
+  unarchive: "из архива",
 };
 
 const ACTION_COLORS: Record<string, string> = {
@@ -30,6 +34,8 @@ const ACTION_COLORS: Record<string, string> = {
   approve: "#4A7C59",
   status: "#E8592A",
   close: "#4A7C59",
+  settle: "#4A7C59",
+  archive: "#A89070",
 };
 
 export function OrderTimeline({ orderId }: { orderId: string }) {

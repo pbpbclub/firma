@@ -12,6 +12,7 @@ import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { MONO } from "../components/ui/Num";
 import { OrderLink } from "../components/ui/links";
 import { useTableSort } from "../components/ui/sort";
+import { ObligationsConfirmModal, type Unpaid } from "../components/order/ObligationsConfirmModal";
 import { useIsMobile, M, HScroll } from "../components/ui/responsive";
 import { RowCard } from "../components/ui/RowCard";
 import { IconButton } from "../components/ui/IconButton";
@@ -343,6 +344,13 @@ function DebtorsTab() {
   const [dlFrom, setDlFrom] = useState("");
   const [dlTo, setDlTo] = useState("");
   const [linkItem, setLinkItem] = useState<any>(null);
+  // «Расчёты закрыты» (orders.settled_at): заглушённые долги — отдельным свёрнутым
+  // блоком, чтобы было видно, что и на сколько заглушено, и можно было открыть заново.
+  const [settledOpen, setSettledOpen] = useState(false);
+  const unsettle = useMutation({
+    mutationFn: (orderId: string) => ordersApi.unsettle(orderId),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["debtors"] }); qc.invalidateQueries({ queryKey: ["orders-v2"] }); },
+  });
   const clearFilters = () => { setStatusFilter(""); setClientFilter(""); setOrderFilter(""); setPlanMin(""); setPlanMax(""); setPaidMin(""); setPaidMax(""); setDebtMin(""); setDebtMax(""); setDlFrom(""); setDlTo(""); setSelectedIds(new Set()); };
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -509,6 +517,37 @@ function DebtorsTab() {
       {/* Потенциальная выручка — заказы «Ждёт оплаты». Сознательно НЕ дебиторка
           (решение Юры 28.07.2026): счёт выставлен, но работа не началась — это
           ориентир «сколько получу, если дожму», а не долг клиента. */}
+      {!!data?.settled?.length && (
+        <div style={{ marginTop: 28, padding: "0 28px" }}>
+          <div onClick={() => setSettledOpen(v => !v)}
+            style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 4, cursor: "pointer", userSelect: "none" }}>
+            <span style={{ fontSize: 11, color: "#A89070", letterSpacing: "0.06em" }}>РАСЧЁТЫ ЗАКРЫТЫ</span>
+            <span style={{ fontSize: 11, color: "#C8C0B0" }}>
+              · {data.settled_count} · не привязано <span style={{ fontFamily: MONO }}>{fmt(data.settled_unlinked_total)}</span> · {settledOpen ? "свернуть" : "показать"}
+            </span>
+          </div>
+          {settledOpen && data.settled.map((s: any) => (
+            <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12,
+                                     padding: "9px 0", borderBottom: "1px solid #F2EFE9", fontSize: 12, flexWrap: "wrap" }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ color: "#1A1A1A", fontWeight: 500 }}>{s.customer_name || "—"} · <OrderLink id={s.id}>{s.title}</OrderLink></div>
+                <div style={{ fontSize: 10, color: "#A89070", marginTop: 2 }}>
+                  {s.status_label} · закрыто {String(s.settled_at || "").slice(0, 10)}{s.settled_note ? ` · ${s.settled_note}` : ""}
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+                <span style={{ fontFamily: MONO, color: "#A89070" }}>{fmt(s.paid_total)} из {fmt(s.price_plan)}</span>
+                <span style={{ fontFamily: MONO, color: "#6B6355" }}>не привязано {fmt(s.unlinked)}</span>
+                <button type="button" onClick={() => unsettle.mutate(s.id)} disabled={unsettle.isPending}
+                  style={{ fontSize: 10, color: "#8B3A3A", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
+                  открыть
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {!!data?.potential?.length && (
         <div style={{ marginTop: 28, padding: "0 28px" }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 4 }}>
@@ -908,7 +947,10 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
   const [addOpen, setAddOpen] = useState(false);
   const [editItem, setEditItem] = useState<any>(null);
   const [linkItem, setLinkItem] = useState<any>(null);
-  const [closeOpen, setCloseOpen] = useState(false);
+  // Какую плашку «закрыть по …» открыли: завершённые (в «Мы должны»), отменённые
+  // и архивные (во вкладке «План»). Одно состояние, не три булевых.
+  const [staleKind, setStaleKind] = useState<"completed" | "cancelled" | "archived" | null>(null);
+  const [bulkError, setBulkError] = useState<string | null>(null);
   const [contragentFilter, setContragentFilter] = useState("");
   const [descFilter, setDescFilter] = useState("");
   const [cPlanMin, setCPlanMin] = useState("");
@@ -933,18 +975,24 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
   const [bulkAction, setBulkAction] = useState<"close" | "delete" | null>(null);
   const bulkMutation = useMutation({
     mutationFn: async ({ ids, action }: { ids: string[]; action: "close" | "delete" }) => {
-      for (const id of ids) {
-        if (action === "close") await financeApi.updateCreditor(id, { status: "closed" });
-        else await financeApi.deleteCreditor(id);
-      }
+      // Закрытие — одним запросом, всё или ничего (причина manual). Удаление —
+      // по одному: строка, по которой прошли деньги, ответит 409 и цикл встанет.
+      if (action === "close") { await financeApi.closeCreditors(ids); return; }
+      for (const id of ids) await financeApi.deleteCreditor(id);
     },
     onSuccess: () => {
       setBulkAction(null);
+      setBulkError(null);
       setSelectedIds(new Set());
       qc.invalidateQueries({ queryKey: ["creditors"] });
       qc.invalidateQueries({ queryKey: ["orders-v2"] });
     },
-    onError: () => setBulkAction(null),
+    onError: (e: any) => {
+      setBulkAction(null);
+      const d = e?.response?.data?.detail;
+      setBulkError(d?.message || "Не удалось выполнить — ничего не изменено");
+      qc.invalidateQueries({ queryKey: ["creditors"] });
+    },
   });
 
   // scope с бэка: debt — живые заказы (производство, завершённые) и ручные;
@@ -982,17 +1030,33 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
   const totalOwed = filteredItems.reduce((s: number, c: any) => s + ((c.amount_plan ?? c.total) || 0), 0);
   const totalPaid = filteredItems.reduce((s: number, c: any) => s + ((c.fact ?? c.paid) || 0), 0);
   const totalDebt = filteredItems.reduce((s: number, c: any) => s + (c.debt || 0), 0);
-  const closableTotal = data?.closable_total ?? 0;
-  const closableCount = data?.closable_count ?? 0;
 
-  const closeCompleted = useMutation({
-    mutationFn: () => financeApi.closeCompletedObligations(),
+  const closeStale = useMutation({
+    mutationFn: ({ kind, ids }: { kind: string; ids: string[] }) => financeApi.closeStale({ kinds: [kind], only_ids: ids }),
     onSuccess: () => {
-      setCloseOpen(false);
+      setStaleKind(null);
       qc.invalidateQueries({ queryKey: ["creditors"] });
       qc.invalidateQueries({ queryKey: ["orders-v2"] });
+      qc.invalidateQueries({ queryKey: ["ledger"] });
     },
   });
+  // Плашки «неактуальное»: в «Мы должны» — завершённые заказы, во вкладке «План» —
+  // отменённые и архивные. Бэк отдаёт stale[kind] = {count, total, orders[]}.
+  const STALE_UI: Record<string, { label: string; intro: string; eyebrow: string }> = {
+    completed: { eyebrow: "ЗАКРЫТЬ ПО ЗАВЕРШЁННЫМ", label: "завершённым",
+      intro: "Заказы сданы и оплачены, а обязательства по их сметам открыты — план, по которому деньги уже прошли расходами. Закрыть — признать расчёты законченными: остатки спишутся. Вернёшь заказ в работу — переоткроются." },
+    cancelled: { eyebrow: "ЗАКРЫТЬ ПО ОТМЕНЁННЫМ", label: "отменённым",
+      intro: "Заказы отменены, подрядчикам по ним ничего не заказано, а план сметы всё ещё начисляется в их сальдо. Закрыть — снять его из «Расчётов с подрядчиками». Сними галочку, если реально должны." },
+    archived: { eyebrow: "ЗАКРЫТЬ ПО АРХИВНЫМ", label: "архивным",
+      intro: "Заказы в архиве, а обязательства по их сметам открыты и начисляются подрядчикам полным планом. Закрыть — снять из сальдо; вернёшь заказ из архива — переоткроются." },
+  };
+  const staleKinds = scope === "debt" ? ["completed"] : ["cancelled", "archived"];
+  const staleItems: Unpaid[] = staleKind
+    ? ((data?.items || []) as any[])
+        .filter((c: any) => c.stale_kind === staleKind && (c.status === "open" || c.status === "partial"))
+        .map((c: any) => ({ id: c.id, name: c.description || c.name, plan: c.amount_plan ?? c.total, fact: c.fact ?? c.paid,
+                            debt: c.debt, ambiguous: c.ambiguous, order: c.order_number ? `${c.order_number} · ${c.order_title}` : undefined }))
+    : [];
 
   if (isLoading) return <Loading />;
 
@@ -1011,39 +1075,35 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
           onCancel={() => setBulkAction(null)}
         />
       )}
-      {closeOpen && (
-        <Modal
-          eyebrow="ЗАКРЫТЬ РАСЧЁТЫ ПО ЗАВЕРШЁННЫМ"
-          onClose={() => setCloseOpen(false)}
-          onCancel={() => setCloseOpen(false)}
-          onSave={() => closeCompleted.mutate()}
-          saveLabel="Закрыть расчёты"
-          saving={closeCompleted.isPending}
-        >
-          <div style={{ padding: "18px 24px", fontSize: 13, color: "#6B6355", lineHeight: 1.6 }}>
-            Заказы сданы и оплачены, но обязательства по их сметам остались открытыми:
-            <b> {closableCount} строк на {fmt(closableTotal)}</b>. Закрыть — значит признать
-            расчёты законченными: непокрытые остатки спишутся. Каждая строка попадёт в журнал
-            изменений; вернёшь заказ в работу — обязательства переоткроются.
-          </div>
-        </Modal>
+      {staleKind && (
+        <ObligationsConfirmModal
+          eyebrow={STALE_UI[staleKind].eyebrow} saveLabel="Закрыть"
+          intro={STALE_UI[staleKind].intro}
+          items={staleItems} total={data?.stale?.[staleKind]?.total ?? 0} saving={closeStale.isPending}
+          onConfirm={ids => closeStale.mutate({ kind: staleKind, ids })}
+          onCancel={() => setStaleKind(null)}
+        />
       )}
 
-      {scope === "debt" && closableCount > 0 && (
-        <div style={{ margin: "12px 28px 0", padding: "11px 14px", background: "#FBF7EF",
-                      borderLeft: "3px solid #B8860B", display: "flex", alignItems: "center",
-                      justifyContent: "space-between", gap: 16 }}>
-          <div style={{ fontSize: 12, color: "#6B6355", lineHeight: 1.5 }}>
-            По завершённым заказам остались открытые обязательства: <b>{closableCount} строк
-            на {fmt(closableTotal)}</b> — план сметы, по которому деньги уже прошли расходами.
+      {staleKinds.map(kind => {
+        const st = data?.stale?.[kind];
+        if (!st || !st.count) return null;
+        return (
+          <div key={kind} style={{ margin: isMobile ? "10px 16px 0" : "12px 28px 0", padding: "11px 14px", background: "#FBF7EF",
+                        borderLeft: "3px solid #B8860B", display: "flex", alignItems: "center",
+                        justifyContent: "space-between", gap: 16, flexWrap: isMobile ? "wrap" : undefined }}>
+            <div style={{ fontSize: 12, color: "#6B6355", lineHeight: 1.5 }}>
+              По {STALE_UI[kind].label} заказам открыто <b>{st.count} строк на {fmt(st.total)}</b>
+              {st.orders?.length ? <> — {st.orders.slice(0, 3).map((o: any) => o.title).join(", ")}{st.orders.length > 3 ? ` и ещё ${st.orders.length - 3}` : ""}</> : null}.
+            </div>
+            <button type="button" onClick={() => setStaleKind(kind as any)}
+              style={{ fontSize: 11, color: "#B8860B", background: "none", border: "1px solid #B8860B",
+                       padding: isMobile ? "9px 12px" : "5px 11px", cursor: "pointer", whiteSpace: "nowrap", fontFamily: "inherit" }}>
+              Закрыть
+            </button>
           </div>
-          <button type="button" onClick={() => setCloseOpen(true)}
-            style={{ fontSize: 11, color: "#B8860B", background: "none", border: "1px solid #B8860B",
-                     padding: "5px 11px", cursor: "pointer", whiteSpace: "nowrap" }}>
-            Закрыть расчёты
-          </button>
-        </div>
-      )}
+        );
+      })}
 
       {(() => {
         const hasFilters = !!(contragentFilter || descFilter || cPlanMin || cPlanMax || cPaidMin || cPaidMax || varMin || varMax || cDebtMin || cDebtMax || dueFrom || dueTo);
@@ -1069,6 +1129,7 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
                 </>
               )}
               {selectedIds.size === 0 && <span>{filteredItems.length} записей</span>}
+              {bulkError && <span style={{ color: "#8B3A3A" }}>{bulkError}</span>}
             </div>
             <button type="button" onClick={canClear ? clearFilters : undefined} style={{ fontSize: 10, color: canClear ? "#E8592A" : "#C8C0B0", background: "none", border: "none", cursor: canClear ? "pointer" : "default", display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
               <X size={10} /> Сбросить

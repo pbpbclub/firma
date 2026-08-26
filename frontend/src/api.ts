@@ -62,8 +62,13 @@ export const ordersApi = {
   // opts — подтверждение закрытия обязательств при завершении заказа (409 без него)
   updateStatus: (id: string, status: string, opts?: { close_obligations?: boolean; only_ids?: string[] }) =>
     api.patch(`/orders/${id}/status`, { status, ...(opts || {}) }).then((r) => r.data),
-  archive: (id: string) => api.patch(`/orders/${id}/archive`).then((r) => r.data),
+  // Архивация закрывает обязательства заказа (409 obligations_unpaid без подтверждения)
+  archive: (id: string, opts?: { close_obligations?: boolean; only_ids?: string[] }) =>
+    api.patch(`/orders/${id}/archive`, opts ?? {}).then((r) => r.data),
   unarchive: (id: string) => api.patch(`/orders/${id}/unarchive`).then((r) => r.data),
+  // «Расчёты с клиентом закрыты»: долг не считается, цена/платежи/маржа не меняются
+  settle: (id: string, note?: string) => api.post(`/orders/${id}/settle`, { note: note || null }).then((r) => r.data),
+  unsettle: (id: string) => api.post(`/orders/${id}/unsettle`).then((r) => r.data),
   create: (data: { title: string; customer_id?: string | null; deadline?: string | null; priority?: string; brand?: string | null }) =>
     api.post("/orders", data).then((r) => r.data),
   update: (id: string, data: Record<string, any>) => api.patch(`/orders/${id}`, data).then((r) => r.data),
@@ -143,9 +148,12 @@ export const financeApi = {
     api.patch(`/finance/creditors/${id}`, data).then((r) => r.data),
   deleteCreditor: (id: string) =>
     api.delete(`/finance/creditors/${id}`).then((r) => r.data),
-  // Закрыть расчёты по завершённым заказам (плашка на экране обязательств)
-  closeCompletedObligations: (data?: { order_ids?: string[]; only_ids?: string[] }) =>
-    api.post("/finance/creditors/close-completed", data ?? {}).then((r) => r.data),
+  // Закрыть обязательства заказов в терминале: завершённых / отменённых / архивных
+  closeStale: (data: { kinds: string[]; order_ids?: string[]; only_ids?: string[] }) =>
+    api.post("/finance/creditors/close-stale", data).then((r) => r.data),
+  // «Закрыть выбранные» — вручную, всё или ничего
+  closeCreditors: (ids: string[]) =>
+    api.post("/finance/creditors/close", { ids, reason: "manual" }).then((r) => r.data),
   suggestTx: (name: string, amount: number) =>
     api.get("/finance/transactions/suggest", { params: { name, amount } }).then((r) => r.data),
   suggestInTx: (name: string, amount: number) =>

@@ -46,7 +46,9 @@ export function OrderSummaryStrip({ order, paidTotal, compact }: { order: any; p
           label="ОПЛАЧЕНО"
           value={fmtMoney(paidTotal)}
           color="#4A7C59"
-          sub={debt > 0
+          sub={order?.settled_at
+            ? <span style={{ color: "#4A7C59" }}>расчёты закрыты{debt > 0 && <> · <span style={{ fontFamily: MONO, color: "#A89070" }}>не привязано {fmtMoney(debt)}</span></>}</span>
+            : debt > 0
             ? <span style={{ color: debtColor(debt, "in"), fontFamily: MONO }}>долг {fmtMoney(debt)}</span>
             : <span style={{ color: debtColor(0, "in") }}>долга нет</span>}
         />

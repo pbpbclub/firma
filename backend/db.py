@@ -180,6 +180,25 @@ def ensure_estimate_items_schema():
         conn.close()
 
 
+def ensure_order_settlement_schema():
+    """«Расчёты с клиентом закрыты» (решение Юры 26.08.2026). Завершённый заказ с
+    непривязанными платежами висел бы в «Нам должны» вечно; единственный обходной
+    путь — discount — режет выручку и маржу во всех отчётах. settled_at — долг
+    клиента не считается, цена/платежи/маржа не меняются; settled_note — почему
+    (не привязали, взаимозачёт, безнадёжно)."""
+    conn = get_production()
+    try:
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(orders)").fetchall()}
+        if existing:
+            if "settled_at" not in existing:
+                conn.execute("ALTER TABLE orders ADD COLUMN settled_at TEXT")
+            if "settled_note" not in existing:
+                conn.execute("ALTER TABLE orders ADD COLUMN settled_note TEXT")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_order_discount_schema():
     """Скидка — договорённость в конце сделки (Спираль: «22 500 он не будет
     доплачивать»). Живёт на заказе, смету-документ не перекраивает:

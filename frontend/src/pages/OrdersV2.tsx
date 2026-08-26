@@ -9,6 +9,7 @@ import { DeadlinePill } from "../components/ui/Pill";
 import { useTableSort, SortHeader } from "../components/ui/sort";
 import { useIsMobile, M, HScroll } from "../components/ui/responsive";
 import { RowCard } from "../components/ui/RowCard";
+import { ObligationsConfirmModal } from "../components/order/ObligationsConfirmModal";
 import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ordersApi, customersApi, brandsApi, estimatesApi, financeApi } from "../api";
@@ -540,21 +541,35 @@ export default function OrdersV2() {
     },
   });
 
-  const handleArchive = async () => {
+  // Архивация закрывает обязательства заказа: без подтверждения бэк отвечает 409
+  // со списком, окно — то же, что при завершении. Раньше в архив уходило молча,
+  // и план заказа продолжал начисляться в сальдо подрядчиков.
+  const [archiveConfirm, setArchiveConfirm] = useState<{ items: any[]; total: number } | null>(null);
+  const doArchive = async (opts?: { close_obligations: boolean; only_ids: string[] }) => {
     if (!selected) return;
     setArchiving(true);
     try {
       if (archiveMode) {
         await ordersApi.unarchive(selected.id);
       } else {
-        await ordersApi.archive(selected.id);
+        await ordersApi.archive(selected.id, opts);
       }
       qc.invalidateQueries({ queryKey: ["orders-v2"] });
+      qc.invalidateQueries({ queryKey: ["creditors"] });
+      setArchiveConfirm(null);
       setSelected(null);
+    } catch (err: any) {
+      const d = err?.response?.data?.detail;
+      if (err?.response?.status === 409 && d?.code === "obligations_unpaid") {
+        setArchiveConfirm({ items: d.items || [], total: d.unpaid_total || 0 });
+      } else {
+        throw err;
+      }
     } finally {
       setArchiving(false);
     }
   };
+  const handleArchive = () => doArchive();
 
   const { data: detail } = useQuery({
     queryKey: ["order-detail-v2", selected?.id],
@@ -1184,6 +1199,18 @@ export default function OrdersV2() {
         </div>
         </>)}
       </div>
+
+      {archiveConfirm && (
+        <ObligationsConfirmModal
+          eyebrow="В АРХИВ" saveLabel="В архив"
+          intro={<>Заказ уходит в архив, а по его смете остались обязательства на <b>{fmt(archiveConfirm.total)}</b>.
+            Архив закрывает их — подрядчикам по этому заказу ничего не заказано. Сними галочку у строки,
+            если реально должны: она останется долгом.</>}
+          items={archiveConfirm.items} total={archiveConfirm.total} saving={archiving}
+          onConfirm={ids => doArchive({ close_obligations: true, only_ids: ids })}
+          onCancel={() => setArchiveConfirm(null)}
+        />
+      )}
 
       {/* ── Right: detail panel ─────────────────────────── */}
       {selected && !isMobile && (

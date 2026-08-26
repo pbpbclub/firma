@@ -284,6 +284,20 @@ export default function OrderDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  // «Расчёты с клиентом закрыты» — завершённый/отменённый заказ с непривязанным
+  // остатком перестаёт висеть в «Нам должны». Не скидка: цена и маржа не меняются.
+  const [settleOpen, setSettleOpen] = useState(false);
+  const [settleNote, setSettleNote] = useState("");
+  const invalidateDebt = () => {
+    qc.invalidateQueries({ queryKey: ["order-detail", id] });
+    qc.invalidateQueries({ queryKey: ["debtors"] });
+    qc.invalidateQueries({ queryKey: ["orders-v2"] });
+  };
+  const settleMutation = useMutation({
+    mutationFn: () => ordersApi.settle(id!, settleNote),
+    onSuccess: () => { setSettleOpen(false); setSettleNote(""); invalidateDebt(); },
+  });
+  const unsettleMutation = useMutation({ mutationFn: () => ordersApi.unsettle(id!), onSuccess: invalidateDebt });
   const [form, setForm] = useState<OrderFormState | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -481,7 +495,6 @@ export default function OrderDetail() {
     if (!form) return;
     saveMutation.mutate({
       title: form.title.trim() || undefined,
-      status: form.status,
       brand: form.brand || null,
       priority: form.priority,
       deadline: form.deadline || null,
@@ -1080,6 +1093,47 @@ export default function OrderDetail() {
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {/* Расчёты с клиентом: завершённый/отменённый заказ с непривязанным остатком.
+              «Закрыть расчёты» — не скидка: цена, платежи и маржа не меняются, долг просто
+              перестаёт считаться дебиторкой (решение Юры 26.08.2026). */}
+          {order && ["completed", "cancelled"].includes(order.status) && (order.settled_at || (order.debt ?? 0) > 0) && (
+            <div style={{ paddingTop: 18, marginBottom: 8 }}>
+              <div style={{ marginBottom: 10 }}><SectionLabel>РАСЧЁТЫ С КЛИЕНТОМ</SectionLabel></div>
+              {order.settled_at ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", fontSize: 12 }}>
+                  <span style={{ color: "#4A7C59", fontWeight: 600 }}>Расчёты закрыты {fmtDate(order.settled_at)}</span>
+                  {(order.debt ?? 0) > 0 && <span style={{ color: "#A89070" }}>не привязано <span style={{ fontFamily: MONO }}>{fmtMoney(order.debt)}</span></span>}
+                  {order.settled_note && <span style={{ color: "#6B6355" }}>· {order.settled_note}</span>}
+                  <Button size="sm" onClick={() => unsettleMutation.mutate()} disabled={unsettleMutation.isPending} style={{ fontSize: 11, color: "#6B6355" }}>
+                    Открыть заново
+                  </Button>
+                </div>
+              ) : (
+                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", fontSize: 12, color: "#6B6355" }}>
+                  <span>Не привязано <span style={{ fontFamily: MONO, color: debtColor(order.debt, "in") }}>{fmtMoney(order.debt)}</span> — заказ висит в «Нам должны».</span>
+                  <Button size="sm" onClick={() => setSettleOpen(true)} style={{ fontSize: 11 }}>Закрыть расчёты</Button>
+                </div>
+              )}
+              {settleOpen && (
+                <Modal eyebrow="РАСЧЁТЫ С КЛИЕНТОМ" size="sm" onClose={() => setSettleOpen(false)} onCancel={() => setSettleOpen(false)}
+                  onSave={() => settleMutation.mutate()} saveLabel="Закрыть расчёты" saving={settleMutation.isPending}>
+                  <div style={{ padding: "18px 24px" }}>
+                    <div style={{ fontSize: 13, color: "#6B6355", lineHeight: 1.6, marginBottom: 14 }}>
+                      Не привязано <b style={{ fontFamily: MONO }}>{fmtMoney(order.debt)}</b>. Долг перестанет считаться
+                      дебиторкой; цена заказа, платежи и маржа не меняются. Это не скидка — скидка оформляется в параметрах.
+                      Открыть заново можно в любой момент.
+                    </div>
+                    <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>ПОЧЕМУ (НЕОБЯЗАТЕЛЬНО)</div>
+                    <input value={settleNote} onChange={e => setSettleNote(e.target.value)} autoFocus
+                      placeholder="например: платежи не привязывали, заказ тренировочный"
+                      style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none", fontFamily: "inherit" }} />
+                    {settleMutation.isError && <div style={{ fontSize: 11, color: "#8B3A3A", marginTop: 8 }}>{(settleMutation.error as any)?.response?.data?.detail?.message || "Не удалось закрыть расчёты"}</div>}
+                  </div>
+                </Modal>
+              )}
             </div>
           )}
 

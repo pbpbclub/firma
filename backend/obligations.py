@@ -34,6 +34,11 @@ _ALIEN_PURPOSES = ("overhead", "contractor_pay", "contractor_third_party", "stoc
 
 _EPS = 0.01   # деньги в REAL: сравнение только через порог (правило Б3, code_rules 04.08)
 
+# Почему обязательство закрыто. По причине откат переоткрывает ровно своё:
+# вернул заказ из архива — открылось закрытое архивацией, закрытое вручную
+# и погашенное полностью осталось закрытым.
+CLOSE_REASONS = ("order_completed", "order_cancelled", "order_archived", "manual", "paid_in_full")
+
 
 def _payee(row) -> str:
     """Кому ушёл расход: точная связь важнее текста (supplier — свободное поле)."""
@@ -222,7 +227,25 @@ def unpaid_for_order(conn, oid: str) -> list:
     return out
 
 
-def close_for_order(conn, oid: str, *, force: bool = False, only_ids: Optional[list] = None) -> dict:
+def _close_rows(conn, ids: list, reason: str) -> dict:
+    """Закрыть строки по id с причиной; вернуть снимки ДО изменения.
+    paid/total не трогаются — факт себестоимости (_plan_fact) от закрытия не меняется."""
+    assert reason in CLOSE_REASONS, reason
+    if not ids:
+        return {}
+    holes = ",".join("?" * len(ids))
+    # Снимки строк собираем ДО UPDATE: журнал должен помнить состояние «до»,
+    # иначе восстановить закрытое по ошибке будет нечем.
+    before_rows = {r["id"]: dict(r) for r in conn.execute(
+        f"SELECT * FROM creditors WHERE id IN ({holes})", ids).fetchall()}
+    conn.execute(
+        f"""UPDATE creditors SET status = 'closed', closed_at = datetime('now'), closed_reason = ?
+             WHERE id IN ({holes})""", [reason, *ids])
+    return before_rows
+
+
+def close_for_order(conn, oid: str, *, force: bool = False, only_ids: Optional[list] = None,
+                    reason: str = "order_completed") -> dict:
     """Закрыть расчёты по заказу (завершение заказа или кнопка «закрыть»).
 
     Единственное место, где статус обязательства меняется автоматически. Без
@@ -244,28 +267,55 @@ def close_for_order(conn, oid: str, *, force: bool = False, only_ids: Optional[l
     if not items:
         return {"closed": 0, "written_off": 0.0, "items": [], "before_rows": {}}
     ids = [i["id"] for i in items]
-    holes = ",".join("?" * len(ids))
-    # Снимки строк собираем ДО UPDATE: журнал должен помнить состояние «до»,
-    # иначе восстановить закрытое по ошибке будет нечем.
-    before_rows = {r["id"]: dict(r) for r in conn.execute(
-        f"SELECT * FROM creditors WHERE id IN ({holes})", ids).fetchall()}
-    conn.execute(
-        f"""UPDATE creditors SET status = 'closed', closed_at = datetime('now'),
-                                 closed_reason = 'order_completed'
-             WHERE id IN ({holes})""", ids)
+    before_rows = _close_rows(conn, ids, reason)
     return {"closed": len(items),
             "written_off": round(sum(i["debt"] for i in items), 2),
-            "items": items, "before_rows": before_rows}
+            "items": items, "before_rows": before_rows, "reason": reason}
 
 
-def reopen_for_order(conn, oid: str) -> dict:
-    """Заказ вернули из «Завершён» — переоткрыть то, что закрылось завершением.
-    Закрытые вручную и погашенные полностью (paid_in_full) не трогаем."""
+def reopen_for_order(conn, oid: str, reason: str = "order_completed") -> dict:
+    """Заказ вернули из терминального состояния (завершён/отменён/архив) —
+    переоткрыть то, что закрылось ИМЕННО этим переходом. Закрытые вручную и
+    погашенные полностью (paid_in_full) не трогаем."""
+    assert reason in CLOSE_REASONS, reason
     cur = conn.execute(
         """UPDATE creditors SET status = 'open', closed_at = NULL, closed_reason = NULL
-            WHERE order_id = ? AND status = 'closed' AND closed_reason = 'order_completed'""",
-        (oid,))
+            WHERE order_id = ? AND status = 'closed' AND closed_reason = ?""",
+        (oid, reason))
     return {"reopened": cur.rowcount}
+
+
+def close_manual(conn, ids: list) -> dict:
+    """Кнопка «Закрыть выбранные»: всё или ничего. Любой id, которого нет, который
+    уже закрыт или который постоянный (kind='fixed'), — ValueError со списком:
+    частичное закрытие оставило бы Юру гадать, что именно прошло."""
+    if not ids:
+        return {"closed": 0, "written_off": 0.0, "items": [], "before_rows": {}}
+    holes = ",".join("?" * len(ids))
+    rows = {r["id"]: dict(r) for r in conn.execute(
+        f"SELECT * FROM creditors WHERE id IN ({holes})", ids).fetchall()}
+    bad = []
+    for cid in ids:
+        r = rows.get(cid)
+        if not r:
+            bad.append({"id": cid, "name": None, "why": "не найдено"})
+        elif r["status"] not in ("open", "partial"):
+            bad.append({"id": cid, "name": r["name"], "why": "уже закрыто"})
+        elif r.get("kind") == "fixed":
+            bad.append({"id": cid, "name": r["name"], "why": "постоянное — своя вкладка"})
+    if bad:
+        raise ValueError(bad)
+    oids = sorted({r["order_id"] for r in rows.values() if r["order_id"]})
+    cov = coverage(conn, oids) if oids else {}
+    items = []
+    for cid in ids:
+        r = rows[cid]; c = cov.get(cid, {})
+        items.append({"id": cid, "name": r["name"], "plan": round(r["total"] or 0, 2),
+                      "fact": round(max(r["paid"] or 0, c.get("covered_exact", 0.0)) + c.get("covered_by_name", 0.0), 2),
+                      "debt": effective_debt(r, c)})
+    before_rows = _close_rows(conn, ids, "manual")
+    return {"closed": len(ids), "written_off": round(sum(i["debt"] for i in items), 2),
+            "items": items, "before_rows": before_rows}
 
 
 def effective_debt(cred_row, cov: Optional[dict] = None) -> float:

@@ -82,13 +82,8 @@ export function OrderParams({ order, form, field, customers, onStatusChanged }: 
       {open && (
         <div style={{ paddingBottom: 20 }}>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 18 }}>
-            <div>
-              <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>СТАТУС</div>
-              <select value={form.status} onChange={e => field({ status: e.target.value })}
-                style={{ border: "1px solid #EDEBE6", padding: "6px 10px", fontSize: 12, fontWeight: 600, outline: "none", background: "#fff", color: statusMeta?.color ?? "#1A1A1A", cursor: "pointer", fontFamily: "inherit" }}>
-                {ORDER_STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-              </select>
-            </div>
+            {/* Статус меняется только пилюлей в строке выше: <select> в форме шёл через
+                PATCH /orders/{id} без окна подтверждения закрытия обязательств. */}
             <div>
               <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>БРЕНД</div>
               <select value={form.brand} onChange={e => field({ brand: e.target.value })}

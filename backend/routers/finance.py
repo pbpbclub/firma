@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from audit import audit
 from db import get_finance, get_production, get_analytics
 import uuid
@@ -672,6 +672,7 @@ def get_debtors():
             LEFT JOIN customers c ON c.id = o.customer_id
             LEFT JOIN payments p ON p.order_id = o.id
             WHERE o.archived = 0
+              AND o.settled_at IS NULL
               AND o.status NOT IN ('cancelled', 'awaiting_payment')
             GROUP BY o.id
             HAVING o.status IN ('in_production', 'completed')
@@ -751,6 +752,30 @@ def get_debtors():
             potential.append(row)
         potential.sort(key=lambda x: x["rest"], reverse=True)
 
+        # «Расчёты закрыты» — заказы, чей долг Юра признал непривязанным и закрыл
+        # (orders.settled_at). Из дебиторки исключены выше; здесь — отдельным
+        # списком, чтобы было видно, что и на сколько заглушено.
+        settled = []
+        for r in prod.execute(
+            """SELECT o.id, o.number, o.title, o.status, o.price_plan, o.cost_plan,
+                      o.settled_at, o.settled_note, c.name AS customer_name,
+                      COALESCE(SUM(p.amount), 0) AS paid_total
+               FROM orders o
+               LEFT JOIN customers c ON c.id = o.customer_id
+               LEFT JOIN payments p ON p.order_id = o.id
+               WHERE o.archived = 0 AND o.settled_at IS NOT NULL
+               GROUP BY o.id"""
+        ).fetchall():
+            row = dict(r)
+            m = _margin(prod, row["id"], row["price_plan"], row["cost_plan"],
+                        transit_facts=tfacts, discounts=discounts, extras=extras)
+            row["price_plan"] = m["revenue"]
+            row.pop("cost_plan", None)
+            row["unlinked"] = round((m["revenue"] or 0) - (row["paid_total"] or 0), 2)
+            row["status_label"] = STATUS_LABELS.get(row["status"], row["status"])
+            settled.append(row)
+        settled.sort(key=lambda x: x["unlinked"], reverse=True)
+
         return {
             "items": result,
             "total": round(total_debt, 2),
@@ -758,6 +783,9 @@ def get_debtors():
             "total_paid": round(total_paid, 2),
             "potential": potential,
             "potential_total": round(sum(x["rest"] for x in potential), 2),
+            "settled": settled,
+            "settled_count": len(settled),
+            "settled_unlinked_total": round(sum(x["unlinked"] for x in settled), 2),
         }
     finally:
         prod.close()
@@ -785,6 +813,7 @@ class CreditorPatch(BaseModel):
     estimate_item_id: Optional[str] = None
     finance_tx_id: Optional[str] = None
     zenmoney_tx_id: Optional[str] = None
+    closed_reason: Optional[str] = None   # obligations.CLOSE_REASONS; без него закрытие = 'manual'
 
 
 @router.get("/creditors")
@@ -813,7 +842,15 @@ def get_creditors(status: Optional[str] = None):
                      WHEN COALESCE(o.archived, 0) = 1                THEN 'plan'
                      WHEN o.status IN ('in_production', 'completed') THEN 'debt'
                      ELSE 'plan'
-                   END AS scope
+                   END AS scope,
+                   -- «Неактуальное»: заказ уже в терминале, а строка ещё открыта.
+                   -- Плашки «закрыть» на экране строятся по этому признаку.
+                   CASE
+                     WHEN c.order_id IS NULL OR o.id IS NULL  THEN NULL
+                     WHEN COALESCE(o.archived, 0) = 1          THEN 'archived'
+                     WHEN o.status = 'cancelled'               THEN 'cancelled'
+                     WHEN o.status = 'completed'               THEN 'completed'
+                   END AS stale_kind
             FROM creditors c
             LEFT JOIN estimate_items ei ON ei.id = c.estimate_item_id
             LEFT JOIN orders         o  ON o.id  = c.order_id
@@ -826,8 +863,9 @@ def get_creditors(status: Optional[str] = None):
             sql += " AND c.status = ? AND (c.kind IS NULL OR c.kind != 'fixed')"
             params.append(status)
         else:
-            # kind='fixed' живут во вкладке «Постоянные» — в «Мы должны» не показываем
-            sql += " AND c.status = 'open' AND (c.kind IS NULL OR c.kind != 'fixed')"
+            # kind='fixed' живут во вкладке «Постоянные» — в «Мы должны» не показываем.
+            # partial — тоже живое: close_for_order его закрывает, а экран не показывал.
+            sql += " AND c.status IN ('open','partial') AND (c.kind IS NULL OR c.kind != 'fixed')"
         sql += " ORDER BY c.created_at DESC"
         rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
         cov = coverage(conn)          # один вызов на весь список, без N+1
@@ -852,7 +890,22 @@ def get_creditors(status: Optional[str] = None):
         # заказов в статусе «Смета», по которым расходы заводят регулярно.
         debt_rows = [r for r in rows if r.get("scope") == "debt"]
         plan_rows = [r for r in rows if r.get("scope") == "plan"]
+        live = [r for r in rows if r.get("status") in ("open", "partial")]
+
+        def _stale(kind):
+            rk = [r for r in live if r.get("stale_kind") == kind]
+            orders = {}
+            for r in rk:
+                o = orders.setdefault(r["order_id"], {"id": r["order_id"], "number": r["order_number"],
+                                                       "title": r["order_title"], "count": 0, "total": 0.0})
+                o["count"] += 1; o["total"] = round(o["total"] + r["debt"], 2)
+            return {"count": len(rk), "total": round(sum(r["debt"] for r in rk), 2),
+                    "orders": sorted(orders.values(), key=lambda x: -x["total"])}
+        stale = {k: _stale(k) for k in ("completed", "cancelled", "archived")}
         return {
+            # завершённые / отменённые / архивные заказы с открытыми строками — то, что
+            # на экране «неактуально» и закрывается кнопкой (POST /creditors/close-stale)
+            "stale": stale,
             "items": rows,
             "total_owed": round(sum(r["total"] or 0 for r in debt_rows), 2),
             "total_paid": round(sum(r["fact"] for r in debt_rows), 2),
@@ -860,10 +913,9 @@ def get_creditors(status: Optional[str] = None):
             "debt_count": len(debt_rows),
             "plan_total": round(sum(r["debt"] for r in plan_rows), 2),
             "plan_count": len(plan_rows),
-            # завершённые заказы: расчёты можно закрыть одной кнопкой
-            "closable_total": round(sum(r["debt"] for r in debt_rows
-                                        if r.get("order_status") == "completed"), 2),
-            "closable_count": sum(1 for r in debt_rows if r.get("order_status") == "completed"),
+            # завершённые заказы: расчёты можно закрыть одной кнопкой (= stale.completed)
+            "closable_total": stale["completed"]["total"],
+            "closable_count": stale["completed"]["count"],
         }
     finally:
         conn.close()
@@ -874,68 +926,114 @@ class CloseCompletedIn(BaseModel):
     only_ids: Optional[list] = None     # конкретные обязательства (чекбоксы в окне)
 
 
-@router.post("/creditors/close-completed")
-def close_completed_obligations(body: Optional[CloseCompletedIn] = None):
-    """Закрыть расчёты по завершённым заказам (плашка на экране обязательств).
+# Какие заказы считаются «неактуальными» и какой причиной закрывать их обязательства.
+STALE_KINDS = {
+    "completed": ("COALESCE(o.archived,0) = 0 AND o.status = 'completed'", "order_completed", "завершённому"),
+    "cancelled": ("COALESCE(o.archived,0) = 0 AND o.status = 'cancelled'", "order_cancelled", "отменённому"),
+    "archived":  ("COALESCE(o.archived,0) = 1",                            "order_archived",  "архивному"),
+}
 
-    Тот же путь, что и завершение заказа, — не миграция: 116 200 ₽ по старым
-    заказам это молчаливое списание чужих денег при рестарте сервиса, такое
-    делается кнопкой и с полным следом в журнале.
 
-    order_ids из тела НЕ доверяем: force=True списывает остаток без окна
-    подтверждения, и имя эндпоинта («close-completed») проверкой не является —
-    статус каждого заказа перепроверяется здесь, иначе id заказа в производстве
-    молча спишет живой долг подрядчику (code_rules 06.08.2026).
+class CloseStaleIn(BaseModel):
+    kinds: List[str]                     # непустое подмножество STALE_KINDS
+    order_ids: Optional[list] = None     # None = все подходящие; [] = ничего (не схлопывать!)
+    only_ids: Optional[list] = None      # конкретные обязательства (чекбоксы в окне)
 
-    «Поле не передано» (None — все завершённые) и «передан пустой список»
-    (снятый выбор во фронте — не делать ничего) — разные случаи: `if order_ids:`
-    схлопывал их и превращал пустой выбор в списание по всей базе."""
+
+@router.post("/creditors/close-stale")
+def close_stale_obligations(body: CloseStaleIn):
+    """Закрыть обязательства заказов, которые уже в терминале: завершённых,
+    отменённых, архивных. Обобщение close-completed (26.08.2026): отменённый
+    ORD-005 держал 149 867 ₽ плана в сальдо подрядчиков, а кнопки для него не было.
+
+    Правила те же: статус каждого заказа перепроверяется здесь (имя ручки —
+    не проверка), всё-или-ничего, каждая строка — в журнал со снимком."""
     from obligations import close_for_order
-    body = body or CloseCompletedIn()
+    kinds = [k for k in body.kinds if k in STALE_KINDS]
+    if not kinds or len(kinds) != len(body.kinds):
+        raise HTTPException(status_code=400, detail=f"kinds: непустое подмножество {sorted(STALE_KINDS)}")
     conn = get_production()
     try:
         if body.order_ids is not None and not body.order_ids:
-            return {"ok": True, "closed": 0, "written_off": 0.0}
+            return {"ok": True, "closed": 0, "written_off": 0.0, "by_kind": {}}
+        targets = []   # (order_row, reason, label)
+        seen = set()
+        for kind in kinds:
+            cond, reason, label = STALE_KINDS[kind]
+            sql = f"""SELECT DISTINCT o.id, o.number, o.title FROM orders o
+                        JOIN creditors c ON c.order_id = o.id
+                       WHERE {cond} AND c.status IN ('open','partial')
+                         AND (c.kind IS NULL OR c.kind != 'fixed')"""
+            params: list = []
+            if body.order_ids is not None:
+                holes = ",".join("?" * len(body.order_ids))
+                sql += f" AND o.id IN ({holes})"; params = list(body.order_ids)
+            for r in conn.execute(sql, params).fetchall():
+                if r["id"] not in seen:
+                    seen.add(r["id"]); targets.append((r, reason, label))
         if body.order_ids is not None:
-            holes = ",".join("?" * len(body.order_ids))
-            rows = conn.execute(
-                f"""SELECT id, number, title FROM orders
-                     WHERE id IN ({holes}) AND status = 'completed'""", body.order_ids).fetchall()
-            found = {r["id"] for r in rows}
-            skipped = [i for i in body.order_ids if i not in found]
+            skipped = [i for i in body.order_ids if i not in seen]
             if skipped:
                 # Всё или ничего: частичное списание по «хорошей» половине списка
                 # оставило бы Юру гадать, что именно прошло.
-                bad_ids = set(skipped)
+                holes = ",".join("?" * len(skipped))
                 bad = [dict(r) for r in conn.execute(
-                    f"SELECT id, number, title, status FROM orders WHERE id IN ({holes})",
-                    body.order_ids).fetchall() if r["id"] in bad_ids]
+                    f"SELECT id, number, title, status, archived FROM orders WHERE id IN ({holes})", skipped).fetchall()]
                 raise HTTPException(status_code=400, detail={
-                    "error": "Закрыть расчёты можно только по завершённым заказам",
-                    "skipped": bad,
-                    "unknown": [i for i in skipped if i not in {b["id"] for b in bad}],
+                    "error": "Заказ не подходит под выбранный вид закрытия или по нему нет открытых обязательств",
+                    "skipped": bad, "unknown": [i for i in skipped if i not in {b["id"] for b in bad}],
                 })
-        else:
-            rows = conn.execute("""
-                SELECT DISTINCT o.id, o.number, o.title FROM orders o
-                  JOIN creditors c ON c.order_id = o.id
-                 WHERE o.status = 'completed' AND c.status IN ('open','partial')
-                   AND (c.kind IS NULL OR c.kind != 'fixed')""").fetchall()
-        closed, written = 0, 0.0
-        for o in rows:
-            res = close_for_order(conn, o["id"], force=True, only_ids=body.only_ids)
+        closed, written, by_kind = 0, 0.0, {}
+        for o, reason, label in targets:
+            res = close_for_order(conn, o["id"], force=True, only_ids=body.only_ids, reason=reason)
             for it in res.get("items", []):
-                before = res.get("before_rows", {}).get(it["id"])
                 audit(conn, "creditor", it["id"], "close",
-                      f"Закрыто по завершённому заказу {o['number']}: «{it['name']}» "
+                      f"Закрыто по {label} заказу {o['number']}: «{it['name']}» "
                       f"план {it['plan']:g} ₽, факт {it['fact']:g} ₽, списано {it['debt']:g} ₽",
-                      before_row=before)
-            closed += res.get("closed", 0)
-            written += res.get("written_off", 0.0)
+                      before_row=res.get("before_rows", {}).get(it["id"]))
+            closed += res.get("closed", 0); written += res.get("written_off", 0.0)
+            bk = by_kind.setdefault(reason, {"closed": 0, "written_off": 0.0})
+            bk["closed"] += res.get("closed", 0); bk["written_off"] = round(bk["written_off"] + res.get("written_off", 0.0), 2)
         conn.commit()
-        return {"ok": True, "closed": closed, "written_off": round(written, 2)}
+        return {"ok": True, "closed": closed, "written_off": round(written, 2), "by_kind": by_kind}
     finally:
         conn.close()
+
+
+class CloseIdsIn(BaseModel):
+    ids: List[str]
+    reason: str = "manual"
+
+
+@router.post("/creditors/close")
+def close_creditors(body: CloseIdsIn):
+    """«Закрыть выбранные» — вручную, с причиной manual. Всё или ничего."""
+    from obligations import close_manual
+    if body.reason != "manual":
+        raise HTTPException(status_code=400, detail="reason: только 'manual' — остальные ставят статусные переходы")
+    conn = get_production()
+    try:
+        try:
+            res = close_manual(conn, body.ids)
+        except ValueError as e:
+            raise HTTPException(status_code=409, detail={"code": "not_closable", "items": e.args[0],
+                                                         "message": "Часть строк закрыть нельзя — ничего не закрыто"})
+        for it in res["items"]:
+            audit(conn, "creditor", it["id"], "close",
+                  f"Закрыто вручную: «{it['name']}» план {it['plan']:g} ₽, факт {it['fact']:g} ₽, списано {it['debt']:g} ₽",
+                  before_row=res["before_rows"].get(it["id"]))
+        conn.commit()
+        return {"ok": True, "closed": res["closed"], "written_off": res["written_off"]}
+    finally:
+        conn.close()
+
+
+@router.post("/creditors/close-completed")
+def close_completed_obligations(body: Optional[CloseCompletedIn] = None):
+    """Закрыть расчёты по завершённым заказам (плашка на экране обязательств).
+    С 26.08.2026 — тонкая обёртка над close-stale kinds=['completed']."""
+    body = body or CloseCompletedIn()
+    return close_stale_obligations(CloseStaleIn(kinds=["completed"], order_ids=body.order_ids, only_ids=body.only_ids))
 
 
 @router.post("/creditors", status_code=201)
@@ -979,8 +1077,18 @@ def update_creditor(creditor_id: str, body: CreditorPatch):
             params.append(val)
         if not fields:
             return dict(row)
+        from obligations import CLOSE_REASONS
+        if body.closed_reason is not None and body.closed_reason not in CLOSE_REASONS:
+            raise HTTPException(status_code=400, detail=f"closed_reason: одно из {CLOSE_REASONS}")
         params.append(creditor_id)
         conn.execute(f"UPDATE creditors SET {', '.join(fields)} WHERE id = ?", params)
+        # Закрытие руками — с причиной: по ней откат переоткрывает только своё.
+        if body.status == "closed" and row["status"] != "closed":
+            conn.execute("""UPDATE creditors SET closed_at = datetime('now'),
+                                     closed_reason = COALESCE(?, closed_reason, 'manual') WHERE id = ?""",
+                         (body.closed_reason, creditor_id))
+        elif body.status in ("open", "partial"):
+            conn.execute("UPDATE creditors SET closed_at = NULL, closed_reason = NULL WHERE id = ?", (creditor_id,))
         # Полностью погашенное не остаётся открытым: иначе строка висит в «Мы должны»
         # с нулевым остатком и в долге подрядчика. Порог 0.01 — деньги в REAL (Б3).
         conn.execute("""
@@ -1006,6 +1114,16 @@ def delete_creditor(creditor_id: str):
         row = conn.execute("SELECT * FROM creditors WHERE id = ?", (creditor_id,)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Not found")
+        # Обязательство, по которому прошли деньги, не удаляется никогда (CLAUDE.md):
+        # на нём держится факт себестоимости. Признак — тот же, что в unapprove.
+        from obligations import coverage
+        cov = coverage(conn, [row["order_id"]]).get(creditor_id, {}) if row["order_id"] else {}
+        paid, covered = round(row["paid"] or 0, 2), round(cov.get("covered", 0.0), 2)
+        if paid > 0.01 or covered > 0.01:
+            raise HTTPException(status_code=409, detail={
+                "code": "creditor_has_money", "paid": paid, "covered": covered,
+                "message": f"По обязательству «{row['name']}» прошли деньги (оплачено {paid:g} ₽, "
+                           f"покрыто расходами {covered:g} ₽) — закрой, а не удаляй"})
         conn.execute("DELETE FROM creditors WHERE id = ?", (creditor_id,))
         audit(conn, "creditor", creditor_id, "delete",
               f"Удалено обязательство «{row['name']}» ({row['total']:g} ₽, оплачено {row['paid']:g})",
