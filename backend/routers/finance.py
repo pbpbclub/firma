@@ -890,10 +890,30 @@ def get_creditors(status: Optional[str] = None):
         # заказов в статусе «Смета», по которым расходы заводят регулярно.
         debt_rows = [r for r in rows if r.get("scope") == "debt"]
         plan_rows = [r for r in rows if r.get("scope") == "plan"]
-        live = [r for r in rows if r.get("status") in ("open", "partial")]
+
+        # Плашка «неактуальные» описывает состояние ВСЕЙ базы, поэтому считается
+        # своим запросом, а не из rows: те уже сужены параметром status, и при
+        # ?status=open плашка потеряла бы partial-строки, а при ?status=closed
+        # показала бы нули вместо реальных сумм.
+        stale_rows = [dict(r) for r in conn.execute("""
+            SELECT c.id, c.order_id, c.total, c.paid,
+                   o.number AS order_number, o.title AS order_title,
+                   CASE
+                     WHEN COALESCE(o.archived, 0) = 1 THEN 'archived'
+                     WHEN o.status = 'cancelled'       THEN 'cancelled'
+                     WHEN o.status = 'completed'       THEN 'completed'
+                   END AS stale_kind
+            FROM creditors c
+            JOIN orders o ON o.id = c.order_id
+            WHERE c.status IN ('open', 'partial')
+              AND (c.kind IS NULL OR c.kind != 'fixed')
+              AND (COALESCE(o.archived, 0) = 1 OR o.status IN ('cancelled', 'completed'))
+        """).fetchall()]
+        for r in stale_rows:
+            r["debt"] = effective_debt(r, cov.get(r["id"], {}))
 
         def _stale(kind):
-            rk = [r for r in live if r.get("stale_kind") == kind]
+            rk = [r for r in stale_rows if r.get("stale_kind") == kind]
             orders = {}
             for r in rk:
                 o = orders.setdefault(r["order_id"], {"id": r["order_id"], "number": r["order_number"],

@@ -1440,6 +1440,14 @@ def settle_order(order_id: str, body: Optional[SettleIn] = None):
             raise HTTPException(status_code=409, detail={
                 "code": "order_not_final",
                 "message": "Закрыть расчёты можно только по завершённому или отменённому заказу"})
+        # Ставить флаг можно ровно там, где виден его список: дебиторка и блок
+        # settled[] в /finance/debtors исключают архив, и заглушённая сумма
+        # архивного заказа не попала бы ни в один экран. Архивный заказ в
+        # «Нам должны» и так не висит — закрывать по нему нечего.
+        if r["archived"]:
+            raise HTTPException(status_code=409, detail={
+                "code": "order_archived",
+                "message": "Заказ в архиве — он и так не в дебиторке. Сначала верните из архива"})
         if r["settled_at"]:
             raise HTTPException(status_code=409, detail={"code": "already_settled", "message": "Расчёты уже закрыты"})
         unlinked = _unlinked(conn, r)

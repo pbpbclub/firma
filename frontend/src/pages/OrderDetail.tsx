@@ -1113,8 +1113,14 @@ export default function OrderDetail() {
                 </div>
               ) : (
                 <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", fontSize: 12, color: "#6B6355" }}>
-                  <span>Не привязано <span style={{ fontFamily: MONO, color: debtColor(order.debt, "in") }}>{fmtMoney(order.debt)}</span> — заказ висит в «Нам должны».</span>
-                  <Button size="sm" onClick={() => setSettleOpen(true)} style={{ fontSize: 11 }}>Закрыть расчёты</Button>
+                  {/* Архивный заказ в дебиторке не показывается, и закрытые по нему
+                      расчёты не попали бы ни в один список — бэк такой settle отклоняет. */}
+                  {order.archived ? (
+                    <span>Не привязано <span style={{ fontFamily: MONO, color: debtColor(order.debt, "in") }}>{fmtMoney(order.debt)}</span> — заказ в архиве и в «Нам должны» не висит.</span>
+                  ) : (<>
+                    <span>Не привязано <span style={{ fontFamily: MONO, color: debtColor(order.debt, "in") }}>{fmtMoney(order.debt)}</span> — заказ висит в «Нам должны».</span>
+                    <Button size="sm" onClick={() => setSettleOpen(true)} style={{ fontSize: 11 }}>Закрыть расчёты</Button>
+                  </>)}
                 </div>
               )}
               {settleOpen && (
