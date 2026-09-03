@@ -78,9 +78,11 @@ export function ExpenseModal({ orderId, expense, existingExpenses = [], extras =
   // Обязательства этого заказа — чтобы поймать двойной счёт до того, как он случится.
   // Эндпоинт отдаёт обёртку {items, total_*} — разворачиваем сразу, иначе .find по
   // объекту роняет рендер («Добавить расход» падал в ErrorBoundary).
+  // include_unstarted: расходы по заказам в статусе «Смета» заводят регулярно,
+  // а бэк по умолчанию незапущенные не отдаёт (ТЗ 03.09.2026, п.4).
   const { data: creditors = [] } = useQuery({
-    queryKey: ["creditors"],
-    queryFn: () => financeApi.creditors().then((r: any) => r?.items ?? r ?? []),
+    queryKey: ["creditors", "all-orders"],
+    queryFn: () => financeApi.creditors(undefined, { include_unstarted: true }).then((r: any) => r?.items ?? r ?? []),
   });
 
   const master = (masters as any[]).find((m: any) => m.id === masterId);

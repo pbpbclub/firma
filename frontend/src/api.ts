@@ -140,8 +140,10 @@ export const financeApi = {
     api.get("/finance/transactions", { params }).then((r) => r.data),
   summary: () => api.get("/finance/summary").then((r) => r.data),
   debtors: () => api.get("/finance/debtors").then((r) => r.data),
-  creditors: (status?: string) =>
-    api.get("/finance/creditors", { params: status ? { status } : {} }).then((r) => r.data),
+  // include_unstarted — план незапущенных заказов (черновик/смета/проект/ждёт оплаты);
+  // по умолчанию бэк его не отдаёт (ТЗ 03.09.2026, п.4).
+  creditors: (status?: string, opts?: { include_unstarted?: boolean }) =>
+    api.get("/finance/creditors", { params: { ...(status ? { status } : {}), ...(opts?.include_unstarted ? { include_unstarted: 1 } : {}) } }).then((r) => r.data),
   createCreditor: (data: { name: string; total: number; paid?: number; description?: string; order_id?: string; due_date?: string }) =>
     api.post("/finance/creditors", data).then((r) => r.data),
   updateCreditor: (id: string, data: { paid?: number; total?: number; description?: string; status?: string; due_date?: string; finance_tx_id?: string | null; zenmoney_tx_id?: string | null }) =>
@@ -151,9 +153,13 @@ export const financeApi = {
   // Закрыть обязательства заказов в терминале: завершённых / отменённых / архивных
   closeStale: (data: { kinds: string[]; order_ids?: string[]; only_ids?: string[] }) =>
     api.post("/finance/creditors/close-stale", data).then((r) => r.data),
-  // «Закрыть выбранные» — вручную, всё или ничего
-  closeCreditors: (ids: string[]) =>
-    api.post("/finance/creditors/close", { ids, reason: "manual" }).then((r) => r.data),
+  // «Закрыть выбранные» — вручную, всё или ничего. manual — списать прикидку,
+  // recognized — работа принята, долг остаётся (лицевой счёт начислит целиком).
+  closeCreditors: (ids: string[], reason: "manual" | "recognized" = "manual") =>
+    api.post("/finance/creditors/close", { ids, reason }).then((r) => r.data),
+  // Как закрытие изменит сальдо подрядчиков — ничего не пишет (ТЗ 03.09.2026)
+  closePreview: (ids: string[], reason: string) =>
+    api.post("/finance/creditors/close-preview", { ids, reason }).then((r) => r.data),
   suggestTx: (name: string, amount: number) =>
     api.get("/finance/transactions/suggest", { params: { name, amount } }).then((r) => r.data),
   suggestInTx: (name: string, amount: number) =>

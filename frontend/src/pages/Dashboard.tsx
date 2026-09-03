@@ -4,7 +4,7 @@ import { SkeletonRows } from "../components/ui/Loading";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { financeApi, taxApi, ordersApi, reportsApi, estimatesApi } from "../api";
+import { financeApi, taxApi, ordersApi, reportsApi, estimatesApi, ledgerApi } from "../api";
 import { MONO } from "../components/ui/Num";
 import { DeadlinePill } from "../components/ui/Pill";
 import { POLARITY, debtColor } from "../components/ui/type";
@@ -41,6 +41,8 @@ export default function Dashboard() {
   const pfSummary = useQuery({ queryKey: ["orders-plan-fact-summary", "active"],
                                queryFn: () => ordersApi.planFactSummary("active") });
   const creditors = useQuery({ queryKey: ["creditors"], queryFn: () => financeApi.creditors() });
+  // «Мы должны» — сальдо лицевых счетов, одно число на человека (ТЗ 03.09.2026).
+  const ledger = useQuery({ queryKey: ["ledger-balances"], queryFn: () => ledgerApi.balances() });
   // A8: накладные месяца (аренда, расходники) и как они ложатся на заказы в работе
   const overhead = useQuery({ queryKey: ["overhead-summary"], queryFn: ordersApi.overheadSummary });
 
@@ -308,30 +310,33 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Мы должны — зеркало «Нам должны». На главной этой стороны не было вовсе:
-          видно было только то, что должны нам. План по подрядчикам рядом золотым:
-          это НЕ долг (ещё не заказано), путать их дорого. */}
-      {(creditors.data?.total_debt ?? 0) > 0 && (
+      {/* Мы должны — зеркало «Нам должны»: сальдо лицевых счетов, одна строка на
+          человека (ТЗ 03.09.2026). Остаток плана смет рядом золотым: это НЕ долг
+          (ещё не заказано), путать их дорого. */}
+      {((ledger.data?.we_owe ?? 0) > 0 || (creditors.data?.plan_rest_total ?? 0) > 0) && (
         <div style={{ ...section, borderLeft: `3px solid ${POLARITY.out.rail}`, cursor: "pointer" }}
           onClick={() => navigate("/debtors")}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
             <div style={{ fontSize: 11, color: POLARITY.out.color, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase" }}>Мы должны</div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: debtColor(creditors.data.total_debt, "out"), fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
-              {fmt(creditors.data.total_debt)}
+            <div style={{ fontSize: 13, fontWeight: 700, color: debtColor(ledger.data?.we_owe ?? 0, "out"), fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
+              {fmt(ledger.data?.we_owe ?? 0)}
             </div>
           </div>
-          <div style={{ display: "flex", gap: 28, flexWrap: "wrap" }}>
-            <div>
-              <div style={{ fontSize: 10, color: "#A89070" }}>ОБЯЗАТЕЛЬСТВ</div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A", fontFamily: MONO }}>{creditors.data.debt_count ?? 0}</div>
+          {(ledger.data?.items ?? []).filter((m: any) => m.balance > 0).slice(0, 4).map((m: any, i: number, arr: any[]) => (
+            <div key={m.master_id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+                                            padding: "8px 0", borderBottom: i < arr.length - 1 ? "1px solid #F2EFE9" : "none" }}>
+              <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>{m.name}</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: debtColor(m.balance, "out"), fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(m.balance)}</div>
             </div>
-            {(creditors.data.plan_total ?? 0) > 0 && (
+          ))}
+          <div style={{ display: "flex", gap: 28, flexWrap: "wrap", marginTop: 12 }}>
+            {(creditors.data?.plan_rest_total ?? 0) > 0 && (
               <div>
-                <div style={{ fontSize: 10, color: "#A89070" }}>ПЛАН ПО ПОДРЯДЧИКАМ · НЕ ДОЛГ</div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#B8860B", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(creditors.data.plan_total)}</div>
+                <div style={{ fontSize: 10, color: "#A89070" }}>ОСТАЛОСЬ ПОТРАТИТЬ · НЕ ДОЛГ</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#B8860B", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(creditors.data.plan_rest_total)}</div>
               </div>
             )}
-            {(creditors.data.closable_total ?? 0) > 0 && (
+            {(creditors.data?.closable_total ?? 0) > 0 && (
               <div>
                 <div style={{ fontSize: 10, color: "#A89070" }}>МОЖНО ЗАКРЫТЬ</div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#4A7C59", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(creditors.data.closable_total)}</div>

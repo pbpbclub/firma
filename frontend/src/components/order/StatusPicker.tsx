@@ -10,7 +10,7 @@ import { CaretDown } from "@phosphor-icons/react";
 import { ordersApi } from "../../api";
 import { fmtMoneyDash as fmt } from "../ui/format";
 import { ORDER_STATUSES } from "../domain";
-import { ObligationsConfirmModal, type Unpaid } from "./ObligationsConfirmModal";
+import { ObligationsConfirmModal, type Unpaid, type LedgerDelta } from "./ObligationsConfirmModal";
 
 export function StatusPicker({ orderId, current, onChange }: {
   orderId: string; current: string; onChange: (status: string) => void;
@@ -18,7 +18,7 @@ export function StatusPicker({ orderId, current, onChange }: {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   // target — куда переводим: завершение и отмена отвечают одним 409, окно одно.
-  const [confirm, setConfirm] = useState<{ items: Unpaid[]; total: number; target: string } | null>(null);
+  const [confirm, setConfirm] = useState<{ items: Unpaid[]; total: number; target: string; delta?: LedgerDelta } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -42,7 +42,7 @@ export function StatusPicker({ orderId, current, onChange }: {
       // 409 — по заказу остались незакрытые обязательства: спрашиваем, а не списываем молча
       const d = err?.response?.data?.detail;
       if (err?.response?.status === 409 && d?.code === "obligations_unpaid") {
-        setConfirm({ items: d.items || [], total: d.unpaid_total || 0, target: d.target || value });
+        setConfirm({ items: d.items || [], total: d.unpaid_total || 0, target: d.target || value, delta: d.ledger_delta });
       } else {
         throw err;
       }
@@ -80,6 +80,8 @@ export function StatusPicker({ orderId, current, onChange }: {
                 Завершение считает расчёты законченными: остатки спишутся. Сними галочку у строки,
                 если подрядчику действительно не заплачено — она останется долгом.</>}
           items={confirm.items} total={confirm.total} saving={saving}
+          previewReason={confirm.target === "cancelled" ? "order_cancelled" : "order_completed"}
+          initialDelta={confirm.delta}
           onConfirm={confirmClose} onCancel={() => setConfirm(null)}
         />
       )}

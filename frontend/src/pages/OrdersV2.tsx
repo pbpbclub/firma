@@ -544,7 +544,7 @@ export default function OrdersV2() {
   // Архивация закрывает обязательства заказа: без подтверждения бэк отвечает 409
   // со списком, окно — то же, что при завершении. Раньше в архив уходило молча,
   // и план заказа продолжал начисляться в сальдо подрядчиков.
-  const [archiveConfirm, setArchiveConfirm] = useState<{ items: any[]; total: number } | null>(null);
+  const [archiveConfirm, setArchiveConfirm] = useState<{ items: any[]; total: number; delta?: any } | null>(null);
   const doArchive = async (opts?: { close_obligations: boolean; only_ids: string[] }) => {
     if (!selected) return;
     setArchiving(true);
@@ -561,7 +561,7 @@ export default function OrdersV2() {
     } catch (err: any) {
       const d = err?.response?.data?.detail;
       if (err?.response?.status === 409 && d?.code === "obligations_unpaid") {
-        setArchiveConfirm({ items: d.items || [], total: d.unpaid_total || 0 });
+        setArchiveConfirm({ items: d.items || [], total: d.unpaid_total || 0, delta: d.ledger_delta });
       } else {
         throw err;
       }
@@ -1207,6 +1207,7 @@ export default function OrdersV2() {
             Архив закрывает их — подрядчикам по этому заказу ничего не заказано. Сними галочку у строки,
             если реально должны: она останется долгом.</>}
           items={archiveConfirm.items} total={archiveConfirm.total} saving={archiving}
+          previewReason="order_archived" initialDelta={archiveConfirm.delta}
           onConfirm={ids => doArchive({ close_obligations: true, only_ids: ids })}
           onCancel={() => setArchiveConfirm(null)}
         />

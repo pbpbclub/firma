@@ -24,7 +24,7 @@ const SANS = "inherit";
 
 // Полярность вкладки: деньги входят (in) / выходят (out) — задаёт цвет зоны.
 const TAB_POLARITY: Record<string, keyof typeof POLARITY> = {
-  debtors: "in", unallocated: "in", creditors: "out", fixed: "out", plan: "out",
+  debtors: "in", unallocated: "in", creditors: "out", fixed: "out",
   ledger: "out",
 };
 
@@ -941,10 +941,17 @@ function LinkTxModal({ creditor, onClose }: { creditor: any; onClose: () => void
 // «отклонение» ушла: при плане из сметы отклонение — это и есть остаток.
 const creditorCols = "28px 1.8fr 1.5fr 110px 130px 110px 90px 28px";
 
-function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
+// «Осталось потратить по заказам в работе» (ТЗ 03.09.2026, п.10): обязательства
+// смет — план закупок за вычетом факта, прогноз, не долг. Долг перед человеком —
+// сальдо лицевого счёта (LedgerTab). Незапущенные заказы и покрытые/признанные
+// строки спрятаны за переключателями: по умолчанию видно только то, что ещё
+// предстоит потратить.
+function CreditorsTab() {
   const isMobile = useIsMobile();
   const qc = useQueryClient();
   const [addOpen, setAddOpen] = useState(false);
+  const [showUnstarted, setShowUnstarted] = useState(false);
+  const [showSettled, setShowSettled] = useState(false);
   const [editItem, setEditItem] = useState<any>(null);
   const [linkItem, setLinkItem] = useState<any>(null);
   // Какую плашку «закрыть по …» открыли: завершённые (в «Мы должны»), отменённые
@@ -966,7 +973,10 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
   const clearFilters = () => { setContragentFilter(""); setDescFilter(""); setCPlanMin(""); setCPlanMax(""); setCPaidMin(""); setCPaidMax(""); setVarMin(""); setVarMax(""); setCDebtMin(""); setCDebtMax(""); setDueFrom(""); setDueTo(""); setSelectedIds(new Set()); };
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const { data, isLoading } = useQuery({ queryKey: ["creditors"], queryFn: () => financeApi.creditors() });
+  const { data, isLoading } = useQuery({
+    queryKey: ["creditors", { include_unstarted: showUnstarted }],
+    queryFn: () => financeApi.creditors(undefined, { include_unstarted: showUnstarted }),
+  });
 
   // Массовые действия к выделению. Чекбоксы и «выделить всё» были с самого
   // начала, но действий к ним не было ни одного — выделил 12 обязательств и
@@ -974,10 +984,11 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
   // приём, что bulkDelete в списке заказов.
   const [bulkAction, setBulkAction] = useState<"close" | "delete" | null>(null);
   const bulkMutation = useMutation({
-    mutationFn: async ({ ids, action }: { ids: string[]; action: "close" | "delete" }) => {
-      // Закрытие — одним запросом, всё или ничего (причина manual). Удаление —
+    mutationFn: async ({ ids, action, reason }: { ids: string[]; action: "close" | "delete"; reason?: "manual" | "recognized" }) => {
+      // Закрытие — одним запросом, всё или ничего; причину (списать / признать
+      // долгом) и дельту сальдо показывает ObligationsConfirmModal. Удаление —
       // по одному: строка, по которой прошли деньги, ответит 409 и цикл встанет.
-      if (action === "close") { await financeApi.closeCreditors(ids); return; }
+      if (action === "close") { await financeApi.closeCreditors(ids, reason ?? "manual"); return; }
       for (const id of ids) await financeApi.deleteCreditor(id);
     },
     onSuccess: () => {
@@ -986,6 +997,8 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
       setSelectedIds(new Set());
       qc.invalidateQueries({ queryKey: ["creditors"] });
       qc.invalidateQueries({ queryKey: ["orders-v2"] });
+      qc.invalidateQueries({ queryKey: ["ledger-balances"] });
+      qc.invalidateQueries({ queryKey: ["ledger"] });
     },
     onError: (e: any) => {
       setBulkAction(null);
@@ -996,8 +1009,11 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
   });
 
   // scope с бэка: debt — живые заказы (производство, завершённые) и ручные;
-  // plan — обязательства незапущенных заказов, это план закупок, не долг.
-  const items: any[] = (data?.items || []).filter((c: any) => (c.scope ?? "debt") === scope);
+  // plan — незапущенные (приходят только с include_unstarted). covered/recognized —
+  // остатка нет или долг сверен в лицевом счёте: показываем по переключателю.
+  const allItems: any[] = data?.items || [];
+  const hiddenSettled = allItems.filter((c: any) => (c.covered || c.recognized) && !showSettled).length;
+  const items: any[] = allItems.filter((c: any) => showSettled || !(c.covered || c.recognized));
   const uniqueContragents = useMemo(() => [...new Set(items.map((c: any) => c.name).filter(Boolean))].sort() as string[], [items]);
   const uniqueDescriptions = useMemo(() => [...new Set(items.map((c: any) => c.description).filter(Boolean))].sort() as string[], [items]);
   const { sort, toggle: toggleSort, apply: applySort } = useTableSort();
@@ -1050,13 +1066,17 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
     archived: { eyebrow: "ЗАКРЫТЬ ПО АРХИВНЫМ", label: "архивным",
       intro: "Заказы в архиве, а обязательства по их сметам открыты и начисляются подрядчикам полным планом. Закрыть — снять из сальдо; вернёшь заказ из архива — переоткроются." },
   };
-  const staleKinds = scope === "debt" ? ["completed"] : ["cancelled", "archived"];
+  const staleKinds = showUnstarted ? ["completed", "cancelled", "archived"] : ["completed"];
+  const toUnpaid = (c: any): Unpaid => ({
+    id: c.id, name: c.description || c.name, plan: c.amount_plan ?? c.total, fact: c.fact ?? c.paid,
+    debt: c.debt, ambiguous: c.ambiguous, recognized: c.recognized, recognized_amount: c.recognized_amount,
+    order: c.order_number ? `${c.order_number} · ${c.order_title}` : undefined,
+  });
   const staleItems: Unpaid[] = staleKind
-    ? ((data?.items || []) as any[])
-        .filter((c: any) => c.stale_kind === staleKind && (c.status === "open" || c.status === "partial"))
-        .map((c: any) => ({ id: c.id, name: c.description || c.name, plan: c.amount_plan ?? c.total, fact: c.fact ?? c.paid,
-                            debt: c.debt, ambiguous: c.ambiguous, order: c.order_number ? `${c.order_number} · ${c.order_title}` : undefined }))
+    ? allItems.filter((c: any) => c.stale_kind === staleKind && (c.status === "open" || c.status === "partial")).map(toUnpaid)
     : [];
+  const STALE_REASON: Record<string, string> = { completed: "order_completed", cancelled: "order_cancelled", archived: "order_archived" };
+  const selectedItems: Unpaid[] = allItems.filter((c: any) => selectedIds.has(String(c.id))).map(toUnpaid);
 
   if (isLoading) return <Loading />;
 
@@ -1065,13 +1085,23 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
       {addOpen && <AddCreditorModal onClose={() => setAddOpen(false)} />}
       {editItem && <PayCreditorModal item={editItem} onClose={() => setEditItem(null)} />}
       {linkItem && <LinkTxModal creditor={linkItem} onClose={() => setLinkItem(null)} />}
-      {bulkAction && (
+      {bulkAction === "delete" && (
         <ConfirmModal
-          message={bulkAction === "close"
-            ? `Закрыть ${selectedIds.size} обязательств(а)? Непокрытые остатки спишутся — расчёты по этим строкам признаются законченными.`
-            : `Удалить ${selectedIds.size} обязательств(а) безвозвратно? Расходы и платежи не затрагиваются — удаляется только строка плана.`}
-          confirmLabel={bulkMutation.isPending ? "Выполняем..." : bulkAction === "close" ? "Закрыть" : "Удалить"}
-          onConfirm={() => bulkMutation.mutate({ ids: [...selectedIds], action: bulkAction })}
+          message={`Удалить ${selectedIds.size} обязательств(а) безвозвратно? Расходы и платежи не затрагиваются — удаляется только строка плана.`}
+          confirmLabel={bulkMutation.isPending ? "Выполняем..." : "Удалить"}
+          onConfirm={() => bulkMutation.mutate({ ids: [...selectedIds], action: "delete" })}
+          onCancel={() => setBulkAction(null)}
+        />
+      )}
+      {bulkAction === "close" && (
+        <ObligationsConfirmModal
+          eyebrow="ЗАКРЫТЬ ВЫБРАННЫЕ" saveLabel="Закрыть"
+          intro={<>Выбрано строк: <b>{selectedItems.length}</b>. Закрытие говорит «эта плановая строка больше не ждёт
+            денег». Что при этом происходит с долгом перед мастером — выбери ниже; как изменится его сальдо, видно
+            до кнопки.</>}
+          items={selectedItems} total={selectedItems.reduce((s, i) => s + i.debt, 0)} saving={bulkMutation.isPending}
+          reasonChoice
+          onConfirm={(ids, reason) => bulkMutation.mutate({ ids, action: "close", reason })}
           onCancel={() => setBulkAction(null)}
         />
       )}
@@ -1080,9 +1110,41 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
           eyebrow={STALE_UI[staleKind].eyebrow} saveLabel="Закрыть"
           intro={STALE_UI[staleKind].intro}
           items={staleItems} total={data?.stale?.[staleKind]?.total ?? 0} saving={closeStale.isPending}
+          previewReason={STALE_REASON[staleKind]}
           onConfirm={ids => closeStale.mutate({ kind: staleKind, ids })}
           onCancel={() => setStaleKind(null)}
         />
+      )}
+
+      <div style={{ margin: isMobile ? "10px 16px 0" : "12px 28px 0", padding: "11px 14px", background: "#FBF7EF",
+                    borderLeft: "3px solid #B8860B", fontSize: 12, color: "#6B6355", lineHeight: 1.5,
+                    display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
+        <span>
+          План закупок и работ из утверждённых смет за вычетом факта — <b style={{ color: "#B8860B" }}>прогноз, не долг</b>.
+          Сколько мы должны каждому человеку — во вкладке «Мы должны» (лицевые счета).
+        </span>
+        <span style={{ display: "flex", gap: 14, whiteSpace: "nowrap" }}>
+          <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer", fontSize: 11 }}>
+            <input type="checkbox" checked={showUnstarted} onChange={e => { setShowUnstarted(e.target.checked); setSelectedIds(new Set()); }}
+                   style={{ accentColor: "#E8592A" }} />
+            незапущенные заказы
+          </label>
+          <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer", fontSize: 11 }}>
+            <input type="checkbox" checked={showSettled} onChange={e => { setShowSettled(e.target.checked); setSelectedIds(new Set()); }}
+                   style={{ accentColor: "#E8592A" }} />
+            покрытые и признанные{hiddenSettled > 0 ? ` (${hiddenSettled})` : ""}
+          </label>
+        </span>
+      </div>
+
+      {(data?.double_accrual?.length ?? 0) > 0 && (
+        <div style={{ margin: isMobile ? "10px 16px 0" : "12px 28px 0", padding: "11px 14px", background: "#FBF3F3",
+                      borderLeft: "3px solid #8B3A3A", fontSize: 12, color: "#6B6355", lineHeight: 1.5 }}>
+          <b style={{ color: "#8B3A3A" }}>Похоже на двойное начисление:</b> ручная проводка лицевого счёта по заказу
+          без привязки к строке, а в заказе открыта строка на ту же сумму — сальдо считает обе.
+          {" "}{data.double_accrual.slice(0, 4).map((d: any) => `${d.master_name} ${fmt(d.amount)} (${d.order_number})`).join("; ")}
+          {data.double_accrual.length > 4 ? ` и ещё ${data.double_accrual.length - 4}` : ""}. Сверить с фин-агентом.
+        </div>
       )}
 
       {staleKinds.map(kind => {
@@ -1159,7 +1221,7 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
       </div>
 
       {filteredItems.length === 0 ? (
-        <EmptyState title={scope === "plan" ? "Плановых обязательств нет" : "Нет открытых обязательств"} />
+        <EmptyState title="Тратить по заказам в работе больше нечего" hint={hiddenSettled > 0 ? `покрытых и признанных строк: ${hiddenSettled}` : undefined} />
       ) : (
         <>
           {filteredItems.map((c: any, i: number) => {
@@ -1169,11 +1231,12 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
                 title={c.name}
                 sub={<>{c.order_title ? <OrderLink id={c.order_id}>{c.order_title}</OrderLink> : c.estimate_item_title ? `← Смета: ${c.estimate_item_title}` : null}
                   {c.order_status === "completed" && <span style={{ marginLeft: 6, color: "#B8860B" }}>· заказ завершён</span>}</>}
-                right={<span style={{ color: scope === "plan" ? (c.debt > 0 ? "#B8860B" : POLARITY.neutral.color) : debtColor(c.debt, "out") }}>{c.debt > 0 ? fmt(c.debt) : "Закрыт"}</span>}
+                right={<span style={{ color: c.debt > 0 ? "#B8860B" : POLARITY.neutral.color }}>{c.recognized ? "признано" : c.debt > 0 ? fmt(c.debt) : "покрыто"}</span>}
                 rightSub={<>план {fmt(c.amount_plan ?? c.total)}</>}
                 badge={<>
                   {(c.fact ?? c.paid) > 0 && <span style={{ fontSize: 11, color: "#4A7C59", fontFamily: MONO }}>факт {fmt(c.fact ?? c.paid)}</span>}
                   {c.ambiguous && <span style={{ fontSize: 10, color: "#B8860B" }}>≈ похоже, закрыто</span>}
+                  {c.scope === "plan" && <span style={{ fontSize: 10, color: "#A89070" }}>заказ не запущен</span>}
                   <DeadlinePill date={c.due_date} />
                 </>}
                 meta={c.description || undefined}
@@ -1207,6 +1270,12 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
                     {c.order_status === "completed" && (
                       <span style={{ marginLeft: 6, color: "#B8860B" }}>· заказ завершён</span>
                     )}
+                    {c.scope === "plan" && (
+                      <span style={{ marginLeft: 6, color: "#A89070" }}>· заказ не запущен</span>
+                    )}
+                    {c.set_title && (
+                      <span style={{ marginLeft: 6, color: "#C8C0B0" }} title="Из какой сметы строка">· {c.set_title}</span>
+                    )}
                   </div>
                 )}
               </div>
@@ -1221,6 +1290,9 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
                 {c.fact_by_name > 0 && (
                   <div style={{ fontSize: 9, color: "#A89070", fontFamily: SANS, marginTop: 1 }}>по расходам</div>
                 )}
+                {c.fact_ledger > 0 && (
+                  <div style={{ fontSize: 9, color: "#A89070", fontFamily: SANS, marginTop: 1 }}>по лицевому счёту</div>
+                )}
                 {c.ambiguous && (
                   <div title={`Расходов той же категории по заказу: ${fmt(c.bucket_hint)}. Автоматически не засчитываем — у строки нет подрядчика.`}
                     style={{ fontSize: 9, color: "#B8860B", fontFamily: SANS, marginTop: 1 }}>
@@ -1229,12 +1301,13 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
                 )}
               </div>
               <div style={{ fontSize: 13, fontWeight: 700,
-                            // Золото у плана — НЕ упущение: план закупок это ещё не долг
-                    // (CLAUDE.md, 04.08.2026), подрядчикам ничего не заказано и в сальдо
-                    // это не идёт. Правило «мы должны — красное» на него не распространяется.
-                    color: scope === "plan" ? (c.debt > 0 ? "#B8860B" : POLARITY.neutral.color)
-                                            : debtColor(c.debt, "out") }}>
-                {c.debt > 0 ? fmt(c.debt) : "Закрыт"}
+                            // Золото — НЕ упущение: остаток плана закупок это ещё не долг
+                            // (CLAUDE.md, 04.08.2026; ТЗ 03.09.2026). Долг — сальдо лицевого счёта.
+                            color: c.debt > 0 ? "#B8860B" : POLARITY.neutral.color }}>
+                {c.recognized
+                  ? <span title={`Ручное начисление лицевого счёта: ${fmt(c.recognized_amount)}. Долг сверен там.`}
+                          style={{ fontSize: 11, color: "#4A7C59", fontFamily: SANS }}>признано</span>
+                  : c.debt > 0 ? fmt(c.debt) : <span style={{ fontSize: 11, fontFamily: SANS }}>покрыто</span>}
               </div>
               <div><DeadlinePill date={c.due_date} /></div>
               <div style={{ display: "flex", justifyContent: "center" }}>
@@ -1258,7 +1331,7 @@ function CreditorsTab({ scope = "debt" }: { scope?: "debt" | "plan" }) {
             <div />
             <div style={{ fontSize: 12, color: "#6B6355", fontWeight: 500 }}>{fmt(totalOwed)}</div>
             <div style={{ fontSize: 12, color: "#4A7C59", fontWeight: 500 }}>{fmt(totalPaid)}</div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: scope === "plan" ? "#B8860B" : "#8B3A3A" }}>{fmt(totalDebt)}</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#B8860B" }}>{fmt(totalDebt)}</div>
             <div /><div />
           </div>
         </>
@@ -1567,7 +1640,7 @@ function LedgerTab() {
   if (isError) return <QueryError error={error} what="сальдо подрядчиков" />;
   if (isLoading) return <Loading />;
   const items: any[] = data?.items ?? [];
-  if (!items.length) return <EmptyState compact title="Расчётов с подрядчиками нет" />;
+  if (!items.length) return <EmptyState compact title="Никому не должны" hint="и авансов у мастеров нет" />;
 
   const COLS = "1.6fr 110px 110px 110px 100px 120px 120px";
   const head: React.CSSProperties = { fontSize: 10, color: "#A89070", letterSpacing: "0.04em", textAlign: "right" };
@@ -1577,9 +1650,10 @@ function LedgerTab() {
     <div style={{ padding: "0 28px 40px" }}>
       <div style={{ margin: "12px 0 0", padding: "11px 14px", background: "#FAF8F5",
                     borderLeft: "3px solid #EDEBE6", fontSize: 12, color: "#6B6355", lineHeight: 1.5 }}>
-        Лицевые счета: начислено по сметам минус выплаты, зачёты и оплаты за подрядчика.
-        Плюс — мы должны мастеру, минус — у него наш аванс. Это не то же, что «Мы должны»:
-        там план закупок по сметам, здесь реальный расчёт.
+        Долг перед человеком — одно число: сальдо лицевого счёта. Начислено (сверенные суммы
+        и план открытых строк смет) минус выплачено, зачтено и оплачено за него. Плюс — мы
+        должны мастеру, минус — у него наш аванс. «Осталось потратить» — соседняя вкладка,
+        это прогноз по сметам, не долг.
       </div>
 
       <div style={{ display: "flex", gap: 36, margin: "18px 0 14px" }}>
@@ -1614,7 +1688,13 @@ function LedgerTab() {
             {m.name}
             {m.role && <span style={{ fontSize: 10, color: "#A89070" }}> · {m.role}</span>}
           </span>
-          <span style={{ ...cell, color: "#6B6355" }}>{fmt(m.accrued)}</span>
+          <span style={{ ...cell, color: "#6B6355" }}>
+            {fmt(m.accrued)}
+            {m.plan_open > 0 && (
+              <div title="Из начисленного — план открытых строк смет (прикидка до сверки)"
+                   style={{ fontSize: 9, color: "#B8860B", fontFamily: SANS }}>план {fmt(m.plan_open)}</div>
+            )}
+          </span>
           <span style={{ ...cell, color: "#6B6355" }}>{fmt(m.paid)}</span>
           <span style={{ ...cell, color: m.third_party ? "#6B6355" : "#C8C0B0" }}>{m.third_party ? fmt(m.third_party) : "—"}</span>
           <span style={{ ...cell, color: m.offset ? "#6B6355" : "#C8C0B0" }}>{m.offset ? fmt(m.offset) : "—"}</span>
@@ -1633,7 +1713,7 @@ function LedgerTab() {
 export default function Debtors() {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
-  const [tab, setTab] = useState<"debtors" | "unallocated" | "creditors" | "plan" | "ledger" | "fixed">("debtors");
+  const [tab, setTab] = useState<"debtors" | "unallocated" | "creditors" | "ledger" | "fixed">("debtors");
   const [addCreditorOpen, setAddCreditorOpen] = useState(false);
   const [addReceivableOpen, setAddReceivableOpen] = useState(false);
   const [addFixedOpen, setAddFixedOpen] = useState(false);
@@ -1641,24 +1721,26 @@ export default function Debtors() {
   const { data: debtData } = useQuery({ queryKey: ["debtors"], queryFn: financeApi.debtors });
   const { data: credData } = useQuery({ queryKey: ["creditors"], queryFn: () => financeApi.creditors() });
   const { data: recData }  = useQuery({ queryKey: ["receivables"], queryFn: financeApi.receivables });
+  const { data: ledData }  = useQuery({ queryKey: ["ledger-balances"], queryFn: () => ledgerApi.balances() });
 
   // В сальдо идут только долги по ЗАКАЗАМ: счета из вики — параллельный учёт
   // тех же денег (Ануш ORD-015, Винзавод/Мирра), сложение считало их дважды.
   // Счета показываем отдельной подписью и на своей вкладке (решение Юры 04.08.2026).
   const receivable = debtData?.total ?? 0;
   const unallocated = recData?.total_debt ?? 0;
-  const payable    = credData?.total_debt ?? 0;
+  // «Мы должны» — ОДНО число на человека: сальдо лицевого счёта (ТЗ 03.09.2026).
+  // Обязательства смет — план закупок, они рядом золотом и в сальдо не входят:
+  // начисления лицевого счёта строятся из тех же строк, складывать — считать дважды.
+  const payable    = ledData?.we_owe ?? 0;
+  const planRest   = credData?.plan_rest_total ?? 0;
   const openRecCount = recData?.open_items?.length ?? 0;
 
   const TABS = [
     { id: "debtors",     label: "Нам должны" },
-    { id: "creditors",   label: "Мы должны" },
-    // План по подрядчикам: обязательства заказов, которые ещё не запущены.
-    // В сальдо не идут — подрядчикам ничего не заказано (решение Юры 04.08.2026).
-    { id: "plan",        label: "План по подрядчикам" },
-    // Лицевые счета — это НЕ обязательства: там план закупок по сметам, здесь
-    // реальный долг мастеру с учётом авансов, зачётов и оплат за него.
-    { id: "ledger",      label: "Расчёты с подрядчиками" },
+    // Лицевые счета: реальный долг мастеру с учётом авансов, зачётов и оплат за него.
+    { id: "ledger",      label: "Мы должны" },
+    // Обязательства смет по заказам в работе — прогноз трат, не долг.
+    { id: "creditors",   label: "Осталось потратить" },
     { id: "fixed",       label: "Постоянные" },
     { id: "unallocated", label: openRecCount > 0 ? `Нераспределённые (${openRecCount})` : "Нераспределённые" },
   ];
@@ -1711,6 +1793,14 @@ export default function Debtors() {
               <span style={{ fontSize: 13 }}>←</span> Мы должны
             </div>
             <div style={{ ...T.hero, color: POLARITY.out.color, marginTop: 6 }}>{fmt(payable)}</div>
+            {planRest > 0 && (
+              <button type="button" onClick={() => setTab("creditors")}
+                title="План закупок и работ по заказам в производстве за вычетом факта. Прогноз, не долг: в сальдо не входит"
+                style={{ marginTop: 4, padding: 0, background: "none", border: "none", cursor: "pointer",
+                         fontSize: 11, color: "#B8860B", fontFamily: "inherit", textAlign: "right" }}>
+                + осталось потратить по заказам в работе: {fmt(planRest)}
+              </button>
+            )}
           </div>
         </div>
 
@@ -1750,8 +1840,6 @@ export default function Debtors() {
           const onAdd = {
             debtors: () => navigate("/orders"),
             creditors: () => setAddCreditorOpen(true),
-            // План рождается из смет, руками сюда не добавляют — ведём в заказы
-            plan: () => navigate("/orders"),
             fixed: () => setAddFixedOpen(true),
             unallocated: () => setAddReceivableOpen(true),
             // Расчёты — сводка только на чтение: аванс, зачёт и оплату за подрядчика
@@ -1772,16 +1860,6 @@ export default function Debtors() {
         {tab === "debtors" && <DebtorsTab />}
         {tab === "unallocated" && <HScroll><UnallocatedTab /></HScroll>}
         {tab === "creditors" && <CreditorsTab />}
-        {tab === "plan" && (
-          <>
-            <div style={{ margin: "12px 28px 0", padding: "11px 14px", background: "#FAF8F5",
-                          borderLeft: "3px solid #EDEBE6", fontSize: 12, color: "#6B6355", lineHeight: 1.5 }}>
-              Плановые закупки и работы из утверждённых смет по заказам, которые ещё не в
-              производстве. В сальдо не входят: подрядчикам пока ничего не заказано.
-            </div>
-            <CreditorsTab scope="plan" />
-          </>
-        )}
         {tab === "ledger" && <HScroll><LedgerTab /></HScroll>}
         {tab === "fixed" && <HScroll><FixedTab /></HScroll>}
       </div>
