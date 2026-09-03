@@ -27,6 +27,7 @@ import type { OrderFormState } from "../components/order/OrderParams";
 import { useNavigationGuard, NavigationGuardModal } from "../components/NavigationGuard";
 import { Breadcrumbs } from "../components/ui/Breadcrumbs";
 import { CardButton } from "../components/CardButton";
+import { CompleteOrderButton } from "../components/order/CompleteOrderButton";
 import { MasterLink } from "../components/ui/links";
 import { OrderTimeline } from "../components/order/OrderTimeline";
 
@@ -1233,6 +1234,19 @@ export default function OrderDetail() {
                     onClick={() => setStatusMutation.mutate("in_production")} style={{ fontSize: 11 }}>
                     {setStatusMutation.isPending ? "..." : "В производство"}
                   </Button>
+                </div>
+              )}
+              {/* ТЗ 03.09.2026 п.2: оплачено целиком, остатков по обязательствам нет,
+                  а статус — «в производстве». Подсказка, не автопереход. */}
+              {order?.done_hint && (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+                  background: "#F3F7F4", border: "1px solid #DCE8DF", padding: "10px 14px", marginBottom: 14 }}>
+                  <Warning size={13} style={{ color: "#4A7C59", flexShrink: 0 }} />
+                  <span style={{ fontSize: 11, color: "#6B6355", flex: 1, minWidth: 160 }}>
+                    Оплачено целиком — <b>похоже, заказ завершён</b>.
+                    {order.done_open_rest > 0 && <> По смете открыто {fmtMoney(order.done_open_rest)} без факта — при завершении решишь, списать или оставить долгом.</>}
+                  </span>
+                  <CompleteOrderButton orderId={id!} />
                 </div>
               )}
               {order?.plan_source === "draft" && (

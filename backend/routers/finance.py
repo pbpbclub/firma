@@ -975,9 +975,10 @@ def get_creditors(status: Optional[str] = None, include_unstarted: bool = False)
                    COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id = o.id), 0) AS paid_total
               FROM orders o WHERE o.status = 'in_production' AND COALESCE(o.archived, 0) = 0""").fetchall():
             revenue = _margin(conn, o["id"], o["price_plan"], o["cost_plan"])["revenue"] or 0
-            if revenue > 0 and (o["paid_total"] or 0) >= revenue - 0.01 and rest_by_order.get(o["id"], 0.0) <= 0.01:
+            if revenue > 0 and (o["paid_total"] or 0) >= revenue - 0.01:
                 looks_done.append({"id": o["id"], "number": o["number"], "title": o["title"],
                                    "revenue": round(revenue, 2), "paid_total": round(o["paid_total"] or 0, 2),
+                                   "open_rest": rest_by_order.get(o["id"], 0.0),
                                    "open_count": sum(1 for r in rows if r.get("order_id") == o["id"]
                                                      and r["status"] in ("open", "partial"))})
         return {

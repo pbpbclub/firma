@@ -290,17 +290,19 @@ def _awaiting_flags(status: str, price_plan, paid_total, open_rest=None) -> dict
     Юре пометить (сам статус НЕ ставим — ручное решение).
     awaiting_paid_signal: по «ждущему» пришли деньги — сигнал «запускаем?», тоже без
     автоперехода: частичная предоплата ещё не значит, что работа началась.
-    done_hint (ТЗ 03.09.2026, п.2): заказ в производстве, оплачен целиком, открытых
-    остатков по обязательствам нет — похоже, завершён (ORD-041 будка, ORD-042 вешалка
-    висели «в производстве» после отгрузки и оплаты). open_rest — obligations.
-    open_rest_by_order; None = не проверяли, подсказку не даём."""
+    done_hint (ТЗ 03.09.2026, п.2): заказ в производстве и оплачен целиком — похоже,
+    завершён (ORD-041 будка, ORD-042 вешалка висели «в производстве» после отгрузки
+    и оплаты). Открытые остатки по обязательствам подсказку НЕ гасят: у Dakel план
+    материалов без единого расхода, и ждать его покрытия — значит не подсказать
+    никогда; остаток решается в окне завершения (409 obligations_unpaid). Сумма —
+    done_open_rest (obligations.open_rest_by_order), чтобы подсказка предупредила."""
+    fully_paid = (price_plan or 0) > 0 and (paid_total or 0) >= (price_plan or 0) - 0.01
     return {
         "awaiting_hint": status in ("estimate", "project")
                          and (price_plan or 0) > 0 and (paid_total or 0) <= 0,
         "awaiting_paid_signal": status == "awaiting_payment" and (paid_total or 0) > 0,
-        "done_hint": status == "in_production" and (price_plan or 0) > 0
-                     and (paid_total or 0) >= (price_plan or 0) - 0.01
-                     and open_rest is not None and open_rest <= 0.01,
+        "done_hint": status == "in_production" and fully_paid,
+        "done_open_rest": round(open_rest or 0.0, 2) if status == "in_production" and fully_paid else 0.0,
     }
 
 

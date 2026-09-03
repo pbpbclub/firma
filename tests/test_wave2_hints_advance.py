@@ -42,7 +42,9 @@ class TestDoneHint:
         from routers.orders import _awaiting_flags
         assert _awaiting_flags("in_production", 50_000, 50_000, 0.0)["done_hint"] is True
         assert _awaiting_flags("in_production", 50_000, 49_000, 0.0)["done_hint"] is False
-        assert _awaiting_flags("in_production", 50_000, 50_000, 1_500.0)["done_hint"] is False
+        # открытый остаток подсказку не гасит — его решает окно завершения
+        f = _awaiting_flags("in_production", 50_000, 50_000, 1_500.0)
+        assert f["done_hint"] is True and f["done_open_rest"] == 1_500
         assert _awaiting_flags("completed", 50_000, 50_000, 0.0)["done_hint"] is False
 
     def test_остаток_по_заказу_не_считает_признанное(self, db):
@@ -63,8 +65,9 @@ class TestDoneHint:
         done = get_creditors()["looks_done"]
         assert [d["number"] for d in done] == ["ORD-901"]
         _cred(db, "c-1", 5_734)
-        assert get_order("o-1")["done_hint"] is False
-        assert get_creditors()["looks_done"] == []
+        o = get_order("o-1")
+        assert o["done_hint"] is True and o["done_open_rest"] == 5_734
+        assert get_creditors()["looks_done"][0]["open_rest"] == 5_734
 
 
 class TestAdvanceState:

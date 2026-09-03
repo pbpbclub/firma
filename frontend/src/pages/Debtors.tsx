@@ -13,6 +13,7 @@ import { MONO } from "../components/ui/Num";
 import { OrderLink } from "../components/ui/links";
 import { useTableSort } from "../components/ui/sort";
 import { ObligationsConfirmModal, type Unpaid } from "../components/order/ObligationsConfirmModal";
+import { CompleteOrderButton } from "../components/order/CompleteOrderButton";
 import { useIsMobile, M, HScroll } from "../components/ui/responsive";
 import { RowCard } from "../components/ui/RowCard";
 import { IconButton } from "../components/ui/IconButton";
@@ -1116,6 +1117,26 @@ function CreditorsTab() {
         />
       )}
 
+      {(data?.looks_done?.length ?? 0) > 0 && (
+        <div style={{ margin: isMobile ? "10px 16px 0" : "12px 28px 0", padding: "11px 14px", background: "#F3F7F4",
+                      borderLeft: "3px solid #4A7C59", fontSize: 12, color: "#6B6355", lineHeight: 1.5 }}>
+          <div style={{ marginBottom: 6 }}>
+            <b style={{ color: "#4A7C59" }}>Похоже, завершены:</b> оплачены целиком, а статус ещё «в производстве».
+            Завершение закроет расчёты по ним; открытый остаток сметы спишется или останется долгом — решишь в окне.
+          </div>
+          {data.looks_done.map((o: any) => (
+            <div key={o.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "6px 0",
+                                     borderTop: "1px solid #DCE8DF", flexWrap: "wrap" }}>
+              <span style={{ flex: 1, minWidth: 160 }}>
+                <OrderLink id={o.id}>{o.title}</OrderLink>
+                <span style={{ color: "#A89070" }}> · оплачено {fmt(o.paid_total)}{o.open_rest > 0 ? ` · по смете открыто ${fmt(o.open_rest)}` : ""}</span>
+              </span>
+              <CompleteOrderButton orderId={o.id} />
+            </div>
+          ))}
+        </div>
+      )}
+
       <div style={{ margin: isMobile ? "10px 16px 0" : "12px 28px 0", padding: "11px 14px", background: "#FBF7EF",
                     borderLeft: "3px solid #B8860B", fontSize: 12, color: "#6B6355", lineHeight: 1.5,
                     display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
@@ -1641,10 +1662,59 @@ function LedgerTab() {
   if (isLoading) return <Loading />;
   const items: any[] = data?.items ?? [];
   if (!items.length) return <EmptyState compact title="Никому не должны" hint="и авансов у мастеров нет" />;
+  // Три состояния сальдо с бэка (ТЗ 03.09.2026, п.6): we_owe — долг, advance —
+  // настоящий аванс (явно помечен), unallocated — минус без начислений: дырка в
+  // разноске, не деньги. Последнее — ниже и мельче, в суммы не идёт.
+  const owe = items.filter((m: any) => m.state === "we_owe");
+  const adv = items.filter((m: any) => m.state === "advance");
+  const unalloc = items.filter((m: any) => m.state === "unallocated");
 
   const COLS = "1.6fr 110px 110px 110px 100px 120px 120px";
   const head: React.CSSProperties = { fontSize: 10, color: "#A89070", letterSpacing: "0.04em", textAlign: "right" };
   const cell: React.CSSProperties = { fontSize: 12, textAlign: "right", fontFamily: MONO, fontVariantNumeric: "tabular-nums" };
+
+  const rows = (list: any[]) => list.map((m: any) => (
+    <div key={m.master_id} onClick={() => navigate(`/wiki/contractors/${m.master_id}`)}
+      style={{ display: "grid", gridTemplateColumns: COLS, gap: "0 14px", padding: "10px 0",
+               borderBottom: "1px solid #F7F5F1", cursor: "pointer", alignItems: "baseline" }}
+      onMouseEnter={e => { e.currentTarget.style.background = "#FAF8F5"; }}
+      onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}>
+      <span style={{ fontSize: 13, color: "#1A1A1A" }}>
+        {m.name}
+        {m.role && <span style={{ fontSize: 10, color: "#A89070" }}> · {m.role}</span>}
+      </span>
+      <span style={{ ...cell, color: "#6B6355" }}>
+        {fmt(m.accrued)}
+        {m.plan_open > 0 && (
+          <div title="Из начисленного — план открытых строк смет (прикидка до сверки)"
+               style={{ fontSize: 9, color: "#B8860B", fontFamily: SANS }}>план {fmt(m.plan_open)}</div>
+        )}
+      </span>
+      <span style={{ ...cell, color: "#6B6355" }}>
+        {fmt(m.paid + (m.advance || 0))}
+        {m.advance > 0 && <div style={{ fontSize: 9, color: "#4A7C59", fontFamily: SANS }}>аванс {fmt(m.advance)}</div>}
+      </span>
+      <span style={{ ...cell, color: m.third_party ? "#6B6355" : "#C8C0B0" }}>{m.third_party ? fmt(m.third_party) : "—"}</span>
+      <span style={{ ...cell, color: m.offset ? "#6B6355" : "#C8C0B0" }}>{m.offset ? fmt(m.offset) : "—"}</span>
+      <span style={{ ...cell, color: m.accepted ? "#A89070" : "#C8C0B0" }}>{m.accepted ? fmt(m.accepted) : "—"}</span>
+      <span style={{ ...cell, fontWeight: 700,
+        color: m.state === "we_owe" ? "#8B3A3A" : m.state === "advance" ? "#4A7C59" : "#A89070" }}>
+        {fmt(m.balance)}
+      </span>
+    </div>
+  ));
+  const headRow = (
+    <div style={{ display: "grid", gridTemplateColumns: COLS, gap: "0 14px", padding: "8px 0",
+                  borderBottom: "1px solid #EDEBE6" }}>
+      <span style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>ПОДРЯДЧИК</span>
+      <span style={head}>НАЧИСЛЕНО</span>
+      <span style={head}>ВЫПЛАЧЕНО</span>
+      <span style={head}>ЗА НЕГО</span>
+      <span style={head}>ЗАЧТЕНО</span>
+      <span style={{ ...head }} title="Работы приняты, но закрыты авансом или зачётом либо ещё не оплачены. В сальдо не входит.">ПРИНЯТО</span>
+      <span style={head}>САЛЬДО</span>
+    </div>
+  );
 
   return (
     <div style={{ padding: "0 28px 40px" }}>
@@ -1656,7 +1726,7 @@ function LedgerTab() {
         это прогноз по сметам, не долг.
       </div>
 
-      <div style={{ display: "flex", gap: 36, margin: "18px 0 14px" }}>
+      <div style={{ display: "flex", gap: 36, margin: "18px 0 14px", flexWrap: "wrap" }}>
         <div>
           <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>МЫ ДОЛЖНЫ</div>
           <div style={{ fontSize: 20, fontWeight: 700, fontFamily: MONO, color: "#8B3A3A" }}>{fmt(data?.we_owe)}</div>
@@ -1665,46 +1735,37 @@ function LedgerTab() {
           <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>АВАНСЫ У МАСТЕРОВ</div>
           <div style={{ fontSize: 20, fontWeight: 700, fontFamily: MONO, color: "#4A7C59" }}>{fmt(data?.they_owe)}</div>
         </div>
+        {(data?.unallocated_total ?? 0) > 0 && (
+          <div title="Выплачено больше, чем начислено, и аванс не помечен — работа не заведена. Это дырка в разноске, не деньги.">
+            <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>ТРЕБУЕТ РАЗНОСКИ</div>
+            <div style={{ fontSize: 20, fontWeight: 700, fontFamily: MONO, color: "#A89070" }}>{fmt(data?.unallocated_total)}</div>
+          </div>
+        )}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: COLS, gap: "0 14px", padding: "8px 0",
-                    borderBottom: "1px solid #EDEBE6" }}>
-        <span style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em" }}>ПОДРЯДЧИК</span>
-        <span style={head}>НАЧИСЛЕНО</span>
-        <span style={head}>ВЫПЛАЧЕНО</span>
-        <span style={head}>ЗА НЕГО</span>
-        <span style={head}>ЗАЧТЕНО</span>
-        <span style={{ ...head }} title="Работы приняты, но закрыты авансом или зачётом либо ещё не оплачены. В сальдо не входит.">ПРИНЯТО</span>
-        <span style={head}>САЛЬДО</span>
-      </div>
+      {owe.length > 0 ? (<>{headRow}{rows(owe)}</>) : (
+        <div style={{ padding: "14px 0", fontSize: 12, color: "#6B6355" }}>Долгов перед подрядчиками нет.</div>
+      )}
 
-      {items.map((m: any) => (
-        <div key={m.master_id} onClick={() => navigate(`/wiki/contractors/${m.master_id}`)}
-          style={{ display: "grid", gridTemplateColumns: COLS, gap: "0 14px", padding: "10px 0",
-                   borderBottom: "1px solid #F7F5F1", cursor: "pointer", alignItems: "baseline" }}
-          onMouseEnter={e => { e.currentTarget.style.background = "#FAF8F5"; }}
-          onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}>
-          <span style={{ fontSize: 13, color: "#1A1A1A" }}>
-            {m.name}
-            {m.role && <span style={{ fontSize: 10, color: "#A89070" }}> · {m.role}</span>}
-          </span>
-          <span style={{ ...cell, color: "#6B6355" }}>
-            {fmt(m.accrued)}
-            {m.plan_open > 0 && (
-              <div title="Из начисленного — план открытых строк смет (прикидка до сверки)"
-                   style={{ fontSize: 9, color: "#B8860B", fontFamily: SANS }}>план {fmt(m.plan_open)}</div>
-            )}
-          </span>
-          <span style={{ ...cell, color: "#6B6355" }}>{fmt(m.paid)}</span>
-          <span style={{ ...cell, color: m.third_party ? "#6B6355" : "#C8C0B0" }}>{m.third_party ? fmt(m.third_party) : "—"}</span>
-          <span style={{ ...cell, color: m.offset ? "#6B6355" : "#C8C0B0" }}>{m.offset ? fmt(m.offset) : "—"}</span>
-          <span style={{ ...cell, color: m.accepted ? "#A89070" : "#C8C0B0" }}>{m.accepted ? fmt(m.accepted) : "—"}</span>
-          <span style={{ ...cell, fontWeight: 700,
-            color: m.balance > 0 ? "#8B3A3A" : m.balance < 0 ? "#4A7C59" : "#A89070" }}>
-            {m.balance === 0 ? "—" : fmt(m.balance)}
-          </span>
-        </div>
-      ))}
+      {adv.length > 0 && (
+        <>
+          <div style={{ fontSize: 10, color: "#4A7C59", letterSpacing: "0.04em", margin: "24px 0 0" }}>АВАНСЫ У МАСТЕРОВ — деньги отданы вперёд, работа впереди</div>
+          {headRow}{rows(adv)}
+        </>
+      )}
+
+      {unalloc.length > 0 && (
+        <>
+          <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em", margin: "24px 0 0" }}>
+            ТРЕБУЕТ РАЗНОСКИ — выплачено, работа не заведена
+          </div>
+          <div style={{ fontSize: 11, color: "#A89070", margin: "4px 0 0", lineHeight: 1.5 }}>
+            Минус без начислений — не аванс: работы сделаны и оплачены, а начисление не завели. Заведи
+            начисление в карточке подрядчика или пометь выплату авансом.
+          </div>
+          {headRow}{rows(unalloc)}
+        </>
+      )}
     </div>
   );
 }

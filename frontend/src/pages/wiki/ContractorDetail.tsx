@@ -5,7 +5,7 @@ import { useNavigationGuard, NavigationGuardModal } from "../../components/Navig
 import { EditModal, type FieldDef } from "../../components/EditModal";
 import { PayeeRulesSection } from "../../components/PayeeRulesSection";
 import { useNavigate } from "react-router-dom";
-import { mastersApi, financeApi, ledgerApi, ordersApi } from "../../api";
+import { mastersApi, financeApi, ledgerApi, ordersApi, generalExpensesApi } from "../../api";
 import { ContactStrip, contactHref } from "../../components/ui/ContactLinks";
 import { PriceSync } from "./PriceSync";
 import { Check, User, HandCoins, ArrowsLeftRight, Receipt } from "@phosphor-icons/react";
@@ -232,6 +232,15 @@ export function ContractorDetail({ id, onClose }: { id: string; onClose: () => v
     onSuccess: () => { invalidate(); setEditing(false); onClose(); },
   });
 
+  const togglePurpose = useMutation({
+    mutationFn: ({ id: eid, purpose }: { id: string; purpose: string }) => generalExpensesApi.update(eid, { purpose }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["ledger"] });
+      qc.invalidateQueries({ queryKey: ["ledger-balances"] });
+      qc.invalidateQueries({ queryKey: ["general-expenses"] });
+    },
+  });
+
   const saveCreditor = useMutation({
     mutationFn: (patch: any) => financeApi.updateCreditor(editCreditor.id, patch),
     onSuccess: () => {
@@ -296,9 +305,9 @@ export function ContractorDetail({ id, onClose }: { id: string; onClose: () => v
           // Долг берём из лицевого счёта: сумма открытых обязательств не учитывает
           // выплаты, прошедшие расходом, и на карточке спорила бы с сальдо ниже.
           if (ledger && Math.abs(ledger.balance) >= 1)
-            m.push({ label: ledger.balance > 0 ? "Мы должны" : "Аванс у мастера",
+            m.push({ label: ledger.balance > 0 ? "Мы должны" : ledger.state === "advance" ? "Аванс у мастера" : "Требует разноски",
                      value: fmt(Math.abs(ledger.balance)),
-                     color: ledger.balance > 0 ? "#8B3A3A" : "#4A7C59" });
+                     color: ledger.balance > 0 ? "#8B3A3A" : ledger.state === "advance" ? "#4A7C59" : "#A89070" });
           else if (!ledger && totalDebt > 0) m.push({ label: "Долг", value: fmt(totalDebt), color: "#8B3A3A" });
           return m.length ? m : undefined;
         })()}
@@ -357,11 +366,14 @@ export function ContractorDetail({ id, onClose }: { id: string; onClose: () => v
                 filename={`Расчёты — ${master?.name ?? "подрядчик"}.pdf`}
                 fetcher={() => ledgerApi.card(id)} />
             </div>
-            <Row label={ledger.balance >= 0 ? "Мы должны" : "Аванс у мастера"}
+            {/* Минус без признака аванса — дырка в разноске, не «нам должны» (ТЗ 03.09.2026, п.6) */}
+            <Row label={ledger.balance >= 0 ? "Мы должны" : ledger.state === "advance" ? "Аванс у мастера" : "Требует разноски: выплачено, работа не заведена"}
                  value={fmt(Math.abs(ledger.balance))} mono
-                 valueColor={ledger.balance > 0 ? "#8B3A3A" : ledger.balance < 0 ? "#4A7C59" : undefined} />
-            <Row label="Начислено по сметам" value={fmt(ledger.accrued)} mono />
+                 valueColor={ledger.balance > 0 ? "#8B3A3A" : ledger.state === "advance" ? "#4A7C59" : "#A89070"} />
+            <Row label="Начислено" value={fmt(ledger.accrued)} mono />
+            {ledger.plan_open > 0 && <Row label="— из них план открытых строк смет" value={fmt(ledger.plan_open)} mono valueColor="#B8860B" />}
             <Row label="Выплачено" value={fmt(ledger.paid)} mono />
+            {ledger.advance > 0 && <Row label="Выдано авансом" value={fmt(ledger.advance)} mono valueColor="#4A7C59" />}
             {ledger.third_party > 0 && <Row label="Оплачено за него" value={fmt(ledger.third_party)} mono />}
             {ledger.offset > 0 && <Row label="Зачтено" value={fmt(ledger.offset)} mono />}
             {/* A1: работы приняты, но закрыты авансом/зачётом или ещё не оплачены.
@@ -377,6 +389,17 @@ export function ContractorDetail({ id, onClose }: { id: string; onClose: () => v
                                  textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     <OrderLink id={e.order_id}>{e.order_title || e.title}</OrderLink>
                   </span>
+                  {/* Выплата вне заказа: аванс ⇄ выплата — правит purpose расхода.
+                      Только явный аванс даёт «аванс у мастера» (ТЗ 03.09.2026, п.6). */}
+                  {e.source === "expense" && (e.purpose === "contractor_pay" || e.purpose === "contractor_advance") && (
+                    <button type="button" disabled={togglePurpose.isPending}
+                      title={e.purpose === "contractor_advance" ? "Помечено авансом — сделать обычной выплатой" : "Пометить авансом под будущую работу"}
+                      onClick={() => togglePurpose.mutate({ id: e.ref_id, purpose: e.purpose === "contractor_advance" ? "contractor_pay" : "contractor_advance" })}
+                      style={{ fontSize: 9, color: e.purpose === "contractor_advance" ? "#4A7C59" : "#A89070",
+                               background: "none", border: "1px solid #EDEBE6", padding: "1px 6px", cursor: "pointer", fontFamily: "inherit" }}>
+                      {e.purpose === "contractor_advance" ? "аванс" : "→ аванс"}
+                    </button>
+                  )}
                   <span style={{ fontFamily: MONO, fontSize: 12,
                                  color: e.sign > 0 ? "#8B3A3A" : e.sign < 0 ? "#4A7C59" : "#A89070" }}>
                     {e.sign > 0 ? "+" : e.sign < 0 ? "−" : ""}{fmt(e.amount)}

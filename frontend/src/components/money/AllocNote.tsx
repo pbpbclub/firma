@@ -13,7 +13,8 @@ const PURPOSE_LABELS: Record<string, string> = {
   stock: "Запас",
   sample: "Образцы",
   overhead: "Накладные",
-  contractor_pay: "Аванс подрядчику",
+  contractor_pay: "Выплата подрядчику",
+  contractor_advance: "Аванс подрядчику",
   contractor_third_party: "Оплата за подрядчика",
 };
 
