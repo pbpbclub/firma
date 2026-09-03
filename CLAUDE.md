@@ -263,6 +263,64 @@ WHERE c.order_id = ?
   меняются — это не скидка (`discount` режет выручку везде). В UI слово «не
   привязано», не «списано».
 
+### 💳 Долг — одно число на человека; обязательства — план (ТЗ фин-агента 03.09.2026)
+
+Начисления лицевого счёта (`ledger._build_entries`) строятся ИЗ строк `creditors`:
+открытая — полной суммой, закрытая — признанной частью. Поэтому «Мы должны» по
+обязательствам и сальдо подрядчика — две проекции одного источника, и складывать
+их — считать долг дважды (Малафеев: 87 100 + 129 500). С 03.09.2026:
+
+- **«Мы должны» = `GET /api/ledger/balances`** (одна строка на контрагента).
+  Обязательства смет на экране денег — вкладка «Осталось потратить» (`plan_rest_*`
+  в `GET /finance/creditors`, только `in_production`, золото). `total_debt` там —
+  алиас `plan_rest_total` на время переезда. Незапущенные заказы бэк не отдаёт без
+  `include_unstarted=1` (ExpenseModal его передаёт).
+- **Единая формула признанного — `obligations.recognized(cred, cov, with_ledger)`**:
+  `max(paid, L1+L2) + L3 [+ covered_ledger]`. `covered_ledger` — выплаты
+  `master_ledger` (payment/offset/third_party) по creditor_id → tx_id → мастер в
+  границах заказа (последнее — только для открытых). В `effective_debt` входит,
+  в начисления закрытых строк (`with_ledger=False`) — НЕТ: проводка уже стоит в
+  ленте минусом, поднять ею же начисление — начислить дважды (ORD-017).
+- **Проводка главнее строки.** Ручной `accrual` с `creditor_id` вытесняет начисление
+  строки (`manual_accrued`), строка помечается `recognized` и из «осталось
+  потратить» уходит; `POST /ledger/entries` даёт 409 только на ВТОРОЕ ручное
+  начисление. Живые проводки без `creditor_id` — `scripts/link_ledger_accruals.py`
+  (dry-run; применять после «да» Юры).
+- 🔒 **Закрытие обязательства меняет сальдо подрядчика — и обязано это показать.**
+  `POST /finance/creditors/close-preview {ids, reason}` (`obligations.ledger_impact`,
+  SAVEPOINT + откат) → дельта по мастерам; 409 `obligations_unpaid` несёт
+  `ledger_delta`; `ObligationsConfirmModal` рисует «было → станет» во всех дверях.
+  `POST /creditors/close` принимает `reason: manual` (списать прикидку — начисление
+  → покрытая часть) или `recognized` (работа принята, долг стоит — начисление
+  `total`; 409 `unbound_creditor`, если строка не привязана к мастеру).
+  `CLOSE_REASONS` += `recognized`, `internal`, `superseded_estimate`; NULL = manual.
+- **Аванс — только явный**: `expenses.purpose='contractor_advance'` («Выдать аванс»),
+  в ленте `kind=advance` (−1, не в `MANUAL_KINDS`). `contractor_pay` = выплата вне
+  заказа без признака аванса. `balances.state`: `we_owe` | `advance` | `unallocated`
+  (минус без начислений — дырка в разноске, в `they_owe` не идёт) | `settled` (нули
+  не отдаются). Переключатель «аванс ⇄ выплата» — в карточке подрядчика.
+- **`done_hint`** (`orders`, `creditors.looks_done[]`): в производстве и оплачен
+  целиком → «похоже, завершён», `CompleteOrderButton` с 409-окном; открытый
+  остаток сметы (`done_open_rest`) подсказку не гасит — решается в окне.
+- **Внутренние строки без обязательств**: `estimate_lines.internal` (кнопка «внутр.»
+  в редакторе) либо `service|other` без мастера, подрядчика и `material_code`
+  (`obligations.has_payee`). Уже созданные — плашка «внутренние строки»,
+  `close-stale kinds=['internal']`. Имена-заглушки («Позиция 2», «Прочее: …») —
+  400 в `POST /creditors`, `_gen_obligations` такие позиции пропускает.
+- **Новая версия сметы переносит обязательства** (`estimates.repoint_obligations`
+  в `_approve_set` до `_gen_obligations`): совпавшие строки (позиция, тип, название;
+  фолбэк — сумма) едут на новые id с `paid`/tx/связями расходов, `prev_estimate_*`
+  помнит откуда; несовпавшие — `superseded_estimate`; `unapprove` возвращает.
+  Просто закрыть старые нельзя — оплаченная часть начислится дважды.
+  `creditors.double_sets[]` — открытые строки заказа из разных смет (красная плашка).
+- **Заглушить, не удалить**: `snoozes` (creditor | receivable | order, `until` NULL =
+  навсегда, `reason` обязателен) — `PUT/DELETE /finance/snoozes/{kind}/{id}`, вкладка
+  «Архив». Из `debtors.total`, `plan_rest`, плашек и `receivables.open_items` уходит;
+  счета фин-агента (`finance.db alert_snooze`) читаются, в чужую базу не пишем.
+- **Роли** `masters.role`: Мастер/Подрядчик → contractor, Поставщик → supplier,
+  Партнёр, Накладные (иное — 400). `balances.we_owe` — только contractor+supplier;
+  `partners_total`/`overhead_total` отдельными секциями.
+
 ### ✅ Утверждение сметы: один гейт на все двери (24.08.2026)
 
 Сделать смету актуальной можно двумя ручками — `POST /sets/{id}/approve` и
