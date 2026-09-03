@@ -32,8 +32,8 @@ from routers.orders import _bucket
 # overhead/stock/sample — траты «мимо заказа» (ТЗ stock_and_samples),
 # owner_draw — личные выводы владельца (ТЗ 03.09.2026): покрытием обязательства
 # быть не может, деньги ушли Юре, а не подрядчику.
-_ALIEN_PURPOSES = ("overhead", "contractor_pay", "contractor_third_party", "stock", "sample",
-                   "owner_draw")
+_ALIEN_PURPOSES = ("overhead", "contractor_pay", "contractor_advance", "contractor_third_party",
+                   "stock", "sample", "owner_draw")
 
 _EPS = 0.01   # деньги в REAL: сравнение только через порог (правило Б3, code_rules 04.08)
 
@@ -323,6 +323,31 @@ def _ledger_coverage(conn, creds: list, exps: list, by_order: dict, out: dict) -
             if rest <= _EPS:
                 break
             take(c, m, rest, "contractor")
+
+
+def open_rest_by_order(conn, order_ids: Optional[list] = None) -> dict:
+    """Непокрытый остаток открытых обязательств по заказам: {order_id: сумма}.
+    Признанные (ручное начисление лицевого счёта) не считаются — долг сверен там.
+    Заказы без остатка в словарь не попадают. Один coverage на все заказы."""
+    cov = coverage(conn, order_ids)
+    sql = """SELECT * FROM creditors WHERE order_id IS NOT NULL AND status IN ('open','partial')
+              AND (kind IS NULL OR kind != 'fixed')"""
+    params: list = []
+    if order_ids is not None:
+        if not order_ids:
+            return {}
+        sql += f" AND order_id IN ({','.join('?' * len(order_ids))})"
+        params = list(order_ids)
+    rows = conn.execute(sql, params).fetchall()
+    accrued = ledger_accruals(conn, [r["id"] for r in rows])
+    out: dict = {}
+    for r in rows:
+        if r["id"] in accrued:
+            continue
+        d = effective_debt(r, cov.get(r["id"], {}))
+        if d > _EPS:
+            out[r["order_id"]] = round(out.get(r["order_id"], 0.0) + d, 2)
+    return out
 
 
 def recognized(cred_row, cov: Optional[dict] = None, *, with_ledger: bool = True) -> float:

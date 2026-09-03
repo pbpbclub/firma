@@ -40,15 +40,19 @@ router = APIRouter()
 # (A8 фильтрует purpose='overhead'), ни в total общего контура. Опознаётся по
 # purpose, который проставляет разносящий, а не по payee — способов вывода
 # будет больше.
-PURPOSES = ("stock", "sample", "overhead", "contractor_pay", "contractor_third_party",
-            "owner_draw")
-LEDGER_PURPOSES = ("contractor_pay", "contractor_third_party")
+# contractor_advance (ТЗ 03.09.2026, п.6) — деньги мастеру ВПЕРЁД под будущую работу;
+# только такая выплата даёт «аванс у мастера». contractor_pay — выплата вне заказа
+# без признака аванса: перекос в минус по ней — дырка в разноске, не аванс.
+PURPOSES = ("stock", "sample", "overhead", "contractor_pay", "contractor_advance",
+            "contractor_third_party", "owner_draw")
+LEDGER_PURPOSES = ("contractor_pay", "contractor_advance", "contractor_third_party")
 OWNER_DRAW = "owner_draw"
 PURPOSE_LABELS = {
     "stock": "Запас",
     "sample": "Образцы и тесты",
     "overhead": "Общехозяйственные",
-    "contractor_pay": "Аванс подрядчику",
+    "contractor_pay": "Выплата подрядчику",
+    "contractor_advance": "Аванс подрядчику",
     "contractor_third_party": "Оплата за подрядчика",
     "owner_draw": "Личные средства владельца",
 }
@@ -129,7 +133,7 @@ def _row(conn, eid: str) -> dict:
 
 @router.get("")
 def list_general(
-    purpose: Optional[str] = Query(None, pattern="^(stock|sample|overhead|contractor_pay|contractor_third_party|owner_draw)$"),
+    purpose: Optional[str] = Query(None, pattern="^(stock|sample|overhead|contractor_pay|contractor_advance|contractor_third_party|owner_draw)$"),
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     with_spent: bool = True,

@@ -93,6 +93,8 @@ def list_orders(
         # непокрытые обязательства, тот же инвариант, что в _plan_fact).
         fcosts = _fact_costs(conn, [r["id"] for r in rows])
         out = []
+        from obligations import open_rest_by_order
+        open_rest = open_rest_by_order(conn)   # один coverage на весь список
         for r in rows:
             m = _margin(conn, r["id"], r["price_plan"], r["cost_plan"],
                         transit_facts=tfacts, discounts=discounts, extras=extras)
@@ -131,7 +133,7 @@ def list_orders(
                 "cost_fact": cost_fact,
                 "cost_delta": round(cost_fact - (m["cost"] or 0), 2),
                 "cost_coverage": (round(cost_fact / m["cost"], 4) if m["cost"] else None),
-                **_awaiting_flags(r["status"], m["revenue"], r["paid_total"]),
+                **_awaiting_flags(r["status"], m["revenue"], r["paid_total"], open_rest.get(r["id"], 0.0)),
                 **_order_delta(r, m, cost_fact),
             })
         return out
@@ -281,17 +283,24 @@ def _active_set(conn, oid: str):
     ).fetchone()
 
 
-def _awaiting_flags(status: str, price_plan, paid_total) -> dict:
-    """Подсказки вокруг «Ждёт оплаты» — производные, в схеме ничего не храним.
+def _awaiting_flags(status: str, price_plan, paid_total, open_rest=None) -> dict:
+    """Подсказки вокруг статуса — производные, в схеме ничего не храним.
 
     awaiting_hint: счёт/цена есть, оплат нет — похоже, заказ ждёт оплату; предлагаем
     Юре пометить (сам статус НЕ ставим — ручное решение).
     awaiting_paid_signal: по «ждущему» пришли деньги — сигнал «запускаем?», тоже без
-    автоперехода: частичная предоплата ещё не значит, что работа началась."""
+    автоперехода: частичная предоплата ещё не значит, что работа началась.
+    done_hint (ТЗ 03.09.2026, п.2): заказ в производстве, оплачен целиком, открытых
+    остатков по обязательствам нет — похоже, завершён (ORD-041 будка, ORD-042 вешалка
+    висели «в производстве» после отгрузки и оплаты). open_rest — obligations.
+    open_rest_by_order; None = не проверяли, подсказку не даём."""
     return {
         "awaiting_hint": status in ("estimate", "project")
                          and (price_plan or 0) > 0 and (paid_total or 0) <= 0,
         "awaiting_paid_signal": status == "awaiting_payment" and (paid_total or 0) > 0,
+        "done_hint": status == "in_production" and (price_plan or 0) > 0
+                     and (paid_total or 0) >= (price_plan or 0) - 0.01
+                     and open_rest is not None and open_rest <= 0.01,
     }
 
 
@@ -1191,7 +1200,8 @@ def get_order(order_id: str):
             "transit": m.get("transit"),
             "has_estimate": m["has_estimate"],
             "plan_source": m["plan_source"],
-            **_awaiting_flags(order["status"], m["revenue"], paid_total),
+            **_awaiting_flags(order["status"], m["revenue"], paid_total,
+                              __import__("obligations").open_rest_by_order(conn, [oid]).get(oid, 0.0)),
             # Резерв под материалы (ТЗ-1 задача 1). reserved_amount/reserve_released_at
             # льются через **order; сюда — производные для UI.
             "reserve_suggested": _reserve_suggested(pf, order.get("cost_plan") or 0),

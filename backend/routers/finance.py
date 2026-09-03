@@ -964,10 +964,27 @@ def get_creditors(status: Optional[str] = None, include_unstarted: bool = False)
                                    "note": m["note"], "creditor_id": r["id"], "creditor_name": r["name"],
                                    "order_id": r["order_id"], "order_number": r["order_number"],
                                    "order_title": r["order_title"]})
+        # «Похоже, заказ завершён» (ТЗ 03.09.2026, п.2): в производстве, оплачен
+        # целиком, открытых остатков нет. Статус не меняем — плашка с кнопкой.
+        from routers.orders import _margin
+        from obligations import open_rest_by_order
+        rest_by_order = open_rest_by_order(conn)
+        looks_done = []
+        for o in conn.execute("""
+            SELECT o.id, o.number, o.title, o.price_plan, o.cost_plan,
+                   COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id = o.id), 0) AS paid_total
+              FROM orders o WHERE o.status = 'in_production' AND COALESCE(o.archived, 0) = 0""").fetchall():
+            revenue = _margin(conn, o["id"], o["price_plan"], o["cost_plan"])["revenue"] or 0
+            if revenue > 0 and (o["paid_total"] or 0) >= revenue - 0.01 and rest_by_order.get(o["id"], 0.0) <= 0.01:
+                looks_done.append({"id": o["id"], "number": o["number"], "title": o["title"],
+                                   "revenue": round(revenue, 2), "paid_total": round(o["paid_total"] or 0, 2),
+                                   "open_count": sum(1 for r in rows if r.get("order_id") == o["id"]
+                                                     and r["status"] in ("open", "partial"))})
         return {
             # завершённые / отменённые / архивные заказы с открытыми строками — то, что
             # на экране «неактуально» и закрывается кнопкой (POST /creditors/close-stale)
             "stale": stale,
+            "looks_done": looks_done,
             "items": rows,
             "total_owed": round(sum(r["total"] or 0 for r in debt_rows), 2),
             "total_paid": round(sum(r["fact"] for r in debt_rows), 2),

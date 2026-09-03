@@ -33,21 +33,24 @@ from obligations import recognized as _recognized
 router = APIRouter()
 
 # Знак оборота: +1 — мы должны больше, −1 — наш долг гасится, 0 — справка.
-KIND_SIGN = {"accrual": 1, "payment": -1, "third_party": -1, "offset": -1, "adjust": 1,
+KIND_SIGN = {"accrual": 1, "payment": -1, "advance": -1, "third_party": -1, "offset": -1, "adjust": 1,
              "accepted": 0}
 KIND_LABELS = {
     "accrual":     "Начислено",
     "payment":     "Выплачено",
+    "advance":     "Аванс",
     "third_party": "Оплачено за него",
     "offset":      "Зачёт",
     "adjust":      "Корректировка",
     "accepted":    "Принято, не оплачено",
 }
-# Виды, которые можно завести руками (POST /entries). «accepted» сюда не входит:
-# это не оборот, а справочная строка, и master_ledger.kind под CHECK без неё.
-MANUAL_KINDS = tuple(k for k in KIND_SIGN if k != "accepted")
-# purpose расходов, относящихся к лицевому счёту, а не к заказам
-LEDGER_PURPOSES = ("contractor_pay", "contractor_third_party")
+# Виды, которые можно завести руками (POST /entries). «accepted» и «advance» сюда
+# не входят: accepted — справочная строка, advance — производный вид от расхода
+# purpose=contractor_advance (кнопка «Выдать аванс»); master_ledger.kind под CHECK
+# без них обоих, и ручная строка упала бы в 500.
+MANUAL_KINDS = tuple(k for k in KIND_SIGN if k not in ("accepted", "advance"))
+# purpose расходов, относящихся к лицевому счёту, а не к заказам — один список
+from routers.general_expenses import LEDGER_PURPOSES  # noqa: E402
 
 # A1 (ТЗ 24.08.2026): расход по заказу — это «работа принята». Двинул ли он деньги
 # мастеру, говорит expenses.settled_by. Движение по лицевому счёту рождают только
@@ -215,8 +218,10 @@ def _build_entries(creditors: list[dict], expenses: list[dict], manual: list[dic
         settled = e.get("settled_by")
         if purpose == "contractor_third_party":
             kind = "third_party"        # расход вне заказа: мы заплатили за мастера
+        elif purpose == "contractor_advance":
+            kind = "advance"            # деньги вперёд под будущую работу (ТЗ 03.09.2026)
         elif purpose == "contractor_pay":
-            kind = "payment"            # расход вне заказа: выдали аванс деньгами
+            kind = "payment"            # расход вне заказа: выплата мастеру
         else:
             # Расход по заказу. Двинул ли он деньги — решает settled_by (A1).
             kind = SETTLED_KIND.get(settled, "payment")
@@ -277,11 +282,25 @@ def _build_entries(creditors: list[dict], expenses: list[dict], manual: list[dic
 def _totals(entries: list[dict]) -> dict:
     def s(*kinds):
         return round(sum(e["amount"] for e in entries if e["kind"] in kinds), 2)
+    # Признак настоящего аванса: явная выплата вперёд (advance) либо принятая работа,
+    # закрытая авансом (accepted с settled_by=advance). Минус без этого — дырка в
+    # разноске («выплачено, работа не заведена»), а не деньги, которые нам должны.
+    advance_evidence = any(e["kind"] == "advance" for e in entries) or any(
+        e["kind"] == "accepted" and e.get("settled_by") == "advance" for e in entries)
+    balance = round(sum(e["effect"] for e in entries), 2)
+    if balance > 0.01:
+        state = "we_owe"
+    elif balance < -0.01:
+        state = "advance" if advance_evidence else "unallocated"
+    else:
+        state = "settled"
     return {
         "accrued": s("accrual"),
         # Из начисленного — план открытых строк смет (прикидка, не сверенный долг).
         "plan_open": round(sum(e["amount"] for e in entries if e["kind"] == "accrual" and e.get("plan")), 2),
         "paid": s("payment"),
+        "advance": s("advance"),
+        "state": state,
         "third_party": s("third_party"),
         "offset": s("offset"),
         "adjust": round(sum(e["effect"] for e in entries if e["kind"] == "adjust"), 2),
@@ -344,9 +363,9 @@ def balances(date_to: Optional[str] = None,
             if date_to:
                 entries = [e for e in entries if (e["date"] or "") <= date_to]
             t = _totals(entries)
-            if nonzero and not entries:
-                continue
-            if nonzero and abs(t["balance"]) < 0.01 and not t["accrued"]:
+            # Нулевое сальдо не показываем вовсе (ТЗ 03.09.2026, п.6): строка
+            # «Сальдо: 0 ₽» занимала экран и читалась как долг.
+            if nonzero and (not entries or abs(t["balance"]) < 0.01):
                 continue
             rows.append({**{k: m[k] for k in ("id", "name", "role", "status")},
                          "master_id": m["id"], **t, "entries_count": len(entries)})
@@ -354,8 +373,12 @@ def balances(date_to: Optional[str] = None,
         conn.close()
     rows.sort(key=lambda r: -abs(r["balance"]))
     return {"items": rows, "count": len(rows), "date_to": date_to,
-            "we_owe": round(sum(r["balance"] for r in rows if r["balance"] > 0), 2),
-            "they_owe": round(-sum(r["balance"] for r in rows if r["balance"] < 0), 2)}
+            "we_owe": round(sum(r["balance"] for r in rows if r["state"] == "we_owe"), 2),
+            # «нам должны» — только настоящие авансы; минус без признака аванса —
+            # «требует разноски», в деньги не идёт
+            "they_owe": round(-sum(r["balance"] for r in rows if r["state"] == "advance"), 2),
+            "unallocated_total": round(-sum(r["balance"] for r in rows if r["state"] == "unallocated"), 2),
+            "unallocated_count": sum(1 for r in rows if r["state"] == "unallocated")}
 
 
 class EntryIn(BaseModel):
@@ -591,7 +614,7 @@ def contractor_pay(body: ContractorPayIn):
         fin_id = body.tx_id if body.source == "bank" else None
         zen_id = body.tx_id if body.source == "zen" else None
 
-    purpose = "contractor_third_party" if body.kind == "third_party" else "contractor_pay"
+    purpose = "contractor_third_party" if body.kind == "third_party" else "contractor_advance"
     conn = get_production()
     try:
         master = _master(conn, body.master_id)
@@ -671,6 +694,7 @@ def master_card(master_id: str,
 
     totals = [row("accrued", "Начислено за работы", "")]
     for key, label, hint in (("paid", "Выплачено деньгами", None),
+                             ("advance", "Выдано авансом", "деньги вперёд под работу"),
                              ("third_party", "Оплачено за него", "перевод третьему лицу"),
                              ("offset", "Зачёт", "закрыто встречным обязательством")):
         if d.get(key):

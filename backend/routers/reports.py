@@ -21,7 +21,8 @@ MONTHS_RU = ["январь", "февраль", "март", "апрель", "ма
 # Общие траты вне заказов: purpose расхода → как называть в карточке.
 GENERAL_PURPOSES = {"overhead": "Накладные расходы", "stock": "Закупка в запас",
                     "sample": "Образцы и пробы",
-                    "contractor_pay": "Авансы подрядчикам",
+                    "contractor_pay": "Выплаты подрядчикам",
+                    "contractor_advance": "Авансы подрядчикам",
                     "contractor_third_party": "Оплачено за подрядчиков"}
 CAT_LABELS = {"material": "Материалы", "work": "Работы",
               "delivery": "Доставка", "other": "Прочее"}
