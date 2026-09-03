@@ -1697,6 +1697,42 @@ def ensure_order_status_check_schema():
         conn.close()
 
 
+def ensure_estimate_lines_internal_schema():
+    """estimate_lines.internal (ТЗ 03.09.2026, п.3): строка без получателя денег —
+    резерв, наценка, округление. В себестоимость и план-факт входит, обязательства
+    при утверждении не рождает (obligations.has_payee). Копировать во всех INSERT
+    строк — колонки перечислены явно."""
+    conn = get_production()
+    try:
+        info = conn.execute("PRAGMA table_info(estimate_lines)").fetchall()
+        if not info:
+            return
+        if "internal" not in {r[1] for r in info}:
+            conn.execute("ALTER TABLE estimate_lines ADD COLUMN internal INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_creditors_repoint_schema():
+    """creditors.prev_estimate_item_id / prev_estimate_line_id — с какой строки
+    предыдущей версии сметы обязательство перенесла новая (estimates.repoint_obligations,
+    ТЗ 03.09.2026 п.8); по ним unapprove возвращает строку назад. Вызывать ПОСЛЕ
+    ensure_creditors_constraints_schema (пересборка таблицы собирает колонки из PRAGMA)."""
+    conn = get_production()
+    try:
+        info = conn.execute("PRAGMA table_info(creditors)").fetchall()
+        if not info:
+            return
+        existing = {r[1] for r in info}
+        for col in ("prev_estimate_item_id TEXT", "prev_estimate_line_id TEXT"):
+            if col.split()[0] not in existing:
+                conn.execute(f"ALTER TABLE creditors ADD COLUMN {col}")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_creditors_close_schema():
     """След закрытия обязательства: когда и почему (ТЗ обязательств 04.08.2026).
 

@@ -172,7 +172,10 @@ export function CalcRow({
     const contractor = masters.find((m: any) => m.id === line.master_id)?.name || line.contractor_name || "";
     return (
       <div style={{ display: "grid", gridTemplateColumns: cols(withContractor), gap: 8, alignItems: "center", padding: "6px 0", borderBottom: "1px solid #F2EFE9" }}>
-        <div style={{ fontSize: 12, color: "#1A1A1A" }}>{line.title || "—"}</div>
+        <div style={{ fontSize: 12, color: "#1A1A1A" }}>
+          {line.title || "—"}
+          {!!line.internal && <span title="Внутренняя строка: в себестоимости есть, обязательства не рождает" style={{ marginLeft: 6, fontSize: 9, color: "#B8860B" }}>внутр.</span>}
+        </div>
         <div style={numCell}>{line.qty ?? "—"}</div>
         <div style={{ fontSize: 11, color: "#6B6355" }}>{line.unit || ""}</div>
         <div style={numCell}>{line.unit_price ? fmtNum(line.unit_price) : "—"}</div>
@@ -185,8 +188,10 @@ export function CalcRow({
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: cols(withContractor), gap: 8, alignItems: "center", padding: "6px 0", borderBottom: "1px solid #F2EFE9" }}>
-      {/* Наименование */}
-      <div style={{ fontSize: 12, color: "#1A1A1A" }}>
+      {/* Наименование. «внутр.» — резерв/наценка: в себестоимость входит,
+          обязательства при утверждении не рождает (ТЗ 03.09.2026, п.3). */}
+      <div style={{ fontSize: 12, color: "#1A1A1A", display: "flex", alignItems: "center", gap: 6 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
         {isMaterial && withAutocomplete && materialsFetch ? (
           <MaterialTitle
             value={line.title}
@@ -203,6 +208,15 @@ export function CalcRow({
           />
         ) : (
           <EditableText value={line.title} placeholder="Наименование" onSave={v => onPatch({ title: v })} />
+        )}
+        </div>
+        {withContractor && (
+          <button type="button" onClick={() => onPatch({ internal: !line.internal })}
+            title={line.internal ? "Внутренняя строка (резерв, наценка): обязательства не рождает. Снять?" : "Пометить внутренней: резерв, наценка, округление — никому не должны"}
+            style={{ fontSize: 9, padding: "1px 5px", border: `1px solid ${line.internal ? "#B8860B" : "#EDEBE6"}`,
+                     color: line.internal ? "#B8860B" : "#C8C0B0", background: "none", cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>
+            внутр.
+          </button>
         )}
       </div>
       {/* Кол-во */}

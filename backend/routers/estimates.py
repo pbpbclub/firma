@@ -309,6 +309,10 @@ def _approve_set(conn, set_id: str) -> dict:
     conn.execute("UPDATE estimate_sets SET is_primary = 0 WHERE order_id = ?", (es["order_id"],))
     conn.execute("UPDATE estimate_sets SET is_primary = 1 WHERE id = ?", (set_id,))
     _sync_order_from_set(conn, set_id)
+    # Обязательства предыдущей версии — перенести на совпавшие строки этой
+    # (ТЗ 03.09.2026, п.8): иначе заказ получал второй комплект, а оплаченная
+    # часть начислялась в лицевом счёте дважды. Несовпавшие — закрыть.
+    repointed = repoint_obligations(conn, es)
     # Обязательства по строкам — чтобы разноска сразу могла привязывать оплату
     # к плановым позициям. Идемпотентно (дедуп по estimate_line_id).
     obligations = _gen_obligations(conn, es)
@@ -346,6 +350,7 @@ def _approve_set(conn, set_id: str) -> dict:
         "cost_before": (before["cost_plan"] or 0) if before else 0,
         "cost_after": (after["cost_plan"] or 0) if after else 0,
         "obligations": obligations,
+        "repointed": repointed,
         "superseded": superseded,
         "learned": learned,
     }
@@ -484,6 +489,7 @@ class LineCreate(BaseModel):
     material_code: Optional[str] = None
     price_supplier: Optional[str] = None
     price_date: Optional[str] = None
+    internal: bool = False        # резерв/наценка: в себестоимость да, в обязательства нет
 
 
 class LineUpdate(BaseModel):
@@ -499,6 +505,7 @@ class LineUpdate(BaseModel):
     material_code: Optional[str] = None
     price_supplier: Optional[str] = None
     price_date: Optional[str] = None
+    internal: Optional[bool] = None
     no_learn: Optional[bool] = None   # true → не писать learned-ставку (цена «только в эту смету»)
 
 
@@ -706,6 +713,37 @@ def unapprove_set(set_id: str, body: Optional[UnapproveIn] = None):
             raise HTTPException(status_code=409, detail="Смета не утверждена — отменять нечего")
         oid = es["order_id"]
 
+        # Сначала вернуть то, что утверждение ЭТОЙ сметы перенесло с предшественниц
+        # (repoint_obligations): строка едет на prev_*, план — от старой строки;
+        # закрытые как superseded_estimate — переоткрыть. Только потом решать
+        # судьбу обязательств, оставшихся у этой сметы.
+        restoring = [r["id"] for r in conn.execute(
+            "SELECT id FROM estimate_sets WHERE superseded_by = ?", (set_id,)).fetchall()]
+        restored_obl = reopened_obl = 0
+        if restoring:
+            rh = ",".join("?" * len(restoring))
+            for c in conn.execute(f"""
+                SELECT c.id, c.prev_estimate_item_id, c.prev_estimate_line_id,
+                       COALESCE(el.line_total, ei.cost_total) AS prev_total
+                  FROM creditors c
+                  LEFT JOIN estimate_lines el ON el.id = c.prev_estimate_line_id
+                  JOIN estimate_items ei ON ei.id = c.prev_estimate_item_id
+                 WHERE ei.set_id IN ({rh})""", restoring).fetchall():
+                conn.execute(
+                    """UPDATE creditors SET estimate_item_id = ?, estimate_line_id = ?,
+                              total = COALESCE(?, total), amount_plan = COALESCE(?, amount_plan),
+                              prev_estimate_item_id = NULL, prev_estimate_line_id = NULL
+                        WHERE id = ?""",
+                    (c["prev_estimate_item_id"], c["prev_estimate_line_id"], c["prev_total"], c["prev_total"], c["id"]))
+                restored_obl += 1
+            reopened_obl = conn.execute(f"""
+                UPDATE creditors SET status = 'open', closed_at = NULL, closed_reason = NULL
+                 WHERE status = 'closed' AND closed_reason = 'superseded_estimate'
+                   AND id IN (SELECT c.id FROM creditors c
+                                LEFT JOIN estimate_lines el ON el.id = c.estimate_line_id
+                                JOIN estimate_items ei ON ei.id = COALESCE(el.item_id, c.estimate_item_id)
+                               WHERE ei.set_id IN ({rh}))""", restoring).rowcount
+
         # Что стало с обязательствами этой сметы. Признак «трогали деньгами» — тот же,
         # что в обязательствах вообще: paid или покрытие расходом (obligations.coverage).
         from obligations import coverage as _coverage
@@ -754,10 +792,12 @@ def unapprove_set(set_id: str, body: Optional[UnapproveIn] = None):
         plan = _resync_order_plan(conn, oid) if oid else {}
         audit(conn, "estimate", set_id, "update",
               f"Рассогласование: смет поднято {restored}, обязательств удалено {len(drop)}, "
-              f"оставлено с фактом {len(keep)}", before_row=es)
+              f"оставлено с фактом {len(keep)}, возвращено на прежние строки {restored_obl}, "
+              f"переоткрыто {reopened_obl}", before_row=es)
         conn.commit()
         return {"ok": True, "restored_sets": restored,
                 "obligations_deleted": len(drop), "obligations_kept": keep,
+                "obligations_restored": restored_obl, "obligations_reopened": reopened_obl,
                 "plan": plan}
     finally:
         conn.close()
@@ -904,12 +944,13 @@ def new_set_version(set_id: str):
                 conn.execute(
                     """INSERT INTO estimate_lines (id, item_id, type, title, qty, unit, unit_price, line_total,
                                                    material_id, sort_order, master_id, contractor_name, work_type_id,
-                                                   material_code, price_supplier, price_date, created_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                                   material_code, price_supplier, price_date, internal, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (str(uuid.uuid4()), new_item_id, ln["type"], ln["title"], ln["qty"], ln["unit"],
                      ln["unit_price"], ln["line_total"], ln["material_id"], ln["sort_order"],
                      ln["master_id"], ln["contractor_name"], ln["work_type_id"],
-                     ln["material_code"], ln["price_supplier"], ln["price_date"], now)
+                     ln["material_code"], ln["price_supplier"], ln["price_date"],
+                     ln["internal"] if "internal" in ln.keys() else 0, now)
                 )
         conn.commit()
         return dict(conn.execute("SELECT * FROM estimate_sets WHERE id = ?", (new_id,)).fetchone())
@@ -1183,11 +1224,11 @@ def add_line(item_id: str, body: LineCreate):
             if wt:
                 title = wt["name"]
         conn.execute(
-            """INSERT INTO estimate_lines (id, item_id, type, title, qty, unit, unit_price, line_total, sort_order, master_id, contractor_name, work_type_id, material_code, price_supplier, price_date, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO estimate_lines (id, item_id, type, title, qty, unit, unit_price, line_total, sort_order, master_id, contractor_name, work_type_id, material_code, price_supplier, price_date, internal, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (line_id, item_id, body.type, title, body.qty, body.unit, unit_price, line_total,
              body.sort_order, body.master_id, body.contractor_name, body.work_type_id,
-             body.material_code, price_supplier, price_date, _now())
+             body.material_code, price_supplier, price_date, int(bool(body.internal)), _now())
         )
         _recalc_item(conn, item_id)
         _touch_set(conn, item_id)
@@ -1210,6 +1251,8 @@ def update_line(line_id: str, body: LineUpdate):
         # как NULL — можно ОТВЯЗАТЬ мастера/вид работ/материал, а не только заменить.
         fields = body.model_dump(exclude_unset=True)
         no_learn = bool(fields.pop("no_learn", False) or False)   # не колонка — только флаг поведения
+        if "internal" in fields:
+            fields["internal"] = int(bool(fields["internal"]))
         # If work_type chosen, sync title to its name
         if fields.get("work_type_id"):
             wt = conn.execute("SELECT name FROM work_types WHERE id = ?", (fields["work_type_id"],)).fetchone()
@@ -1363,6 +1406,130 @@ def from_catalog(body: FromCatalog):
 _LINE_TYPE_RU = {"material": "Материал", "labor": "Работа", "service": "Услуга", "delivery": "Доставка", "other": "Прочее"}
 
 
+def _creditor_name_for_line(conn, item, line) -> tuple:
+    """(name, description) обязательства по строке сметы — одна формула на
+    генерацию и на перенос между версиями (repoint_obligations)."""
+    master_id = line["master_id"] if line["master_id"] else None
+    contractor = line["contractor_name"] or ""
+    if not master_id and contractor:
+        master_id = _find_or_create_master(conn, contractor)
+    if not contractor and master_id:
+        m = conn.execute("SELECT name FROM masters WHERE id = ?", (master_id,)).fetchone()
+        contractor = m["name"] if m else ""
+    type_label = _LINE_TYPE_RU.get(line["type"] or "other", "Прочее")
+    name = contractor or f"{type_label}: {line['title'] or 'Без названия'}"
+    description = f"{item['title'] or ''} — {line['title'] or type_label}".strip(" —")
+    return name, description
+
+
+def _norm_title(s) -> str:
+    return " ".join((s or "").lower().split())
+
+
+def repoint_obligations(conn, es) -> dict:
+    """Перенести обязательства сметы-предшественницы на новую версию (ТЗ 03.09.2026, п.8).
+
+    new-version даёт строкам новые id, дедуп _gen_obligations по estimate_line_id
+    не срабатывает, и заказ получал ВТОРОЙ комплект обязательств; при этом
+    оплаченная часть старой строки (paid, расход с creditor_id) начислялась в
+    лицевом счёте дважды. Просто закрыть старые нельзя по той же причине.
+
+    Совпадение: (позиция, тип строки, название) жадно по порядку, фолбэк —
+    (позиция, тип, сумма). Совпало → та же строка creditors едет на новые id
+    (total/amount_plan/name/description — от новой строки; paid, tx, связи
+    расходов — как были; prev_* помнит, откуда). Не совпало → закрыть
+    superseded_estimate. Строки без получателя (has_payee) целями не бывают."""
+    from obligations import has_payee, is_placeholder, _close_rows
+    sid, oid = es["id"], es["order_id"]
+    prev = [r["id"] for r in conn.execute(
+        "SELECT id FROM estimate_sets WHERE superseded_by = ? AND order_id = ?", (sid, oid)).fetchall()]
+    if not prev:
+        return {"moved": 0, "closed": 0}
+    holes = ",".join("?" * len(prev))
+    old = [dict(r) for r in conn.execute(f"""
+        SELECT c.*, ei.title AS item_title, el.type AS line_type, el.title AS line_title,
+               el.line_total AS old_line_total
+          FROM creditors c
+          LEFT JOIN estimate_lines el ON el.id = c.estimate_line_id
+          JOIN estimate_items ei ON ei.id = COALESCE(el.item_id, c.estimate_item_id)
+         WHERE ei.set_id IN ({holes}) AND c.status IN ('open', 'partial')
+           AND (c.kind IS NULL OR c.kind != 'fixed')
+         ORDER BY ei.sort_order, el.sort_order""", prev).fetchall()]
+    if not old:
+        return {"moved": 0, "closed": 0}
+    taken = {r["estimate_line_id"] for r in conn.execute(
+        "SELECT estimate_line_id FROM creditors WHERE estimate_line_id IS NOT NULL").fetchall()}
+    taken_items = {r["estimate_item_id"] for r in conn.execute(
+        "SELECT estimate_item_id FROM creditors WHERE estimate_line_id IS NULL AND estimate_item_id IS NOT NULL").fetchall()}
+    by_title: dict = {}
+    by_sum: dict = {}
+    by_item: dict = {}
+    for item in conn.execute("SELECT * FROM estimate_items WHERE set_id = ? ORDER BY sort_order", (sid,)).fetchall():
+        lines = conn.execute("SELECT * FROM estimate_lines WHERE item_id = ? ORDER BY sort_order", (item["id"],)).fetchall()
+        if not lines:
+            if item["id"] not in taken_items and not is_placeholder(item["title"]):
+                by_item.setdefault(_norm_title(item["title"]), []).append(item)
+            continue
+        for ln in lines:
+            if ln["id"] in taken or not has_payee(ln):
+                continue
+            t = _norm_title(item["title"])
+            by_title.setdefault((t, ln["type"], _norm_title(ln["title"])), []).append((item, ln))
+            by_sum.setdefault((t, ln["type"], round(ln["line_total"] or 0, 2)), []).append((item, ln))
+    used = set()
+
+    def pop(bucket, key):
+        for cand in bucket.get(key, []):
+            lid = cand[1]["id"] if isinstance(cand, tuple) else cand["id"]
+            if lid not in used:
+                used.add(lid)
+                return cand
+        return None
+
+    moved, closed = 0, 0
+    for c in old:
+        t = _norm_title(c["item_title"])
+        hit = None
+        if c["estimate_line_id"]:
+            hit = pop(by_title, (t, c["line_type"], _norm_title(c["line_title"]))) \
+                or pop(by_sum, (t, c["line_type"], round(c["old_line_total"] or 0, 2)))
+            if hit:
+                item, ln = hit
+                total = round(ln["line_total"] or 0, 2)
+                name, description = _creditor_name_for_line(conn, item, ln)
+                new_item, new_line = item["id"], ln["id"]
+        else:
+            item = pop(by_item, t)
+            hit = item
+            if hit:
+                total = round(item["cost_total"] or 0, 2)
+                name, description = c["name"], f"Смета: {es['title'] or es['id']}"
+                new_item, new_line = item["id"], None
+        if hit:
+            conn.execute(
+                """UPDATE creditors SET estimate_item_id = ?, estimate_line_id = ?, total = ?, amount_plan = ?,
+                          name = ?, description = ?,
+                          prev_estimate_item_id = ?, prev_estimate_line_id = ?
+                    WHERE id = ?""",
+                (new_item, new_line, total, total, name, description,
+                 c["estimate_item_id"], c["estimate_line_id"], c["id"]))
+            conn.execute("""UPDATE creditors SET status = 'closed', closed_at = datetime('now'),
+                                   closed_reason = COALESCE(closed_reason, 'paid_in_full')
+                             WHERE id = ? AND COALESCE(total, 0) > 0 AND COALESCE(paid, 0) >= COALESCE(total, 0) - 0.01""",
+                         (c["id"],))
+            audit(conn, "creditor", c["id"], "update",
+                  f"Перенесено на новую версию сметы «{es['title'] or es['id']}»: «{name}» план {(c['total'] or 0):g} → {total:g} ₽",
+                  before_row=c)
+            moved += 1
+        else:
+            before = _close_rows(conn, [c["id"]], "superseded_estimate")
+            audit(conn, "creditor", c["id"], "close",
+                  f"Закрыто: строки нет в новой версии сметы «{es['title'] or es['id']}» — «{c['name']}» {(c['total'] or 0):g} ₽",
+                  before_row=before.get(c["id"]))
+            closed += 1
+    return {"moved": moved, "closed": closed}
+
+
 def _find_or_create_master(conn, name: str) -> str:
     """Find master by name or create new one, return master id."""
     row = conn.execute("SELECT id FROM masters WHERE name = ? COLLATE NOCASE", (name,)).fetchone()
@@ -1391,11 +1558,13 @@ def _gen_obligations(conn, es) -> dict:
     # вместо 230 200, а чистая ушла в −181 335.
     if (es["payment_type"] or "") == "transit":
         return {"created": 0, "skipped": 0, "reason": "transit"}
+    from obligations import has_payee, is_placeholder
     items = conn.execute(
         "SELECT * FROM estimate_items WHERE set_id = ? ORDER BY sort_order", (es["id"],)
     ).fetchall()
     created = 0
     skipped = 0
+    skipped_internal = 0   # строки без получателя денег: резерв, наценка (ТЗ 03.09.2026, п.3)
     for item in items:
         lines = conn.execute(
             "SELECT * FROM estimate_lines WHERE item_id = ? ORDER BY sort_order", (item["id"],)
@@ -1409,16 +1578,10 @@ def _gen_obligations(conn, es) -> dict:
                 if existing:
                     skipped += 1
                     continue
-                master_id = line["master_id"] if line["master_id"] else None
-                contractor = line["contractor_name"] or ""
-                if not master_id and contractor:
-                    master_id = _find_or_create_master(conn, contractor)
-                if not contractor and master_id:
-                    m = conn.execute("SELECT name FROM masters WHERE id = ?", (master_id,)).fetchone()
-                    contractor = m["name"] if m else ""
-                type_label = _LINE_TYPE_RU.get(line["type"] or "other", "Прочее")
-                name = contractor or f"{type_label}: {line['title'] or 'Без названия'}"
-                description = f"{item['title'] or ''} — {line['title'] or type_label}".strip(" —")
+                if not has_payee(line):
+                    skipped_internal += 1
+                    continue
+                name, description = _creditor_name_for_line(conn, item, line)
                 amount = round(line["line_total"] or 0, 2)
                 cid = str(uuid.uuid4())
                 conn.execute(
@@ -1437,6 +1600,10 @@ def _gen_obligations(conn, es) -> dict:
             if existing:
                 skipped += 1
                 continue
+            if is_placeholder(item["title"]):
+                # «Позиция 2», «Прочее» — имя-заглушка, а не контрагент (п.9)
+                skipped_internal += 1
+                continue
             amount = round(item["cost_total"] or 0, 2)
             cid = str(uuid.uuid4())
             conn.execute(
@@ -1444,11 +1611,11 @@ def _gen_obligations(conn, es) -> dict:
                    (id, name, total, paid, description, order_id,
                     estimate_item_id, amount_plan, status)
                    VALUES (?, ?, ?, 0, ?, ?, ?, ?, 'open')""",
-                (cid, item["title"] or "Без названия", amount,
+                (cid, item["title"], amount,
                  f"Смета: {es['title'] or es['id']}", order_id, item["id"], amount),
             )
             created += 1
-    return {"created": created, "skipped": skipped}
+    return {"created": created, "skipped": skipped, "skipped_internal": skipped_internal}
 
 
 @router.post("/sets/{set_id}/create-obligations")

@@ -22,6 +22,7 @@ L3 отвечает «похоже, тот же» — этого достато�
 заказа: добавь L3 в _plan_fact — и `creditors.paid` перестанет попадать в факт,
 себестоимость просядет, маржа вырастет на пустом месте.
 """
+import re
 from typing import Optional
 
 from routers.masters import _norm_name
@@ -51,6 +52,33 @@ CLOSE_REASONS = ("order_completed", "order_cancelled", "order_archived", "manual
 # Выплаты лицевого счёта, которые могут гасить обязательство. accrual/adjust —
 # начисления, они покрытием не бывают.
 _LEDGER_PAY_KINDS = ("payment", "offset", "third_party")
+
+
+# Имя-заглушка: «Позиция», «Прочее: Сварка», «Материал: труба» — ярлык плана, не
+# контрагент. Обязательство с таким именем руками не заводится (ТЗ 03.09.2026, п.9).
+PLACEHOLDER_RE = re.compile(
+    r"^(позиция|прочее|без названия|материал|работа|услуга|доставка)(\s*\d+)?(\s*:.*)?$", re.I)
+
+
+def is_placeholder(name) -> bool:
+    n = (name or "").strip()
+    return not n or bool(PLACEHOLDER_RE.match(n))
+
+
+def has_payee(line) -> bool:
+    """Есть ли у строки сметы получатель денег (ТЗ 03.09.2026, п.3). Резерв
+    5/10/15 %, наценка, округление — подушка внутри цены, мы её никому не должны:
+    в себестоимость входит, обязательства не рождает. Признак — явный флаг
+    internal либо тип service/other без мастера, подрядчика и кода материала.
+    Материал, работа и доставка получателя подразумевают всегда (кто-то продаст
+    и сделает), даже если он ещё не назван. Фильтр в Python: lower() SQLite
+    кириллицу не сворачивает."""
+    d = line if isinstance(line, dict) else dict(line)
+    if d.get("internal"):
+        return False
+    if d.get("master_id") or (d.get("contractor_name") or "").strip() or d.get("material_code"):
+        return True
+    return (d.get("type") or "material") in ("material", "labor", "delivery", "work")
 
 
 def _payee(row) -> str:

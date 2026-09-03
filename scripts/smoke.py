@@ -44,11 +44,11 @@ REQUIRED_COLUMNS = {
     "expenses": ["creditor_id", "finance_tx_id", "zenmoney_tx_id", "payment_source", "master_id",
                  # траты без заказа: запас / образцы / общехоз (01.08.2026)
                  "purpose", "stock_parent_id", "updated_at", "match_status", "matched_by"],
-    "creditors": ["estimate_line_id", "amount_plan", "kind", "updated_at"],
+    "creditors": ["estimate_line_id", "amount_plan", "kind", "updated_at", "closed_reason", "prev_estimate_line_id"],
     # клиент ↔ подрядчик: один человек в двух картотеках (мердж Пинчука, 26.07)
     "customers": ["telegram", "whatsapp", "master_id", "updated_at"],
     # A9: снимок применённой ставки в строке (волна ЛЕСКОВО-1)
-    "estimate_lines": ["applied_rate", "rate_scheme", "rate_date", "updated_at"],
+    "estimate_lines": ["applied_rate", "rate_scheme", "rate_date", "updated_at", "internal"],
     "catalog_item_lines": ["applied_rate", "rate_scheme", "rate_date"],
     "orders": ["reserved_amount", "reserve_released_at", "discount", "discount_note", "brand_id"],
     # волна 2: журнал изменений и история ставок — целые таблицы

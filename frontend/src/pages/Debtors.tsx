@@ -957,7 +957,7 @@ function CreditorsTab() {
   const [linkItem, setLinkItem] = useState<any>(null);
   // Какую плашку «закрыть по …» открыли: завершённые (в «Мы должны»), отменённые
   // и архивные (во вкладке «План»). Одно состояние, не три булевых.
-  const [staleKind, setStaleKind] = useState<"completed" | "cancelled" | "archived" | null>(null);
+  const [staleKind, setStaleKind] = useState<"completed" | "cancelled" | "archived" | "internal" | null>(null);
   const [bulkError, setBulkError] = useState<string | null>(null);
   const [contragentFilter, setContragentFilter] = useState("");
   const [descFilter, setDescFilter] = useState("");
@@ -1066,17 +1066,22 @@ function CreditorsTab() {
       intro: "Заказы отменены, подрядчикам по ним ничего не заказано, а план сметы всё ещё начисляется в их сальдо. Закрыть — снять его из «Расчётов с подрядчиками». Сними галочку, если реально должны." },
     archived: { eyebrow: "ЗАКРЫТЬ ПО АРХИВНЫМ", label: "архивным",
       intro: "Заказы в архиве, а обязательства по их сметам открыты и начисляются подрядчикам полным планом. Закрыть — снять из сальдо; вернёшь заказ из архива — переоткроются." },
+    // Резерв 5/10/15 %, наценка, округление — подушка внутри цены, никому не должны.
+    // Утверждение таких обязательств больше не создаёт; эти — из старых смет.
+    internal: { eyebrow: "ВНУТРЕННИЕ СТРОКИ СМЕТ", label: "внутренним строкам (резерв, наценка)",
+      intro: "Строки без получателя денег — резерв на непредвиденное, наценка, округление. В себестоимости остаются, а обязательством быть не должны: их никто не ждёт. Закрыть — убрать из плана трат; сальдо подрядчиков не изменится." },
   };
-  const staleKinds = showUnstarted ? ["completed", "cancelled", "archived"] : ["completed"];
+  const staleKinds = showUnstarted ? ["completed", "cancelled", "archived", "internal"] : ["completed", "internal"];
   const toUnpaid = (c: any): Unpaid => ({
     id: c.id, name: c.description || c.name, plan: c.amount_plan ?? c.total, fact: c.fact ?? c.paid,
     debt: c.debt, ambiguous: c.ambiguous, recognized: c.recognized, recognized_amount: c.recognized_amount,
     order: c.order_number ? `${c.order_number} · ${c.order_title}` : undefined,
   });
   const staleItems: Unpaid[] = staleKind
-    ? allItems.filter((c: any) => c.stale_kind === staleKind && (c.status === "open" || c.status === "partial")).map(toUnpaid)
+    ? allItems.filter((c: any) => (staleKind === "internal" ? c.no_payee && !(c.fact > 0) : c.stale_kind === staleKind)
+                                  && (c.status === "open" || c.status === "partial")).map(toUnpaid)
     : [];
-  const STALE_REASON: Record<string, string> = { completed: "order_completed", cancelled: "order_cancelled", archived: "order_archived" };
+  const STALE_REASON: Record<string, string> = { completed: "order_completed", cancelled: "order_cancelled", archived: "order_archived", internal: "internal" };
   const selectedItems: Unpaid[] = allItems.filter((c: any) => selectedIds.has(String(c.id))).map(toUnpaid);
 
   if (isLoading) return <Loading />;
@@ -1158,6 +1163,19 @@ function CreditorsTab() {
         </span>
       </div>
 
+      {(data?.double_sets?.length ?? 0) > 0 && (
+        <div style={{ margin: isMobile ? "10px 16px 0" : "12px 28px 0", padding: "11px 14px", background: "#FBF3F3",
+                      borderLeft: "3px solid #8B3A3A", fontSize: 12, color: "#6B6355", lineHeight: 1.5 }}>
+          <b style={{ color: "#8B3A3A" }}>Двойной комплект обязательств:</b> открытые строки одного заказа пришли из разных
+          смет — проверить, какая версия живая.
+          {data.double_sets.map((d: any) => (
+            <div key={d.order_id} style={{ marginTop: 4 }}>
+              <OrderLink id={d.order_id}>{d.title}</OrderLink>
+              {": "}{d.sets.map((s: any) => `${s.title || "без названия"} (${s.status}, ${s.count} на ${fmt(s.total)})`).join(" · ")}
+            </div>
+          ))}
+        </div>
+      )}
       {(data?.double_accrual?.length ?? 0) > 0 && (
         <div style={{ margin: isMobile ? "10px 16px 0" : "12px 28px 0", padding: "11px 14px", background: "#FBF3F3",
                       borderLeft: "3px solid #8B3A3A", fontSize: 12, color: "#6B6355", lineHeight: 1.5 }}>
@@ -1296,6 +1314,9 @@ function CreditorsTab() {
                     )}
                     {c.set_title && (
                       <span style={{ marginLeft: 6, color: "#C8C0B0" }} title="Из какой сметы строка">· {c.set_title}</span>
+                    )}
+                    {c.no_payee && (
+                      <span style={{ marginLeft: 6, color: "#B8860B" }} title="Строка сметы без получателя денег: резерв, наценка. Обязательство лишнее — закрой плашкой выше">· без получателя</span>
                     )}
                   </div>
                 )}

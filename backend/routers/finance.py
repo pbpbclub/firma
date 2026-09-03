@@ -816,6 +816,30 @@ class CreditorPatch(BaseModel):
     closed_reason: Optional[str] = None   # obligations.CLOSE_REASONS; без него закрытие = 'manual'
 
 
+def _no_payee(r: dict) -> bool:
+    """Обязательство по строке сметы без получателя денег (obligations.has_payee)."""
+    from obligations import has_payee
+    if not r.get("estimate_line_id") or r.get("line_type") is None:
+        return False
+    return not has_payee({"type": r.get("line_type"), "master_id": r.get("line_master_id"),
+                          "contractor_name": r.get("line_contractor"),
+                          "material_code": r.get("line_material_code"), "internal": r.get("line_internal")})
+
+
+def _internal_open_rows(conn) -> list:
+    """Открытые обязательства по строкам без получателя — по всей базе."""
+    rows = [dict(r) for r in conn.execute("""
+        SELECT c.id, c.order_id, c.name, c.total, c.paid, c.estimate_line_id,
+               o.number AS order_number, o.title AS order_title,
+               el.type AS line_type, el.master_id AS line_master_id, el.contractor_name AS line_contractor,
+               el.material_code AS line_material_code, el.internal AS line_internal
+          FROM creditors c
+          JOIN estimate_lines el ON el.id = c.estimate_line_id
+          LEFT JOIN orders o ON o.id = c.order_id
+         WHERE c.status IN ('open', 'partial') AND (c.kind IS NULL OR c.kind != 'fixed')""").fetchall()]
+    return [r for r in rows if _no_payee(r)]
+
+
 @router.get("/creditors")
 def get_creditors(status: Optional[str] = None, include_unstarted: bool = False):
     """Обязательства = ПЛАН закупок по заказам, не долг (ТЗ фин-агента 03.09.2026).
@@ -840,6 +864,8 @@ def get_creditors(status: Optional[str] = None, include_unstarted: bool = False)
             SELECT c.*, ei.title AS estimate_item_title,
                    es.id AS set_id, es.title AS set_title, es.status AS set_status,
                    es.created_at AS set_created_at,
+                   el.type AS line_type, el.master_id AS line_master_id, el.contractor_name AS line_contractor,
+                   el.material_code AS line_material_code, el.internal AS line_internal,
                    o.number AS order_number, o.title AS order_title, o.status AS order_status,
                    CASE
                      WHEN c.order_id IS NULL                         THEN 'debt'
@@ -859,6 +885,7 @@ def get_creditors(status: Optional[str] = None, include_unstarted: bool = False)
             FROM creditors c
             LEFT JOIN estimate_items ei ON ei.id = c.estimate_item_id
             LEFT JOIN estimate_sets  es ON es.id = ei.set_id
+            LEFT JOIN estimate_lines el ON el.id = c.estimate_line_id
             LEFT JOIN orders         o  ON o.id  = c.order_id
             WHERE 1=1
         """
@@ -905,6 +932,8 @@ def get_creditors(status: Optional[str] = None, include_unstarted: bool = False)
             ms = bound.get(r["id"], [])
             r["master_ids"] = ms
             r["master_id"] = ms[0] if ms else None
+            # Строка без получателя денег (резерв, наценка): обязательство лишнее (п.3)
+            r["no_payee"] = _no_payee(r)
         # items — полный список выбранного среза: по ключу ["creditors"] его читает
         # ExpenseModal (подсказка «это оплата обязательства?») с include_unstarted=1.
         debt_rows = [r for r in rows if r.get("scope") == "debt"]
@@ -943,6 +972,33 @@ def get_creditors(status: Optional[str] = None, include_unstarted: bool = False)
             return {"count": len(rk), "total": round(sum(r["debt"] for r in rk), 2),
                     "orders": sorted(orders.values(), key=lambda x: -x["total"])}
         stale = {k: _stale(k) for k in ("completed", "cancelled", "archived")}
+        # Внутренние строки (резерв, наценка) — обязательства без получателя денег,
+        # рождённые до правила п.3. Закрываются плашкой (close-stale kinds=['internal']).
+        internal_rows = [r for r in _internal_open_rows(conn)
+                         if (r["paid"] or 0) <= 0.01 and cov.get(r["id"], {}).get("covered", 0.0) <= 0.01]
+        io = {}
+        for r in internal_rows:
+            o = io.setdefault(r["order_id"], {"id": r["order_id"], "number": r["order_number"],
+                                              "title": r["order_title"], "count": 0, "total": 0.0})
+            o["count"] += 1; o["total"] = round(o["total"] + (r["total"] or 0), 2)
+        stale["internal"] = {"count": len(internal_rows),
+                             "total": round(sum(r["total"] or 0 for r in internal_rows), 2),
+                             "orders": sorted(io.values(), key=lambda x: -x["total"])}
+        # Двойной комплект: открытые строки одного заказа из РАЗНЫХ смет (п.8) —
+        # ошибка данных, показываем красной плашкой, не суммируем молча.
+        by_o: dict = {}
+        for r in rows:
+            if r["status"] in ("open", "partial") and r.get("order_id") and r.get("set_id"):
+                by_o.setdefault(r["order_id"], {}).setdefault(r["set_id"], []).append(r)
+        double_sets = []
+        for oid_, sets in by_o.items():
+            if len(sets) < 2:
+                continue
+            any_r = next(iter(next(iter(sets.values()))))
+            double_sets.append({"order_id": oid_, "number": any_r["order_number"], "title": any_r["order_title"],
+                                "sets": [{"id": sid_, "title": rs[0]["set_title"], "status": rs[0]["set_status"],
+                                          "count": len(rs), "total": round(sum(x["debt"] for x in rs), 2)}
+                                         for sid_, rs in sets.items()]})
 
         # Подсказка «двойное начисление»: ручная проводка по заказу БЕЗ creditor_id,
         # а в заказе открыта строка на ту же сумму — лицевой счёт считает обе.
@@ -986,6 +1042,7 @@ def get_creditors(status: Optional[str] = None, include_unstarted: bool = False)
             # на экране «неактуально» и закрывается кнопкой (POST /creditors/close-stale)
             "stale": stale,
             "looks_done": looks_done,
+            "double_sets": double_sets,
             "items": rows,
             "total_owed": round(sum(r["total"] or 0 for r in debt_rows), 2),
             "total_paid": round(sum(r["fact"] for r in debt_rows), 2),
@@ -1033,14 +1090,34 @@ def close_stale_obligations(body: CloseStaleIn):
 
     Правила те же: статус каждого заказа перепроверяется здесь (имя ручки —
     не проверка), всё-или-ничего, каждая строка — в журнал со снимком."""
-    from obligations import close_for_order
+    from obligations import close_for_order, _close_rows, coverage
+    want_internal = "internal" in body.kinds
     kinds = [k for k in body.kinds if k in STALE_KINDS]
-    if not kinds or len(kinds) != len(body.kinds):
-        raise HTTPException(status_code=400, detail=f"kinds: непустое подмножество {sorted(STALE_KINDS)}")
+    if (not kinds and not want_internal) or len(kinds) + int(want_internal) != len(body.kinds):
+        raise HTTPException(status_code=400, detail=f"kinds: непустое подмножество {sorted(STALE_KINDS) + ['internal']}")
     conn = get_production()
     try:
         if body.order_ids is not None and not body.order_ids:
             return {"ok": True, "closed": 0, "written_off": 0.0, "by_kind": {}, "nothing_to_close": []}
+        closed, written, by_kind = 0, 0.0, {}
+        if want_internal:
+            # Внутренние строки (резерв, наценка): без получателя денег, без факта.
+            # Причина internal — откат статуса заказа их не переоткрывает.
+            cov = coverage(conn)
+            irows = [r for r in _internal_open_rows(conn)
+                     if (r["paid"] or 0) <= 0.01 and cov.get(r["id"], {}).get("covered", 0.0) <= 0.01
+                     and (body.order_ids is None or r["order_id"] in set(body.order_ids))
+                     and (body.only_ids is None or r["id"] in set(body.only_ids))]
+            before = _close_rows(conn, [r["id"] for r in irows], "internal")
+            for r in irows:
+                audit(conn, "creditor", r["id"], "close",
+                      f"Закрыто как внутренняя строка сметы (без получателя): «{r['name']}» {(r['total'] or 0):g} ₽",
+                      before_row=before.get(r["id"]))
+            closed += len(irows); written = round(written + sum(r["total"] or 0 for r in irows), 2)
+            by_kind["internal"] = {"closed": len(irows), "written_off": round(sum(r["total"] or 0 for r in irows), 2)}
+            if not kinds:
+                conn.commit()
+                return {"ok": True, "closed": closed, "written_off": written, "by_kind": by_kind, "nothing_to_close": []}
         targets = []   # (order_row, reason, label)
         seen = set()
         for kind in kinds:
@@ -1078,7 +1155,6 @@ def close_stale_obligations(body: CloseStaleIn):
                         "error": "Заказ не подходит под выбранный вид закрытия",
                         "skipped": bad, "unknown": [i for i in bad_ids if i not in {b["id"] for b in bad}],
                     })
-        closed, written, by_kind = 0, 0.0, {}
         for o, reason, label in targets:
             res = close_for_order(conn, o["id"], force=True, only_ids=body.only_ids, reason=reason)
             for it in res.get("items", []):
@@ -1161,6 +1237,11 @@ def close_completed_obligations(body: Optional[CloseCompletedIn] = None):
 
 @router.post("/creditors", status_code=201)
 def create_creditor(body: CreditorIn):
+    from obligations import is_placeholder
+    if is_placeholder(body.name):
+        # «Позиция», «Прочее: Сварка» — ярлык плана, не контрагент (ТЗ 03.09.2026, п.9)
+        raise HTTPException(status_code=400,
+                            detail=f"«{body.name}» — не имя контрагента. Укажи, кому должны: мастеру, поставщику, компании")
     conn = get_production()
     try:
         cid = str(uuid.uuid4())
