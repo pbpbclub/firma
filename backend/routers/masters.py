@@ -158,13 +158,11 @@ def list_masters():
 
         # Агрегаты пакетно: по одному запросу на источник, не по запросу на мастера
         # (code_rules: N+1 в списочных эндпоинтах запрещён).
-        # Долг дедупа не требует — считаем сразу агрегатом.
-        debt_by_name = {}
-        for r in conn.execute(
-            """SELECT name,
-                      COALESCE(SUM(CASE WHEN status = 'open' THEN total - paid ELSE 0 END), 0) AS debt
-               FROM creditors GROUP BY name"""):
-            debt_by_name[(r["name"] or "").strip()] = round(r["debt"] or 0, 2)
+        # Долг = сальдо лицевого счёта (ТЗ 03.09.2026: один долг на человека).
+        # Раньше здесь была третья цифра — сумма открытых строк по имени.
+        from routers.ledger import _entries_bulk, _totals
+        bulk = _entries_bulk(conn, rows)
+        debt_by_id = {m["id"]: _totals(bulk.get(m["id"], []))["balance"] for m in rows}
 
         # «Выплачено» дедупится (см. _paid_total) → нужны строки, а не суммы.
         # Обязательства группируем по имени, расходы — по master_id и по supplier.
@@ -201,7 +199,7 @@ def list_masters():
             result.append({
                 **m,
                 "work_type_ids": wt_by_master.get(str(m["id"]), []),
-                "debt": debt_by_name.get(name, 0),
+                "debt": debt_by_id.get(m["id"], 0),
                 "paid_total": paid_total,
                 "pay_label": wf.get("pay_label"),
                 "pay_scheme": wf.get("pay_scheme"),

@@ -1281,7 +1281,7 @@ def _apply_status(conn, row, new_status: str, *, close_obligations: bool = False
     Завершение заказа = расчёты закрыты (решение Юры 04.08.2026). Если остались
     непокрытые остатки, без подтверждения отдаём 409 со списком: план сметы и
     факт расходятся законно, списывать молча нельзя."""
-    from obligations import close_for_order, reopen_for_order
+    from obligations import close_for_order, reopen_for_order, ledger_impact
     out = {}
     was = row["status"]
     # Терминальные статусы закрывают обязательства каждый своей причиной (26.08.2026:
@@ -1298,6 +1298,8 @@ def _apply_status(conn, row, new_status: str, *, close_obligations: bool = False
                 "message": f"По заказу остаются незакрытые обязательства на {res['unpaid_total']:g} ₽",
                 "unpaid_total": res["unpaid_total"],
                 "items": res["items"],
+                # как закрытие отразится на сальдо подрядчиков (ТЗ 03.09.2026)
+                "ledger_delta": ledger_impact(conn, [i["id"] for i in res["items"]], reason),
             })
         how = "завершением" if new_status == "completed" else "отменой"
         for it in res.get("items", []):
@@ -1356,7 +1358,7 @@ def archive_order(order_id: str, body: Optional[ArchiveIn] = None):
     409-подтверждением, что у завершения. До 26.08.2026 архивация была голым
     UPDATE archived=1: строки уходили с экрана «Мы должны», но продолжали
     начисляться в сальдо подрядчика полным планом, и следа в журнале не оставалось."""
-    from obligations import close_for_order
+    from obligations import close_for_order, ledger_impact
     body = body or ArchiveIn()
     conn = get_production()
     try:
@@ -1372,6 +1374,7 @@ def archive_order(order_id: str, body: Optional[ArchiveIn] = None):
                 "code": "obligations_unpaid", "target": "archived",
                 "message": f"По заказу остаются незакрытые обязательства на {res['unpaid_total']:g} ₽",
                 "unpaid_total": res["unpaid_total"], "items": res["items"],
+                "ledger_delta": ledger_impact(conn, [i["id"] for i in res["items"]], "order_archived"),
             })
         for it in res.get("items", []):
             audit(conn, "creditor", it["id"], "close",

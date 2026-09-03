@@ -1469,19 +1469,36 @@ def create_obligations(set_id: str):
 
 @router.delete("/sets/{set_id}/obligations")
 def delete_obligations(set_id: str):
+    """Снести обязательства сметы. Строка, по которой прошли деньги (paid, покрытие
+    расходом или проводкой, ручное начисление), не удаляется никогда — на ней
+    держится факт себестоимости и сальдо мастера (тот же 409, что у
+    DELETE /creditors/{id}). Закрытые строки не трогаем: они — история."""
+    from obligations import coverage, ledger_accruals
     conn = get_production()
     try:
-        item_ids = [r["id"] for r in conn.execute(
-            "SELECT id FROM estimate_items WHERE set_id = ?", (set_id,)
-        ).fetchall()]
-        if not item_ids:
+        es = conn.execute("SELECT order_id FROM estimate_sets WHERE id = ?", (set_id,)).fetchone()
+        rows = [dict(r) for r in conn.execute(
+            """SELECT c.* FROM creditors c
+                 JOIN estimate_items ei ON ei.id = c.estimate_item_id
+                WHERE ei.set_id = ? AND c.status IN ('open','partial')""", (set_id,)).fetchall()]
+        if not rows:
             return {"deleted": 0}
-        placeholders = ",".join("?" * len(item_ids))
-        result = conn.execute(
-            f"DELETE FROM creditors WHERE estimate_item_id IN ({placeholders})", item_ids
-        )
+        cov = coverage(conn, [es["order_id"]]) if es and es["order_id"] else {}
+        accrued = ledger_accruals(conn, [r["id"] for r in rows])
+        money = [r for r in rows if (r["paid"] or 0) > 0.01
+                 or cov.get(r["id"], {}).get("covered", 0.0) > 0.01 or r["id"] in accrued]
+        if money:
+            raise HTTPException(status_code=409, detail={
+                "code": "creditor_has_money",
+                "items": [{"id": r["id"], "name": r["name"], "paid": round(r["paid"] or 0, 2),
+                           "covered": round(cov.get(r["id"], {}).get("covered", 0.0), 2)} for r in money],
+                "message": "По части обязательств прошли деньги — закрой их, а не удаляй; ничего не удалено"})
+        for r in rows:
+            conn.execute("DELETE FROM creditors WHERE id = ?", (r["id"],))
+            audit(conn, "creditor", r["id"], "delete",
+                  f"Удалено обязательство сметы «{r['name']}» ({(r['total'] or 0):g} ₽)", before_row=r)
         conn.commit()
-        return {"deleted": result.rowcount}
+        return {"deleted": len(rows)}
     finally:
         conn.close()
 

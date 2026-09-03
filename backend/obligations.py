@@ -340,15 +340,103 @@ def recognized(cred_row, cov: Optional[dict] = None, *, with_ledger: bool = True
     return round(total, 2)
 
 
+def ledger_accruals(conn, ids: Optional[list] = None) -> dict:
+    """Ручные начисления лицевого счёта по обязательствам: {creditor_id: сумма}.
+    Такая строка — «признано»: сверка с мастером заменила прикидку сметы
+    (ledger._build_entries начисляет проводку, а не строку)."""
+    sql = """SELECT creditor_id, SUM(amount) AS s FROM master_ledger
+              WHERE kind = 'accrual' AND creditor_id IS NOT NULL"""
+    params: list = []
+    if ids is not None:
+        if not ids:
+            return {}
+        sql += f" AND creditor_id IN ({','.join('?' * len(ids))})"
+        params = list(ids)
+    return {r["creditor_id"]: round(r["s"] or 0, 2)
+            for r in conn.execute(sql + " GROUP BY creditor_id", params).fetchall()}
+
+
+def creditor_masters(conn, ids: list) -> dict:
+    """К какому мастеру привязано обязательство — ТА ЖЕ привязка, что в
+    ledger._entries_bulk: master_id строки сметы сильнее имени, имя работает
+    только если это не ярлык плана («Материал: труба»). {creditor_id: [master_id]};
+    пустой список = строка в лицевой счёт никого не попадает."""
+    if not ids:
+        return {}
+    by_name: dict = {}
+    for r in conn.execute("SELECT id, name FROM masters").fetchall():
+        by_name.setdefault(r["name"], []).append(r["id"])
+    known = {m for ms in by_name.values() for m in ms}
+    holes = ",".join("?" * len(ids))
+    out = {}
+    for r in conn.execute(f"""
+        SELECT c.id, c.name, el.master_id AS line_master_id
+          FROM creditors c LEFT JOIN estimate_lines el ON el.id = c.estimate_line_id
+         WHERE c.id IN ({holes})""", list(ids)).fetchall():
+        lm = r["line_master_id"]
+        if lm:
+            out[r["id"]] = [lm] if lm in known else []
+        else:
+            out[r["id"]] = list(by_name.get(r["name"], []))
+    return out
+
+
+def ledger_impact(conn, ids: list, reason: str) -> dict:
+    """Как изменится сальдо подрядчиков, если закрыть строки `ids` с причиной
+    `reason`. Ничего не пишет: закрытие делается внутри SAVEPOINT и откатывается.
+
+    ТЗ 03.09.2026: ручное закрытие «дублей» Малафеева уронило начисление на
+    111 500 ₽ и перевернуло сальдо — любая кнопка «закрыть» обязана показать это
+    ДО нажатия. В by_master попадают мастера, чьё сальдо изменилось, и мастера,
+    к которым привязаны закрываемые строки (даже если дельта нулевая — это и есть
+    ответ «долг остаётся»). unbound — строки, которые в лицевой счёт не попадают
+    (ярлык плана без мастера): им причина recognized не положена."""
+    from routers.ledger import _entries_bulk, _totals
+    ids = list(dict.fromkeys(ids or []))
+    if not ids:
+        return {"by_master": [], "unbound": []}
+    masters = [dict(r) for r in conn.execute("SELECT id, name FROM masters ORDER BY name").fetchall()]
+
+    def balances():
+        bulk = _entries_bulk(conn, masters)
+        return {m["id"]: _totals(bulk.get(m["id"], []))["balance"] for m in masters}
+
+    before = balances()
+    conn.execute("SAVEPOINT ledger_sim")
+    try:
+        _close_rows(conn, ids, reason)
+        after = balances()
+    finally:
+        conn.execute("ROLLBACK TO ledger_sim")
+        conn.execute("RELEASE ledger_sim")
+    bound = creditor_masters(conn, ids)
+    touched = {m for ms in bound.values() for m in ms}
+    names = {c["id"]: c["name"] for c in conn.execute(
+        f"SELECT id, name FROM creditors WHERE id IN ({','.join('?' * len(ids))})", ids).fetchall()}
+    by_master = []
+    for m in masters:
+        b, a = before.get(m["id"], 0.0), after.get(m["id"], 0.0)
+        if m["id"] in touched or abs(a - b) > _EPS:
+            by_master.append({"master_id": m["id"], "name": m["name"],
+                              "balance_before": round(b, 2), "balance_after": round(a, 2),
+                              "delta": round(a - b, 2)})
+    unbound = [{"id": cid, "name": names.get(cid)} for cid in ids if not bound.get(cid)]
+    return {"by_master": by_master, "unbound": unbound}
+
+
 def unpaid_for_order(conn, oid: str) -> list:
     """Живые обязательства заказа с остатком после учёта факта — то, что Юра
-    увидит в окне подтверждения при завершении заказа."""
+    увидит в окне подтверждения при завершении заказа.
+
+    recognized — по строке есть ручное начисление лицевого счёта: долг перед
+    мастером уже сверен и живёт там, остаток строки — не вопрос для подтверждения."""
     cov = coverage(conn, [oid])
     rows = conn.execute(
         """SELECT * FROM creditors
             WHERE order_id = ? AND status IN ('open','partial')
               AND (kind IS NULL OR kind != 'fixed')
             ORDER BY total DESC""", (oid,)).fetchall()
+    accrued = ledger_accruals(conn, [r["id"] for r in rows])
     out = []
     for r in rows:
         c = cov.get(r["id"], {})
@@ -359,6 +447,8 @@ def unpaid_for_order(conn, oid: str) -> list:
             "debt": effective_debt(r, c),
             "cover_level": c.get("level"),
             "ambiguous": c.get("ambiguous", False),
+            "recognized": r["id"] in accrued,
+            "recognized_amount": accrued.get(r["id"], 0.0),
         })
     return out
 
@@ -396,7 +486,7 @@ def close_for_order(conn, oid: str, *, force: bool = False, only_ids: Optional[l
     if only_ids is not None:
         keep = set(only_ids)
         items = [i for i in items if i["id"] in keep]
-    unpaid = [i for i in items if i["debt"] > _EPS]
+    unpaid = [i for i in items if i["debt"] > _EPS and not i.get("recognized")]
     if unpaid and not force:
         return {"needs_confirm": True, "items": items,
                 "unpaid_total": round(sum(i["debt"] for i in unpaid), 2)}
@@ -429,10 +519,15 @@ def reopen_for_order(conn, oid: str, reason="order_completed") -> dict:
     return {"reopened": cur.rowcount}
 
 
-def close_manual(conn, ids: list) -> dict:
+def close_manual(conn, ids: list, reason: str = "manual") -> dict:
     """Кнопка «Закрыть выбранные»: всё или ничего. Любой id, которого нет, который
     уже закрыт или который постоянный (kind='fixed'), — ValueError со списком:
-    частичное закрытие оставило бы Юру гадать, что именно прошло."""
+    частичное закрытие оставило бы Юру гадать, что именно прошло.
+
+    reason: manual — «прикидка не ждёт денег» (списание), recognized — «работа
+    принята, долг стоит» (лицевой счёт начисляет полную сумму). recognized по
+    строке, не привязанной ни к какому мастеру, — долг в никуда: ValueError."""
+    assert reason in ("manual", "recognized"), reason
     # Повтор id в теле запроса — не второе закрытие: без дедупа строка попадала
     # дважды в closed/written_off и дважды в журнал об одном и том же закрытии.
     ids = list(dict.fromkeys(ids or []))
@@ -450,6 +545,10 @@ def close_manual(conn, ids: list) -> dict:
             bad.append({"id": cid, "name": r["name"], "why": "уже закрыто"})
         elif r.get("kind") == "fixed":
             bad.append({"id": cid, "name": r["name"], "why": "постоянное — своя вкладка"})
+    if reason == "recognized":
+        bound = creditor_masters(conn, ids)
+        bad += [{"id": cid, "name": rows[cid]["name"], "why": "не привязано к мастеру — признавать некому"}
+                for cid in ids if cid in rows and not bound.get(cid)]
     if bad:
         raise ValueError(bad)
     oids = sorted({r["order_id"] for r in rows.values() if r["order_id"]})
@@ -460,9 +559,9 @@ def close_manual(conn, ids: list) -> dict:
         items.append({"id": cid, "name": r["name"], "plan": round(r["total"] or 0, 2),
                       "fact": recognized(r, c),
                       "debt": effective_debt(r, c)})
-    before_rows = _close_rows(conn, ids, "manual")
+    before_rows = _close_rows(conn, ids, reason)
     return {"closed": len(ids), "written_off": round(sum(i["debt"] for i in items), 2),
-            "items": items, "before_rows": before_rows}
+            "items": items, "before_rows": before_rows, "reason": reason}
 
 
 def effective_debt(cred_row, cov: Optional[dict] = None) -> float:

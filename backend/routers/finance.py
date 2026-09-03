@@ -817,24 +817,29 @@ class CreditorPatch(BaseModel):
 
 
 @router.get("/creditors")
-def get_creditors(status: Optional[str] = None):
-    """Обязательства с разделением план/долг (ТЗ обязательств 04.08.2026).
+def get_creditors(status: Optional[str] = None, include_unstarted: bool = False):
+    """Обязательства = ПЛАН закупок по заказам, не долг (ТЗ фин-агента 03.09.2026).
 
-    Долгом считается обязательство ЖИВОГО заказа: in_production и completed
-    (пока Юра явно не закрыл расчёты), плюс ручные — заведённые без заказа.
-    Обязательства незапущенных заказов (смета, ждёт оплаты, черновик) — это план
-    закупок: подрядчикам ничего не заказано, в сальдо им делать нечего. До этой
-    правки они давали 550 158 ₽ из 812 112 ₽ «долга».
+    Долг перед человеком — одно число, сальдо лицевого счёта (GET /ledger/balances):
+    начисления там строятся из этих же строк, и показывать обе цифры рядом значит
+    считать один долг дважды (Малафеев: 87 100 + 129 500). Здесь остаётся
+    «осталось потратить по заказам в работе» — plan_rest_*: строки in_production
+    с непокрытым остатком, не признанные проводкой лицевого счёта.
 
-    Остаток строки считается с учётом ФАКТА (obligations.coverage): деньги
-    подрядчику уходят расходами, а creditors.paid при этом чаще всего не
-    двигается — отмечено оплаченными 2% суммы.
+    Незапущенные заказы (черновик, смета, проект, ждёт оплаты, отмена) по умолчанию
+    не отдаются вовсе — их место в карточке заказа; include_unstarted=1 возвращает
+    их в items и plan_total (нужно подсказке ExpenseModal и переключателю на экране).
+
+    Остаток строки считается с учётом ФАКТА (obligations.coverage): расходы,
+    creditors.paid и выплаты лицевого счёта.
     """
-    from obligations import coverage, effective_debt, recognized
+    from obligations import coverage, effective_debt, recognized, ledger_accruals, creditor_masters
     conn = get_production()
     try:
         sql = """
             SELECT c.*, ei.title AS estimate_item_title,
+                   es.id AS set_id, es.title AS set_title, es.status AS set_status,
+                   es.created_at AS set_created_at,
                    o.number AS order_number, o.title AS order_title, o.status AS order_status,
                    CASE
                      WHEN c.order_id IS NULL                         THEN 'debt'
@@ -853,6 +858,7 @@ def get_creditors(status: Optional[str] = None):
                    END AS stale_kind
             FROM creditors c
             LEFT JOIN estimate_items ei ON ei.id = c.estimate_item_id
+            LEFT JOIN estimate_sets  es ON es.id = ei.set_id
             LEFT JOIN orders         o  ON o.id  = c.order_id
             WHERE 1=1
         """
@@ -866,9 +872,15 @@ def get_creditors(status: Optional[str] = None):
             # kind='fixed' живут во вкладке «Постоянные» — в «Мы должны» не показываем.
             # partial — тоже живое: close_for_order его закрывает, а экран не показывал.
             sql += " AND c.status IN ('open','partial') AND (c.kind IS NULL OR c.kind != 'fixed')"
+        if status != "all" and not include_unstarted:
+            sql += """ AND (c.order_id IS NULL OR o.id IS NULL
+                            OR (COALESCE(o.archived, 0) = 0 AND o.status IN ('in_production', 'completed')))"""
         sql += " ORDER BY c.created_at DESC"
         rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
         cov = coverage(conn)          # один вызов на весь список, без N+1
+        ids = [r["id"] for r in rows]
+        accrued = ledger_accruals(conn, ids)
+        bound = creditor_masters(conn, ids)
         for r in rows:
             c = cov.get(r["id"], {})
             r["fact_exact"] = round(max(r["paid"] or 0, c.get("covered_exact", 0.0)), 2)
@@ -886,11 +898,19 @@ def get_creditors(status: Optional[str] = None):
             # непокрытый остаток — а это долг (r["debt"]), а не отклонение от плана.
             r["variance"] = (round(r["fact"] - r["amount_plan"], 2)
                              if r.get("amount_plan") is not None and r["fact"] > 0 else None)
-        # items остаётся ПОЛНЫМ списком: по ключу ["creditors"] его читает ExpenseModal
-        # (подсказка «это оплата обязательства?») — обрезав, сломали бы подсказку для
-        # заказов в статусе «Смета», по которым расходы заводят регулярно.
+            # «Признано»: ручное начисление лицевого счёта заменило прикидку строки.
+            r["recognized"] = r["id"] in accrued
+            r["recognized_amount"] = accrued.get(r["id"], 0.0)
+            r["covered"] = r["debt"] <= 0.01
+            ms = bound.get(r["id"], [])
+            r["master_ids"] = ms
+            r["master_id"] = ms[0] if ms else None
+        # items — полный список выбранного среза: по ключу ["creditors"] его читает
+        # ExpenseModal (подсказка «это оплата обязательства?») с include_unstarted=1.
         debt_rows = [r for r in rows if r.get("scope") == "debt"]
         plan_rows = [r for r in rows if r.get("scope") == "plan"]
+        rest_rows = [r for r in debt_rows if r.get("order_status") == "in_production"
+                     and not r["covered"] and not r["recognized"]]
 
         # Плашка «неактуальные» описывает состояние ВСЕЙ базы, поэтому считается
         # своим запросом, а не из rows: те уже сужены параметром status, и при
@@ -923,6 +943,27 @@ def get_creditors(status: Optional[str] = None):
             return {"count": len(rk), "total": round(sum(r["debt"] for r in rk), 2),
                     "orders": sorted(orders.values(), key=lambda x: -x["total"])}
         stale = {k: _stale(k) for k in ("completed", "cancelled", "archived")}
+
+        # Подсказка «двойное начисление»: ручная проводка по заказу БЕЗ creditor_id,
+        # а в заказе открыта строка на ту же сумму — лицевой счёт считает обе.
+        # Не сумма, а список на сверку (правка данных — только по решению Юры).
+        open_by_order: dict = {}
+        for r in rows:
+            if r["status"] in ("open", "partial") and r.get("order_id"):
+                open_by_order.setdefault(r["order_id"], []).append(r)
+        double = []
+        for m in conn.execute("""
+            SELECT m.id, m.master_id, m.amount, m.happened_at, m.note, m.order_id, ms.name AS master_name
+              FROM master_ledger m JOIN masters ms ON ms.id = m.master_id
+             WHERE m.kind = 'accrual' AND m.creditor_id IS NULL AND m.order_id IS NOT NULL""").fetchall():
+            for r in open_by_order.get(m["order_id"], []):
+                if abs((r["total"] or 0) - (m["amount"] or 0)) < 1 and (
+                        not r["master_ids"] or m["master_id"] in r["master_ids"]):
+                    double.append({"ledger_id": m["id"], "master_id": m["master_id"],
+                                   "master_name": m["master_name"], "amount": m["amount"],
+                                   "note": m["note"], "creditor_id": r["id"], "creditor_name": r["name"],
+                                   "order_id": r["order_id"], "order_number": r["order_number"],
+                                   "order_title": r["order_title"]})
         return {
             # завершённые / отменённые / архивные заказы с открытыми строками — то, что
             # на экране «неактуально» и закрывается кнопкой (POST /creditors/close-stale)
@@ -930,10 +971,15 @@ def get_creditors(status: Optional[str] = None):
             "items": rows,
             "total_owed": round(sum(r["total"] or 0 for r in debt_rows), 2),
             "total_paid": round(sum(r["fact"] for r in debt_rows), 2),
-            "total_debt": round(sum(r["debt"] for r in debt_rows), 2),
             "debt_count": len(debt_rows),
+            # «Осталось потратить по заказам в работе» — прогноз, не долг.
+            "plan_rest_total": round(sum(r["debt"] for r in rest_rows), 2),
+            "plan_rest_count": len(rest_rows),
+            # total_debt — алиас plan_rest_total на время переезда фронта; убрать после.
+            "total_debt": round(sum(r["debt"] for r in rest_rows), 2),
             "plan_total": round(sum(r["debt"] for r in plan_rows), 2),
             "plan_count": len(plan_rows),
+            "double_accrual": double,
             # завершённые заказы: расчёты можно закрыть одной кнопкой (= stale.completed)
             "closable_total": stale["completed"]["total"],
             "closable_count": stale["completed"]["count"],
@@ -1035,28 +1081,54 @@ def close_stale_obligations(body: CloseStaleIn):
 
 class CloseIdsIn(BaseModel):
     ids: List[str]
-    reason: str = "manual"
+    reason: str = "manual"      # manual — списать прикидку; recognized — работа принята, долг стоит
+
+
+class ClosePreviewIn(BaseModel):
+    ids: List[str]
+    reason: str = "manual"      # любая из obligations.CLOSE_REASONS
+
+
+@router.post("/creditors/close-preview")
+def close_preview(body: ClosePreviewIn):
+    """Как изменится сальдо подрядчиков, если закрыть эти строки с этой причиной.
+    Ничего не пишет (obligations.ledger_impact). Окно подтверждения обязано
+    показать это до кнопки — ТЗ 03.09.2026."""
+    from obligations import CLOSE_REASONS, ledger_impact
+    if body.reason not in CLOSE_REASONS:
+        raise HTTPException(status_code=400, detail=f"reason: одно из {CLOSE_REASONS}")
+    conn = get_production()
+    try:
+        return ledger_impact(conn, body.ids, body.reason)
+    finally:
+        conn.close()
 
 
 @router.post("/creditors/close")
 def close_creditors(body: CloseIdsIn):
-    """«Закрыть выбранные» — вручную, с причиной manual. Всё или ничего."""
+    """«Закрыть выбранные» — вручную. Всё или ничего.
+    manual — прикидка не ждёт денег (лицевой счёт начислит только покрытое);
+    recognized — работа принята, долг стоит (начисление полной суммой)."""
     from obligations import close_manual
-    if body.reason != "manual":
-        raise HTTPException(status_code=400, detail="reason: только 'manual' — остальные ставят статусные переходы")
+    if body.reason not in ("manual", "recognized"):
+        raise HTTPException(status_code=400, detail="reason: 'manual' или 'recognized' — остальные ставят статусные переходы")
     conn = get_production()
     try:
         try:
-            res = close_manual(conn, body.ids)
+            res = close_manual(conn, body.ids, reason=body.reason)
         except ValueError as e:
-            raise HTTPException(status_code=409, detail={"code": "not_closable", "items": e.args[0],
+            bad = e.args[0]
+            code = "unbound_creditor" if any("не привязано" in (b.get("why") or "") for b in bad) else "not_closable"
+            raise HTTPException(status_code=409, detail={"code": code, "items": bad,
                                                          "message": "Часть строк закрыть нельзя — ничего не закрыто"})
+        how = "признано долгом" if body.reason == "recognized" else "закрыто вручную"
         for it in res["items"]:
             audit(conn, "creditor", it["id"], "close",
-                  f"Закрыто вручную: «{it['name']}» план {it['plan']:g} ₽, факт {it['fact']:g} ₽, списано {it['debt']:g} ₽",
+                  f"{how[0].upper()}{how[1:]}: «{it['name']}» план {it['plan']:g} ₽, факт {it['fact']:g} ₽"
+                  + (f", списано {it['debt']:g} ₽" if body.reason == "manual" else ""),
                   before_row=res["before_rows"].get(it["id"]))
         conn.commit()
-        return {"ok": True, "closed": res["closed"], "written_off": res["written_off"]}
+        return {"ok": True, "closed": res["closed"], "written_off": res["written_off"], "reason": body.reason}
     finally:
         conn.close()
 
