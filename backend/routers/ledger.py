@@ -175,8 +175,12 @@ def _build_entries(creditors: list[dict], expenses: list[dict], manual: list[dic
                     "effect": round(KIND_SIGN[kind] * (amount or 0), 2),
                     "date": (date or "")[:10], "title": title, **ref})
 
-    accrued_creditors = set()   # обязательства, уже давшие начисление
     paid_creditors = set()      # обязательства, оплата по которым уже в ленте
+    # Проводка лицевого счёта главнее строки сметы (ТЗ 03.09.2026): ручное
+    # начисление по обязательству — это сверка с мастером, «прикидка закрыта фактом».
+    # Строка с такой проводкой своего начисления не даёт, иначе оборот задваивается.
+    manual_accrued = {m["creditor_id"] for m in manual
+                      if m["kind"] == "accrual" and m.get("creditor_id")}
 
     for c in creditors:
         if c["status"] == "cancelled" or not c["total"]:
@@ -186,21 +190,25 @@ def _build_entries(creditors: list[dict], expenses: list[dict], manual: list[dic
         # каждый месяц, и долг рос бы вечно.
         if (c.get("kind") or "") == "fixed":
             continue
-        # Начисление ЗАКРЫТОГО обязательства = признанная сумма, а не полный план:
-        # завершение заказа списывает непокрытый остаток (obligations.close_for_order),
-        # и полный total оставил бы у подрядчика фантомный долг на списанное.
+        if c["id"] in manual_accrued:
+            continue
+        live = c["status"] in ("open", "partial")
         recognized = c["total"]
-        if c["status"] not in ("open", "partial"):
+        if not live and c.get("closed_reason") != "recognized":
+            # Начисление ЗАКРЫТОГО обязательства = признанная сумма, а не полный план:
+            # завершение заказа списывает непокрытый остаток (obligations.close_for_order),
+            # и полный total оставил бы у подрядчика фантомный долг на списанное.
+            # Исключение — closed_reason='recognized': «работа принята, долг стоит».
             # with_ledger=False: выплата лицевого счёта уже стоит в ленте минусом,
             # поднять ею же начисление — начислить дважды (ORD-017 Спектр-Колор).
             recognized = _recognized(c, (coverage or {}).get(c["id"], {}), with_ledger=False)
             if recognized <= 0:
                 continue
-        accrued_creditors.add(c["id"])
         add("accrual", recognized, c.get("due_date") or c.get("created_at"),
             c.get("description") or "Обязательство по смете",
             source="creditor", ref_id=c["id"], order_id=c.get("order_id"),
-            order_number=c.get("order_number"), order_title=c.get("order_title"))
+            order_number=c.get("order_number"), order_title=c.get("order_title"),
+            plan=live)
 
     for e in expenses:
         purpose = e.get("purpose")
@@ -244,9 +252,8 @@ def _build_entries(creditors: list[dict], expenses: list[dict], manual: list[dic
             order_number=c.get("order_number"), order_title=c.get("order_title"))
 
     # Ручные строки. Тот же дедуп: если операцию уже видно расходом или
-    # обязательством — не повторяем. Ссылка creditor_id тут такой же ключ дедупа,
-    # как expense_id: ручное начисление по обязательству, которое уже дало accrual,
-    # задваивало оборот (инвариант жил только в докстринге create_entry).
+    # обязательством — не повторяем. Ручное начисление по обязательству главнее
+    # строки (см. manual_accrued выше), поэтому здесь оно проходит всегда.
     exp_ids = {e["id"] for e in expenses}
     for m in manual:
         if m.get("expense_id") and m["expense_id"] in exp_ids:
@@ -256,8 +263,6 @@ def _build_entries(creditors: list[dict], expenses: list[dict], manual: list[dic
         if m.get("zenmoney_tx_id") and m["zenmoney_tx_id"] in covered_zen:
             continue
         cid = m.get("creditor_id")
-        if cid and m["kind"] == "accrual" and cid in accrued_creditors:
-            continue
         if cid and m["kind"] == "payment" and (cid in paid_creditors or cid in covered_ids):
             continue
         add(m["kind"], m["amount"], m["happened_at"], m.get("note") or KIND_LABELS[m["kind"]],
@@ -274,6 +279,8 @@ def _totals(entries: list[dict]) -> dict:
         return round(sum(e["amount"] for e in entries if e["kind"] in kinds), 2)
     return {
         "accrued": s("accrual"),
+        # Из начисленного — план открытых строк смет (прикидка, не сверенный долг).
+        "plan_open": round(sum(e["amount"] for e in entries if e["kind"] == "accrual" and e.get("plan")), 2),
         "paid": s("payment"),
         "third_party": s("third_party"),
         "offset": s("offset"),
@@ -389,10 +396,14 @@ def create_entry(body: EntryIn):
                              (body.creditor_id,)).fetchone()
             if not c:
                 raise HTTPException(status_code=404, detail="Обязательство не найдено")
-            if body.kind == "accrual" and c["status"] != "cancelled" and (c["total"] or 0):
+            # Ручное начисление по строке — сверка с мастером, оно вытесняет план
+            # строки (ledger._build_entries). Задваивает только ВТОРАЯ ручная проводка.
+            if body.kind == "accrual" and conn.execute(
+                    "SELECT 1 FROM master_ledger WHERE creditor_id = ? AND kind = 'accrual'",
+                    (body.creditor_id,)).fetchone():
                 raise HTTPException(
                     status_code=409,
-                    detail="Начисление по этому обязательству уже в регистре — ручная строка задвоит оборот")
+                    detail="Ручное начисление по этому обязательству уже проведено — второе задвоит оборот")
             if body.kind == "payment" and (c["paid"] or 0):
                 raise HTTPException(
                     status_code=409,

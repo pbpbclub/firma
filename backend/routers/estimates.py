@@ -710,16 +710,22 @@ def unapprove_set(set_id: str, body: Optional[UnapproveIn] = None):
         # что в обязательствах вообще: paid или покрытие расходом (obligations.coverage).
         from obligations import coverage as _coverage
         cov = _coverage(conn, [oid]) if oid else {}
+        # Строки уровня позиции (без состава) привязаны только estimate_item_id —
+        # LEFT JOIN, иначе их ни показать, ни удалить.
         creds = [dict(r) for r in conn.execute(
-            """SELECT c.id, c.name, c.description, c.total, c.paid, c.status
+            """SELECT c.id, c.name, c.description, c.total, c.paid, c.status, c.closed_reason,
+                      EXISTS(SELECT 1 FROM master_ledger m WHERE m.creditor_id = c.id) AS has_ledger
                  FROM creditors c
-                 JOIN estimate_lines el ON el.id = c.estimate_line_id
-                 JOIN estimate_items ei ON ei.id = el.item_id
+                 LEFT JOIN estimate_lines el ON el.id = c.estimate_line_id
+                 JOIN estimate_items ei ON ei.id = COALESCE(el.item_id, c.estimate_item_id)
                 WHERE ei.set_id = ?""", (set_id,)).fetchall()]
         keep, drop = [], []
         for c in creds:
             covered = (cov.get(c["id"]) or {}).get("covered", 0.0)
-            touched = (c["paid"] or 0) > 0 or covered > 0
+            # Признанный долг и строка с проводкой лицевого счёта — тоже «деньги»:
+            # удалить такую строку значит осиротить проводку и уронить сальдо.
+            touched = ((c["paid"] or 0) > 0 or covered > 0 or bool(c["has_ledger"])
+                       or c["closed_reason"] == "recognized")
             item = {"id": c["id"], "name": c["description"] or c["name"],
                     "plan": round(c["total"] or 0, 2), "paid": round(c["paid"] or 0, 2),
                     "covered": round(covered, 2)}
