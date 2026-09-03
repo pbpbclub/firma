@@ -28,6 +28,7 @@ from uuid import uuid4
 
 from audit import audit
 from db import get_production
+from obligations import recognized as _recognized
 
 router = APIRouter()
 
@@ -190,9 +191,9 @@ def _build_entries(creditors: list[dict], expenses: list[dict], manual: list[dic
         # и полный total оставил бы у подрядчика фантомный долг на списанное.
         recognized = c["total"]
         if c["status"] not in ("open", "partial"):
-            cov = (coverage or {}).get(c["id"], {})
-            recognized = round(max(c["paid"] or 0, cov.get("covered_exact", 0.0))
-                               + cov.get("covered_by_name", 0.0), 2)
+            # with_ledger=False: выплата лицевого счёта уже стоит в ленте минусом,
+            # поднять ею же начисление — начислить дважды (ORD-017 Спектр-Колор).
+            recognized = _recognized(c, (coverage or {}).get(c["id"], {}), with_ledger=False)
             if recognized <= 0:
                 continue
         accrued_creditors.add(c["id"])

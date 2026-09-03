@@ -420,12 +420,18 @@ def create_from_tx(body: FromTxIn):
                 c = conn.execute("SELECT id, total, paid FROM creditors WHERE id = ? AND order_id = ?", (cred, oid)).fetchone()
                 if c:
                     new_paid = round((c["paid"] or 0) + a.amount, 2)
+                    # Погашено целиком — закрываем С ПРИЧИНОЙ: строка без closed_reason
+                    # читалась лицевым счётом как «списано», а не «оплачено».
                     conn.execute(
                         f"""UPDATE creditors
                             SET paid = ?, {col} = COALESCE({col}, ?),
-                                status = CASE WHEN ? >= total THEN 'closed' ELSE status END
+                                closed_at = CASE WHEN ? >= total - 0.01 AND status != 'closed'
+                                                 THEN datetime('now') ELSE closed_at END,
+                                closed_reason = CASE WHEN ? >= total - 0.01
+                                                     THEN COALESCE(closed_reason, 'paid_in_full') ELSE closed_reason END,
+                                status = CASE WHEN ? >= total - 0.01 THEN 'closed' ELSE status END
                             WHERE id = ?""",
-                        (new_paid, body.tx_id, new_paid, cred)
+                        (new_paid, body.tx_id, new_paid, new_paid, new_paid, cred)
                     )
                 else:
                     cred = None  # чужое/несуществующее обязательство — не гасим

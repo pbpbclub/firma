@@ -40,7 +40,17 @@ _EPS = 0.01   # деньги в REAL: сравнение только через
 # Почему обязательство закрыто. По причине откат переоткрывает ровно своё:
 # вернул заказ из архива — открылось закрытое архивацией, закрытое вручную
 # и погашенное полностью осталось закрытым.
-CLOSE_REASONS = ("order_completed", "order_cancelled", "order_archived", "manual", "paid_in_full")
+# recognized — «работа принята, долг стоит» (ТЗ 03.09.2026): строка больше не план,
+# лицевой счёт начисляет её ПОЛНОЙ суммой (ledger._build_entries); manual —
+# «прикидка не ждёт денег», начисляется только покрытая часть.
+# internal — строка без получателя денег (резерв, наценка); superseded_estimate —
+# строка старой версии сметы, не нашедшая пары в новой (estimates.repoint_obligations).
+CLOSE_REASONS = ("order_completed", "order_cancelled", "order_archived", "manual", "paid_in_full",
+                 "recognized", "internal", "superseded_estimate")
+
+# Выплаты лицевого счёта, которые могут гасить обязательство. accrual/adjust —
+# начисления, они покрытием не бывают.
+_LEDGER_PAY_KINDS = ("payment", "offset", "third_party")
 
 
 def _payee(row) -> str:
@@ -68,8 +78,8 @@ def _payees_of(cred) -> set:
 def coverage(conn, order_ids: Optional[list] = None) -> dict:
     """Сколько по каждому обязательству уже закрыто фактом.
 
-    Возвращает {creditor_id: {covered, covered_exact, covered_by_name, level,
-    sources, bucket_hint, ambiguous}}. Два запроса на весь экран — никакого N+1
+    Возвращает {creditor_id: {covered, covered_exact, covered_by_name, covered_ledger,
+    level, sources, bucket_hint, ambiguous}}. Два запроса на весь экран — никакого N+1
     (code_rules 17.07), считается пакетно даже для одного заказа. В набор входят
     и ЗАКРЫТЫЕ обязательства: их покрытие нужно лицевому счёту, чтобы начислять
     признанное вместо полного плана.
@@ -79,6 +89,15 @@ def coverage(conn, order_ids: Optional[list] = None) -> dict:
       L2 tx_id       — тот же перевод банка/ZenMoney в границах ЭТОГО заказа;
       L3 подрядчик   — расход тому, кому адресовано обязательство (в границах заказа);
       L4 категория   — только подсказка (bucket_hint), из долга НЕ вычитается.
+
+    Третий источник — выплаты ЛИЦЕВОГО СЧЁТА (master_ledger payment/offset/third_party,
+    ТЗ 03.09.2026): деньги с личной карты Юры приходят проводкой, не расходом, и
+    без них долг перед человеком показывался дважды. Те же уровни (creditor_id →
+    tx_id → мастер в границах заказа, последний — только для открытых строк), тот
+    же дедуп против расходов (expense_id, tx_id). Результат — ОТДЕЛЬНОЕ поле
+    covered_ledger: в начисления закрытых строк (ledger._build_entries) оно не
+    входит — проводка уже стоит в ленте минусом, и поднимать ею же начисление
+    значило бы начислить дважды. `covered` (признак «прошли деньги») его включает.
 
     Каждый расход — кошелёк: потратив рубль на одно обязательство, он не может
     потратить его на второе. Порядок обхода фиксирован, поэтому пересчёт на тех
@@ -137,6 +156,7 @@ def coverage(conn, order_ids: Optional[list] = None) -> dict:
         by_order.setdefault(e["order_id"], []).append(e)
 
     out = {c["id"]: {"covered": 0.0, "covered_exact": 0.0, "covered_by_name": 0.0,
+                     "covered_ledger": 0.0,
                      "level": None, "sources": [], "bucket_hint": 0.0, "ambiguous": False}
            for c in creds}
 
@@ -149,7 +169,7 @@ def coverage(conn, order_ids: Optional[list] = None) -> dict:
         res = out[cred["id"]]
         # settled_by — «чем закрыто» (A1): карточка обязательства показывает не только
         # сколько покрыто, но и деньгами это было, зачётом, авансом или оплатой за него.
-        res["sources"].append({"expense_id": exp["id"], "title": exp["title"],
+        res["sources"].append({"source": "expense", "expense_id": exp["id"], "title": exp["title"],
                                "amount": round(amount, 2), "level": level,
                                "settled_by": exp.get("settled_by") or "cash",
                                "date": exp["expense_date"]})
@@ -192,10 +212,13 @@ def coverage(conn, order_ids: Optional[list] = None) -> dict:
             if rest <= _EPS:
                 break
 
+    # ── Выплаты лицевого счёта: свой кошелёк, свои уровни, дедуп против расходов.
+    _ledger_coverage(conn, creds, exps, by_order, out)
+
     # ── L4: подсказка по категории для обязательств без подрядчика. НЕ вычитается.
     for c in creds:
         res = out[c["id"]]
-        res["covered"] = round(res["covered_exact"] + res["covered_by_name"], 2)
+        res["covered"] = round(res["covered_exact"] + res["covered_by_name"] + res["covered_ledger"], 2)
         if res["covered"] > _EPS or _payees_of(c):
             continue
         want = _bucket(c["line_type"])
@@ -205,6 +228,116 @@ def coverage(conn, order_ids: Optional[list] = None) -> dict:
             res["bucket_hint"] = round(hint, 2)
             res["ambiguous"] = True
     return out
+
+
+def _ledger_coverage(conn, creds: list, exps: list, by_order: dict, out: dict) -> None:
+    """Покрытие выплатами лицевого счёта — в out[cid]["covered_ledger"].
+
+    Проводка гасит обязательство сверх того, что уже признано расходами и paid
+    (тот же max, что в recognized): проводка и разноска одной транзакции — одни
+    деньги. Проводка, за которой стоит расход (expense_id) или та же транзакция,
+    что у расхода, пропускается — расход её уже учёл."""
+    cred_ids = {c["id"] for c in creds}
+    order_ids = set(by_order) | {c["order_id"] for c in creds}
+    rows = [dict(r) for r in conn.execute(f"""
+        SELECT m.id, m.master_id, m.kind, m.amount, m.order_id, m.creditor_id, m.expense_id,
+               m.finance_tx_id, m.zenmoney_tx_id, m.happened_at, m.note
+          FROM master_ledger m
+         WHERE m.kind IN ({','.join('?' * len(_LEDGER_PAY_KINDS))})""",
+        list(_LEDGER_PAY_KINDS)).fetchall()]
+    cred_fin = {c["finance_tx_id"] for c in creds if c.get("finance_tx_id")}
+    cred_zen = {c["zenmoney_tx_id"] for c in creds if c.get("zenmoney_tx_id")}
+    rows = [m for m in rows if (m["creditor_id"] in cred_ids) or (m["order_id"] in order_ids)
+            or (m["finance_tx_id"] in cred_fin) or (m["zenmoney_tx_id"] in cred_zen)]
+    if not rows:
+        return
+    exp_ids = {e["id"] for e in exps}
+    exp_fin = {e["finance_tx_id"] for e in exps if e.get("finance_tx_id")}
+    exp_zen = {e["zenmoney_tx_id"] for e in exps if e.get("zenmoney_tx_id")}
+    rows = [m for m in rows
+            if not (m["expense_id"] and m["expense_id"] in exp_ids)
+            and not (m["finance_tx_id"] and m["finance_tx_id"] in exp_fin)
+            and not (m["zenmoney_tx_id"] and m["zenmoney_tx_id"] in exp_zen)]
+    if not rows:
+        return
+    rows.sort(key=lambda m: (m["happened_at"] or "", m["id"]))
+    wallet = {m["id"]: round(m["amount"] or 0, 2) for m in rows}
+
+    # Привязка обязательства к мастеру — та же, что в ledger._entries_bulk:
+    # master_id строки сметы сильнее имени, имя — только для строк без ярлыка плана.
+    masters = {}
+    for r in conn.execute("SELECT id, name FROM masters").fetchall():
+        masters.setdefault(_norm_name(r["name"]), set()).add(r["id"])
+
+    def masters_of(c) -> set:
+        if c.get("line_master_id"):
+            return {c["line_master_id"]}
+        raw = (c["name"] or "").strip().lower()
+        if raw.startswith(_PLAN_LABELS):
+            return set()
+        return set(masters.get(_norm_name(c["name"]), ()))
+
+    def take(c, m, limit, level):
+        amount = min(wallet[m["id"]], limit)
+        if amount <= _EPS:
+            return 0.0
+        wallet[m["id"]] = round(wallet[m["id"]] - amount, 2)
+        res = out[c["id"]]
+        res["sources"].append({"source": "ledger", "ledger_id": m["id"], "kind": m["kind"],
+                               "title": m.get("note") or "Проводка лицевого счёта",
+                               "amount": round(amount, 2), "level": level,
+                               "date": (m.get("happened_at") or "")[:10]})
+        if res["level"] is None:
+            res["level"] = level
+        res["covered_ledger"] = round(res["covered_ledger"] + amount, 2)
+        return round(amount, 2)
+
+    def rest_of(c):
+        res = out[c["id"]]
+        base = max(c["paid"] or 0, res["covered_exact"]) + res["covered_by_name"] + res["covered_ledger"]
+        return round(max(0.0, (c["total"] or 0) - base), 2)
+
+    # L1/L2 — явные ключи, независимо от статуса строки.
+    for c in creds:
+        for m in rows:
+            same_creditor = m["creditor_id"] and m["creditor_id"] == c["id"]
+            same_tx = ((m["finance_tx_id"] and m["finance_tx_id"] == c["finance_tx_id"])
+                       or (m["zenmoney_tx_id"] and m["zenmoney_tx_id"] == c["zenmoney_tx_id"]))
+            if not (same_creditor or same_tx):
+                continue
+            rest = rest_of(c)
+            if rest <= _EPS:
+                break
+            take(c, m, rest, "creditor_id" if same_creditor else "tx_id")
+    # L3 — тот же мастер в границах заказа; закрытым строкам догадка не положена.
+    for c in creds:
+        if c["status"] not in ("open", "partial") or not c["order_id"]:
+            continue
+        targets = masters_of(c)
+        if not targets:
+            continue
+        for m in rows:
+            if m["creditor_id"] or m["order_id"] != c["order_id"] or m["master_id"] not in targets:
+                continue
+            rest = rest_of(c)
+            if rest <= _EPS:
+                break
+            take(c, m, rest, "contractor")
+
+
+def recognized(cred_row, cov: Optional[dict] = None, *, with_ledger: bool = True) -> float:
+    """Признанная часть обязательства — ЕДИНСТВЕННАЯ формула на проект.
+
+    max(paid, L1+L2) + L3 [+ выплаты лицевого счёта]. max — потому что from-tx
+    поднимает paid И создаёт расход с creditor_id, это один платёж.
+    with_ledger=False — для ledger._build_entries: проводка уже в ленте минусом.
+    """
+    cov = cov or {}
+    paid = (cred_row.get("paid") if isinstance(cred_row, dict) else cred_row["paid"]) or 0
+    total = max(paid, cov.get("covered_exact", 0.0)) + cov.get("covered_by_name", 0.0)
+    if with_ledger:
+        total += cov.get("covered_ledger", 0.0)
+    return round(total, 2)
 
 
 def unpaid_for_order(conn, oid: str) -> list:
@@ -222,7 +355,7 @@ def unpaid_for_order(conn, oid: str) -> list:
         out.append({
             "id": r["id"], "name": r["name"], "description": r["description"],
             "plan": round(r["total"] or 0, 2),
-            "fact": round(max(r["paid"] or 0, c.get("covered_exact", 0.0)) + c.get("covered_by_name", 0.0), 2),
+            "fact": recognized(r, c),
             "debt": effective_debt(r, c),
             "cover_level": c.get("level"),
             "ambiguous": c.get("ambiguous", False),
@@ -325,7 +458,7 @@ def close_manual(conn, ids: list) -> dict:
     for cid in ids:
         r = rows[cid]; c = cov.get(cid, {})
         items.append({"id": cid, "name": r["name"], "plan": round(r["total"] or 0, 2),
-                      "fact": round(max(r["paid"] or 0, c.get("covered_exact", 0.0)) + c.get("covered_by_name", 0.0), 2),
+                      "fact": recognized(r, c),
                       "debt": effective_debt(r, c)})
     before_rows = _close_rows(conn, ids, "manual")
     return {"closed": len(ids), "written_off": round(sum(i["debt"] for i in items), 2),
@@ -338,8 +471,5 @@ def effective_debt(cred_row, cov: Optional[dict] = None) -> float:
     Признанное = max(paid, L1+L2) + L3. max — потому что paid и расход с
     creditor_id по одной разноске это один платёж, а не два.
     """
-    cov = cov or {}
     total = (cred_row["total"] if not isinstance(cred_row, dict) else cred_row.get("total")) or 0
-    paid = (cred_row["paid"] if not isinstance(cred_row, dict) else cred_row.get("paid")) or 0
-    recognized = max(paid, cov.get("covered_exact", 0.0)) + cov.get("covered_by_name", 0.0)
-    return round(max(0.0, total - recognized), 2)
+    return round(max(0.0, total - recognized(cred_row, cov)), 2)

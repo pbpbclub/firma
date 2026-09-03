@@ -830,7 +830,7 @@ def get_creditors(status: Optional[str] = None):
     подрядчику уходят расходами, а creditors.paid при этом чаще всего не
     двигается — отмечено оплаченными 2% суммы.
     """
-    from obligations import coverage, effective_debt
+    from obligations import coverage, effective_debt, recognized
     conn = get_production()
     try:
         sql = """
@@ -873,7 +873,8 @@ def get_creditors(status: Optional[str] = None):
             c = cov.get(r["id"], {})
             r["fact_exact"] = round(max(r["paid"] or 0, c.get("covered_exact", 0.0)), 2)
             r["fact_by_name"] = round(c.get("covered_by_name", 0.0), 2)
-            r["fact"] = round(r["fact_exact"] + r["fact_by_name"], 2)
+            r["fact_ledger"] = round(c.get("covered_ledger", 0.0), 2)
+            r["fact"] = recognized(r, c)
             r["plan"] = round(r["amount_plan"] if r.get("amount_plan") is not None else (r["total"] or 0), 2)
             r["debt"] = effective_debt(r, c)
             r["cover_level"] = c.get("level")
