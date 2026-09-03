@@ -29,8 +29,11 @@ from routers.orders import _bucket
 
 # Расходы, которые к сметным обязательствам отношения не имеют:
 # contractor_pay/third_party — контур лицевого счёта (ledger.py),
-# overhead/stock/sample — траты «мимо заказа» (ТЗ stock_and_samples).
-_ALIEN_PURPOSES = ("overhead", "contractor_pay", "contractor_third_party", "stock", "sample")
+# overhead/stock/sample — траты «мимо заказа» (ТЗ stock_and_samples),
+# owner_draw — личные выводы владельца (ТЗ 03.09.2026): покрытием обязательства
+# быть не может, деньги ушли Юре, а не подрядчику.
+_ALIEN_PURPOSES = ("overhead", "contractor_pay", "contractor_third_party", "stock", "sample",
+                   "owner_draw")
 
 _EPS = 0.01   # деньги в REAL: сравнение только через порог (правило Б3, code_rules 04.08)
 

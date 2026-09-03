@@ -11,6 +11,9 @@
   sample   — собственный/тестовый экземпляр. Заказчика нет и не будет, выручки не будет
              никогда: это не убыток заказа, а вложение в продукт — отдельная строка отчёта.
   overhead — общехозяйственное, к заказам не относится вовсе.
+  owner_draw — личные средства владельца: деньги ушли Юре, а не в дело. Ни
+             себестоимость, ни накладные, ни база УСН этим не двигаются —
+             только сводка «сколько взято» (GET /owner-draws).
 
 Инвариант «одна оплата = один факт» не ломается: списание запаса в заказ уменьшает
 исходную строку ровно на списанную сумму (паттерн split/from-tx — несколько строк
@@ -30,14 +33,24 @@ router = APIRouter()
 # contractor_pay / contractor_third_party — обороты лицевого счёта подрядчика
 # (ТЗ 05.08.2026, routers/ledger.py): деньги ушли, но это не наша себестоимость
 # и не накладные — это дебет лицевого счёта, гасится будущими работами мастера.
-PURPOSES = ("stock", "sample", "overhead", "contractor_pay", "contractor_third_party")
+# owner_draw — личные выводы владельца (ТЗ фин-агента 03.09.2026): Avosend,
+# переводы себе между картами, перевод с р/с ИП на личный счёт, снятия. Это НЕ
+# расход бизнеса, а изъятие прибыли, поэтому не входит ни в себестоимость
+# (order_id IS NULL — в _plan_fact не попадает по построению), ни в накладные
+# (A8 фильтрует purpose='overhead'), ни в total общего контура. Опознаётся по
+# purpose, который проставляет разносящий, а не по payee — способов вывода
+# будет больше.
+PURPOSES = ("stock", "sample", "overhead", "contractor_pay", "contractor_third_party",
+            "owner_draw")
 LEDGER_PURPOSES = ("contractor_pay", "contractor_third_party")
+OWNER_DRAW = "owner_draw"
 PURPOSE_LABELS = {
     "stock": "Запас",
     "sample": "Образцы и тесты",
     "overhead": "Общехозяйственные",
     "contractor_pay": "Аванс подрядчику",
     "contractor_third_party": "Оплата за подрядчика",
+    "owner_draw": "Личные средства владельца",
 }
 
 
@@ -116,7 +129,7 @@ def _row(conn, eid: str) -> dict:
 
 @router.get("")
 def list_general(
-    purpose: Optional[str] = Query(None, pattern="^(stock|sample|overhead|contractor_pay|contractor_third_party)$"),
+    purpose: Optional[str] = Query(None, pattern="^(stock|sample|overhead|contractor_pay|contractor_third_party|owner_draw)$"),
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     with_spent: bool = True,
@@ -226,6 +239,7 @@ def summary(date_from: Optional[str] = None, date_to: Optional[str] = None):
         stock = by.get("stock", {"amount": 0, "count": 0})
         sample = by.get("sample", {"amount": 0, "count": 0})
         overhead = by.get("overhead", {"amount": 0, "count": 0})
+        draw = by.get(OWNER_DRAW, {"amount": 0, "count": 0})
         return {
             "stock_open": stock["amount"],
             "stock_count": stock["count"],
@@ -238,8 +252,65 @@ def summary(date_from: Optional[str] = None, date_to: Optional[str] = None):
             # в total (P&L общего контура) не входит, но и не теряется из виду.
             "contractor_ledger": ledger["amount"],
             "contractor_ledger_count": ledger["count"],
+            # Личные выводы владельца — тоже не расход периода, а изъятие прибыли:
+            # в total не входят (иначе P&L общего контура покажет потребление Юры
+            # как затраты дела), но видны отдельной строкой.
+            "owner_draw": draw["amount"],
+            "owner_draw_count": draw["count"],
             "total": round(stock["amount"] + sample["amount"] + overhead["amount"], 2),
         }
+    finally:
+        conn.close()
+
+
+@router.get("/owner-draws")
+def owner_draws(year: Optional[str] = Query(None, pattern="^[0-9]{4}$"),
+                date_from: Optional[str] = None, date_to: Optional[str] = None):
+    """Сколько владелец взял себе: по месяцам, по кварталам и всего.
+
+    Отдельный эндпоинт, а не строка в /summary: способ вывода разный (Avosend,
+    перевод себе, снятие), а вопрос один — «сколько за месяц / за квартал».
+    Период: year=YYYY либо произвольный date_from/date_to; без параметров —
+    текущий год.
+    """
+    conn = get_production()
+    try:
+        where = ["order_id IS NULL", "purpose = ?"]
+        params: list = [OWNER_DRAW]
+        if not (date_from or date_to):
+            year = year or conn.execute("SELECT strftime('%Y','now')").fetchone()[0]
+        if year:
+            where.append("strftime('%Y', expense_date) = ?")
+            params.append(year)
+        if date_from:
+            where.append("expense_date >= ?")
+            params.append(date_from)
+        if date_to:
+            where.append("expense_date <= ?")
+            params.append(date_to)
+        w = " AND ".join(where)
+        months = [{"period": r["m"], "amount": round(r["s"] or 0, 2), "count": r["cnt"]}
+                  for r in conn.execute(
+                      f"""SELECT strftime('%Y-%m', expense_date) AS m, SUM(amount) AS s,
+                                 COUNT(*) AS cnt
+                            FROM expenses WHERE {w} GROUP BY m ORDER BY m""", params).fetchall()
+                  if r["m"]]
+        quarters: dict = {}
+        for m in months:
+            q = f"{m['period'][:4]}-Q{(int(m['period'][5:7]) - 1) // 3 + 1}"
+            agg = quarters.setdefault(q, {"period": q, "amount": 0.0, "count": 0})
+            agg["amount"] = round(agg["amount"] + m["amount"], 2)
+            agg["count"] += m["count"]
+        items = [dict(r) for r in conn.execute(
+            f"""SELECT id, title, amount, expense_date, supplier, payment_source,
+                       finance_tx_id, zenmoney_tx_id, source
+                  FROM expenses WHERE {w}
+                 ORDER BY expense_date DESC, created_at DESC""", params).fetchall()]
+        return {"year": year, "date_from": date_from, "date_to": date_to,
+                "months": months, "quarters": sorted(quarters.values(), key=lambda q: q["period"]),
+                "total": round(sum(m["amount"] for m in months), 2),
+                "count": sum(m["count"] for m in months),
+                "items": items}
     finally:
         conn.close()
 

@@ -108,6 +108,16 @@ NULL AND purpose='overhead'` + оплаченные `creditors.kind='fixed'` п�
 `net_with_overhead` виден в карточке заказа в производстве и на дашборде
 (`GET /api/orders/overhead-summary`). Сметы и план-факт этим не обрастают.
 
+**Личные выводы владельца (ТЗ фин-агента 03.09.2026):** `expenses.purpose='owner_draw'`
+при `order_id IS NULL` — Avosend, перевод себе, с р/с ИП на личный, снятие. Это изъятие
+прибыли, а не расход дела: в себестоимость и `obligations.coverage` не попадает
+(`_ALIEN_PURPOSES`), в накладные — тоже (A8 фильтрует ровно `purpose='overhead'`), в
+`general-expenses/summary.total` не входит, в карточке месяца стоит ПОСЛЕ «потрачено» и в
+него не включён. Заводится `POST /api/general-expenses` или `POST /api/expenses/from-tx`
+со строкой `{purpose:"owner_draw"}` (tx-ссылки сохраняются — по ним фин-агент не задваивает
+разноску). Сводка «сколько взято»: `GET /api/general-expenses/owner-draws` — по месяцам,
+кварталам и всего. **Опознавать по purpose, а не по payee** — способы вывода добавляются.
+
 **`mes_id` (в 9 таблицах) — архивный идентификатор импорта из снятого MES, НЕ
 ИСПОЛЬЗОВАТЬ** (решение Юры 04.08.2026, Б6 спеки ЛЕСКОВО): не заполнять, не искать
 по нему, в связях не участвует. Не путать с `analytics.contractors.mes_master_id` —

@@ -1006,6 +1006,9 @@ def plan_fact_summary(scope: str = Query("active", description="active | complet
             "stock_written_off": round(written_off or 0, 2),
             "sample": gen.get("sample", 0),
             "overhead": gen.get("overhead", 0),
+            # Изъятие прибыли, не расход дела: показываем отдельно и ни в какие
+            # суммы себестоимости/накладных не подмешиваем (ТЗ 03.09.2026).
+            "owner_draw": gen.get("owner_draw", 0),
         }}
     finally:
         conn.close()

@@ -123,8 +123,12 @@ def month_card(month: str = Query(None, description="YYYY-MM, по умолча�
     creditors = finance.get_creditors()
     bal = ledger.balances()
 
+    # Личные выводы владельца — не трата дела, а изъятие прибыли: в «потрачено»
+    # не входят, но и не прячутся — отдельная строка карточки (ТЗ 03.09.2026).
+    owner_draw = round(money["general"].get("owner_draw", 0), 2)
     general_rows = [{"label": GENERAL_PURPOSES.get(k, "Прочее вне заказов"), "value": v}
-                    for k, v in sorted(money["general"].items(), key=lambda kv: -kv[1]) if v]
+                    for k, v in sorted(money["general"].items(), key=lambda kv: -kv[1])
+                    if v and k != "owner_draw"]
     spent = round(money["on_orders"] + sum(r["value"] for r in general_rows), 2)
 
     path = cards.render(
@@ -137,6 +141,7 @@ def month_card(month: str = Query(None, description="YYYY-MM, по умолча�
         on_orders=money["on_orders"],
         by_cat=money["by_cat"],
         general_rows=general_rows,
+        owner_draw=owner_draw,
         spent=spent,
         left=round(money["paid"] - spent, 2),
         overhead=overhead,

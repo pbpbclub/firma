@@ -39,6 +39,11 @@
       <div>{% if left >= 0 %}Осталось от поступлений{% else %}Потратили больше, чем пришло{% endif %}</div>
       <div class="s {{ 'pos' if left >= 0 else 'neg' }}">{{ left | abs | money }}<span class="rub">₽</span></div>
     </div>
+    {% if owner_draw %}
+    {# Изъятие прибыли, а не трата дела: стоит ПОСЛЕ итога и в него не входит. #}
+    <div class="n">Выведено себе<small>личные средства владельца</small></div>
+    <div class="s dim">{{ owner_draw | money }}<span class="rub">₽</span></div>
+    {% endif %}
   </div>
 </div>
 
