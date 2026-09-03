@@ -29,6 +29,7 @@ from uuid import uuid4
 from audit import audit
 from db import get_production
 from obligations import recognized as _recognized
+from routers.masters import role_kind as _role_kind
 
 router = APIRouter()
 
@@ -368,12 +369,18 @@ def balances(date_to: Optional[str] = None,
             if nonzero and (not entries or abs(t["balance"]) < 0.01):
                 continue
             rows.append({**{k: m[k] for k in ("id", "name", "role", "status")},
-                         "master_id": m["id"], **t, "entries_count": len(entries)})
+                         "master_id": m["id"], "kind": _role_kind(m.get("role")),
+                         **t, "entries_count": len(entries)})
     finally:
         conn.close()
     rows.sort(key=lambda r: -abs(r["balance"]))
+    # Роли (ТЗ 03.09.2026, п.5): в «Мы должны» — исполнители и поставщики;
+    # доля партнёра и накладные — отдельными суммами, в we_owe не входят.
+    core = ("contractor", "supplier")
     return {"items": rows, "count": len(rows), "date_to": date_to,
-            "we_owe": round(sum(r["balance"] for r in rows if r["state"] == "we_owe"), 2),
+            "we_owe": round(sum(r["balance"] for r in rows if r["state"] == "we_owe" and r["kind"] in core), 2),
+            "partners_total": round(sum(r["balance"] for r in rows if r["state"] == "we_owe" and r["kind"] == "partner"), 2),
+            "overhead_total": round(sum(r["balance"] for r in rows if r["state"] == "we_owe" and r["kind"] == "overhead"), 2),
             # «нам должны» — только настоящие авансы; минус без признака аванса —
             # «требует разноски», в деньги не идёт
             "they_owe": round(-sum(r["balance"] for r in rows if r["state"] == "advance"), 2),

@@ -252,6 +252,22 @@ def list_wiki_only():
     return sorted(out, key=lambda x: x["name"] or "")
 
 
+# Роли контрагентов (ТЗ 03.09.2026, п.5): подпись в БД остаётся русской, смысл —
+# справа. В «Мы должны» по умолчанию идут contractor и supplier; доля партнёра и
+# накладные (аренда, связь, бухгалтерия) — отдельными секциями со своими правилами.
+ROLES = {"Мастер": "contractor", "Подрядчик": "contractor", "Поставщик": "supplier",
+         "Партнёр": "partner", "Накладные": "overhead"}
+
+
+def role_kind(role) -> str:
+    return ROLES.get((role or "").strip(), "contractor")
+
+
+def _check_role(role):
+    if role is not None and role not in ROLES:
+        raise HTTPException(status_code=400, detail=f"role: одно из {list(ROLES)}")
+
+
 class MasterCreate(BaseModel):
     name: str
     role: Optional[str] = "Мастер"
@@ -264,6 +280,7 @@ class MasterCreate(BaseModel):
 
 @router.post("")
 def create_master(body: MasterCreate):
+    _check_role(body.role)
     import uuid
     name = (body.name or "").strip()
     if not name:
@@ -468,6 +485,8 @@ def update_master(master_id: str, body: MasterUpdate):
                        "inn", "full_name", "contact", "website", "price_supplier"]
         fields, params = [], []
         data = body.model_dump(exclude_unset=True)   # присланный null очищает поле
+        if "role" in data:
+            _check_role(data["role"])
         for f in prod_fields:
             if f in data:
                 fields.append(f"{f} = ?")

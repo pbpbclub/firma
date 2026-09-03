@@ -1733,6 +1733,29 @@ def ensure_creditors_repoint_schema():
         conn.close()
 
 
+def ensure_snoozes_schema():
+    """snoozes — «убрать из актуального» (ТЗ 03.09.2026, п.7): обязательство, счёт
+    или заказ с причиной и датой возврата (NULL = навсегда). Заглушённое не входит
+    в суммы экрана денег, но остаётся в истории и во вкладке «Архив»; истёкший срок
+    возвращает строку сам. Образец — inbox_dismissed. Счета фин-агент глушит у себя
+    (finance.db alert_snooze) — веб читает и то, и другое, пишет только сюда."""
+    conn = get_production()
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS snoozes (
+                entity_type TEXT NOT NULL CHECK (entity_type IN ('creditor', 'receivable', 'order')),
+                entity_id   TEXT NOT NULL,
+                until       TEXT,
+                reason      TEXT NOT NULL,
+                created_by  TEXT,
+                created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (entity_type, entity_id)
+            )""")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_creditors_close_schema():
     """След закрытия обязательства: когда и почему (ТЗ обязательств 04.08.2026).
 

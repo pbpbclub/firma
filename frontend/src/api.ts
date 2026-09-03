@@ -379,6 +379,14 @@ export const paymentsApi = {
 };
 
 // Лицевой счёт подрядчика: взаиморасчёты (начислено / выплачено / за него / зачёт)
+// «Убрать из актуального» (ТЗ 03.09.2026, п.7): обязательство | счёт | заказ
+export const snoozeApi = {
+  list: () => api.get("/finance/snoozes").then((r) => r.data),
+  set: (kind: "creditor" | "receivable" | "order", id: string, data: { until: string | null; reason: string }) =>
+    api.put(`/finance/snoozes/${kind}/${id}`, data).then((r) => r.data),
+  remove: (kind: string, id: string) => api.delete(`/finance/snoozes/${kind}/${id}`).then((r) => r.data),
+};
+
 export const ledgerApi = {
   master: (id: string, params?: { date_from?: string; date_to?: string }) =>
     api.get(`/ledger/masters/${id}`, { params }).then((r) => r.data),

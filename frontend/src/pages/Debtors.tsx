@@ -4,9 +4,10 @@ import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loading } from "../components/ui/Loading";
 import { EmptyState } from "../components/ui/EmptyState";
-import { financeApi, zenmoneyApi, ordersApi, ledgerApi } from "../api";
+import { financeApi, zenmoneyApi, ordersApi, ledgerApi, snoozeApi } from "../api";
+import { SnoozeModal } from "../components/money/SnoozeModal";
 import { useNavigate } from "react-router-dom";
-import { Bank, X, Check, Plus, LinkSimple } from "@phosphor-icons/react";
+import { Bank, X, Check, Plus, LinkSimple, BellSlash, ArrowCounterClockwise } from "@phosphor-icons/react";
 import { ColumnFilter, AmountFilter, PeriodFilter } from "../components/TableFilters";
 import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { MONO } from "../components/ui/Num";
@@ -26,8 +27,23 @@ const SANS = "inherit";
 // Полярность вкладки: деньги входят (in) / выходят (out) — задаёт цвет зоны.
 const TAB_POLARITY: Record<string, keyof typeof POLARITY> = {
   debtors: "in", unallocated: "in", creditors: "out", fixed: "out",
-  ledger: "out",
+  ledger: "out", archive: "neutral",
 };
+
+// Общий хук «убрать из актуального» для трёх вкладок: одна модалка, один вызов.
+function useSnooze(kind: "creditor" | "receivable" | "order", invalidate: string[]) {
+  const qc = useQueryClient();
+  const [item, setItem] = useState<{ id: string; title: string; subtitle?: string } | null>(null);
+  const m = useMutation({
+    mutationFn: (v: { until: string | null; reason: string }) => snoozeApi.set(kind, item!.id, v),
+    onSuccess: () => { setItem(null); invalidate.forEach(k => qc.invalidateQueries({ queryKey: [k] })); qc.invalidateQueries({ queryKey: ["snoozes"] }); },
+  });
+  const modal = item ? (
+    <SnoozeModal title={item.title} subtitle={item.subtitle} saving={m.isPending}
+                 onSave={v => m.mutate(v)} onClose={() => setItem(null)} />
+  ) : null;
+  return { open: setItem, modal };
+}
 
 function Checkbox({ checked, indeterminate = false, onChange }: {
   checked: boolean; indeterminate?: boolean; onChange: () => void;
@@ -345,6 +361,7 @@ function DebtorsTab() {
   const [dlFrom, setDlFrom] = useState("");
   const [dlTo, setDlTo] = useState("");
   const [linkItem, setLinkItem] = useState<any>(null);
+  const snooze = useSnooze("order", ["debtors"]);
   // «Расчёты закрыты» (orders.settled_at): заглушённые долги — отдельным свёрнутым
   // блоком, чтобы было видно, что и на сколько заглушено, и можно было открыть заново.
   const [settledOpen, setSettledOpen] = useState(false);
@@ -401,6 +418,7 @@ function DebtorsTab() {
           onClose={() => setLinkItem(null)}
         />
       )}
+      {snooze.modal}
       {(() => {
         const hasFilters = !!(statusFilter || clientFilter || orderFilter || planMin || planMax || paidMin || paidMax || debtMin || debtMax || dlFrom || dlTo);
         const canClear = hasFilters || selectedIds.size > 0;
@@ -458,6 +476,8 @@ function DebtorsTab() {
                 meta={<>оплачено <span style={{ color: "#4A7C59", fontFamily: MONO }}>{fmt(d.paid_total)}</span></>}
                 trailing={<IconButton icon={LinkSimple} title="Связать с транзакцией" size={36} iconSize={15}
                   color={d.finance_tx_id ? "#4A7C59" : "#C8C0B0"} onClick={e => { e.stopPropagation(); setLinkItem(d); }} />}
+                actions={<IconButton icon={BellSlash} title="Убрать из актуального" size={36} iconSize={15} color="#A89070"
+                  onClick={e => { e.stopPropagation(); snooze.open({ id: d.id, title: d.title, subtitle: d.customer_name }); }} />}
               />
             ) : (
             <div
@@ -488,10 +508,12 @@ function DebtorsTab() {
               </div>
               <div style={{ fontSize: 13, fontWeight: 700, color: debtColor(d.debt, "in") }}>{fmt(d.debt)}</div>
               <div><DeadlinePill date={d.deadline} /></div>
-              <div style={{ display: "flex", justifyContent: "center" }}>
+              <div style={{ display: "flex", justifyContent: "center", gap: 2 }}>
                 <IconButton icon={LinkSimple} title="Связать с транзакцией" size={24} iconSize={13}
                   color={d.finance_tx_id ? "#4A7C59" : "#C8C0B0"}
                   onClick={e => { e.stopPropagation(); setLinkItem(d); }} />
+                <IconButton icon={BellSlash} title="Убрать из актуального (с причиной и датой возврата)" size={24} iconSize={13}
+                  color="#C8C0B0" onClick={e => { e.stopPropagation(); snooze.open({ id: d.id, title: d.title, subtitle: d.customer_name }); }} />
               </div>
             </div>
             );
@@ -670,6 +692,7 @@ function UnallocatedTab() {
   const [editId, setEditId] = useState<number | null>(null);
   const [paidDraft, setPaidDraft] = useState("");
   const [linkItem, setLinkItem] = useState<any>(null);
+  const snooze = useSnooze("receivable", ["receivables"]);
   const [clientF, setClientF] = useState("");
   const [noteF, setNoteF] = useState("");
   const [invFrom, setInvFrom] = useState("");
@@ -784,10 +807,12 @@ function UnallocatedTab() {
             </div>
             <div style={{ fontSize: 13, color: "#4A7C59" }}>{r.paid > 0 ? fmt(r.paid) : "—"}</div>
             <div style={{ fontSize: 13, fontWeight: 700, color: "#4A7C59" }}>{fmt(r.debt)}</div>
-            <div style={{ display: "flex", justifyContent: "center" }}>
+            <div style={{ display: "flex", justifyContent: "center", gap: 2 }}>
               <IconButton icon={LinkSimple} title="Связать с транзакцией" size={24} iconSize={13}
                 color={r.finance_tx_id ? "#4A7C59" : "#C8C0B0"}
                 onClick={e => { e.stopPropagation(); setLinkItem(r); }} />
+              <IconButton icon={BellSlash} title="Убрать из актуального (с причиной и датой возврата)" size={24} iconSize={13}
+                color="#C8C0B0" onClick={e => { e.stopPropagation(); snooze.open({ id: String(r.id), title: r.client, subtitle: r.invoice_num ? `счёт ${r.invoice_num}` : undefined }); }} />
             </div>
           </div>
 
@@ -953,6 +978,7 @@ function CreditorsTab() {
   const [addOpen, setAddOpen] = useState(false);
   const [showUnstarted, setShowUnstarted] = useState(false);
   const [showSettled, setShowSettled] = useState(false);
+  const snooze = useSnooze("creditor", ["creditors"]);
   const [editItem, setEditItem] = useState<any>(null);
   const [linkItem, setLinkItem] = useState<any>(null);
   // Какую плашку «закрыть по …» открыли: завершённые (в «Мы должны»), отменённые
@@ -1012,7 +1038,8 @@ function CreditorsTab() {
   // scope с бэка: debt — живые заказы (производство, завершённые) и ручные;
   // plan — незапущенные (приходят только с include_unstarted). covered/recognized —
   // остатка нет или долг сверен в лицевом счёте: показываем по переключателю.
-  const allItems: any[] = data?.items || [];
+  // Заглушённые (п.7) — только во вкладке «Архив».
+  const allItems: any[] = (data?.items || []).filter((c: any) => !c.snoozed);
   const hiddenSettled = allItems.filter((c: any) => (c.covered || c.recognized) && !showSettled).length;
   const items: any[] = allItems.filter((c: any) => showSettled || !(c.covered || c.recognized));
   const uniqueContragents = useMemo(() => [...new Set(items.map((c: any) => c.name).filter(Boolean))].sort() as string[], [items]);
@@ -1089,6 +1116,7 @@ function CreditorsTab() {
   return (
     <>
       {addOpen && <AddCreditorModal onClose={() => setAddOpen(false)} />}
+      {snooze.modal}
       {editItem && <PayCreditorModal item={editItem} onClose={() => setEditItem(null)} />}
       {linkItem && <LinkTxModal creditor={linkItem} onClose={() => setLinkItem(null)} />}
       {bulkAction === "delete" && (
@@ -1352,10 +1380,12 @@ function CreditorsTab() {
                   : c.debt > 0 ? fmt(c.debt) : <span style={{ fontSize: 11, fontFamily: SANS }}>покрыто</span>}
               </div>
               <div><DeadlinePill date={c.due_date} /></div>
-              <div style={{ display: "flex", justifyContent: "center" }}>
+              <div style={{ display: "flex", justifyContent: "center", gap: 2 }}>
                 <IconButton icon={LinkSimple} title="Связать с транзакцией" size={24} iconSize={13}
                   color={(c.finance_tx_id || c.zenmoney_tx_id) ? "#4A7C59" : "#C8C0B0"}
                   onClick={e => { e.stopPropagation(); setLinkItem(c); }} />
+                <IconButton icon={BellSlash} title="Убрать из актуального (с причиной и датой возврата)" size={24} iconSize={13}
+                  color="#C8C0B0" onClick={e => { e.stopPropagation(); snooze.open({ id: c.id, title: c.name, subtitle: c.description || c.order_title }); }} />
               </div>
             </div>
             );
@@ -1379,6 +1409,51 @@ function CreditorsTab() {
         </>
       )}
     </>
+  );
+}
+
+// ── Архив: заглушённое (ТЗ 03.09.2026, п.7) ─────────────────────────────────
+
+const SNOOZE_KIND_LABEL: Record<string, string> = { creditor: "Обязательство", receivable: "Счёт", order: "Заказ" };
+
+function ArchiveTab() {
+  const isMobile = useIsMobile();
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery({ queryKey: ["snoozes"], queryFn: snoozeApi.list });
+  const restore = useMutation({
+    mutationFn: ({ kind, id }: { kind: string; id: string }) => snoozeApi.remove(kind, id),
+    onSuccess: () => { ["snoozes", "debtors", "creditors", "receivables"].forEach(k => qc.invalidateQueries({ queryKey: [k] })); },
+  });
+  if (isLoading) return <Loading />;
+  const items: any[] = data?.items ?? [];
+  if (!items.length) return <EmptyState compact title="Заглушённого нет" hint="кнопка «убрать из актуального» — в строках трёх вкладок" />;
+  return (
+    <div style={{ padding: isMobile ? "0 16px 40px" : "0 28px 40px" }}>
+      <div style={{ margin: "12px 0 0", padding: "11px 14px", background: "#FAF8F5",
+                    borderLeft: "3px solid #EDEBE6", fontSize: 12, color: "#6B6355", lineHeight: 1.5 }}>
+        Убрано из актуального: в суммы «Нам должны» / «Осталось потратить» не входит, по сроку вернётся само.
+        Счета, отложенные фин-агентом, видны, но возвращаются у него.
+      </div>
+      {items.map((s: any) => (
+        <div key={`${s.entity_type}:${s.entity_id}`}
+             style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 0", borderBottom: "1px solid #F2EFE9", flexWrap: "wrap" }}>
+          <span style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em", minWidth: 100 }}>{SNOOZE_KIND_LABEL[s.entity_type] || s.entity_type}</span>
+          <span style={{ flex: 1, minWidth: 200 }}>
+            <div style={{ fontSize: 13, color: "#1A1A1A" }}>
+              {s.entity_type === "order" && s.entity_id ? <OrderLink id={s.entity_id}>{s.title}</OrderLink> : (s.title || s.entity_id)}
+              {s.order_number && s.entity_type !== "order" && <span style={{ color: "#A89070" }}> · {s.order_number}</span>}
+            </div>
+            <div style={{ fontSize: 11, color: "#6B6355" }}>{s.subtitle}{s.subtitle && s.reason ? " · " : ""}<i>{s.reason}</i></div>
+          </span>
+          {s.amount != null && <span style={{ fontFamily: MONO, fontSize: 13, color: "#6B6355" }}>{fmt(s.amount)}</span>}
+          <span style={{ fontSize: 11, color: "#A89070", minWidth: 110 }}>{s.until ? `до ${fmtDate(s.until)}` : "навсегда"}</span>
+          {s.source === "fin"
+            ? <span style={{ fontSize: 10, color: "#A89070" }}>фин-агент</span>
+            : <IconButton icon={ArrowCounterClockwise} title="Вернуть в актуальное" size={28} iconSize={14} color="#4A7C59"
+                onClick={() => restore.mutate({ kind: s.entity_type, id: s.entity_id })} />}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -1686,7 +1761,12 @@ function LedgerTab() {
   // Три состояния сальдо с бэка (ТЗ 03.09.2026, п.6): we_owe — долг, advance —
   // настоящий аванс (явно помечен), unallocated — минус без начислений: дырка в
   // разноске, не деньги. Последнее — ниже и мельче, в суммы не идёт.
-  const owe = items.filter((m: any) => m.state === "we_owe");
+  // Роли (п.5): исполнители и поставщики — «Мы должны»; партнёры и накладные —
+  // свои секции, в we_owe не входят (доля партнёра считается от прибыли проекта).
+  const core = (m: any) => m.kind === "contractor" || m.kind === "supplier";
+  const owe = items.filter((m: any) => m.state === "we_owe" && core(m));
+  const partners = items.filter((m: any) => m.state === "we_owe" && m.kind === "partner");
+  const overhead = items.filter((m: any) => m.state === "we_owe" && m.kind === "overhead");
   const adv = items.filter((m: any) => m.state === "advance");
   const unalloc = items.filter((m: any) => m.state === "unallocated");
 
@@ -1768,6 +1848,22 @@ function LedgerTab() {
         <div style={{ padding: "14px 0", fontSize: 12, color: "#6B6355" }}>Долгов перед подрядчиками нет.</div>
       )}
 
+      {partners.length > 0 && (
+        <>
+          <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em", margin: "24px 0 0" }}>
+            ПАРТНЁРЫ — доля от прибыли проекта, появляется в долге после расчёта прибыли · {fmt(data?.partners_total)}
+          </div>
+          {headRow}{rows(partners)}
+        </>
+      )}
+      {overhead.length > 0 && (
+        <>
+          <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.04em", margin: "24px 0 0" }}>
+            НАКЛАДНЫЕ — аренда, связь, бухгалтерия: не долг подрядчику · {fmt(data?.overhead_total)}
+          </div>
+          {headRow}{rows(overhead)}
+        </>
+      )}
       {adv.length > 0 && (
         <>
           <div style={{ fontSize: 10, color: "#4A7C59", letterSpacing: "0.04em", margin: "24px 0 0" }}>АВАНСЫ У МАСТЕРОВ — деньги отданы вперёд, работа впереди</div>
@@ -1795,7 +1891,7 @@ function LedgerTab() {
 export default function Debtors() {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
-  const [tab, setTab] = useState<"debtors" | "unallocated" | "creditors" | "ledger" | "fixed">("debtors");
+  const [tab, setTab] = useState<"debtors" | "unallocated" | "creditors" | "ledger" | "fixed" | "archive">("debtors");
   const [addCreditorOpen, setAddCreditorOpen] = useState(false);
   const [addReceivableOpen, setAddReceivableOpen] = useState(false);
   const [addFixedOpen, setAddFixedOpen] = useState(false);
@@ -1825,6 +1921,8 @@ export default function Debtors() {
     { id: "creditors",   label: "Осталось потратить" },
     { id: "fixed",       label: "Постоянные" },
     { id: "unallocated", label: openRecCount > 0 ? `Нераспределённые (${openRecCount})` : "Нераспределённые" },
+    // Заглушённое с причиной и датой возврата (п.7) — вне сумм, но не удалено
+    { id: "archive",     label: "Архив" },
   ];
 
   return (
@@ -1927,6 +2025,7 @@ export default function Debtors() {
             // Расчёты — сводка только на чтение: аванс, зачёт и оплату за подрядчика
             // заводят в его карточке, чтобы оба входа писали одну строку.
             ledger: null,
+            archive: null,
           }[tab];
           if (!onAdd) return null;
           return (
@@ -1944,6 +2043,7 @@ export default function Debtors() {
         {tab === "creditors" && <CreditorsTab />}
         {tab === "ledger" && <HScroll><LedgerTab /></HScroll>}
         {tab === "fixed" && <HScroll><FixedTab /></HScroll>}
+        {tab === "archive" && <ArchiveTab />}
       </div>
     </div>
   );

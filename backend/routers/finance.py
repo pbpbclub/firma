@@ -702,6 +702,8 @@ def get_debtors():
         extras = _extras_totals(prod)  # допработы: цена заказа = смета + допы
 
         result = []
+        snoozed = []
+        snz = _active_snoozes(prod, "order")   # «убрано из актуального» (п.7)
         for r in orders:
             row = dict(r)
             paid_total = row["paid_manual"]
@@ -717,7 +719,11 @@ def get_debtors():
             row["debt"] = debt
             row["status_label"] = STATUS_LABELS.get(row["status"], row["status"])
             if debt > 0:
-                result.append(row)
+                if row["id"] in snz:
+                    row["snoozed"] = snz[row["id"]]
+                    snoozed.append(row)
+                else:
+                    result.append(row)
 
         result.sort(key=lambda x: x["debt"], reverse=True)
         total_debt = sum(r["debt"] for r in result)
@@ -786,10 +792,132 @@ def get_debtors():
             "settled": settled,
             "settled_count": len(settled),
             "settled_unlinked_total": round(sum(x["unlinked"] for x in settled), 2),
+            # заглушённые (п.7): не в total, видны отдельно
+            "snoozed": snoozed,
+            "snoozed_total": round(sum(x["debt"] for x in snoozed), 2),
         }
     finally:
         prod.close()
         fin.close()
+
+
+# ── Заглушить, а не удалить (ТЗ 03.09.2026, п.7) ─────────────────────────────
+
+SNOOZE_KINDS = ("creditor", "receivable", "order")
+
+
+def _active_snoozes(conn, kind: str) -> dict:
+    """Действующие снузы вида: {entity_id: row}. Истёкший срок — снуза нет."""
+    return {r["entity_id"]: dict(r) for r in conn.execute(
+        "SELECT * FROM snoozes WHERE entity_type = ? AND (until IS NULL OR until >= date('now'))",
+        (kind,)).fetchall()}
+
+
+def _fin_snoozes() -> dict:
+    """Счета, отложенные фин-агентом (alerts.py snooze, finance.db alert_snooze) —
+    по номеру счёта, только чтение. Таблицы может не быть — тогда пусто."""
+    try:
+        conn = get_finance()
+        try:
+            return {r["invoice_num"]: {"until": r["until"], "reason": r["reason"], "source": "fin"}
+                    for r in conn.execute(
+                        "SELECT invoice_num, until, reason FROM alert_snooze WHERE until >= date('now')").fetchall()}
+        finally:
+            conn.close()
+    except Exception:
+        return {}
+
+
+class SnoozeIn(BaseModel):
+    until: Optional[str] = None     # YYYY-MM-DD; None = навсегда
+    reason: str
+
+
+@router.get("/snoozes")
+def list_snoozes():
+    """Всё заглушённое (вкладка «Архив»): с названием сущности, чтобы список читался."""
+    conn = get_production()
+    try:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT * FROM snoozes WHERE until IS NULL OR until >= date('now') ORDER BY created_at DESC").fetchall()]
+        for r in rows:
+            r["title"], r["subtitle"] = None, None
+            if r["entity_type"] == "creditor":
+                c = conn.execute("""SELECT c.name, c.description, c.total, c.paid, o.number, o.title AS order_title
+                                      FROM creditors c LEFT JOIN orders o ON o.id = c.order_id WHERE c.id = ?""",
+                                 (r["entity_id"],)).fetchone()
+                if c:
+                    r["title"] = c["name"]; r["subtitle"] = c["description"] or c["order_title"]
+                    r["amount"] = round((c["total"] or 0) - (c["paid"] or 0), 2)
+                    r["order_number"] = c["number"]
+            elif r["entity_type"] == "order":
+                o = conn.execute("""SELECT o.number, o.title, o.price_plan, cu.name AS customer,
+                                           COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id = o.id), 0) AS paid
+                                      FROM orders o LEFT JOIN customers cu ON cu.id = o.customer_id WHERE o.id = ?""",
+                                 (r["entity_id"],)).fetchone()
+                if o:
+                    r["title"] = o["title"]; r["subtitle"] = o["customer"]
+                    r["amount"] = round((o["price_plan"] or 0) - (o["paid"] or 0), 2)
+                    r["order_number"] = o["number"]
+        if any(r["entity_type"] == "receivable" for r in rows):
+            try:
+                fin = get_finance()
+                try:
+                    recs = {str(x["id"]): dict(x) for x in fin.execute("SELECT * FROM receivables").fetchall()}
+                finally:
+                    fin.close()
+            except Exception:
+                recs = {}
+            for r in rows:
+                if r["entity_type"] == "receivable" and r["entity_id"] in recs:
+                    x = recs[r["entity_id"]]
+                    r["title"] = x.get("client"); r["subtitle"] = f"счёт {x.get('invoice_num') or ''}".strip()
+                    r["amount"] = round((x.get("amount") or 0) - (x.get("paid") or 0), 2)
+        fin_rows = [{"entity_type": "receivable", "entity_id": inv, "until": v["until"], "reason": v["reason"],
+                     "source": "fin", "title": f"счёт {inv}", "subtitle": "отложено фин-агентом"}
+                    for inv, v in _fin_snoozes().items()]
+        return {"items": rows + fin_rows, "count": len(rows) + len(fin_rows)}
+    finally:
+        conn.close()
+
+
+@router.put("/snoozes/{kind}/{entity_id}")
+def set_snooze(kind: str, entity_id: str, body: SnoozeIn):
+    """Убрать из актуального: причина обязательна, until — дата возврата или пусто
+    (навсегда). Повтор перезаписывает. Журнал — на сущность, не на снуз."""
+    from audit import current_actor
+    if kind not in SNOOZE_KINDS:
+        raise HTTPException(status_code=400, detail=f"kind: одно из {SNOOZE_KINDS}")
+    if not (body.reason or "").strip():
+        raise HTTPException(status_code=400, detail="reason: причина обязательна — иначе через месяц не вспомнить")
+    conn = get_production()
+    try:
+        conn.execute(
+            """INSERT OR REPLACE INTO snoozes (entity_type, entity_id, until, reason, created_by, created_at)
+               VALUES (?, ?, ?, ?, ?, datetime('now'))""",
+            (kind, entity_id, body.until or None, body.reason.strip(), current_actor.get()))
+        audit(conn, kind, entity_id, "snooze",
+              f"Убрано из актуального {'до ' + body.until if body.until else 'навсегда'}: {body.reason.strip()}")
+        conn.commit()
+        return {"ok": True, "entity_type": kind, "entity_id": entity_id, "until": body.until or None,
+                "reason": body.reason.strip()}
+    finally:
+        conn.close()
+
+
+@router.delete("/snoozes/{kind}/{entity_id}")
+def delete_snooze(kind: str, entity_id: str):
+    if kind not in SNOOZE_KINDS:
+        raise HTTPException(status_code=400, detail=f"kind: одно из {SNOOZE_KINDS}")
+    conn = get_production()
+    try:
+        cur = conn.execute("DELETE FROM snoozes WHERE entity_type = ? AND entity_id = ?", (kind, entity_id))
+        if cur.rowcount:
+            audit(conn, kind, entity_id, "unsnooze", "Возвращено в актуальное")
+        conn.commit()
+        return {"ok": True, "removed": cur.rowcount}
+    finally:
+        conn.close()
 
 
 # ── Кредиторы (кому должны мы) ───────────────────────────────────────────────
@@ -908,6 +1036,7 @@ def get_creditors(status: Optional[str] = None, include_unstarted: bool = False)
         ids = [r["id"] for r in rows]
         accrued = ledger_accruals(conn, ids)
         bound = creditor_masters(conn, ids)
+        snz = _active_snoozes(conn, "creditor")
         for r in rows:
             c = cov.get(r["id"], {})
             r["fact_exact"] = round(max(r["paid"] or 0, c.get("covered_exact", 0.0)), 2)
@@ -934,12 +1063,14 @@ def get_creditors(status: Optional[str] = None, include_unstarted: bool = False)
             r["master_id"] = ms[0] if ms else None
             # Строка без получателя денег (резерв, наценка): обязательство лишнее (п.3)
             r["no_payee"] = _no_payee(r)
+            # Заглушено (п.7): в суммы и плашки не входит, живёт во вкладке «Архив»
+            r["snoozed"] = snz.get(r["id"])
         # items — полный список выбранного среза: по ключу ["creditors"] его читает
         # ExpenseModal (подсказка «это оплата обязательства?») с include_unstarted=1.
         debt_rows = [r for r in rows if r.get("scope") == "debt"]
         plan_rows = [r for r in rows if r.get("scope") == "plan"]
         rest_rows = [r for r in debt_rows if r.get("order_status") == "in_production"
-                     and not r["covered"] and not r["recognized"]]
+                     and not r["covered"] and not r["recognized"] and not r["snoozed"]]
 
         # Плашка «неактуальные» описывает состояние ВСЕЙ базы, поэтому считается
         # своим запросом, а не из rows: те уже сужены параметром status, и при
@@ -959,6 +1090,7 @@ def get_creditors(status: Optional[str] = None, include_unstarted: bool = False)
               AND (c.kind IS NULL OR c.kind != 'fixed')
               AND (COALESCE(o.archived, 0) = 1 OR o.status IN ('cancelled', 'completed'))
         """).fetchall()]
+        stale_rows = [r for r in stale_rows if r["id"] not in snz]
         for r in stale_rows:
             r["debt"] = effective_debt(r, cov.get(r["id"], {}))
 
@@ -975,7 +1107,8 @@ def get_creditors(status: Optional[str] = None, include_unstarted: bool = False)
         # Внутренние строки (резерв, наценка) — обязательства без получателя денег,
         # рождённые до правила п.3. Закрываются плашкой (close-stale kinds=['internal']).
         internal_rows = [r for r in _internal_open_rows(conn)
-                         if (r["paid"] or 0) <= 0.01 and cov.get(r["id"], {}).get("covered", 0.0) <= 0.01]
+                         if (r["paid"] or 0) <= 0.01 and cov.get(r["id"], {}).get("covered", 0.0) <= 0.01
+                         and r["id"] not in snz]
         io = {}
         for r in internal_rows:
             o = io.setdefault(r["order_id"], {"id": r["order_id"], "number": r["order_number"],
@@ -1043,6 +1176,7 @@ def get_creditors(status: Optional[str] = None, include_unstarted: bool = False)
             "stale": stale,
             "looks_done": looks_done,
             "double_sets": double_sets,
+            "snoozed": [r for r in rows if r["snoozed"]],
             "items": rows,
             "total_owed": round(sum(r["total"] or 0 for r in debt_rows), 2),
             "total_paid": round(sum(r["fact"] for r in debt_rows), 2),
@@ -1580,16 +1714,30 @@ def get_receivables():
             rows = conn.execute(
                 "SELECT * FROM receivables ORDER BY invoice_date DESC"
             ).fetchall()
+            # Заглушённые счета: свои (snoozes, по id) и фин-агента (alert_snooze, по
+            # номеру счёта). Из open_items и total_debt уходят, остаются в snoozed[].
+            try:
+                prod = get_production()
+                try:
+                    snz = _active_snoozes(prod, "receivable")
+                finally:
+                    prod.close()
+            except Exception:
+                snz = {}
+            fin_snz = _fin_snoozes()
             items = []
             for r in rows:
                 row = dict(r)
                 row["debt"] = round(row["amount"] - (row["paid"] or 0), 2)
+                row["snoozed"] = snz.get(str(row["id"])) or fin_snz.get(row.get("invoice_num") or "")
                 items.append(row)
-            open_items = [r for r in items if r["debt"] > 0]
+            open_items = [r for r in items if r["debt"] > 0 and not r["snoozed"]]
+            snoozed = [r for r in items if r["debt"] > 0 and r["snoozed"]]
             dup_error = _mark_receivable_duplicates(open_items)
             return {
                 "items": items,
                 "open_items": open_items,
+                "snoozed": snoozed,
                 "total_debt": round(sum(r["debt"] for r in open_items), 2),
                 "total_amount": round(sum(r["amount"] for r in items), 2),
                 # «дублей нет» и «проверка не отработала» — разные вещи
