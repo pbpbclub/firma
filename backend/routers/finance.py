@@ -3,6 +3,8 @@ from pydantic import BaseModel
 from typing import Optional, List
 from audit import audit
 from db import get_finance, get_production, get_analytics
+from datetime import datetime
+import sqlite3
 import uuid
 
 router = APIRouter()
@@ -813,19 +815,51 @@ def _active_snoozes(conn, kind: str) -> dict:
         (kind,)).fetchall()}
 
 
-def _fin_snoozes() -> dict:
+def _fin_snoozes() -> tuple:
     """Счета, отложенные фин-агентом (alerts.py snooze, finance.db alert_snooze) —
-    по номеру счёта, только чтение. Таблицы может не быть — тогда пусто."""
+    по номеру счёта, только чтение.
+
+    Возвращает (снузы, ошибка|None). «Таблицы нет» — это честное «пусто» (фин-агент
+    ни разу ничего не откладывал), а вот недоступная finance.db — деградация, и
+    молчать о ней нельзя (code_rules 05.08.2026): пустой словарь молча возвращает
+    заглушённые счета в актуальные и в total_debt, и человек видит долг, который
+    сам же убрал."""
     try:
         conn = get_finance()
         try:
-            return {r["invoice_num"]: {"until": r["until"], "reason": r["reason"], "source": "fin"}
-                    for r in conn.execute(
-                        "SELECT invoice_num, until, reason FROM alert_snooze WHERE until >= date('now')").fetchall()}
+            return ({r["invoice_num"]: {"until": r["until"], "reason": r["reason"], "source": "fin"}
+                     for r in conn.execute(
+                         "SELECT invoice_num, until, reason FROM alert_snooze WHERE until >= date('now')").fetchall()},
+                    None)
         finally:
             conn.close()
-    except Exception:
-        return {}
+    except sqlite3.OperationalError as e:
+        if "no such table" in str(e):
+            return {}, None
+        return {}, f"finance.db недоступна: {e}"
+    except Exception as e:
+        return {}, f"alert_snooze не прочитан: {e}"
+
+
+def _parse_until(until: Optional[str]) -> Optional[str]:
+    """Дата возврата снуза → канонический YYYY-MM-DD; пусто = навсегда.
+
+    Сравнение в SQL строковое (until >= date('now')), поэтому непроверенная строка
+    не даёт ни ошибки, ни эффекта: «31.12.2026» лексикографически меньше «2026-…»
+    и снуз истекает мгновенно, а прошедшая дата принимается с ответом 200 и нулевым
+    результатом (code_rules 03.09.2026)."""
+    s = (until or "").strip()
+    if not s:
+        return None
+    try:
+        d = datetime.strptime(s, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400,
+                            detail="until: дата в формате ГГГГ-ММ-ДД (например 2026-12-31) или пусто — навсегда")
+    if d < datetime.now().date():
+        raise HTTPException(status_code=400,
+                            detail=f"until: {s} уже прошло — заглушка не подействует ни на день")
+    return d.isoformat()
 
 
 class SnoozeIn(BaseModel):
@@ -859,6 +893,7 @@ def list_snoozes():
                     r["title"] = o["title"]; r["subtitle"] = o["customer"]
                     r["amount"] = round((o["price_plan"] or 0) - (o["paid"] or 0), 2)
                     r["order_number"] = o["number"]
+        own_invoices = set()   # номера счетов, уже заглушённых у нас (для дедупа с фин-агентом)
         if any(r["entity_type"] == "receivable" for r in rows):
             try:
                 fin = get_finance()
@@ -873,10 +908,18 @@ def list_snoozes():
                     x = recs[r["entity_id"]]
                     r["title"] = x.get("client"); r["subtitle"] = f"счёт {x.get('invoice_num') or ''}".strip()
                     r["amount"] = round((x.get("amount") or 0) - (x.get("paid") or 0), 2)
+                    if x.get("invoice_num"):
+                        own_invoices.add(x["invoice_num"])
+        # Один счёт мог быть заглушён и здесь (по id получателя), и фин-агентом
+        # (по номеру счёта) — это ОДНА сущность: без схлопывания она стоит в
+        # «Архиве» двумя строками и удваивает count.
+        fin_snz, fin_err = _fin_snoozes()
         fin_rows = [{"entity_type": "receivable", "entity_id": inv, "until": v["until"], "reason": v["reason"],
                      "source": "fin", "title": f"счёт {inv}", "subtitle": "отложено фин-агентом"}
-                    for inv, v in _fin_snoozes().items()]
-        return {"items": rows + fin_rows, "count": len(rows) + len(fin_rows)}
+                    for inv, v in fin_snz.items() if inv not in own_invoices]
+        return {"items": rows + fin_rows, "count": len(rows) + len(fin_rows),
+                # «заглушек фин-агента нет» и «его база не прочиталась» — разные вещи
+                "fin_checked": fin_err is None, "fin_error": fin_err}
     finally:
         conn.close()
 
@@ -890,16 +933,17 @@ def set_snooze(kind: str, entity_id: str, body: SnoozeIn):
         raise HTTPException(status_code=400, detail=f"kind: одно из {SNOOZE_KINDS}")
     if not (body.reason or "").strip():
         raise HTTPException(status_code=400, detail="reason: причина обязательна — иначе через месяц не вспомнить")
+    until = _parse_until(body.until)
     conn = get_production()
     try:
         conn.execute(
             """INSERT OR REPLACE INTO snoozes (entity_type, entity_id, until, reason, created_by, created_at)
                VALUES (?, ?, ?, ?, ?, datetime('now'))""",
-            (kind, entity_id, body.until or None, body.reason.strip(), current_actor.get()))
+            (kind, entity_id, until, body.reason.strip(), current_actor.get()))
         audit(conn, kind, entity_id, "snooze",
-              f"Убрано из актуального {'до ' + body.until if body.until else 'навсегда'}: {body.reason.strip()}")
+              f"Убрано из актуального {'до ' + until if until else 'навсегда'}: {body.reason.strip()}")
         conn.commit()
-        return {"ok": True, "entity_type": kind, "entity_id": entity_id, "until": body.until or None,
+        return {"ok": True, "entity_type": kind, "entity_id": entity_id, "until": until,
                 "reason": body.reason.strip()}
     finally:
         conn.close()
@@ -947,8 +991,15 @@ class CreditorPatch(BaseModel):
 def _no_payee(r: dict) -> bool:
     """Обязательство по строке сметы без получателя денег (obligations.has_payee)."""
     from obligations import has_payee
-    if not r.get("estimate_line_id") or r.get("line_type") is None:
+    if not r.get("estimate_line_id"):
         return False
+    # Явный флаг сильнее guard-а по вспомогательному полю: строка, помеченная
+    # «внутр.», обязана попасть во «внутренние» и при незаполненном type — иначе
+    # она не видна ни в плашке, ни для close-stale kinds=['internal'].
+    if r.get("line_internal"):
+        return True
+    if r.get("line_type") is None:
+        return False   # строка сметы не подтянулась (LEFT JOIN) — гадать не о чем
     return not has_payee({"type": r.get("line_type"), "master_id": r.get("line_master_id"),
                           "contractor_name": r.get("line_contractor"),
                           "material_code": r.get("line_material_code"), "internal": r.get("line_internal")})
@@ -1067,8 +1118,12 @@ def get_creditors(status: Optional[str] = None, include_unstarted: bool = False)
             r["snoozed"] = snz.get(r["id"])
         # items — полный список выбранного среза: по ключу ["creditors"] его читает
         # ExpenseModal (подсказка «это оплата обязательства?») с include_unstarted=1.
-        debt_rows = [r for r in rows if r.get("scope") == "debt"]
-        plan_rows = [r for r in rows if r.get("scope") == "plan"]
+        # Заглушённое (п.7) не входит НИ в один итог ответа: items остаются полными
+        # (их читает ExpenseModal), а суммы считаются по строкам без снуза. Иначе
+        # «убрал из актуального» убирало строку только из plan_rest, а total_owed
+        # и plan_total продолжали её показывать — при обещании «в суммы не входит».
+        debt_rows = [r for r in rows if r.get("scope") == "debt" and not r["snoozed"]]
+        plan_rows = [r for r in rows if r.get("scope") == "plan" and not r["snoozed"]]
         rest_rows = [r for r in debt_rows if r.get("order_status") == "in_production"
                      and not r["covered"] and not r["recognized"] and not r["snoozed"]]
 
@@ -1716,15 +1771,17 @@ def get_receivables():
             ).fetchall()
             # Заглушённые счета: свои (snoozes, по id) и фин-агента (alert_snooze, по
             # номеру счёта). Из open_items и total_debt уходят, остаются в snoozed[].
+            snz, snz_err = {}, None
             try:
                 prod = get_production()
                 try:
                     snz = _active_snoozes(prod, "receivable")
                 finally:
                     prod.close()
-            except Exception:
-                snz = {}
-            fin_snz = _fin_snoozes()
+            except Exception as e:
+                snz_err = f"свои заглушки не прочитаны (production.db): {e}"
+            fin_snz, fin_err = _fin_snoozes()
+            snooze_error = snz_err or fin_err
             items = []
             for r in rows:
                 row = dict(r)
@@ -1744,6 +1801,10 @@ def get_receivables():
                 # (code_rules 05.08.2026): фронт обязан показать деградацию.
                 "duplicates_checked": dup_error is None,
                 "duplicates_error": dup_error,
+                # То же про заглушки: не прочитали — счёт вернулся в актуальные
+                # и в total_debt, и молча это выглядит как «долг воскрес».
+                "snoozes_checked": snooze_error is None,
+                "snoozes_error": snooze_error,
             }
         finally:
             conn.close()

@@ -722,19 +722,38 @@ def unapprove_set(set_id: str, body: Optional[UnapproveIn] = None):
         restored_obl = reopened_obl = 0
         if restoring:
             rh = ",".join("?" * len(restoring))
+            # name/description repoint переписал именем строки НОВОЙ версии — вернуть
+            # их обязан и откат, иначе обязательство навсегда носит название из
+            # отменённой сметы. Восстанавливаем не из снимка, а той же формулой,
+            # что их когда-то и породила (_creditor_name_for_line).
             for c in conn.execute(f"""
-                SELECT c.id, c.prev_estimate_item_id, c.prev_estimate_line_id,
-                       COALESCE(el.line_total, ei.cost_total) AS prev_total
+                SELECT c.id, c.name, c.prev_estimate_item_id, c.prev_estimate_line_id,
+                       COALESCE(el.line_total, ei.cost_total) AS prev_total,
+                       ei.title AS prev_item_title,
+                       el.type AS prev_line_type, el.title AS prev_line_title,
+                       el.master_id AS prev_line_master, el.contractor_name AS prev_line_contractor,
+                       es.title AS prev_set_title, es.id AS prev_set_id
                   FROM creditors c
                   LEFT JOIN estimate_lines el ON el.id = c.prev_estimate_line_id
                   JOIN estimate_items ei ON ei.id = c.prev_estimate_item_id
+                  JOIN estimate_sets  es ON es.id = ei.set_id
                  WHERE ei.set_id IN ({rh})""", restoring).fetchall():
+                if c["prev_estimate_line_id"]:
+                    name, description = _creditor_name_for_line(
+                        conn, {"title": c["prev_item_title"]},
+                        {"type": c["prev_line_type"], "title": c["prev_line_title"],
+                         "master_id": c["prev_line_master"], "contractor_name": c["prev_line_contractor"]})
+                else:
+                    # Строка уровня позиции: имя repoint не трогал, подпись — смета
+                    name, description = c["name"], f"Смета: {c['prev_set_title'] or c['prev_set_id']}"
                 conn.execute(
                     """UPDATE creditors SET estimate_item_id = ?, estimate_line_id = ?,
                               total = COALESCE(?, total), amount_plan = COALESCE(?, amount_plan),
+                              name = ?, description = ?,
                               prev_estimate_item_id = NULL, prev_estimate_line_id = NULL
                         WHERE id = ?""",
-                    (c["prev_estimate_item_id"], c["prev_estimate_line_id"], c["prev_total"], c["prev_total"], c["id"]))
+                    (c["prev_estimate_item_id"], c["prev_estimate_line_id"], c["prev_total"], c["prev_total"],
+                     name, description, c["id"]))
                 restored_obl += 1
             reopened_obl = conn.execute(f"""
                 UPDATE creditors SET status = 'open', closed_at = NULL, closed_reason = NULL
