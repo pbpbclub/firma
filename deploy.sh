@@ -68,7 +68,20 @@ sudo -n /bin/systemctl restart firma
 echo "=== Smoke ==="
 # systemctl status покажет только «процесс жив». Падение миграции или роутера
 # выглядит как живой сервис с пятисотками — видно лишь запросом.
-sleep 3
+#
+# Ждём готовности, а не спим вслепую: старт с миграциями занимает то две секунды,
+# то четыре, и фиксированный `sleep 3` дал ложный «Connection refused» на живом
+# сервисе (04.09.2026) — провал приёмки, которого не было. Опрашиваем порт до 40 с:
+# http_code=000 значит «соединение не принято», любой ответ — сервер слушает.
+for i in $(seq 1 40); do
+  code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8001/docs" || true)
+  [ "$code" != "000" ] && break
+  if [ "$i" = "40" ]; then
+    echo "!!! Фирма не отвечает через 40 с после рестарта — smoke не запускался." >&2
+    exit 1
+  fi
+  sleep 1
+done
 if ! python3 "$ROOT/scripts/smoke.py"; then
   echo "!!! Smoke провален — Фирма поднялась, но работает не вся."
   python3 /opt/ai-os/tools/agent_msg.py send --to yos --type alert \

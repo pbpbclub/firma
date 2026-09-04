@@ -28,15 +28,30 @@ export function SilentPanel() {
   if (!data) return <div style={{ padding: "8px 28px 24px" }}><Loading compact /></div>;
 
   const rows: any[] = data.orders || [];
+  // Заказы, у которых дату движения разобрать не удалось: тишину по ним посчитать
+  // нельзя, и в список они не попали. Плашка ВЫШЕ пустого состояния — «все просчёты
+  // свежие» при неразобранных датах означало бы «не проверяли» = «всё хорошо».
+  const undated: any[] = data.undated || [];
+  const undatedWarn = undated.length > 0 ? (
+    <div style={{ margin: "8px 0 4px", padding: "10px 12px", background: "#FBF3F2",
+                  borderLeft: "3px solid #8B3A3A", fontSize: 12, color: "#8B3A3A", lineHeight: 1.5 }}>
+      ⚠ У {undated.length} {undated.length === 1 ? "заказа" : "заказов"} не разобрана дата движения —
+      тишину по ним посчитать нельзя, в список ниже они не вошли:{" "}
+      {undated.map((o: any) => o.number || o.title).join(", ")}.
+    </div>
+  ) : null;
+
   if (rows.length === 0)
     return (
       <div style={{ flex: 1, overflow: "auto", padding: "8px 28px 24px" }}>
+        {undatedWarn}
         <EmptyState compact title="Все просчёты свежие" hint="Ни одного заказа без движения дольше 14 дней" />
       </div>
     );
 
   return (
     <div style={{ flex: 1, overflow: "auto", padding: "8px 28px 24px" }}>
+      {undatedWarn}
       <div style={{ fontSize: 11, color: "#6B6355", padding: "6px 0 12px" }}>
         {rows.length} без движения дольше {data.thresholds.ask} дн.
         {data.archive_candidates > 0 && (

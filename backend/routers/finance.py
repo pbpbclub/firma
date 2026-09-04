@@ -1809,7 +1809,11 @@ def get_receivables():
         finally:
             conn.close()
     except Exception as e:
-        return {"items": [], "open_items": [], "total_debt": 0, "total_amount": 0, "error": str(e)}
+        # Полный отказ: флаги проверок ставим ЯВНО в False. Отсутствие ключа
+        # (undefined во фронте) не равно false — плашки деградации молчали бы, и
+        # пустой экран читался бы как «счетов нет» (code_rules 05.08.2026).
+        return {"items": [], "open_items": [], "snoozed": [], "total_debt": 0, "total_amount": 0,
+                "duplicates_checked": False, "snoozes_checked": False, "error": str(e)}
 
 
 def _mark_receivable_duplicates(open_items: list) -> Optional[str]:
