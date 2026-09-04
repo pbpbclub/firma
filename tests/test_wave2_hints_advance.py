@@ -54,6 +54,12 @@ class TestDoneHint:
         from routers.orders import _awaiting_flags
         with pytest.raises(TypeError):
             _awaiting_flags("in_production", 50_000, 50_000)
+        # явный None — тоже отказ, а не 500 из round() в редкой ветке и не
+        # тихий ноль на всех остальных статусах
+        with pytest.raises(ValueError):
+            _awaiting_flags("in_production", 50_000, 50_000, None)
+        with pytest.raises(ValueError):
+            _awaiting_flags("draft", 0, 0, None)
 
     def test_остаток_по_заказу_не_считает_признанное(self, db):
         from obligations import open_rest_by_order
