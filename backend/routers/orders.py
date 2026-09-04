@@ -283,7 +283,7 @@ def _active_set(conn, oid: str):
     ).fetchone()
 
 
-def _awaiting_flags(status: str, price_plan, paid_total, open_rest=None) -> dict:
+def _awaiting_flags(status: str, price_plan, paid_total, open_rest) -> dict:
     """Подсказки вокруг статуса — производные, в схеме ничего не храним.
 
     awaiting_hint: счёт/цена есть, оплат нет — похоже, заказ ждёт оплату; предлагаем
@@ -295,14 +295,20 @@ def _awaiting_flags(status: str, price_plan, paid_total, open_rest=None) -> dict
     и оплаты). Открытые остатки по обязательствам подсказку НЕ гасят: у Dakel план
     материалов без единого расхода, и ждать его покрытия — значит не подсказать
     никогда; остаток решается в окне завершения (409 obligations_unpaid). Сумма —
-    done_open_rest (obligations.open_rest_by_order), чтобы подсказка предупредила."""
+    done_open_rest (obligations.open_rest_by_order), чтобы подсказка предупредила.
+
+    open_rest ОБЯЗАТЕЛЕН (04.09.2026). С дефолтом None и `or 0.0` «остаток не
+    считали» превращалось в «остаток равен нулю»: подсказка «похоже, завершён»
+    выдавалась без предупреждения о непокрытых обязательствах, и забытый аргумент
+    у нового вызова был бы неотличим от честного нуля. Теперь забыть его нельзя —
+    ошибка вылезет на вызове, а не тихим нулём на экране."""
     fully_paid = (price_plan or 0) > 0 and (paid_total or 0) >= (price_plan or 0) - 0.01
     return {
         "awaiting_hint": status in ("estimate", "project")
                          and (price_plan or 0) > 0 and (paid_total or 0) <= 0,
         "awaiting_paid_signal": status == "awaiting_payment" and (paid_total or 0) > 0,
         "done_hint": status == "in_production" and fully_paid,
-        "done_open_rest": round(open_rest or 0.0, 2) if status == "in_production" and fully_paid else 0.0,
+        "done_open_rest": round(open_rest, 2) if status == "in_production" and fully_paid else 0.0,
     }
 
 

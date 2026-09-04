@@ -717,8 +717,30 @@ function UnallocatedTab() {
 
   const items: any[] = data?.open_items || [];
 
+  // Плашки деградации — ДО раннего выхода: пустой экран «счетов нет» и есть тот
+  // случай, когда молчание опаснее всего (не прочитали ≠ нет).
+  const warns = (
+    <>
+      {/* Проверка на дубли с заказами не отработала — молчать нельзя: экран без
+          пометок читается как «дублей нет», и долг посчитается дважды */}
+      {data?.duplicates_checked === false && (
+        <div style={{ padding: "8px 28px", background: "#FAF8F5", borderBottom: "1px solid #EDEBE6", fontSize: 11, color: "#8B3A3A" }}>
+          ⚠ Сверка с заказами не выполнена{data?.duplicates_error ? `: ${data.duplicates_error}` : ""} — пометки «похоже на заказ» сейчас не показываются.
+        </div>
+      )}
+      {/* Заглушки не прочитались — счёт, который Юра сам убрал, вернулся в список
+          и в сумму. Молчать нельзя: это читается как «долг воскрес». */}
+      {data?.snoozes_checked === false && (
+        <div style={{ padding: "8px 28px", background: "#FAF8F5", borderBottom: "1px solid #EDEBE6", fontSize: 11, color: "#8B3A3A" }}>
+          ⚠ Заглушённые счета не прочитаны{data?.snoozes_error ? `: ${data.snoozes_error}` : ""} — убранные из актуального
+          сейчас показаны как долг и входят в сумму внизу.
+        </div>
+      )}
+    </>
+  );
+
   if (isLoading) return <Loading />;
-  if (items.length === 0) return <EmptyState title="Нет нераспределённых счетов" />;
+  if (items.length === 0) return <>{warns}<EmptyState title="Нет нераспределённых счетов" /></>;
 
   const recCols = "2fr 2fr 120px 120px 120px 28px";
   const uniqueClients = [...new Set(items.map((r: any) => r.client).filter(Boolean))].sort() as string[];
@@ -748,13 +770,7 @@ function UnallocatedTab() {
           onClose={() => setLinkItem(null)}
         />
       )}
-      {/* Проверка на дубли с заказами не отработала — молчать нельзя: экран без
-          пометок читается как «дублей нет», и долг посчитается дважды */}
-      {data?.duplicates_checked === false && (
-        <div style={{ padding: "8px 28px", background: "#FAF8F5", borderBottom: "1px solid #EDEBE6", fontSize: 11, color: "#8B3A3A" }}>
-          ⚠ Сверка с заказами не выполнена{data?.duplicates_error ? `: ${data.duplicates_error}` : ""} — пометки «похоже на заказ» сейчас не показываются.
-        </div>
-      )}
+      {warns}
       <div style={{ padding: "10px 28px", borderBottom: "1px solid #F2EFE9", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
           <span style={{ fontSize: 11, color: "#6B6355" }}>{filtered.length} счетов</span>
@@ -1426,9 +1442,25 @@ function ArchiveTab() {
   });
   if (isLoading) return <Loading />;
   const items: any[] = data?.items ?? [];
-  if (!items.length) return <EmptyState compact title="Заглушённого нет" hint="кнопка «убрать из актуального» — в строках трёх вкладок" />;
+  // База фин-агента не прочиталась — отложенные им счета в списке не видны и
+  // остаются в актуальных суммах. Плашка ВЫШЕ раннего выхода: при пустом списке
+  // «Заглушённого нет» без неё врало бы сильнее всего.
+  const finWarn = data?.fin_checked === false ? (
+    <div style={{ margin: "12px 0 0", padding: "11px 14px", background: "#FBF3F2",
+                  borderLeft: "3px solid #8B3A3A", fontSize: 12, color: "#8B3A3A", lineHeight: 1.5 }}>
+      ⚠ Заглушки фин-агента не прочитаны{data?.fin_error ? `: ${data.fin_error}` : ""} — отложенные им счета
+      здесь не показаны и остаются в «Нам должны».
+    </div>
+  ) : null;
+  if (!items.length) return (
+    <div style={{ padding: isMobile ? "0 16px 40px" : "0 28px 40px" }}>
+      {finWarn}
+      <EmptyState compact title="Заглушённого нет" hint="кнопка «убрать из актуального» — в строках трёх вкладок" />
+    </div>
+  );
   return (
     <div style={{ padding: isMobile ? "0 16px 40px" : "0 28px 40px" }}>
+      {finWarn}
       <div style={{ margin: "12px 0 0", padding: "11px 14px", background: "#FAF8F5",
                     borderLeft: "3px solid #EDEBE6", fontSize: 12, color: "#6B6355", lineHeight: 1.5 }}>
         Убрано из актуального: в суммы «Нам должны» / «Осталось потратить» не входит, по сроку вернётся само.

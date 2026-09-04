@@ -47,6 +47,14 @@ class TestDoneHint:
         assert f["done_hint"] is True and f["done_open_rest"] == 1_500
         assert _awaiting_flags("completed", 50_000, 50_000, 0.0)["done_hint"] is False
 
+    def test_остаток_обязателен_а_не_молчаливый_ноль(self, db):
+        """04.09.2026: у open_rest был дефолт None и `or 0.0` в теле — забытый
+        аргумент нового вызова выглядел бы как честный ноль, и подсказка
+        «похоже, завершён» уходила бы без предупреждения об остатке."""
+        from routers.orders import _awaiting_flags
+        with pytest.raises(TypeError):
+            _awaiting_flags("in_production", 50_000, 50_000)
+
     def test_остаток_по_заказу_не_считает_признанное(self, db):
         from obligations import open_rest_by_order
         _cred(db, "c-1", 30_000)
