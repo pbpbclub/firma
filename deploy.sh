@@ -81,8 +81,9 @@ echo "=== Smoke ==="
 # Потолок ожидания — БЮДЖЕТ ПО ВРЕМЕНИ, а не число итераций: с --max-time 5 плюс
 # sleep 1 сорок шагов ждали бы до четырёх минут, а комментарий, лог и алерт
 # обещают 40 с — человек читает этот срок как факт (code_rules 05.09.2026).
-# Новая попытка не начинается после дедлайна, поэтому перебор — не больше одного
-# --max-time (до 45 с в худшем случае), а не кратный.
+# Дедлайн проверяется ДО попытки, и --max-time урезается остатком бюджета: иначе
+# последняя попытка выходила за срок и реальный потолок был 40+5=45 с, тогда как
+# stderr и алерт называют человеку ровно 40 с (code_rules 06.09.2026).
 #
 # Выход из цикла — через `if ... then ... fi`: в ветке две команды (поднять флаг
 # и выйти), в `[ ... ] && break` они не помещаются. Прежний `&& break` деплой НЕ
@@ -92,13 +93,15 @@ WAIT_SECONDS=40
 deadline=$(( $(date +%s) + WAIT_SECONDS ))
 ready=0
 while :; do
-  code=$(curl -s --connect-timeout 2 --max-time 5 \
+  left=$(( deadline - $(date +%s) ))
+  if [ "$left" -le 0 ]; then
+    break
+  fi
+  if [ "$left" -gt 5 ]; then max_time=5; else max_time="$left"; fi
+  code=$(curl -s --connect-timeout 2 --max-time "$max_time" \
               -o /dev/null -w '%{http_code}' "http://127.0.0.1:8001/docs" || true)
   if [ "$code" != "000" ]; then
     ready=1
-    break
-  fi
-  if [ "$(date +%s)" -ge "$deadline" ]; then
     break
   fi
   sleep 1

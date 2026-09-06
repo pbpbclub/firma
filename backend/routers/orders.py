@@ -302,18 +302,20 @@ def _awaiting_flags(status: str, price_plan, paid_total, open_rest) -> dict:
     выдавалась без предупреждения о непокрытых обязательствах, и забытый аргумент
     у нового вызова был бы неотличим от честного нуля. Теперь забыть его нельзя —
     ошибка вылезет на вызове, а не тихим нулём на экране. Явный None отвергаем
-    здесь же: без проверки он долетал бы до round() и падал 500 только в редкой
-    ветке (in_production + оплачен целиком), а на всех прочих статусах молча
-    проходил бы как «остатка нет»."""
-    if open_rest is None:
-        raise ValueError("_awaiting_flags: open_rest обязателен, None недопустим")
+    ТОЛЬКО в той ветке, где остаток участвует в расчёте (in_production + оплачен
+    целиком): на прочих статусах величина не используется по определению, и raise
+    выше ветвления ронял весь список 500 из-за значения, которое всё равно не
+    читается (code_rules 06.09.2026)."""
     fully_paid = (price_plan or 0) > 0 and (paid_total or 0) >= (price_plan or 0) - 0.01
+    done = status == "in_production" and fully_paid
+    if done and open_rest is None:
+        raise ValueError("_awaiting_flags: open_rest обязателен, None недопустим")
     return {
         "awaiting_hint": status in ("estimate", "project")
                          and (price_plan or 0) > 0 and (paid_total or 0) <= 0,
         "awaiting_paid_signal": status == "awaiting_payment" and (paid_total or 0) > 0,
-        "done_hint": status == "in_production" and fully_paid,
-        "done_open_rest": round(open_rest, 2) if status == "in_production" and fully_paid else 0.0,
+        "done_hint": done,
+        "done_open_rest": round(open_rest, 2) if done else 0.0,
     }
 
 
