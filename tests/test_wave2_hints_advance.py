@@ -54,13 +54,16 @@ class TestDoneHint:
         from routers.orders import _awaiting_flags
         with pytest.raises(TypeError):
             _awaiting_flags("in_production", 50_000, 50_000)
-        # явный None — отказ там, где остаток реально считается
-        with pytest.raises(ValueError):
-            _awaiting_flags("in_production", 50_000, 50_000, None)
+        # 08.09.2026: явный None в «своей» ветке больше не роняет строку — помощник
+        # зовётся в цикле списочного эндпоинта, и 500 на весь список хуже пометки
+        f = _awaiting_flags("in_production", 50_000, 50_000, None)
+        assert f["done_open_rest_unknown"] is True and f["done_open_rest"] == 0.0
         # 06.09.2026: на статусах, где остаток не участвует в расчёте, None не
         # роняет строку — иначе один нерелевантный аргумент валит весь список
         assert _awaiting_flags("draft", 0, 0, None)["done_open_rest"] == 0.0
         assert _awaiting_flags("in_production", 50_000, 10_000, None)["done_hint"] is False
+        # ключ живёт в обеих ветках с одним типом, а не только при деградации
+        assert _awaiting_flags("draft", 0, 0, 0.0)["done_open_rest_unknown"] is False
 
     def test_остаток_по_заказу_не_считает_признанное(self, db):
         from obligations import open_rest_by_order

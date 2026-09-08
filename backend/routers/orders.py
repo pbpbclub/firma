@@ -297,25 +297,29 @@ def _awaiting_flags(status: str, price_plan, paid_total, open_rest) -> dict:
     никогда; остаток решается в окне завершения (409 obligations_unpaid). Сумма —
     done_open_rest (obligations.open_rest_by_order), чтобы подсказка предупредила.
 
-    open_rest ОБЯЗАТЕЛЕН (04.09.2026). С дефолтом None и `or 0.0` «остаток не
-    считали» превращалось в «остаток равен нулю»: подсказка «похоже, завершён»
-    выдавалась без предупреждения о непокрытых обязательствах, и забытый аргумент
-    у нового вызова был бы неотличим от честного нуля. Теперь забыть его нельзя —
-    ошибка вылезет на вызове, а не тихим нулём на экране. Явный None отвергаем
-    ТОЛЬКО в той ветке, где остаток участвует в расчёте (in_production + оплачен
-    целиком): на прочих статусах величина не используется по определению, и raise
-    выше ветвления ронял весь список 500 из-за значения, которое всё равно не
-    читается (code_rules 06.09.2026)."""
+    open_rest ОБЯЗАТЕЛЕН позиционно (04.09.2026). С дефолтом None и `or 0.0`
+    «остаток не считали» превращалось в «остаток равен нулю»: подсказка «похоже,
+    завершён» выдавалась без предупреждения о непокрытых обязательствах, и забытый
+    аргумент у нового вызова был бы неотличим от честного нуля. Аргумент без
+    дефолта ловит забывчивость TypeError'ом на ЛЮБОМ вызове — то есть сразу при
+    разработке.
+
+    А вот пришедший None (посчитать остаток не смогли) строку НЕ роняет: помощник
+    зовётся в цикле по строкам списочного эндпоинта, и raise в редкой ветке
+    (in_production + оплачен целиком) отдал бы 500 на весь список из-за одной
+    записи — вместо этого деградируем признаком done_open_rest_unknown
+    (code_rules 08.09.2026). Ключ есть в ОБЕИХ ветках с одним типом, чтобы
+    потребитель не различал контуры по наличию поля (code_rules 07.09.2026)."""
     fully_paid = (price_plan or 0) > 0 and (paid_total or 0) >= (price_plan or 0) - 0.01
     done = status == "in_production" and fully_paid
-    if done and open_rest is None:
-        raise ValueError("_awaiting_flags: open_rest обязателен, None недопустим")
+    unknown = done and open_rest is None
     return {
         "awaiting_hint": status in ("estimate", "project")
                          and (price_plan or 0) > 0 and (paid_total or 0) <= 0,
         "awaiting_paid_signal": status == "awaiting_payment" and (paid_total or 0) > 0,
         "done_hint": done,
-        "done_open_rest": round(open_rest, 2) if done else 0.0,
+        "done_open_rest": round(open_rest, 2) if done and not unknown else 0.0,
+        "done_open_rest_unknown": unknown,
     }
 
 
