@@ -58,6 +58,9 @@ class TestDoneHint:
         # зовётся в цикле списочного эндпоинта, и 500 на весь список хуже пометки
         f = _awaiting_flags("in_production", 50_000, 50_000, None)
         assert f["done_open_rest_unknown"] is True and f["done_open_rest"] == 0.0
+        # 09.09.2026: но и подсказку «похоже, завершён» при неизвестном остатке
+        # не выдаём — иначе это прежний тихий ноль «остатков нет»
+        assert f["done_hint"] is False
         # 06.09.2026: на статусах, где остаток не участвует в расчёте, None не
         # роняет строку — иначе один нерелевантный аргумент валит весь список
         assert _awaiting_flags("draft", 0, 0, None)["done_open_rest"] == 0.0

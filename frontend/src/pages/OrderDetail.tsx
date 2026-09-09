@@ -1249,6 +1249,19 @@ export default function OrderDetail() {
                   <CompleteOrderButton orderId={id!} />
                 </div>
               )}
+              {/* Остаток по обязательствам посчитать не удалось: подсказку «похоже,
+                  завершён» не показываем (тихий ноль читался бы как «остатков нет»),
+                  но и молчать нельзя — говорим прямо. */}
+              {order?.done_open_rest_unknown && (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+                  background: "#FAF8F5", border: "1px solid #EDEBE6", padding: "10px 14px", marginBottom: 14 }}>
+                  <Warning size={13} style={{ color: "#E8592A", flexShrink: 0 }} />
+                  <span style={{ fontSize: 11, color: "#6B6355", flex: 1, minWidth: 160 }}>
+                    Оплачено целиком, но <b>остаток по обязательствам посчитать не удалось</b> —
+                    проверь обязательства заказа перед завершением.
+                  </span>
+                </div>
+              )}
               {order?.plan_source === "draft" && (
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
                   background: "#FAF8F5", border: "1px solid #EDEBE6", padding: "10px 14px", marginBottom: 14 }}>

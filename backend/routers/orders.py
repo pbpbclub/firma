@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Query, HTTPException, Body, Depends
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -9,6 +11,8 @@ from audit import audit
 from routers.estimates import set_totals
 
 router = APIRouter()
+
+log = logging.getLogger("firma.orders")
 
 STATUS_LABELS = {
     "draft": "Черновик",
@@ -133,7 +137,8 @@ def list_orders(
                 "cost_fact": cost_fact,
                 "cost_delta": round(cost_fact - (m["cost"] or 0), 2),
                 "cost_coverage": (round(cost_fact / m["cost"], 4) if m["cost"] else None),
-                **_awaiting_flags(r["status"], m["revenue"], r["paid_total"], open_rest.get(r["id"], 0.0)),
+                **_awaiting_flags(r["status"], m["revenue"], r["paid_total"], open_rest.get(r["id"], 0.0),
+                                  order_id=r["id"]),
                 **_order_delta(r, m, cost_fact),
             })
         return out
@@ -283,7 +288,7 @@ def _active_set(conn, oid: str):
     ).fetchone()
 
 
-def _awaiting_flags(status: str, price_plan, paid_total, open_rest) -> dict:
+def _awaiting_flags(status: str, price_plan, paid_total, open_rest, order_id=None) -> dict:
     """Подсказки вокруг статуса — производные, в схеме ничего не храним.
 
     awaiting_hint: счёт/цена есть, оплат нет — похоже, заказ ждёт оплату; предлагаем
@@ -309,10 +314,19 @@ def _awaiting_flags(status: str, price_plan, paid_total, open_rest) -> dict:
     (in_production + оплачен целиком) отдал бы 500 на весь список из-за одной
     записи — вместо этого деградируем признаком done_open_rest_unknown
     (code_rules 08.09.2026). Ключ есть в ОБЕИХ ветках с одним типом, чтобы
-    потребитель не различал контуры по наличию поля (code_rules 07.09.2026)."""
+    потребитель не различал контуры по наличию поля (code_rules 07.09.2026).
+
+    Деградация обязана быть видна человеку и оставлять след (code_rules
+    09.09.2026): подсказка «похоже, завершён» при unknown НЕ выдаётся —
+    иначе это ровно прежний тихий ноль, — а сам факт пишется в лог с
+    номером заказа, чтобы причина отказа источника не терялась."""
     fully_paid = (price_plan or 0) > 0 and (paid_total or 0) >= (price_plan or 0) - 0.01
     done = status == "in_production" and fully_paid
     unknown = done and open_rest is None
+    if unknown:
+        log.warning("done_hint: остаток обязательств не посчитан (order_id=%s) — "
+                    "подсказка о завершении не показана", order_id)
+        done = False
     return {
         "awaiting_hint": status in ("estimate", "project")
                          and (price_plan or 0) > 0 and (paid_total or 0) <= 0,
@@ -1220,7 +1234,8 @@ def get_order(order_id: str):
             "has_estimate": m["has_estimate"],
             "plan_source": m["plan_source"],
             **_awaiting_flags(order["status"], m["revenue"], paid_total,
-                              __import__("obligations").open_rest_by_order(conn, [oid]).get(oid, 0.0)),
+                              __import__("obligations").open_rest_by_order(conn, [oid]).get(oid, 0.0),
+                              order_id=oid),
             # Резерв под материалы (ТЗ-1 задача 1). reserved_amount/reserve_released_at
             # льются через **order; сюда — производные для UI.
             "reserve_suggested": _reserve_suggested(pf, order.get("cost_plan") or 0),
