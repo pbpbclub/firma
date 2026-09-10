@@ -68,6 +68,23 @@ class TestDoneHint:
         # ключ живёт в обеих ветках с одним типом, а не только при деградации
         assert _awaiting_flags("draft", 0, 0, 0.0)["done_open_rest_unknown"] is False
 
+    def test_карточка_деградирует_при_отказе_источника_остатка(self, db, monkeypatch):
+        """10.09.2026: до этого оба вызывающих делали `.get(oid, 0.0)` — «не
+        посчитали» превращалось в честный ноль ещё до входа в помощник, ветка
+        unknown была недостижима из реального кода, а сам отказ источника ронял
+        ответ целиком. Проверяем ЧЕРЕЗ эндпоинт, а не через помощник."""
+        import obligations
+        from routers.orders import get_order
+        _pay(db, 50_000)
+
+        def _boom(conn, order_ids=None):
+            raise RuntimeError("coverage недоступен")
+
+        monkeypatch.setattr(obligations, "open_rest_by_order", _boom)
+        o = get_order("o-1")
+        assert o["done_open_rest_unknown"] is True
+        assert o["done_hint"] is False and o["done_open_rest"] == 0.0
+
     def test_остаток_по_заказу_не_считает_признанное(self, db):
         from obligations import open_rest_by_order
         _cred(db, "c-1", 30_000)

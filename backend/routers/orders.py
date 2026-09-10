@@ -98,7 +98,17 @@ def list_orders(
         fcosts = _fact_costs(conn, [r["id"] for r in rows])
         out = []
         from obligations import open_rest_by_order
-        open_rest = open_rest_by_order(conn)   # один coverage на весь список
+        try:
+            open_rest = open_rest_by_order(conn)   # один coverage на весь список
+        except Exception:
+            # Признак «не посчитали» обязан рождаться в ИСТОЧНИКЕ величины
+            # (code_rules 10.09.2026): без этой ветки открытый остаток всегда
+            # честное число (отсутствие ключа = «остатка нет», так задуман
+            # open_rest_by_order), unknown недостижим, а сбой источника ронял
+            # весь список 500-й. Одна запись в лог на запрос — здесь причина,
+            # ниже поимённый список задетых заказов.
+            log.exception("open_rest_by_order упал — остаток обязательств по заказам неизвестен")
+            open_rest = None
         for r in rows:
             m = _margin(conn, r["id"], r["price_plan"], r["cost_plan"],
                         transit_facts=tfacts, discounts=discounts, extras=extras)
@@ -137,10 +147,18 @@ def list_orders(
                 "cost_fact": cost_fact,
                 "cost_delta": round(cost_fact - (m["cost"] or 0), 2),
                 "cost_coverage": (round(cost_fact / m["cost"], 4) if m["cost"] else None),
-                **_awaiting_flags(r["status"], m["revenue"], r["paid_total"], open_rest.get(r["id"], 0.0),
-                                  order_id=r["id"]),
+                # None (а не 0.0) — когда остаток НЕ посчитан: дефолт на стороне
+                # вызова вернул бы деградацию в тихий ноль.
+                **_awaiting_flags(r["status"], m["revenue"], r["paid_total"],
+                                  None if open_rest is None else open_rest.get(r["id"], 0.0)),
                 **_order_delta(r, m, cost_fact),
             })
+        # Лог о деградации — один на запрос со списком заказов, а не N одинаковых
+        # warning'ов из помощника в цикле (code_rules 10.09.2026).
+        unknown_ids = [o["id"] for o in out if o.get("done_open_rest_unknown")]
+        if unknown_ids:
+            log.warning("done_hint: остаток обязательств не посчитан, подсказка о завершении "
+                        "не показана (orders=%s)", ", ".join(str(i) for i in unknown_ids))
         return out
     finally:
         conn.close()
@@ -288,7 +306,7 @@ def _active_set(conn, oid: str):
     ).fetchone()
 
 
-def _awaiting_flags(status: str, price_plan, paid_total, open_rest, order_id=None) -> dict:
+def _awaiting_flags(status: str, price_plan, paid_total, open_rest) -> dict:
     """Подсказки вокруг статуса — производные, в схеме ничего не храним.
 
     awaiting_hint: счёт/цена есть, оплат нет — похоже, заказ ждёт оплату; предлагаем
@@ -318,14 +336,14 @@ def _awaiting_flags(status: str, price_plan, paid_total, open_rest, order_id=Non
 
     Деградация обязана быть видна человеку и оставлять след (code_rules
     09.09.2026): подсказка «похоже, завершён» при unknown НЕ выдаётся —
-    иначе это ровно прежний тихий ноль, — а сам факт пишется в лог с
-    номером заказа, чтобы причина отказа источника не терялась."""
+    иначе это ровно прежний тихий ноль. След пишет ВЫЗЫВАЮЩИЙ: помощник
+    зовётся в цикле списочного эндпоинта, и лог отсюда давал бы N одинаковых
+    warning'ов на один запрос (code_rules 10.09.2026). Поэтому идентификатора
+    заказа помощник не принимает вовсе — логирует список тот, у кого он есть."""
     fully_paid = (price_plan or 0) > 0 and (paid_total or 0) >= (price_plan or 0) - 0.01
     done = status == "in_production" and fully_paid
     unknown = done and open_rest is None
     if unknown:
-        log.warning("done_hint: остаток обязательств не посчитан (order_id=%s) — "
-                    "подсказка о завершении не показана", order_id)
         done = False
     return {
         "awaiting_hint": status in ("estimate", "project")
@@ -1201,6 +1219,16 @@ def get_order(order_id: str):
         # A8: второй уровень маржи — только у заказа в производстве (решение Юры)
         ov = _overhead_allocation(conn) if order.get("status") == "in_production" else None
         m = _margin(conn, oid, price_plan, order.get("cost_plan") or 0, overhead_alloc=ov)
+        # Остаток обязательств: отсутствие ключа = «остатка нет» (так задуман
+        # open_rest_by_order), а вот отказ источника — это None, а не ноль, и
+        # тогда подсказка «похоже, завершён» гасится с плашкой в карточке.
+        try:
+            from obligations import open_rest_by_order
+            open_rest = open_rest_by_order(conn, [oid]).get(oid, 0.0)
+        except Exception:
+            log.exception("open_rest_by_order упал — остаток обязательств заказа %s неизвестен, "
+                          "подсказка о завершении не показана", oid)
+            open_rest = None
 
         return {
             **order,
@@ -1233,9 +1261,7 @@ def get_order(order_id: str):
             "transit": m.get("transit"),
             "has_estimate": m["has_estimate"],
             "plan_source": m["plan_source"],
-            **_awaiting_flags(order["status"], m["revenue"], paid_total,
-                              __import__("obligations").open_rest_by_order(conn, [oid]).get(oid, 0.0),
-                              order_id=oid),
+            **_awaiting_flags(order["status"], m["revenue"], paid_total, open_rest),
             # Резерв под материалы (ТЗ-1 задача 1). reserved_amount/reserve_released_at
             # льются через **order; сюда — производные для UI.
             "reserve_suggested": _reserve_suggested(pf, order.get("cost_plan") or 0),
