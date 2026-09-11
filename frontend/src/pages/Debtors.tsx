@@ -997,6 +997,7 @@ const creditorCols = "28px 1.8fr 1.5fr 110px 130px 110px 90px 28px";
 function CreditorsTab() {
   const isMobile = useIsMobile();
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [addOpen, setAddOpen] = useState(false);
   const [showUnstarted, setShowUnstarted] = useState(false);
   const [showSettled, setShowSettled] = useState(false);
@@ -1222,6 +1223,25 @@ function CreditorsTab() {
             <div key={d.order_id} style={{ marginTop: 4 }}>
               <OrderLink id={d.order_id}>{d.title}</OrderLink>
               {": "}{d.sets.map((s: any) => `${s.title || "без названия"} (${s.status}, ${s.count} на ${fmt(s.total)})`).join(" · ")}
+            </div>
+          ))}
+        </div>
+      )}
+      {/* Работы без исполнителя у заказов в работе: оплата не покроет строку (L3 ищет
+          по подрядчику) и в лицевой счёт мастера не попадёт (11.09.2026) */}
+      {(data?.no_payee?.count ?? 0) > 0 && (
+        <div style={{ margin: isMobile ? "10px 16px 0" : "12px 28px 0", padding: "11px 14px", background: "#FBF7EF",
+                      borderLeft: "3px solid #B8860B", fontSize: 12, color: "#6B6355", lineHeight: 1.5 }}>
+          <b style={{ color: "#1A1A1A" }}>Работы без исполнителя:</b> {data.no_payee.count} стр. на{" "}
+          <span style={{ fontFamily: MONO }}>{fmt(data.no_payee.total)}</span> у заказов в производстве.
+          Назначь мастера в смете — иначе оплата не закроет строку и не попадёт в его лицевой счёт.
+          {data.no_payee.orders.map((o: any) => (
+            <div key={o.id} style={{ marginTop: 4 }}>
+              <OrderLink id={o.id}>{o.title}</OrderLink>
+              {": "}{o.lines.map((l: any) => `${l.name.replace(/^Работа:\s*/, "")} (${fmt(l.total)})`).join(" · ")}
+              {" — "}
+              <span onClick={() => navigate(`/orders/${o.id}/estimate`)}
+                style={{ color: "#E8592A", cursor: "pointer", textDecoration: "underline" }}>в смету</span>
             </div>
           ))}
         </div>

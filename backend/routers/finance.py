@@ -1188,6 +1188,28 @@ def get_creditors(status: Optional[str] = None, include_unstarted: bool = False)
                                           "count": len(rs), "total": round(sum(x["debt"] for x in rs), 2)}
                                          for sid_, rs in sets.items()]})
 
+        # Строки РАБОТ без исполнителя у заказов в производстве (11.09.2026):
+        # обязательство есть, адресата нет — оплата ляжет расходом, который строку
+        # не покроет (L3 ищет по подрядчику) и в лицевой счёт мастера не попадёт.
+        # Услуги без получателя — это «внутренние» (has_payee), доставка — обычно
+        # такси; сюда только labor/work.
+        from obligations import _PLAN_LABELS
+        np_rows = [r for r in rows
+                   if r["status"] in ("open", "partial") and r.get("order_status") == "in_production"
+                   and not r.get("stale_kind") and (r.get("line_type") or "") in ("labor", "work")
+                   and not r.get("line_internal") and not r.get("master_ids") and not r.get("line_contractor")
+                   and (r["name"] or "").strip().lower().startswith(_PLAN_LABELS)
+                   and r["id"] not in snz]
+        npo = {}
+        for r in np_rows:
+            o = npo.setdefault(r["order_id"], {"id": r["order_id"], "number": r["order_number"],
+                                               "title": r["order_title"], "set_id": r.get("set_id"),
+                                               "count": 0, "total": 0.0, "lines": []})
+            o["count"] += 1; o["total"] = round(o["total"] + (r["total"] or 0), 2)
+            o["lines"].append({"id": r["id"], "name": r["name"], "total": r["total"]})
+        no_payee = {"count": len(np_rows), "total": round(sum(r["total"] or 0 for r in np_rows), 2),
+                    "orders": sorted(npo.values(), key=lambda x: -x["total"])}
+
         # Подсказка «двойное начисление»: ручная проводка по заказу БЕЗ creditor_id,
         # а в заказе открыта строка на ту же сумму — лицевой счёт считает обе.
         # Не сумма, а список на сверку (правка данных — только по решению Юры).
@@ -1231,6 +1253,7 @@ def get_creditors(status: Optional[str] = None, include_unstarted: bool = False)
             "stale": stale,
             "looks_done": looks_done,
             "double_sets": double_sets,
+            "no_payee": no_payee,
             "snoozed": [r for r in rows if r["snoozed"]],
             "items": rows,
             "total_owed": round(sum(r["total"] or 0 for r in debt_rows), 2),

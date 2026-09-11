@@ -9,6 +9,19 @@ import { mastersApi, customersApi } from "../../api";
 
 export const PAYEE_ROLES = ["Поставщик", "Подрядчик", "Мастер"];
 
+// Имя для сопоставления с картотекой — то же правило, что masters._norm_name на
+// бэке: регистр, ё, кавычки и пунктуация не в счёт. Только ПОДСКАЗКА при вводе
+// («привязать?»): сальдо по имени не строится (ledger — только master_id).
+export function normPayee(s?: string | null): string {
+  return (s || "").toLowerCase().replace(/ё/g, "е").replace(/[«»"'`.,\-()]+/g, " ").replace(/\s+/g, " ").trim();
+}
+export function matchMasterByName(masters: any[], name?: string | null): any | null {
+  const want = normPayee(name);
+  if (!want) return null;
+  const hits = masters.filter(m => normPayee(m.name) === want);
+  return hits.length === 1 ? hits[0] : null;
+}
+
 // Банк пишет получателя капсом и полным наименованием — предлагаем короткую форму.
 export function prettifyPayee(raw?: string | null): string {
   let s = (raw || "").trim().replace(/\s+/g, " ");

@@ -6,6 +6,7 @@ from audit import audit
 from db import get_production, get_materials
 from money import client_price, cash_from_client, DEFAULT_BANK_PCT
 from routers.materials import cheapest_price
+from routers.masters import _norm_name
 from routers.rates import (find_work_rate, upsert_work_rate, upsert_price_book,
                            effective_rate, batch_qty)
 import uuid, subprocess, glob, os
@@ -350,6 +351,9 @@ def _approve_set(conn, set_id: str) -> dict:
         "cost_before": (before["cost_plan"] or 0) if before else 0,
         "cost_after": (after["cost_plan"] or 0) if after else 0,
         "obligations": obligations,
+        # Исполнители строк, которых нет в картотеке: обязательства созданы по имени,
+        # в лицевой счёт не попадут, пока мастера не заведут и строку не привяжут.
+        "unmatched_contractors": obligations.get("unmatched_contractors", []),
         "repointed": repointed,
         "superseded": superseded,
         "learned": learned,
@@ -739,7 +743,7 @@ def unapprove_set(set_id: str, body: Optional[UnapproveIn] = None):
                   JOIN estimate_sets  es ON es.id = ei.set_id
                  WHERE ei.set_id IN ({rh})""", restoring).fetchall():
                 if c["prev_estimate_line_id"]:
-                    name, description = _creditor_name_for_line(
+                    name, description, _mid = _creditor_name_for_line(
                         conn, {"title": c["prev_item_title"]},
                         {"type": c["prev_line_type"], "title": c["prev_line_title"],
                          "master_id": c["prev_line_master"], "contractor_name": c["prev_line_contractor"]})
@@ -1242,11 +1246,14 @@ def add_line(item_id: str, body: LineCreate):
             wt = conn.execute("SELECT name FROM work_types WHERE id = ?", (body.work_type_id,)).fetchone()
             if wt:
                 title = wt["name"]
+        # Исполнитель текстом (агенты шлют только contractor_name) → id из картотеки
+        # сразу, а не на approve: лицевой счёт и покрытие ищут по master_id.
+        master_id = body.master_id or _find_master(conn, body.contractor_name or "")
         conn.execute(
             """INSERT INTO estimate_lines (id, item_id, type, title, qty, unit, unit_price, line_total, sort_order, master_id, contractor_name, work_type_id, material_code, price_supplier, price_date, internal, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (line_id, item_id, body.type, title, body.qty, body.unit, unit_price, line_total,
-             body.sort_order, body.master_id, body.contractor_name, body.work_type_id,
+             body.sort_order, master_id, body.contractor_name, body.work_type_id,
              body.material_code, price_supplier, price_date, int(bool(body.internal)), _now())
         )
         _recalc_item(conn, item_id)
@@ -1284,6 +1291,10 @@ def update_line(line_id: str, body: LineUpdate):
                 fields.setdefault("unit_price", best["price"])
                 fields.setdefault("price_supplier", best["supplier"])
                 fields.setdefault("price_date", best["price_date"])
+        # Сменили исполнителя текстом, id не прислали → найти в картотеке (или снять
+        # старую привязку, если имя больше ни к кому не подходит).
+        if "contractor_name" in fields and "master_id" not in fields:
+            fields["master_id"] = _find_master(conn, fields["contractor_name"] or "")
         # recalc line_total
         qty = fields.get("qty", row["qty"]) or 0
         unit_price = fields.get("unit_price", row["unit_price"]) or 0
@@ -1425,20 +1436,41 @@ def from_catalog(body: FromCatalog):
 _LINE_TYPE_RU = {"material": "Материал", "labor": "Работа", "service": "Услуга", "delivery": "Доставка", "other": "Прочее"}
 
 
+def _row_get(row, key):
+    """Ключ из sqlite3.Row или dict (repoint даёт Row, unapprove — dict без id)."""
+    try:
+        return row[key]
+    except (KeyError, IndexError):
+        return None
+
+
 def _creditor_name_for_line(conn, item, line) -> tuple:
-    """(name, description) обязательства по строке сметы — одна формула на
-    генерацию и на перенос между версиями (repoint_obligations)."""
-    master_id = line["master_id"] if line["master_id"] else None
-    contractor = line["contractor_name"] or ""
+    """(name, description, master_id) обязательства по строке сметы — одна формула на
+    генерацию, перенос между версиями (repoint_obligations) и откат (unapprove).
+
+    Исполнитель ищется по `contractor_name` в картотеке (`_find_master`), и найденный
+    id ПИШЕТСЯ в `estimate_lines.master_id` (11.09.2026): до этого результат поиска
+    выбрасывался, из 493 строк id имела одна, и все обязательства цеплялись к мастеру
+    только по точному совпадению имени (`ledger._entries_bulk`, `obligations.coverage`).
+    Имя обязательства — каноническое из картотеки, а не вариант из строки
+    («Малафеев Эдуард Леонидович» → «Эдуард Малафеев»). Не нашли — имя строки как есть,
+    master_id None; approve отдаёт таких в `unmatched_contractors`."""
+    master_id = _row_get(line, "master_id") or None
+    contractor = _row_get(line, "contractor_name") or ""
     if not master_id and contractor:
-        master_id = _find_or_create_master(conn, contractor)
-    if not contractor and master_id:
+        master_id = _find_master(conn, contractor)
+        line_id = _row_get(line, "id")
+        if master_id and line_id:
+            conn.execute("UPDATE estimate_lines SET master_id = ? WHERE id = ? AND master_id IS NULL",
+                         (master_id, line_id))
+    if master_id:
         m = conn.execute("SELECT name FROM masters WHERE id = ?", (master_id,)).fetchone()
-        contractor = m["name"] if m else ""
-    type_label = _LINE_TYPE_RU.get(line["type"] or "other", "Прочее")
-    name = contractor or f"{type_label}: {line['title'] or 'Без названия'}"
-    description = f"{item['title'] or ''} — {line['title'] or type_label}".strip(" —")
-    return name, description
+        if m:
+            contractor = m["name"]
+    type_label = _LINE_TYPE_RU.get(_row_get(line, "type") or "other", "Прочее")
+    name = contractor or f"{type_label}: {_row_get(line, 'title') or 'Без названия'}"
+    description = f"{_row_get(item, 'title') or ''} — {_row_get(line, 'title') or type_label}".strip(" —")
+    return name, description, master_id
 
 
 def _norm_title(s) -> str:
@@ -1515,7 +1547,7 @@ def repoint_obligations(conn, es) -> dict:
             if hit:
                 item, ln = hit
                 total = round(ln["line_total"] or 0, 2)
-                name, description = _creditor_name_for_line(conn, item, ln)
+                name, description, _mid = _creditor_name_for_line(conn, item, ln)
                 new_item, new_line = item["id"], ln["id"]
         else:
             item = pop(by_item, t)
@@ -1549,17 +1581,23 @@ def repoint_obligations(conn, es) -> dict:
     return {"moved": moved, "closed": closed}
 
 
-def _find_or_create_master(conn, name: str) -> str:
-    """Find master by name or create new one, return master id."""
+def _find_master(conn, name: str) -> Optional[str]:
+    """Мастер по имени: точное совпадение, иначе нормализованное (`_norm_name` —
+    регистр, ё, кавычки, пунктуация). Нового мастера НЕ создаёт (11.09.2026): раньше
+    approve заводил карточку на любую опечатку в contractor_name — так в вики
+    фин-агента появился «Кто-то» с мёртвой привязкой."""
+    name = (name or "").strip()
+    if not name:
+        return None
     row = conn.execute("SELECT id FROM masters WHERE name = ? COLLATE NOCASE", (name,)).fetchone()
     if row:
         return row["id"]
-    mid = str(uuid.uuid4())
-    conn.execute(
-        "INSERT INTO masters (id, name, created_at) VALUES (?, ?, datetime('now'))",
-        (mid, name)
-    )
-    return mid
+    want = _norm_name(name)
+    if not want:
+        return None
+    hits = [r["id"] for r in conn.execute("SELECT id, name FROM masters").fetchall()
+            if _norm_name(r["name"]) == want]
+    return hits[0] if len(hits) == 1 else None
 
 
 def _gen_obligations(conn, es) -> dict:
@@ -1584,6 +1622,7 @@ def _gen_obligations(conn, es) -> dict:
     created = 0
     skipped = 0
     skipped_internal = 0   # строки без получателя денег: резерв, наценка (ТЗ 03.09.2026, п.3)
+    unmatched = set()      # contractor_name, которого нет в картотеке: обязательство по имени
     for item in items:
         lines = conn.execute(
             "SELECT * FROM estimate_lines WHERE item_id = ? ORDER BY sort_order", (item["id"],)
@@ -1600,7 +1639,9 @@ def _gen_obligations(conn, es) -> dict:
                 if not has_payee(line):
                     skipped_internal += 1
                     continue
-                name, description = _creditor_name_for_line(conn, item, line)
+                name, description, master_id = _creditor_name_for_line(conn, item, line)
+                if (line["contractor_name"] or "").strip() and not master_id:
+                    unmatched.add(line["contractor_name"].strip())
                 amount = round(line["line_total"] or 0, 2)
                 cid = str(uuid.uuid4())
                 conn.execute(
@@ -1634,7 +1675,8 @@ def _gen_obligations(conn, es) -> dict:
                  f"Смета: {es['title'] or es['id']}", order_id, item["id"], amount),
             )
             created += 1
-    return {"created": created, "skipped": skipped, "skipped_internal": skipped_internal}
+    return {"created": created, "skipped": skipped, "skipped_internal": skipped_internal,
+            "unmatched_contractors": sorted(unmatched)}
 
 
 @router.post("/sets/{set_id}/create-obligations")

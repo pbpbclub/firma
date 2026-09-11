@@ -3,7 +3,7 @@ import { useIsMobile } from "./ui/responsive";
 import { MoneyInput, parseMoney } from "./ui/MoneyInput";
 import { useQuery } from "@tanstack/react-query";
 import { Modal } from "./ui/Modal";
-import { PayeePicker } from "./ui/PayeePicker";
+import { PayeePicker, matchMasterByName } from "./ui/PayeePicker";
 import { MONO } from "./ui/Num";
 import { mastersApi, financeApi, accountableApi, ledgerApi } from "../api";
 
@@ -87,6 +87,9 @@ export function ExpenseModal({ orderId, expense, existingExpenses = [], extras =
 
   const master = (masters as any[]).find((m: any) => m.id === masterId);
   const supplier = master?.name ?? expense?.supplier ?? null;
+  // Расход заведён агентом текстом (supplier без master_id) — а в картотеке такой
+  // есть. Без привязки выплата не попадает в лицевой счёт подрядчика (11.09.2026).
+  const nameMatch = !masterId && expense?.supplier ? matchMasterByName(masters as any[], expense.supplier) : null;
 
   // Незакрытое обязательство того же заказа с тем же подрядчиком — вероятно, это оно и есть.
   const candidate = (creditors as any[]).find((c: any) =>
@@ -262,7 +265,18 @@ export function ExpenseModal({ orderId, expense, existingExpenses = [], extras =
         <div style={{ marginTop: 14 }}>
           <div style={lbl}>ПОДРЯДЧИК / ПОСТАВЩИК</div>
           <PayeePicker value={masterId} onChange={setMasterId} placeholder="— не указан —"
-            suggestName={expense?.supplier} />
+            suggestName={expense?.supplier} highlight={!!nameMatch} />
+          {nameMatch && (
+            <div style={{ marginTop: 6, fontSize: 11, color: "#6B6355", lineHeight: 1.5 }}>
+              Поставщик «{expense?.supplier}» есть в картотеке. Привязать — выплата ляжет в его лицевой счёт минусом;
+              начисление за принятую работу проводит фин-агент (парная проводка).{" "}
+              <button type="button" onClick={() => setMasterId(nameMatch.id)}
+                style={{ border: "1px solid #E8592A", background: "#fff", color: "#E8592A", padding: "2px 8px",
+                         fontSize: 10.5, cursor: "pointer", fontFamily: "inherit" }}>
+                привязать к «{nameMatch.name}»
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Похоже на дубль: уже есть трата с тем же поставщиком/суммой в ±3 дня */}
