@@ -423,11 +423,17 @@ def creditor_masters(conn, ids: list) -> dict:
     holes = ",".join("?" * len(ids))
     out = {}
     for r in conn.execute(f"""
-        SELECT c.id, c.name, el.master_id AS line_master_id
+        SELECT c.id, c.name, c.kind, el.master_id AS line_master_id,
+               fo.master_id AS fixed_master_id
           FROM creditors c LEFT JOIN estimate_lines el ON el.id = c.estimate_line_id
+                           LEFT JOIN fixed_obligations fo ON fo.id = c.fixed_id
          WHERE c.id IN ({holes})""", list(ids)).fetchall():
         lm = r["line_master_id"]
-        if lm:
+        if (r["kind"] or "") == "fixed":
+            # постоянное — только по привязке шаблона (11.09.2026), по имени никогда
+            fm = r["fixed_master_id"]
+            out[r["id"]] = [fm] if fm and fm in known else []
+        elif lm:
             out[r["id"]] = [lm] if lm in known else []
         else:
             out[r["id"]] = list(by_name.get(r["name"], []))

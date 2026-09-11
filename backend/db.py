@@ -562,6 +562,13 @@ def ensure_fixed_obligations_schema():
             )
             """
         )
+        # master_id (11.09.2026): постоянное обязательство, которое платится конкретному
+        # мастеру (аренда мастерской — Малафееву), начисляется в его лицевой счёт.
+        # NULL — поведение прежнее: накладные фирмы, в ленту мастера не идёт.
+        fo_cols = {r[1] for r in conn.execute("PRAGMA table_info(fixed_obligations)").fetchall()}
+        if "master_id" not in fo_cols:
+            conn.execute("ALTER TABLE fixed_obligations ADD COLUMN master_id TEXT "
+                         "REFERENCES masters(id) ON DELETE SET NULL")
         conn.commit()
     finally:
         conn.close()

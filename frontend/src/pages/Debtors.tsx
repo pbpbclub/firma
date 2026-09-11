@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loading } from "../components/ui/Loading";
 import { EmptyState } from "../components/ui/EmptyState";
-import { financeApi, zenmoneyApi, ordersApi, ledgerApi, snoozeApi } from "../api";
+import { financeApi, zenmoneyApi, ordersApi, ledgerApi, snoozeApi, mastersApi } from "../api";
 import { SnoozeModal } from "../components/money/SnoozeModal";
 import { useNavigate } from "react-router-dom";
 import { Bank, X, Check, Plus, LinkSimple, BellSlash, ArrowCounterClockwise } from "@phosphor-icons/react";
@@ -1504,6 +1504,10 @@ function AddFixedModal({ item, onClose }: { item?: any; onClose: () => void }) {
   const [payDay, setPayDay] = useState(item?.pay_day ? String(item.pay_day) : "");
   const [note, setNote] = useState(item?.note ?? "");
   const [active, setActive] = useState(item ? !!item.active : true);
+  // Кому платится (11.09.2026): с мастером обязательство начисляется в его лицевой
+  // счёт (аренда мастерской → Малафеев); без — накладные, в ленту мастера не идёт.
+  const [masterId, setMasterId] = useState<string>(item?.master_id ?? "");
+  const { data: masters = [] } = useQuery({ queryKey: ["masters"], queryFn: mastersApi.list });
   const [confirmRemove, setConfirmRemove] = useState(false);
   // Раньше у этих мутаций не было onError вовсе: на 400 окно просто не закрывалось,
   // кнопка отвисала, и никакого объяснения не появлялось.
@@ -1516,6 +1520,7 @@ function AddFixedModal({ item, onClose }: { item?: any; onClose: () => void }) {
         amount: parseFloat(amount) || 0,
         pay_day: payDay ? parseInt(payDay) : undefined,
         note: note.trim() || undefined,
+        master_id: masterId || null,
       };
       return item
         ? financeApi.updateFixedObligation(item.id, { ...data, active: active ? 1 : 0 })
@@ -1582,6 +1587,19 @@ function AddFixedModal({ item, onClose }: { item?: any; onClose: () => void }) {
             style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none", resize: "vertical", fontFamily: "inherit" }}
             placeholder="Помещение на Остужева..."
           />
+        </div>
+        <div>
+          <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>КОМУ ПЛАТИТСЯ</div>
+          <select
+            value={masterId} onChange={e => setMasterId(e.target.value)}
+            style={{ width: "100%", boxSizing: "border-box", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none", background: "#fff", color: masterId ? "#1A1A1A" : "#6B6355" }}
+          >
+            <option value="">— накладные фирмы, без подрядчика —</option>
+            {masters.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+          <div style={{ fontSize: 10, color: "#6B6355", marginTop: 4 }}>
+            С подрядчиком обязательство каждого месяца начисляется в его лицевой счёт и гасится его выплатами.
+          </div>
         </div>
         {item && (
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -1726,6 +1744,7 @@ function FixedTab() {
             >
               <div style={{ fontFamily: SANS }}>
                 <div style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>{f.name}</div>
+                {f.master_name && <div style={{ fontSize: 10, color: "#A89070", marginTop: 2 }}>→ {f.master_name} (в лицевой счёт)</div>}
                 {!f.active && <div style={{ fontSize: 10, color: "#A89070", marginTop: 2 }}>выключено</div>}
               </div>
               <div style={{ fontSize: 12, color: "#6B6355", paddingRight: 16, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: SANS }}>

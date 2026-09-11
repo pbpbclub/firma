@@ -1534,6 +1534,7 @@ class FixedObligationIn(BaseModel):
     amount: float
     pay_day: Optional[int] = None
     note: Optional[str] = None
+    master_id: Optional[str] = None   # кому платится: начисляется в лицевой счёт мастера
 
 
 class FixedObligationPatch(BaseModel):
@@ -1542,6 +1543,12 @@ class FixedObligationPatch(BaseModel):
     pay_day: Optional[int] = None
     note: Optional[str] = None
     active: Optional[int] = None
+    master_id: Optional[str] = None   # null = отвязать (накладные, в ленту мастера не идёт)
+
+
+def _check_master(conn, master_id: Optional[str]):
+    if master_id and not conn.execute("SELECT 1 FROM masters WHERE id = ?", (master_id,)).fetchone():
+        raise HTTPException(status_code=400, detail="master_id: подрядчик не найден")
 
 
 def _current_month() -> str:
@@ -1562,7 +1569,9 @@ def list_fixed_obligations(month: Optional[str] = None):
     conn = get_production()
     try:
         templates = [dict(r) for r in conn.execute(
-            "SELECT * FROM fixed_obligations ORDER BY COALESCE(pay_day, 99), name"
+            """SELECT fo.*, m.name AS master_name
+                 FROM fixed_obligations fo LEFT JOIN masters m ON m.id = fo.master_id
+                ORDER BY COALESCE(fo.pay_day, 99), fo.name"""
         ).fetchall()]
 
         # До-создаём экземпляры за месяц для активных шаблонов
@@ -1628,9 +1637,10 @@ def create_fixed_obligation(body: FixedObligationIn):
     conn = get_production()
     try:
         fid = str(uuid.uuid4())
+        _check_master(conn, body.master_id)
         conn.execute(
-            "INSERT INTO fixed_obligations (id, name, amount, pay_day, note) VALUES (?, ?, ?, ?, ?)",
-            (fid, body.name, body.amount, body.pay_day, body.note),
+            "INSERT INTO fixed_obligations (id, name, amount, pay_day, note, master_id) VALUES (?, ?, ?, ?, ?, ?)",
+            (fid, body.name, body.amount, body.pay_day, body.note, body.master_id),
         )
         conn.commit()
         return dict(conn.execute("SELECT * FROM fixed_obligations WHERE id = ?", (fid,)).fetchone())
@@ -1649,6 +1659,7 @@ def update_fixed_obligation(fixed_id: str, body: FixedObligationPatch):
             fields.append(f"{field} = ?")
             params.append(val)
         if fields:
+            _check_master(conn, body.master_id)
             params.append(fixed_id)
             conn.execute(f"UPDATE fixed_obligations SET {', '.join(fields)} WHERE id = ?", params)
             conn.commit()

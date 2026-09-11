@@ -87,11 +87,17 @@ def _master(conn, master_id: str) -> dict:
 # (creditors.estimate_line_id → estimate_lines.master_id). Имя — только фолбэк для
 # строк без такой привязки: переименование мастера рвало бы связь молча, а начисления
 # обнулялись бы без единой ошибки (code_rules 05.08.2026).
+#
+# Постоянное обязательство (kind='fixed') привязано к мастеру через шаблон
+# (creditors.fixed_id → fixed_obligations.master_id): аренда мастерской — долг перед
+# Малафеевым (11.09.2026). Без master_id у шаблона — накладные, в ленту не идёт.
 _CREDITOR_SQL = """SELECT c.*, o.number AS order_number, o.title AS order_title,
-                          el.master_id AS line_master_id
+                          el.master_id AS line_master_id,
+                          fo.master_id AS fixed_master_id
                      FROM creditors c
                      LEFT JOIN orders o ON o.id = c.order_id
-                     LEFT JOIN estimate_lines el ON el.id = c.estimate_line_id"""
+                     LEFT JOIN estimate_lines el ON el.id = c.estimate_line_id
+                     LEFT JOIN fixed_obligations fo ON fo.id = c.fixed_id"""
 _EXPENSE_SQL = """SELECT e.*, o.number AS order_number, o.title AS order_title
                     FROM expenses e LEFT JOIN orders o ON o.id = e.order_id"""
 _MANUAL_SQL = """SELECT m.*, o.number AS order_number, o.title AS order_title
@@ -107,8 +113,9 @@ def _entries(conn, master: dict) -> list[dict]:
     creditors = [dict(r) for r in conn.execute(
         _CREDITOR_SQL + """
            WHERE el.master_id = ?
+              OR fo.master_id = ?
               OR (c.name = ? AND (el.master_id IS NULL OR el.master_id = ?))""",
-        (mid, name, mid)).fetchall()]
+        (mid, mid, name, mid)).fetchall()]
     # Только явный master_id (ТЗ A1 п.3 от 24.08.2026). Фолбэк по e.supplier
     # раньше тянул в выплаты чужие расходы: supplier — свободный текст («Ант Сервис
     # (Денис Мельничук)»), совпадение с именем мастера случайно. Подсказку «похоже,
@@ -141,6 +148,11 @@ def _entries_bulk(conn, masters: list[dict]) -> dict[str, list[dict]]:
 
     for r in conn.execute(_CREDITOR_SQL).fetchall():
         row = dict(r)
+        if (row.get("kind") or "") == "fixed":
+            # постоянное — только по явной привязке шаблона, по имени никогда
+            fm = row.get("fixed_master_id")
+            put(cred, [fm] if fm and fm in known_ids else [], row)
+            continue
         lm = row.get("line_master_id")
         if lm:
             # id-привязка сильнее имени: тёзка чужое обязательство не подберёт
@@ -189,10 +201,12 @@ def _build_entries(creditors: list[dict], expenses: list[dict], manual: list[dic
     for c in creditors:
         if c["status"] == "cancelled" or not c["total"]:
             continue
-        # Постоянные обязательства (аренда) — не расчёт с подрядчиком, а накладные
-        # расходы фирмы (orders._overhead_month). Тёзка-мастер тянул бы их в сальдо
-        # каждый месяц, и долг рос бы вечно.
-        if (c.get("kind") or "") == "fixed":
+        # Постоянные обязательства (аренда) — накладные расходы фирмы
+        # (orders._overhead_month), в сальдо идут ТОЛЬКО при явной привязке шаблона
+        # к мастеру (fixed_obligations.master_id, 11.09.2026). Тёзка-мастер по имени
+        # тянул бы их в сальдо каждый месяц, и долг рос бы вечно.
+        is_fixed = (c.get("kind") or "") == "fixed"
+        if is_fixed and not c.get("fixed_master_id"):
             continue
         if c["id"] in manual_accrued:
             continue
@@ -208,8 +222,14 @@ def _build_entries(creditors: list[dict], expenses: list[dict], manual: list[dic
             recognized = _recognized(c, (coverage or {}).get(c["id"], {}), with_ledger=False)
             if recognized <= 0:
                 continue
-        add("accrual", recognized, c.get("due_date") or c.get("created_at"),
-            c.get("description") or "Обязательство по смете",
+        if is_fixed:
+            # дата — период обязательства (день оплаты шаблона), не момент создания строки
+            date = c.get("due_date") or (f"{c['period']}-01" if c.get("period") else c.get("created_at"))
+            title = f"{c['name']} — {c['period']}" if c.get("period") else c["name"]
+        else:
+            date = c.get("due_date") or c.get("created_at")
+            title = c.get("description") or "Обязательство по смете"
+        add("accrual", recognized, date, title,
             source="creditor", ref_id=c["id"], order_id=c.get("order_id"),
             order_number=c.get("order_number"), order_title=c.get("order_title"),
             plan=live)
