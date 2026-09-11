@@ -831,34 +831,39 @@ export default function ZenMoneyPage() {
           {/* Month summary strip */}
           {!showBusiness && report && (
             <div style={{
-              display: "flex", gap: 32, marginBottom: 16,
+              // Телефон: сетка 2×2 — шестизначные суммы в одну строку не влезали,
+              // «₽» уезжал на новую строку, «Операций» — за край (11.09.2026)
+              ...(isMobile
+                ? { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 16px" }
+                : { display: "flex", gap: 32 }),
+              marginBottom: 16,
               paddingBottom: 16, borderBottom: "1px solid #EDEBE6",
             }}>
               <div>
                 <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>РАСХОДЫ</div>
-                <div style={{ fontSize: 18, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: "tabular-nums", color: "#8B3A3A" }}>
+                <div style={{ fontSize: isMobile ? 16 : 18, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", color: "#8B3A3A" }}>
                   {fmt(report.expenses)} ₽
                 </div>
               </div>
               <div>
                 <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>ДОХОДЫ</div>
-                <div style={{ fontSize: 18, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: "tabular-nums", color: "#4A7C59" }}>
+                <div style={{ fontSize: isMobile ? 16 : 18, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", color: "#4A7C59" }}>
                   {fmt(report.incomes)} ₽
                 </div>
               </div>
               <div>
                 <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>ЧИСТЫЙ ПОТОК</div>
                 <div style={{
-                  fontSize: 18, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: "tabular-nums",
+                  fontSize: isMobile ? 16 : 18, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap",
                   color: report.incomes - report.expenses >= 0 ? "#4A7C59" : "#8B3A3A",
                 }}>
                   {report.incomes - report.expenses >= 0 ? "+" : "−"}
                   {fmt(report.incomes - report.expenses)} ₽
                 </div>
               </div>
-              <div style={{ marginLeft: "auto", alignSelf: "center" }}>
+              <div style={isMobile ? undefined : { marginLeft: "auto", alignSelf: "center" }}>
                 <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>ОПЕРАЦИЙ</div>
-                <div style={{ fontSize: 18, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: "tabular-nums", color: "#1A1A1A" }}>{displayTx.length}</div>
+                <div style={{ fontSize: isMobile ? 16 : 18, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", color: "#1A1A1A" }}>{displayTx.length}</div>
               </div>
             </div>
           )}
@@ -866,22 +871,27 @@ export default function ZenMoneyPage() {
           {/* Business summary strip */}
           {showBusiness && (
             <div style={{
-              display: "flex", gap: 32, marginBottom: 16,
+              // Телефон: сетка 2×2 — шестизначные суммы в одну строку не влезали,
+              // «₽» уезжал на новую строку, «Операций» — за край (11.09.2026)
+              ...(isMobile
+                ? { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 16px" }
+                : { display: "flex", gap: 32 }),
+              marginBottom: 16,
               paddingBottom: 16, borderBottom: "1px solid #EDEBE6",
             }}>
               <div>
                 <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>ПОТРАЧЕНО НА БИЗНЕС</div>
-                <div style={{ fontSize: 18, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: "tabular-nums", color: "#8B3A3A" }}>{fmt(bizExpense)} ₽</div>
+                <div style={{ fontSize: isMobile ? 16 : 18, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", color: "#8B3A3A" }}>{fmt(bizExpense)} ₽</div>
               </div>
               <div>
                 <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>ПОЛУЧЕНО ОТ ИП</div>
-                <div style={{ fontSize: 18, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: "tabular-nums", color: "#4A7C59" }}>{fmt(bizIncome)} ₽</div>
+                <div style={{ fontSize: isMobile ? 16 : 18, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", color: "#4A7C59" }}>{fmt(bizIncome)} ₽</div>
               </div>
               <div>
                 <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>ОПЕРАЦИЙ</div>
-                <div style={{ fontSize: 18, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: "tabular-nums", color: "#1A1A1A" }}>{displayTx.length}</div>
+                <div style={{ fontSize: isMobile ? 16 : 18, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", color: "#1A1A1A" }}>{displayTx.length}</div>
               </div>
-              <div style={{ marginLeft: "auto", alignSelf: "center", fontSize: 11, color: "#A89070" }}>
+              <div style={{ ...(isMobile ? {} : { marginLeft: "auto" }), alignSelf: "center", fontSize: 11, color: "#A89070" }}>
                 за последние 3 месяца
               </div>
             </div>

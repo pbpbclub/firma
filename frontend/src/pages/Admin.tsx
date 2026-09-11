@@ -4,6 +4,8 @@ import { UploadSimple, CheckCircle, WarningCircle, X, Plus, ArrowsClockwise } fr
 import { adminApi, authApi, zenmoneyApi, payeeRulesApi, mastersApi, customersApi } from "../api";
 import { ConfirmModal } from "../components/ui/Modal";
 import { CostingRefsSection } from "../components/CostingRefsSection";
+import { useIsMobile, M } from "../components/ui/responsive";
+import { IconButton } from "../components/ui/IconButton";
 
 function fmt(n: number | null | undefined) {
   if (n == null) return "—";
@@ -518,15 +520,8 @@ function ImportsSection() {
               <div style={{ fontSize: 13, fontWeight: 700, color: "#4A7C59", whiteSpace: "nowrap" }}>
                 +{imp.rows_added} строк
               </div>
-              <button type="button"
-                onClick={() => setConfirmId(imp.id)}
-                style={{ background: "none", border: "none", cursor: "pointer", color: "#C8C0B0", padding: 4 }}
-                title="Удалить выписку"
-                onMouseEnter={e => (e.currentTarget.style.color = "#8B3A3A")}
-                onMouseLeave={e => (e.currentTarget.style.color = "#C8C0B0")}
-              >
-                <X size={14} />
-              </button>
+              <IconButton icon={X} title="Удалить выписку" tone="danger" size={22} iconSize={14} color="#C8C0B0"
+                onClick={() => setConfirmId(imp.id)} />
             </div>
           ))}
         </div>
@@ -812,19 +807,22 @@ const ADMIN_TABS = [
 
 export default function Admin() {
   const [tab, setTab] = useState<(typeof ADMIN_TABS)[number]["id"]>("bank");
+  const isMobile = useIsMobile();
+  // Телефон: гаттер 16 и вкладки одной прокручиваемой строкой — иначе страница
+  // становилась шире экрана (403 px) и горизонтально скроллилась целиком.
   return (
-    <div style={{ padding: "24px 28px", maxWidth: 720, fontFamily: "inherit" }}>
+    <div style={{ padding: isMobile ? "16px 16px 24px" : "24px 28px", maxWidth: isMobile ? undefined : 720, fontFamily: "inherit", minWidth: 0, overflow: "hidden" }}>
       <div style={{ marginBottom: 20 }}>
-        <div style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.03em", color: "#1A1A1A" }}>
+        <div style={{ fontSize: isMobile ? 22 : 26, fontWeight: 700, letterSpacing: "-0.03em", color: "#1A1A1A" }}>
           Настройки
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 22, borderBottom: "1px solid #EDEBE6", marginBottom: 28 }}>
+      <div style={{ display: "flex", gap: 22, borderBottom: "1px solid #EDEBE6", marginBottom: isMobile ? 20 : 28, ...(isMobile ? M.tabStrip : {}) }}>
         {ADMIN_TABS.map(t => (
           <button type="button" key={t.id} onClick={() => setTab(t.id)}
             style={{ background: "none", border: "none", cursor: "pointer", fontFamily: "inherit",
-              padding: "0 0 10px", fontSize: 13,
+              padding: "0 0 10px", fontSize: 13, whiteSpace: "nowrap", flexShrink: 0,
               fontWeight: tab === t.id ? 700 : 400,
               color: tab === t.id ? "#1A1A1A" : "#A89070",
               borderBottom: tab === t.id ? "2px solid #E8592A" : "2px solid transparent",

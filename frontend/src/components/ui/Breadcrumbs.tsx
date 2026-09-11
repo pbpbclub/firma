@@ -5,18 +5,22 @@
 // последний — текущее место, некликабелен.
 import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
+import { useIsMobile } from "./responsive";
 import { CaretRight } from "@phosphor-icons/react";
 
 export type Crumb = { label: string; to?: string; onClick?: () => void };
 
 export function Breadcrumbs({ items, tail }: { items: Crumb[]; tail?: ReactNode }) {
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0, ...(isMobile ? { overflow: "hidden" } : {}) }}>
       {items.map((c, i) => {
         const last = i === items.length - 1;
+        // Телефон: длинное название режется многоточием внутри крошек, а не вылезает
+        // за экран; десктоп — без изменений (правило «ни на пиксель»).
         return (
-          <span key={i} style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
+          <span key={i} style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0, ...(isMobile ? { overflow: "hidden", flexShrink: last ? 1 : 0 } : {}) }}>
             {i > 0 && <CaretRight size={11} style={{ color: "#C8C0B0", flexShrink: 0 }} />}
             {last ? (
               <span style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>

@@ -537,16 +537,19 @@ export default function OrderDetail() {
       {/* Top bar */}
       <div style={{ padding: isMobile ? "10px 16px" : "16px 28px", borderBottom: "1px solid #EDEBE6", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between",
                     flexWrap: isMobile ? "wrap" : undefined, gap: isMobile ? 8 : 0 }}>
-        {/* Крошки: Заказы › {название} · номер — выход всегда одной кнопкой */}
-        <Breadcrumbs
-          items={[{ label: "Заказы", to: "/orders" }, { label: order?.title || "…" }]}
-          tail={<span style={{ fontSize: 10, color: "#C8C0B0", fontFamily: MONO }}>{order?.number}</span>}
-        />
-        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: isMobile ? "wrap" : undefined }}>
+        {/* Крошки: Заказы › {название} · номер — выход всегда одной кнопкой.
+            На телефоне — своя строка на всю ширину, название ужимается многоточием. */}
+        <div style={isMobile ? { flex: "1 1 100%", minWidth: 0, overflow: "hidden" } : { minWidth: 0 }}>
+          <Breadcrumbs
+            items={[{ label: "Заказы", to: "/orders" }, { label: order?.title || "…" }]}
+            tail={<span style={{ fontSize: 10, color: "#C8C0B0", fontFamily: MONO }}>{order?.number}</span>}
+          />
+        </div>
+        <div style={{ display: "flex", gap: isMobile ? 8 : 10, alignItems: "center", flexWrap: isMobile ? "wrap" : undefined, width: isMobile ? "100%" : undefined }}>
           {/* Выгрузки PDF. «КП» жила только в редакторе сметы, хотя ищут её здесь;
               в редакторе она осталась — там она рядом со строками, которые уходят
               заказчику. Активная смета = утверждённая, иначе основная. */}
-          <CardButton label="Карточка П/Ф"
+          <CardButton label={isMobile ? "П/Ф" : "Карточка П/Ф"}
             filename={`План-факт — ${order?.title ?? order?.number ?? "заказ"}.pdf`}
             fetcher={() => ordersApi.card(id!)} />
           {kpSetId && (
@@ -558,13 +561,14 @@ export default function OrderDetail() {
           <button type="button"
             onClick={() => setConfirmDelete(true)}
             title="Удалить заказ"
-            style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, background: "#F2EFE9", border: "none", cursor: "pointer", color: "#8B3A3A" }}
+            style={{ display: "flex", alignItems: "center", justifyContent: "center", width: isMobile ? 40 : 32, height: isMobile ? 40 : 32, background: "#F2EFE9", border: "none", cursor: "pointer", color: "#8B3A3A" }}
             onMouseEnter={e => { e.currentTarget.style.background = "#8B3A3A"; e.currentTarget.style.color = "#fff"; }}
             onMouseLeave={e => { e.currentTarget.style.background = "#F2EFE9"; e.currentTarget.style.color = "#8B3A3A"; }}
           >
             <Trash size={14} />
           </button>
-          <Button variant="primary" onClick={handleSave} disabled={saveMutation.isPending} style={{ fontSize: 12 }}>
+          <Button variant="primary" size={isMobile ? "sm" : "md"} onClick={handleSave} disabled={saveMutation.isPending}
+            style={{ fontSize: 12, ...(isMobile ? { marginLeft: "auto" } : {}) }}>
             {saveMutation.isPending ? "Сохраняем..." : "Сохранить"}
           </Button>
         </div>

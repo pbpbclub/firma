@@ -822,12 +822,12 @@ export default function OrdersV2() {
           </div>
           {/* Виды прибыли — чипы (все / производство / транзит / проектные / …) */}
           {(activitiesList as any[]).length > 1 && (
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 10 }}>
+            <div style={{ display: "flex", gap: 6, paddingTop: 10, ...(isMobile ? M.tabStrip : { flexWrap: "wrap" }) }}>
               {[{ code: "", name: "Все виды", color: "#1A1A1A" }, ...(activitiesList as any[])].map((a: any) => {
                 const on = activityFilter === a.code;
                 return (
                   <button key={a.code} type="button" onClick={() => { setActivityFilter(a.code); setPage(0); setSelectedIds(new Set()); }}
-                    style={{ fontSize: 11, fontWeight: 600, padding: "3px 9px", cursor: "pointer", fontFamily: "inherit",
+                    style={{ fontSize: 11, fontWeight: 600, padding: isMobile ? "10px 12px" : "3px 9px", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0,
                              border: `1px solid ${on ? (a.color || "#1A1A1A") : "#EDEBE6"}`, background: on ? (a.color || "#1A1A1A") : "#fff",
                              color: on ? "#fff" : (a.color || "#6B6355") }}>
                     {a.name}{a.code && a.orders_count != null ? <span style={{ opacity: 0.7 }}> · {a.orders_count}</span> : null}

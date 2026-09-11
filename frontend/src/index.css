@@ -136,4 +136,8 @@
   input, select, textarea { font-size: 16px !important; }
   html, body { overscroll-behavior-y: none; }
   * { -webkit-tap-highlight-color: transparent; }
+  /* Мишень под палец ≥ 36px (11.09.2026): текстовые вкладки, чипы и мелкие кнопки
+     во всех экранах верстались под мышь (24–32px). Одно правило вместо правки
+     85 инлайновых <button>; IconButton и так поднимает себя до 36. */
+  button { min-height: 36px; }
 }

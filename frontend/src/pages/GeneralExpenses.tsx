@@ -7,7 +7,10 @@
  * себестоимость ложится туда, где материал реально израсходован.
  */
 import { useState, Fragment } from "react";
-import { useIsMobile } from "../components/ui/responsive";
+import { useIsMobile, M } from "../components/ui/responsive";
+import { RowCard } from "../components/ui/RowCard";
+import { IconButton } from "../components/ui/IconButton";
+import { Button } from "../components/ui/Button";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { Plus, Trash, ArrowRight, PencilSimple } from "@phosphor-icons/react";
 
@@ -65,7 +68,7 @@ function Chips({ options, value, onPick }: {
       {options.map(o => (
         <button type="button" key={o.v} onClick={() => onPick(o.v)} title={o.hint}
           style={{ fontSize: 11, padding: "7px 12px", cursor: "pointer", fontFamily: "inherit",
-                   border: "1px solid #EDEBE6", marginLeft: -1,
+                   border: "1px solid #EDEBE6", marginLeft: -1, whiteSpace: "nowrap", flexShrink: 0,
                    background: value === o.v ? "#1A1A1A" : "#fff",
                    color: value === o.v ? "#fff" : "#6B6355" }}>
           {o.l}
@@ -284,7 +287,7 @@ export default function GeneralExpenses() {
         ))}
       </div>
 
-      <div style={{ padding: isMobile ? "10px 16px" : "12px 28px", borderBottom: "1px solid #EDEBE6", display: "flex", gap: 0, flexShrink: 0, overflowX: isMobile ? "auto" : undefined }}>
+      <div style={{ padding: isMobile ? "10px 16px" : "12px 28px", borderBottom: "1px solid #EDEBE6", display: "flex", gap: 0, flexShrink: 0, ...(isMobile ? M.tabStrip : {}) }}>
         <Chips options={[{ v: "", l: "Все" }, ...PURPOSES]} value={purpose} onPick={setPurpose} />
       </div>
 
@@ -293,9 +296,33 @@ export default function GeneralExpenses() {
           hint="Сюда попадают закупки впрок, собственные образцы и общехозяйственные траты. Часть перевода можно отправить сюда прямо из детализации расхода заказа." />
       ) : (
         <div style={{ flex: 1, overflow: "auto" }}>
-          {/* Телефон: таблица прокручивается вбок внутри контейнера (desktop-only вид) */}
-          <div style={{ overflowX: isMobile ? "auto" : undefined }}>
-          <table style={{ width: "100%", minWidth: isMobile ? 640 : undefined, borderCollapse: "collapse" }}>
+          {/* Телефон (11.09.2026): строка — карточка, а не таблица с прокруткой вбок:
+              шесть колонок в 390 px рвали ячейки, кнопки были 24 px. */}
+          {isMobile ? items.map(it => (
+            <Fragment key={it.id}>
+              <RowCard
+                title={it.title}
+                sub={<>{fmtDate(it.expense_date)}{(it.master_name || it.supplier) ? ` · ${it.master_name || it.supplier}` : ""} · {it.purpose_label}</>}
+                right={<span style={{ color: it.amount > 0 ? "#1A1A1A" : "#C8C0B0" }}>{fmt(it.amount)}</span>}
+                rightSub={it.written_off ? <span style={{ color: "#4A7C59" }}>списано {fmt(it.written_off)}</span> : undefined}
+                meta={it.written_off_orders ? <span onClick={() => toggleRow(it.id)} style={{ color: "#A89070", cursor: "pointer" }}>{openRows.has(it.id) ? "▾ " : "▸ "}{it.written_off_orders}</span> : undefined}
+                actions={<>
+                  {it.purpose === "stock" && it.amount > 0 && <Button size="sm" onClick={() => setWriteOff(it)}><ArrowRight size={12} /> В заказ</Button>}
+                  <IconButton icon={PencilSimple} title="Править" onClick={() => setForm({ item: it })} />
+                  <IconButton icon={Trash} title="Удалить" tone="danger" onClick={() => del.mutate(it.id)} />
+                </>}
+              />
+              {openRows.has(it.id) && (it.write_offs || []).map((w: any) => (
+                <div key={w.id} style={{ background: "#FAF8F5", padding: "8px 16px", borderBottom: "1px solid #F2EFE9", display: "flex", alignItems: "center", gap: 10, fontSize: 12 }}>
+                  <span style={{ fontFamily: MONO, fontSize: 11, color: "#A89070" }}>{fmtDate(w.expense_date)}</span>
+                  <span style={{ flex: 1, color: "#6B6355", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>→ {w.order_title || w.order_number || "заказ удалён"}</span>
+                  <span style={{ fontFamily: MONO, color: "#4A7C59" }}>{fmt(w.amount)}</span>
+                  <Button size="sm" onClick={() => undo.mutate(w.id)} disabled={undo.isPending}>{undo.isPending ? "…" : "Вернуть"}</Button>
+                </div>
+              ))}
+            </Fragment>
+          )) : (
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", textAlign: "left" }}>
                 <th style={{ padding: "10px 28px", fontWeight: 400 }}>ДАТА</th>
@@ -380,7 +407,7 @@ export default function GeneralExpenses() {
               ))}
             </tbody>
           </table>
-          </div>
+          )}
           {del.isError && (
             <div style={{ padding: "10px 28px", fontSize: 11, color: "#8B3A3A" }}>
               {(del.error as any)?.response?.data?.detail || "Не удалось удалить"}
