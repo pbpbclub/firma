@@ -400,8 +400,11 @@ export const snoozeApi = {
 
 // Машинное время агентов — направление «Проектные работы» (11.09.2026).
 export const machineUsageApi = {
-  list: (params?: { order_id?: string; month?: string; agent?: string; unassigned?: boolean; date_from?: string; date_to?: string }) =>
+  list: (params?: { order_id?: string; month?: string; agent?: string; unassigned?: boolean; date_from?: string; date_to?: string; hidden?: boolean }) =>
     api.get("/machine-usage", { params }).then((r) => r.data),
+  // Скрыть с экрана, не удаляя: ключ остаётся, повторный прогон мака дубль не пришлёт
+  hide: (data: { ids?: string[]; unassigned?: boolean; hidden?: boolean }) =>
+    api.post("/machine-usage/hide", data).then((r) => r.data),
   summary: (params?: { date_from?: string; date_to?: string; activity?: string; paid_only?: boolean }) =>
     api.get("/machine-usage/summary", { params }).then((r) => r.data),
   create: (data: Record<string, any>) => api.post("/machine-usage", data).then((r) => r.data),

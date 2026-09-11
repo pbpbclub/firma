@@ -7,7 +7,7 @@
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { Trash, CaretDown, CaretRight, FloppyDisk } from "@phosphor-icons/react";
+import { Trash, CaretDown, CaretRight, FloppyDisk, EyeSlash, Eye } from "@phosphor-icons/react";
 import { machineUsageApi, ordersApi } from "../api";
 import { Loading } from "../components/ui/Loading";
 import { EmptyState } from "../components/ui/EmptyState";
@@ -83,9 +83,10 @@ export default function MachineTime() {
   // оплаченным проектным работам; «Прочие сессии» — всё остальное с мака (производство,
   // папки без заказа, работа без папки) — хранится, но главную не засоряет.
   const [tab, setTab] = useState<"design" | "other">("design");
+  const [showHidden, setShowHidden] = useState(false);
   const others = useQuery({
-    queryKey: ["machine-usage", "others", from, to],
-    queryFn: () => machineUsageApi.list({ date_from: from || undefined, date_to: to || undefined }),
+    queryKey: ["machine-usage", "others", from, to, showHidden],
+    queryFn: () => machineUsageApi.list({ date_from: from || undefined, date_to: to || undefined, ...(showHidden ? { hidden: true } : {}) }),
     enabled: tab === "other",
   });
 
@@ -153,7 +154,8 @@ export default function MachineTime() {
 
       {tab === "other" && (
         <OtherSessions rows={(others.data?.items ?? []) as any[]} loading={others.isLoading}
-          unassigned={q.data?.unassigned?.items ?? []} onDone={invalidate} />
+          unassigned={showHidden ? [] : (q.data?.unassigned?.items ?? [])} onDone={invalidate}
+          showHidden={showHidden} setShowHidden={setShowHidden} hiddenCount={q.data?.hidden_count ?? 0} />
       )}
       {tab === "design" && <>
 
@@ -291,10 +293,18 @@ export default function MachineTime() {
 }
 
 // «Прочие сессии»: производство и всё без заказа — часы, токены, модели; денег нет.
-function OtherSessions({ rows, loading, unassigned, onDone }: { rows: any[]; loading: boolean; unassigned: any[]; onDone: () => void }) {
+function OtherSessions({ rows, loading, unassigned, onDone, showHidden, setShowHidden, hiddenCount }: {
+  rows: any[]; loading: boolean; unassigned: any[]; onDone: () => void;
+  showHidden: boolean; setShowHidden: (v: boolean) => void; hiddenCount: number;
+}) {
   const isMobile = useIsMobile();
-  // Без заказа — в жёлтом блоке выше (там назначают), в группы идут только заказы
-  const other = rows.filter(r => r.order_id && r.order_activity !== "design");
+  const hide = useMutation({
+    mutationFn: (data: { ids?: string[]; unassigned?: boolean; hidden?: boolean }) => machineUsageApi.hide(data),
+    onSuccess: onDone,
+  });
+  // Без заказа — в жёлтом блоке выше (там назначают), в группы идут только заказы;
+  // в режиме «скрытые» показываем всё скрытое подряд
+  const other = showHidden ? rows : rows.filter(r => r.order_id && r.order_activity !== "design");
   const groups: Record<string, { key: string; title: string; sub: string; order_id?: string; color?: string; rows: any[] }> = {};
   for (const r of other) {
     const key = r.order_id || `dir:${r.project_dir || "—"}`;
@@ -309,14 +319,37 @@ function OtherSessions({ rows, loading, unassigned, onDone }: { rows: any[]; loa
   const list = Object.values(groups).sort((a, b) => sum(b.rows, "hours") - sum(a.rows, "hours"));
   function sum(rs: any[], k: string) { return rs.reduce((s, r) => s + (r[k] || 0), 0); }
   if (loading) return <Loading />;
-  if (!other.length && !unassigned.length) return <EmptyState title="Прочих сессий за период нет" hint="Сюда попадают сессии по производственным заказам и папкам без заказа." />;
+  const toggleHidden = (
+    <span onClick={() => setShowHidden(!showHidden)} style={{ color: "#E8592A", cursor: "pointer", textDecoration: "underline", display: "inline-flex", alignItems: "center", gap: 4 }}>
+      {showHidden ? <><Eye size={12} /> к обычному виду</> : <><EyeSlash size={12} /> показать скрытые{hiddenCount ? ` (${hiddenCount})` : ""}</>}
+    </span>
+  );
+  if (!other.length && !unassigned.length) return (
+    <div style={{ padding: isMobile ? "0 16px 16px" : "0 28px 24px" }}>
+      <EmptyState title={showHidden ? "Скрытых строк нет" : "Прочих сессий за период нет"} hint="Сюда попадают сессии по производственным заказам и папкам без заказа." />
+      <div style={{ fontSize: 12, textAlign: "center" }}>{toggleHidden}</div>
+    </div>
+  );
   return (
     <div style={{ padding: isMobile ? "0 16px 16px" : "0 28px 24px" }}>
-      <div style={{ fontSize: 12, color: "#6B6355", padding: "14px 0 6px" }}>
-        Сессии конструктора по другим заказам: {other.length} зап. · {fmtHours(sum(other, "hours"))} · {fmtTok(sum(other, "tokens_total"))}.
-        Хранятся для истории; в показатели «Проектных работ» не входят.
+      <div style={{ fontSize: 12, color: "#6B6355", padding: "14px 0 6px", display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <span>
+          {showHidden ? <>Скрытые строки: {other.length} зап. · {fmtHours(sum(other, "hours"))} · {fmtTok(sum(other, "tokens_total"))}.</>
+            : <>Сессии конструктора по другим заказам: {other.length} зап. · {fmtHours(sum(other, "hours"))} · {fmtTok(sum(other, "tokens_total"))}.
+                Хранятся для истории; в показатели «Проектных работ» не входят.</>}
+        </span>
+        {toggleHidden}
       </div>
-      {unassigned.length > 0 && <UnassignedBlock items={unassigned} totals={{ hours: sum(unassigned, "hours"), tokens_total: sum(unassigned, "tokens_total") }} onDone={onDone} />}
+      {unassigned.length > 0 && (
+        <UnassignedBlock items={unassigned} totals={{ hours: sum(unassigned, "hours"), tokens_total: sum(unassigned, "tokens_total") }} onDone={onDone}
+          onHide={id => hide.mutate({ ids: [id] })}
+          onHideAll={() => { if (confirm(`Скрыть все ${unassigned.length} строк без заказа? Данные останутся, с экрана уйдут.`)) hide.mutate({ unassigned: true }); }} />
+      )}
+      {showHidden && other.length > 0 && (
+        <div style={{ margin: "8px 0" }}>
+          <Button size="sm" onClick={() => hide.mutate({ ids: other.map(r => r.id), hidden: false })}>Вернуть все на экран</Button>
+        </div>
+      )}
       {list.map(g => (
         <div key={g.key} style={{ marginTop: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "8px 0", borderBottom: "1px solid #EDEBE6", alignItems: "baseline" }}>
@@ -328,7 +361,8 @@ function OtherSessions({ rows, loading, unassigned, onDone }: { rows: any[]; loa
               {sum(g.rows, "sessions")} сес. · {fmtHours(sum(g.rows, "hours"))} · <b style={{ color: "#1A1A1A" }}>{fmtTok(sum(g.rows, "tokens_total"))}</b>
             </span>
           </div>
-          <UsageRows rows={g.rows} onRemove={id => { if (confirm("Удалить запись машинного времени?")) machineUsageApi.remove(id).then(onDone); }} />
+          <UsageRows rows={g.rows} onRemove={id => { if (confirm("Удалить запись машинного времени?")) machineUsageApi.remove(id).then(onDone); }}
+            onHide={id => hide.mutate({ ids: [id], hidden: !showHidden })} hiddenMode={showHidden} />
         </div>
       ))}
     </div>
@@ -336,7 +370,7 @@ function OtherSessions({ rows, loading, unassigned, onDone }: { rows: any[]; loa
 }
 
 // Сессии одного заказа: дата, кто, модель, часы, токены по видам, $ справочно
-function UsageRows({ rows, onRemove }: { rows: any[]; onRemove: (id: string) => void }) {
+function UsageRows({ rows, onRemove, onHide, hiddenMode }: { rows: any[]; onRemove: (id: string) => void; onHide?: (id: string) => void; hiddenMode?: boolean }) {
   const isMobile = useIsMobile();
   if (!rows.length) return <div style={{ fontSize: 12, color: "#A89070", padding: "8px 0" }}>Сессий по заказу ещё не записано.</div>;
   return (
@@ -353,6 +387,7 @@ function UsageRows({ rows, onRemove }: { rows: any[]; onRemove: (id: string) => 
             {r.note ? <span style={{ color: "#B8860B" }}> · {r.note}</span> : ""}
           </span>
           <span style={{ ...num, fontSize: 11, color: "#A89070", minWidth: 60, textAlign: "right" }}>{fmtUsd(r.usd_est)}</span>
+          {onHide && <IconButton icon={hiddenMode ? Eye : EyeSlash} title={hiddenMode ? "Вернуть на экран" : "Скрыть с экрана (данные останутся)"} size={24} onClick={e => { e.stopPropagation(); onHide(r.id); }} />}
           <IconButton icon={Trash} title="Удалить запись" tone="danger" size={24} onClick={e => { e.stopPropagation(); onRemove(r.id); }} />
         </div>
       ))}
@@ -361,7 +396,7 @@ function UsageRows({ rows, onRemove }: { rows: any[]; onRemove: (id: string) => 
 }
 
 // Строки без заказа: папка мака не в карте. Назначить заказ — и запомнить папку.
-function UnassignedBlock({ items, totals, onDone }: { items: any[]; totals: any; onDone: () => void }) {
+function UnassignedBlock({ items, totals, onDone, onHide, onHideAll }: { items: any[]; totals: any; onDone: () => void; onHide?: (id: string) => void; onHideAll?: () => void }) {
   const isMobile = useIsMobile();
   const { data: orders = [] } = useQuery({ queryKey: ["orders", "for-usage"], queryFn: () => ordersApi.list({}) });
   const [pick, setPick] = useState<Record<string, string>>({});
@@ -384,7 +419,8 @@ function UnassignedBlock({ items, totals, onDone }: { items: any[]; totals: any;
     <div style={{ margin: isMobile ? "10px 16px 0" : "12px 28px 0", padding: "11px 14px", background: "#FBF7EF", borderLeft: "3px solid #B8860B" }}>
       <div style={{ fontSize: 12, color: "#6B6355", lineHeight: 1.5 }}>
         <b style={{ color: "#1A1A1A" }}>Без заказа:</b> {items.length} зап. · {fmtHours(totals.hours)} · {fmtTok(totals.tokens_total)}.
-        Папка на маке не привязана к заказу — назначь, папка запомнится.
+        Папка на маке не привязана к заказу — назначь, папка запомнится. Пробное и лишнее — скрой: данные останутся, с экрана уйдут.
+        {onHideAll && <> <span onClick={onHideAll} style={{ color: "#E8592A", cursor: "pointer", textDecoration: "underline" }}>скрыть все без заказа</span></>}
       </div>
       {items.map((r: any) => (
         <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
@@ -403,6 +439,7 @@ function UnassignedBlock({ items, totals, onDone }: { items: any[]; totals: any;
             </label>
           )}
           <Button size="sm" variant="primary" disabled={!pick[r.id] || assign.isPending} onClick={() => assign.mutate(r)}>Назначить</Button>
+          {onHide && <IconButton icon={EyeSlash} title="Скрыть с экрана (данные останутся)" size={28} onClick={() => onHide(r.id)} />}
         </div>
       ))}
     </div>

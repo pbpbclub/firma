@@ -2116,6 +2116,11 @@ def ensure_machine_usage_schema():
             """
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_machine_usage_order ON machine_usage(order_id, work_date)")
+        # hidden (11.09.2026): Юра убирает с экрана строки без заказа / пробные папки, не
+        # удаляя — ключ остаётся, повторный прогон мака их не воскресит
+        mu_cols = {r[1] for r in conn.execute("PRAGMA table_info(machine_usage)").fetchall()}
+        if "hidden" not in mu_cols:
+            conn.execute("ALTER TABLE machine_usage ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0")
         conn.execute(
             """
             CREATE TRIGGER IF NOT EXISTS trg_machine_usage_updated_at

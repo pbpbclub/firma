@@ -67,6 +67,7 @@ class ImportIn(BaseModel):
 
 class UsagePatch(BaseModel):
     order_id: Optional[str] = None
+    hidden: Optional[bool] = None        # скрыть с экрана, не удаляя (ключ остаётся — дубль не придёт)
     hours: Optional[float] = None
     sessions: Optional[int] = None
     note: Optional[str] = None
@@ -220,6 +221,8 @@ def patch_usage(usage_id: str, body: UsagePatch):
                 fields["order_id"] = o["id"]
             else:
                 fields["order_id"] = None
+        if "hidden" in fields:
+            fields["hidden"] = int(bool(fields["hidden"]))
         merged = {**dict(row), **fields}
         if any(k in fields for k in ("model",) + TOKEN_KINDS):
             fields["usd"] = (_usd(_price(conn, merged["model"]), merged["tokens_in"] or 0, merged["tokens_out"] or 0,
@@ -281,13 +284,44 @@ def _by_model(rows: list) -> list:
     return sorted(acc.values(), key=lambda m: -m["tokens_total"])
 
 
+class HideIn(BaseModel):
+    ids: Optional[list[str]] = None      # конкретные строки
+    unassigned: bool = False             # все без заказа
+    hidden: bool = True                  # False — вернуть на экран
+
+
+@router.post("/hide")
+def hide_usage(body: HideIn):
+    """Скрыть/показать пачкой: выбранные строки либо все без заказа."""
+    conn = get_production()
+    try:
+        n = 0
+        if body.ids:
+            holes = ",".join("?" * len(body.ids))
+            n += conn.execute(f"UPDATE machine_usage SET hidden = ? WHERE id IN ({holes})",
+                              [int(body.hidden)] + list(body.ids)).rowcount
+        if body.unassigned:
+            n += conn.execute("UPDATE machine_usage SET hidden = ? WHERE order_id IS NULL", (int(body.hidden),)).rowcount
+        audit(conn, "machine_usage", "bulk", "update", f"{'Скрыто' if body.hidden else 'Показано'} строк машинного времени: {n}")
+        conn.commit()
+        return {"ok": True, "count": n}
+    finally:
+        conn.close()
+
+
 @router.get("")
 def list_usage(order_id: Optional[str] = None, month: Optional[str] = None,
                agent: Optional[str] = None, unassigned: bool = False,
-               date_from: Optional[str] = None, date_to: Optional[str] = None):
+               date_from: Optional[str] = None, date_to: Optional[str] = None,
+               hidden: Optional[bool] = None):
+    """hidden: None — только видимые (дефолт), True — только скрытые, False — все."""
     conn = get_production()
     try:
         sql, params = _ROW_SQL + " WHERE 1=1", []
+        if hidden is None:
+            sql += " AND COALESCE(u.hidden, 0) = 0"
+        elif hidden:
+            sql += " AND COALESCE(u.hidden, 0) = 1"
         if order_id:
             sql += " AND (u.order_id = ? OR o.number = ?)"; params += [order_id, order_id.upper()]
         if month:
@@ -323,7 +357,8 @@ def summary(date_from: Optional[str] = None, date_to: Optional[str] = None,
             where += " AND u.work_date >= ?"; params.append(date_from)
         if date_to:
             where += " AND u.work_date <= ?"; params.append(date_to)
-        usage = [_decorate(dict(r)) for r in conn.execute(_ROW_SQL + " WHERE 1=1" + where, params).fetchall()]
+        usage = [_decorate(dict(r)) for r in conn.execute(_ROW_SQL + " WHERE COALESCE(u.hidden, 0) = 0" + where, params).fetchall()]
+        hidden_count = conn.execute("SELECT COUNT(*) FROM machine_usage WHERE COALESCE(hidden, 0) = 1").fetchone()[0]
         by_order: dict = {}
         unassigned = []
         for r in usage:
@@ -406,6 +441,7 @@ def summary(date_from: Optional[str] = None, date_to: Optional[str] = None,
                 "people_share": round(people_t / rev_t * 100, 1) if rev_t and people_t else None,
             },
             "skipped_unpaid": skipped_unpaid,
+            "hidden_count": hidden_count,
             "by_agent": sorted(by_agent.values(), key=lambda a: -a["tokens_total"]),
             "by_model": _by_model(usage),
             "unassigned": {"items": unassigned, "hours": round(sum(r["hours"] or 0 for r in unassigned), 2),
