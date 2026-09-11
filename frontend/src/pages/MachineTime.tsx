@@ -79,6 +79,15 @@ export default function MachineTime() {
   const activity = "design";
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [showRates, setShowRates] = useState(false);
+  // Две вкладки (Юра 11.09.2026): главная — соотношение выручки и ресурсов агента по
+  // оплаченным проектным работам; «Прочие сессии» — всё остальное с мака (производство,
+  // папки без заказа, работа без папки) — хранится, но главную не засоряет.
+  const [tab, setTab] = useState<"design" | "other">("design");
+  const others = useQuery({
+    queryKey: ["machine-usage", "others", from, to],
+    queryFn: () => machineUsageApi.list({ date_from: from || undefined, date_to: to || undefined }),
+    enabled: tab === "other",
+  });
 
   const q = useQuery({
     queryKey: ["machine-usage", "summary", from, to, activity],
@@ -130,7 +139,23 @@ export default function MachineTime() {
           </div>
           <PeriodFilter label="ПЕРИОД СЕССИЙ" from={from} to={to} onChange={(f, tt) => { setFrom(f); setTo(tt); }} align="right" />
         </div>
+        <div style={{ display: "flex", gap: 24, marginTop: 14, borderBottom: "1px solid #EDEBE6", marginBottom: -20 }}>
+          {([["design", "Проектные работы"], ["other", "Прочие сессии"]] as const).map(([k, l]) => (
+            <button key={k} type="button" onClick={() => setTab(k)}
+              style={{ fontSize: 13, padding: "0 0 10px", border: "none", background: "none", cursor: "pointer", fontFamily: "inherit",
+                       color: tab === k ? "#1A1A1A" : "#A89070", fontWeight: tab === k ? 600 : 400,
+                       borderBottom: tab === k ? "2px solid #E8592A" : "2px solid transparent", marginBottom: -1 }}>
+              {l}{k === "other" && q.data?.unassigned?.items?.length ? <span style={{ color: "#B8860B" }}> · без заказа {q.data.unassigned.items.length}</span> : null}
+            </button>
+          ))}
+        </div>
       </div>
+
+      {tab === "other" && (
+        <OtherSessions rows={(others.data?.items ?? []) as any[]} loading={others.isLoading}
+          unassigned={q.data?.unassigned?.items ?? []} onDone={invalidate} />
+      )}
+      {tab === "design" && <>
 
       {q.isError && <QueryError error={q.error} what="сводку машинного времени" />}
       {q.isLoading && <Loading />}
@@ -147,10 +172,6 @@ export default function MachineTime() {
             </div>
           ))}
         </div>
-      )}
-
-      {q.data && q.data.unassigned.items.length > 0 && (
-        <UnassignedBlock items={q.data.unassigned.items} totals={q.data.unassigned} onDone={invalidate} />
       )}
 
       {q.data && items.length === 0 && (
@@ -247,7 +268,7 @@ export default function MachineTime() {
             ))}
           </div>
           <div style={{ padding: isMobile ? "14px 16px" : "18px 28px" }}>
-            <div style={{ ...lbl, marginBottom: 10 }}>ПО АГЕНТАМ ЗА ПЕРИОД (включая строки без заказа)</div>
+            <div style={{ ...lbl, marginBottom: 10 }}>ПО АГЕНТАМ ЗА ПЕРИОД</div>
             {q.data.by_agent.map((a: any) => (
               <div key={a.agent} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "6px 0", borderBottom: "1px solid #F2EFE9", fontSize: 12 }}>
                 <span style={{ color: "#1A1A1A", fontWeight: 500 }}>{a.label}</span>
@@ -264,6 +285,52 @@ export default function MachineTime() {
         </div>
         {showRates && <RatesBlock />}
       </div>
+      </>}
+    </div>
+  );
+}
+
+// «Прочие сессии»: производство и всё без заказа — часы, токены, модели; денег нет.
+function OtherSessions({ rows, loading, unassigned, onDone }: { rows: any[]; loading: boolean; unassigned: any[]; onDone: () => void }) {
+  const isMobile = useIsMobile();
+  // Без заказа — в жёлтом блоке выше (там назначают), в группы идут только заказы
+  const other = rows.filter(r => r.order_id && r.order_activity !== "design");
+  const groups: Record<string, { key: string; title: string; sub: string; order_id?: string; color?: string; rows: any[] }> = {};
+  for (const r of other) {
+    const key = r.order_id || `dir:${r.project_dir || "—"}`;
+    const g = groups[key] ??= {
+      key, order_id: r.order_id || undefined,
+      title: r.order_id ? r.order_title : (r.project_dir ? `папка ${r.project_dir}` : "без папки проекта"),
+      sub: r.order_id ? `${r.order_number} · ${r.activity_name || ""}` : "не привязано к заказу",
+      color: r.activity_color, rows: [],
+    };
+    g.rows.push(r);
+  }
+  const list = Object.values(groups).sort((a, b) => sum(b.rows, "hours") - sum(a.rows, "hours"));
+  function sum(rs: any[], k: string) { return rs.reduce((s, r) => s + (r[k] || 0), 0); }
+  if (loading) return <Loading />;
+  if (!other.length && !unassigned.length) return <EmptyState title="Прочих сессий за период нет" hint="Сюда попадают сессии по производственным заказам и папкам без заказа." />;
+  return (
+    <div style={{ padding: isMobile ? "0 16px 16px" : "0 28px 24px" }}>
+      <div style={{ fontSize: 12, color: "#6B6355", padding: "14px 0 6px" }}>
+        Сессии конструктора по другим заказам: {other.length} зап. · {fmtHours(sum(other, "hours"))} · {fmtTok(sum(other, "tokens_total"))}.
+        Хранятся для истории; в показатели «Проектных работ» не входят.
+      </div>
+      {unassigned.length > 0 && <UnassignedBlock items={unassigned} totals={{ hours: sum(unassigned, "hours"), tokens_total: sum(unassigned, "tokens_total") }} onDone={onDone} />}
+      {list.map(g => (
+        <div key={g.key} style={{ marginTop: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "8px 0", borderBottom: "1px solid #EDEBE6", alignItems: "baseline" }}>
+            <div>
+              <span style={{ fontSize: 13, fontWeight: 500, color: "#1A1A1A" }}>{g.order_id ? <OrderLink id={g.order_id}>{g.title}</OrderLink> : g.title}</span>
+              <span style={{ fontSize: 11, color: g.color || "#A89070", marginLeft: 8 }}>{g.sub}</span>
+            </div>
+            <span style={{ ...num, fontSize: 12, color: "#6B6355", whiteSpace: "nowrap" }}>
+              {sum(g.rows, "sessions")} сес. · {fmtHours(sum(g.rows, "hours"))} · <b style={{ color: "#1A1A1A" }}>{fmtTok(sum(g.rows, "tokens_total"))}</b>
+            </span>
+          </div>
+          <UsageRows rows={g.rows} onRemove={id => { if (confirm("Удалить запись машинного времени?")) machineUsageApi.remove(id).then(onDone); }} />
+        </div>
+      ))}
     </div>
   );
 }

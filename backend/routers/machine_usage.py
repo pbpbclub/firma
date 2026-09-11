@@ -252,8 +252,10 @@ def delete_usage(usage_id: str):
 
 # ── чтение ───────────────────────────────────────────────────────────────────
 
-_ROW_SQL = """SELECT u.*, o.number AS order_number, o.title AS order_title, o.status AS order_status
-                FROM machine_usage u LEFT JOIN orders o ON o.id = u.order_id"""
+_ROW_SQL = """SELECT u.*, o.number AS order_number, o.title AS order_title, o.status AS order_status,
+                     o.activity AS order_activity, act.name AS activity_name, act.color AS activity_color
+                FROM machine_usage u LEFT JOIN orders o ON o.id = u.order_id
+                LEFT JOIN activities act ON act.code = o.activity"""
 
 
 def _tokens(r: dict) -> int:
@@ -380,8 +382,9 @@ def summary(date_from: Optional[str] = None, date_to: Optional[str] = None,
             })
 
         if paid_only:
+            # разрезы по агентам/моделям — ровно по тем заказам, что в таблице
             kept = {i["id"] for i in items}
-            usage = [r for r in usage if r["order_id"] in kept or not r["order_id"]]
+            usage = [r for r in usage if r["order_id"] in kept]
 
         def tot(key):
             return round(sum(i[key] or 0 for i in items), 2)
