@@ -2298,9 +2298,26 @@ def _resolve_order(conn, order_id: str):
     return r["id"]
 
 
+# Машинное время агентов расходом не заводится (решение Юры 11.09.2026): токены — у.е.,
+# рублей за них никто не платил. design_costs.py фин-агента дважды за день (12:09 и
+# 13:19) заводил «Сессии конструктора» в рублях поверх запрета — страница показывала
+# «выплачено людям 20 715 ₽». Признак — поставщик/название сессий конструктора.
+_MACHINE_MARKERS = ("сессии конструктора", "сессии claude", "конструктор (сессии")
+
+
+def _reject_machine_expense(body: ExpenseIn):
+    hay = f"{body.supplier or ''} {body.title or ''}".lower()
+    if any(m in hay for m in _MACHINE_MARKERS):
+        raise HTTPException(status_code=400, detail={
+            "error": "machine_time_is_not_expense",
+            "message": "Сессии агентов расходом не заводятся: машинное время — у.е. (токены, часы), "
+                       "не рубли. Шли в POST /api/machine-usage/import"})
+
+
 def _validate_expense(body: ExpenseIn):
     if not (body.title or "").strip():
         raise HTTPException(status_code=400, detail="title required")
+    _reject_machine_expense(body)
     # Нулевой/отрицательный расход молча испортит факт и маржу.
     if body.amount is None or body.amount <= 0:
         raise HTTPException(status_code=400, detail="amount must be > 0")
