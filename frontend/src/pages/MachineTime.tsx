@@ -8,7 +8,7 @@ import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Trash, CaretDown, CaretRight, FloppyDisk } from "@phosphor-icons/react";
-import { machineUsageApi, ordersApi, activitiesApi } from "../api";
+import { machineUsageApi, ordersApi } from "../api";
 import { Loading } from "../components/ui/Loading";
 import { EmptyState } from "../components/ui/EmptyState";
 import { QueryError } from "../components/ui/QueryError";
@@ -74,14 +74,15 @@ export default function MachineTime() {
   const qc = useQueryClient();
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
-  const [activity, setActivity] = useState<string>("");
+  // Замеряем только проектные работы, сделанные и оплаченные (Юра 11.09.2026):
+  // другие виды прибыли и неоплаченные заказы на странице не показываются.
+  const activity = "design";
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [showRates, setShowRates] = useState(false);
 
-  const { data: activities = [] } = useQuery({ queryKey: ["activities"], queryFn: activitiesApi.list });
   const q = useQuery({
     queryKey: ["machine-usage", "summary", from, to, activity],
-    queryFn: () => machineUsageApi.summary({ date_from: from || undefined, date_to: to || undefined, activity: activity || undefined }),
+    queryFn: () => machineUsageApi.summary({ date_from: from || undefined, date_to: to || undefined, activity, paid_only: true }),
   });
   const { sort, toggle, apply } = useTableSort();
   const items = useMemo(() => apply((q.data?.items ?? []) as any[], {
@@ -122,24 +123,12 @@ export default function MachineTime() {
           <div>
             <div style={{ fontSize: isMobile ? 22 : 26, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em" }}>Машинное время</div>
             <div style={{ fontSize: 12, color: "#6B6355", marginTop: 4 }}>
-              Сессии агентов по заказам: часы, токены, модели. Приходит по API от мака и фин-агента; рублями не считается.
+              Проектные работы, сделанные и оплаченные: сколько часов и токенов конструктора ушло на каждый рубль.
+              Сессии приходят по API от мака и фин-агента; рублями не считаются.
+              {q.data?.skipped_unpaid ? <span style={{ color: "#A89070" }}> Не оплачено и скрыто: {q.data.skipped_unpaid}.</span> : null}
             </div>
           </div>
           <PeriodFilter label="ПЕРИОД СЕССИЙ" from={from} to={to} onChange={(f, tt) => { setFrom(f); setTo(tt); }} align="right" />
-        </div>
-        {/* Вид прибыли — чипы из справочника; выбранный добавляет заказы вида без сессий */}
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 12 }}>
-          {[{ code: "", name: "Все с сессиями", color: "#1A1A1A" }, ...(activities as any[])].map((a: any) => {
-            const on = activity === a.code;
-            return (
-              <button key={a.code} type="button" onClick={() => setActivity(a.code)}
-                style={{ fontSize: 11, fontWeight: 600, padding: "4px 10px", cursor: "pointer", fontFamily: "inherit",
-                         border: `1px solid ${on ? (a.color || "#E8592A") : "#EDEBE6"}`, background: on ? (a.color || "#E8592A") : "#fff",
-                         color: on ? "#fff" : (a.color || "#6B6355") }}>
-                {a.name}{a.orders_count != null && a.code ? <span style={{ opacity: 0.7 }}> · {a.orders_count}</span> : null}
-              </button>
-            );
-          })}
         </div>
       </div>
 
@@ -166,7 +155,7 @@ export default function MachineTime() {
 
       {q.data && items.length === 0 && (
         <EmptyState title="Сессий агентов пока нет"
-          hint={activity ? "У заказов этого вида прибыли нет сессий за период." : "Записи приходят по API (POST /api/machine-usage) от мака и фин-агента."} />
+          hint="Оплаченных проектных заказов с сессиями за период нет. Записи приходят по API от мака и фин-агента." />
       )}
       {items.length > 0 && !isMobile && (
         <table style={{ width: "100%", borderCollapse: "collapse" }}>

@@ -402,7 +402,7 @@ export const snoozeApi = {
 export const machineUsageApi = {
   list: (params?: { order_id?: string; month?: string; agent?: string; unassigned?: boolean; date_from?: string; date_to?: string }) =>
     api.get("/machine-usage", { params }).then((r) => r.data),
-  summary: (params?: { date_from?: string; date_to?: string; activity?: string }) =>
+  summary: (params?: { date_from?: string; date_to?: string; activity?: string; paid_only?: boolean }) =>
     api.get("/machine-usage/summary", { params }).then((r) => r.data),
   create: (data: Record<string, any>) => api.post("/machine-usage", data).then((r) => r.data),
   importEntries: (entries: Record<string, any>[], source = "manual") =>

@@ -307,7 +307,7 @@ def list_usage(order_id: Optional[str] = None, month: Optional[str] = None,
 
 @router.get("/summary")
 def summary(date_from: Optional[str] = None, date_to: Optional[str] = None,
-            activity: Optional[str] = None):
+            activity: Optional[str] = None, paid_only: bool = False):
     """Сводка по заказам с сессиями: реальные деньги (цена из _margin, оплачено,
     выплаты людям — расходы work/other), у.е. (часы, токены по видам и моделям) и
     показатели: ₽ выручки на час, ₽ на 1 млн токенов, токенов на час, доля выплат
@@ -348,9 +348,15 @@ def summary(date_from: Optional[str] = None, date_to: Optional[str] = None,
                 usage = [r for r in usage if r["order_id"] in keep or not r["order_id"]]
         tfacts, discounts, extras = _transit_facts(conn), _discounts(conn), _extras_totals(conn)
         items = []
+        skipped_unpaid = 0
         for o in orders:
             m = _margin(conn, o["id"], o["price_plan"], o["cost_plan"],
                         transit_facts=tfacts, discounts=discounts, extras=extras)
+            # Замеряем только сделанное и оплаченное (Юра 11.09.2026): цена есть и
+            # получена целиком. Неоплаченный заказ в ₽/час дал бы выручку, которой нет.
+            if paid_only and not ((m["revenue"] or 0) > 0 and (o["paid_total"] or 0) >= (m["revenue"] or 0) - 0.01):
+                skipped_unpaid += 1
+                continue
             rows = by_order.get(o["id"], [])
             hours = round(sum(r["hours"] or 0 for r in rows), 2)
             tokens = sum(r["tokens_total"] for r in rows)
@@ -373,6 +379,10 @@ def summary(date_from: Optional[str] = None, date_to: Optional[str] = None,
                 "usage": rows,
             })
 
+        if paid_only:
+            kept = {i["id"] for i in items}
+            usage = [r for r in usage if r["order_id"] in kept or not r["order_id"]]
+
         def tot(key):
             return round(sum(i[key] or 0 for i in items), 2)
         hours_t, tokens_t, rev_t, people_t = tot("hours"), tot("tokens_total"), tot("revenue"), tot("people_paid")
@@ -392,6 +402,7 @@ def summary(date_from: Optional[str] = None, date_to: Optional[str] = None,
                 "tok_per_hour": round(tokens_t / hours_t) if hours_t else None,
                 "people_share": round(people_t / rev_t * 100, 1) if rev_t and people_t else None,
             },
+            "skipped_unpaid": skipped_unpaid,
             "by_agent": sorted(by_agent.values(), key=lambda a: -a["tokens_total"]),
             "by_model": _by_model(usage),
             "unassigned": {"items": unassigned, "hours": round(sum(r["hours"] or 0 for r in unassigned), 2),
