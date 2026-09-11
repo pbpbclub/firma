@@ -2302,16 +2302,26 @@ def _resolve_order(conn, order_id: str):
 # рублей за них никто не платил. design_costs.py фин-агента дважды за день (12:09 и
 # 13:19) заводил «Сессии конструктора» в рублях поверх запрета — страница показывала
 # «выплачено людям 20 715 ₽». Признак — поставщик/название сессий конструктора.
-_MACHINE_MARKERS = ("сессии конструктора", "сессии claude", "конструктор (сессии")
+_MACHINE_MARKERS = ("сессии конструктора", "сессии claude", "конструктор (сессии", "конструктор (агент)",
+                    "работа 3d-конструктора", "токенов")
 
 
-def _reject_machine_expense(body: ExpenseIn):
+def _reject_machine_expense(body: ExpenseIn, conn=None, oid: str = None):
+    """Тот же замок, что триггер trg_expenses_no_machine_time_* в базе (db.py), но с
+    человеческим ответом: у проектного заказа работа без живого получателя — отказ."""
     hay = f"{body.supplier or ''} {body.title or ''}".lower()
     if any(m in hay for m in _MACHINE_MARKERS):
         raise HTTPException(status_code=400, detail={
             "error": "machine_time_is_not_expense",
             "message": "Сессии агентов расходом не заводятся: машинное время — у.е. (токены, часы), "
                        "не рубли. Шли в POST /api/machine-usage/import"})
+    if conn is not None and oid and body.category in ("work", "other") and not body.master_id:
+        act = conn.execute("SELECT activity FROM orders WHERE id = ?", (oid,)).fetchone()
+        if act and act["activity"] == "design":
+            raise HTTPException(status_code=400, detail={
+                "error": "design_work_needs_payee",
+                "message": "У проектного заказа расход на работу — только живому получателю: укажи master_id. "
+                           "Сессии агентов — в POST /api/machine-usage/import"})
 
 
 def _validate_expense(body: ExpenseIn):
@@ -2493,6 +2503,7 @@ def _insert_expense(conn, oid: str, body: ExpenseIn, matched_by: str = "order-ca
     время агентов (routers/machine_usage.py) идут через неё, чтобы автопривязка
     обязательства, касса и аудит не разъезжались между дверями. Без commit."""
     _validate_expense(body)
+    _reject_machine_expense(body, conn, oid)
     eid = str(uuid4())
     conn.execute(
         """INSERT INTO expenses (id, order_id, title, amount, category, supplier, master_id,

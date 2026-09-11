@@ -2174,3 +2174,38 @@ def ensure_activities_schema():
         conn.commit()
     finally:
         conn.close()
+
+
+def ensure_machine_expense_guard():
+    """Замок в базе: машинное время расходом не заводится (решение Юры 11.09.2026).
+
+    API уже отвечает 400, но агенты пишут в production.db и напрямую (production.py
+    expense-add), а design_costs.py фин-агента дважды за 11.09 завёл «Сессии
+    конструктора» в рублях поверх запрета. Триггер срабатывает на любой INSERT/UPDATE:
+    1) поставщик/название с приметой сессий агента — отказ;
+    2) у проектного заказа (activity='design') расход на работу без живого получателя
+       (master_id) — отказ: деньги за работу там уходят только людям из картотеки,
+       машина получателем не бывает. Материалы/доставка не трогаем."""
+    conn = get_production()
+    try:
+        conn.execute("DROP TRIGGER IF EXISTS trg_expenses_no_machine_time_ins")
+        conn.execute("DROP TRIGGER IF EXISTS trg_expenses_no_machine_time_upd")
+        for ev, name in (("INSERT", "trg_expenses_no_machine_time_ins"), ("UPDATE", "trg_expenses_no_machine_time_upd")):
+            conn.execute(f"""
+                CREATE TRIGGER {name} BEFORE {ev} ON expenses FOR EACH ROW
+                WHEN lower(COALESCE(NEW.supplier, '') || ' ' || COALESCE(NEW.title, '')) LIKE '%сессии конструктора%'
+                  OR lower(COALESCE(NEW.supplier, '') || ' ' || COALESCE(NEW.title, '')) LIKE '%конструктор (сессии%'
+                  OR lower(COALESCE(NEW.supplier, '') || ' ' || COALESCE(NEW.title, '')) LIKE '%сессии claude%'
+                  OR lower(COALESCE(NEW.supplier, '') || ' ' || COALESCE(NEW.title, '')) LIKE '%конструктор (агент)%'
+                  OR lower(COALESCE(NEW.supplier, '') || ' ' || COALESCE(NEW.title, '')) LIKE '%работа 3d-конструктора%'
+                  OR lower(COALESCE(NEW.supplier, '') || ' ' || COALESCE(NEW.title, '')) LIKE '%токенов%'
+                  OR (NEW.category IN ('work', 'other') AND NEW.master_id IS NULL
+                      AND COALESCE(NEW.purpose, '') = ''
+                      AND EXISTS (SELECT 1 FROM orders o WHERE o.id = NEW.order_id AND o.activity = 'design'))
+                BEGIN
+                    SELECT RAISE(ABORT, 'machine_time_is_not_expense: сессии агентов расходом не заводятся — POST /api/machine-usage; работа по проектному заказу — только живому получателю (master_id)');
+                END
+            """)
+        conn.commit()
+    finally:
+        conn.close()
