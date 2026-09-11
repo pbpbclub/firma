@@ -140,6 +140,9 @@ export const businessUnitsApi = {
 };
 
 export const financeApi = {
+  // Единая карта «чем разнесена транзакция» (расходы, платежи, лицевой счёт, фин-агент,
+  // обязательства, переводы себе, служебное) — ключи "bank:<id>" | "zen:<id>"
+  allocMap: () => api.get("/finance/alloc-map").then((r) => r.data as { map: Record<string, any[]>; degraded: string[] }),
   balance: () => api.get("/finance/balance").then((r) => r.data),
   freeCash: () => api.get("/finance/free-cash").then((r) => r.data),
   balanceAtDate: (date: string) =>

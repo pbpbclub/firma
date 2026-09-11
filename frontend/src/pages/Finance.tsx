@@ -343,22 +343,25 @@ const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
   // Куда разнесены СПИСАНИЯ. Для поступлений такая карта была с самого начала,
   // для расходов — нет: транзакция выглядела неразнесённой, хотя деньги давно
   // разложены по заказам, а откатить ошибку можно было только из карточки заказа.
-  const { data: expensesMapData = {} } = useQuery({
-    queryKey: ["expenses-map"],
-    queryFn: inboxApi.map,
+  // С 11.09.2026 — единая карта: не только расходы, но и лицевой счёт, привязки
+  // фин-агента, обязательства, переводы себе, служебное (аудит: половина разнесённого
+  // выглядела неразнесённым).
+  const { data: allocMapData } = useQuery({
+    queryKey: ["alloc-map"],
+    queryFn: financeApi.allocMap,
   });
   const expensesByTx = useMemo(() => {
     const m = new Map<string, any[]>();
-    for (const [key, rows] of Object.entries(expensesMapData as Record<string, any[]>)) {
+    for (const [key, rows] of Object.entries((allocMapData?.map ?? {}) as Record<string, any[]>)) {
       if (key.startsWith("bank:")) m.set(key.slice(5), rows);
     }
     return m;
-  }, [expensesMapData]);
+  }, [allocMapData]);
 
   const undoExpenseGroup = useMutation({
     mutationFn: (groupId: string) => inboxApi.deleteGroup(groupId),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["expenses-map"] });
+      qc.invalidateQueries({ queryKey: ["alloc-map"] });
       qc.invalidateQueries({ queryKey: ["free-cash"] });
     },
   });
@@ -535,7 +538,7 @@ const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
                 right={<span style={{ color: t.direction === "in" ? "#4A7C59" : "#8B3A3A" }}>{t.direction === "in" ? "+" : "−"}{fmt(t.amount)}</span>}
                 rightSub={t.direction === "out" && creditorByFinTx.has(String(t.id)) ? <span style={{ color: "#4A7C59" }}>{creditorByFinTx.get(String(t.id))?.name}</span>
                   : t.direction === "in" && paymentByFinTx.has(String(t.id)) ? <span style={{ color: "#4A7C59" }}>{paymentByFinTx.get(String(t.id))?.title}</span> : undefined}
-                meta={t.direction === "out" && expensesByTx.has(String(t.id)) ? <AllocNote rows={expensesByTx.get(String(t.id))!} onUndo={setUndoGroup} /> : undefined}
+                meta={expensesByTx.has(String(t.id)) ? <AllocNote rows={expensesByTx.get(String(t.id))!} onUndo={setUndoGroup} exclude={["payment", "creditor"]} /> : undefined}
                 trailing={t.source !== "fund" ? (t.direction === "out"
                   ? <IconButton icon={LinkSimple} title="Привязать к обязательству" size={36} iconSize={15} color={creditorByFinTx.has(String(t.id)) ? "#4A7C59" : "#C8C0B0"} onClick={e => { e.stopPropagation(); setLinkModal(t); }} />
                   : <IconButton icon={LinkSimple} title="Привязать к заказу" size={36} iconSize={15} color={paymentByFinTx.has(String(t.id)) ? "#4A7C59" : "#C8C0B0"} onClick={e => { e.stopPropagation(); setLinkOrderModal(t); }} />) : undefined}
@@ -576,8 +579,8 @@ const FIN_GRID = "28px 110px 1fr 120px 120px 28px";
                   </div>
                   {/* Подпись разноски — в широкой ячейке: под суммой (120px) длинный
                       комментарий рвался на пять строк. */}
-                  {t.direction === "out" && expensesByTx.has(String(t.id)) && (
-                    <AllocNote rows={expensesByTx.get(String(t.id))!} onUndo={setUndoGroup} />
+                  {expensesByTx.has(String(t.id)) && (
+                    <AllocNote rows={expensesByTx.get(String(t.id))!} onUndo={setUndoGroup} exclude={["payment", "creditor"]} />
                   )}
                 </div>
                 <div style={{ fontSize: 12 }}>

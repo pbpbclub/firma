@@ -1,43 +1,56 @@
 /**
- * Подпись «куда разнесено списание» под строкой транзакции.
+ * Подпись «чем разнесена транзакция» под строкой ленты (ДДС, личные финансы).
  *
- * Один компонент на ДДС и личные финансы: до этого ДДС показывал только название
- * заказа (комментарий разноски — «за какие работы» — не был виден никогда), а
- * личные финансы не показывали ничего: разнесённая Яндекс-доставка выглядела
- * ровно как неразобранная. Данные — GET /api/expenses/map (inboxApi.map),
- * ключи "bank:<id>" | "zen:<id>".
+ * Данные — единая карта GET /api/finance/alloc-map (financeApi.allocMap), ключи
+ * "bank:<id>" | "zen:<id>", значения — заметки {kind, label, …}. До 11.09.2026 экран
+ * читал только расходы (expenses.map): выплаты через лицевой счёт (Малафеев, Спектр),
+ * привязки фин-агента, платежи заказчика без ссылки, переводы себе — выглядели
+ * неразнесёнными, хотя всё было разложено. Виды: expense | payment | ledger |
+ * zm_link | creditor | accountable | receivable | dismissed | self_transfer | service.
  */
-import { OrderLink } from "../ui/links";
+import { OrderLink, MasterLink } from "../ui/links";
 
-const PURPOSE_LABELS: Record<string, string> = {
-  stock: "Запас",
-  sample: "Образцы",
-  overhead: "Накладные",
-  contractor_pay: "Выплата подрядчику",
-  contractor_advance: "Аванс подрядчику",
-  contractor_third_party: "Оплата за подрядчика",
+const TONE: Record<string, string> = {
+  expense: "#4A7C59", payment: "#4A7C59", ledger: "#4A7C59", zm_link: "#4A7C59",
+  creditor: "#4A7C59", accountable: "#4A7C59", receivable: "#4A7C59",
+  dismissed: "#A89070", self_transfer: "#A89070", service: "#A89070",
 };
 
-export function AllocNote({ rows, onUndo }: {
+export function AllocNote({ rows, onUndo, exclude }: {
   rows: any[];
-  /** Есть group_id → показать «откатить» (разноска вернётся в инбокс). */
+  /** Есть group_id у расхода/платежа → показать «откатить» (вернётся в инбокс). */
   onUndo?: (groupId: string) => void;
+  /** Виды, которые экран уже показывает сам (например, payment в ДДС). */
+  exclude?: string[];
 }) {
-  if (!rows?.length) return null;
-  const gid = rows.find((e: any) => e.group_id)?.group_id;
+  const notes = (rows || []).filter((n: any) => !exclude?.includes(n.kind));
+  if (!notes.length) return null;
+  // Сигнал «перевод себе не записан» — только если ничем другим не разнесено
+  const shown = notes.some((n: any) => !["self_transfer", "service"].includes(n.kind))
+    ? notes.filter((n: any) => !(n.kind === "self_transfer" && n.unrecorded)) : notes;
+  const gid = shown.find((n: any) => n.group_id && (n.kind === "expense" || n.kind === "payment"))?.group_id;
   return (
     <div style={{ fontSize: 10, color: "#6B6355", marginTop: 2 }}>
-      {rows.map((e: any, i: number) => {
-        const where = e.order_title || PURPOSE_LABELS[e.purpose] || e.purpose || "вне заказов";
+      {shown.map((n: any, i: number) => {
+        const tone = n.unrecorded ? "#B8860B" : (TONE[n.kind] || "#6B6355");
+        const where = n.order_title
+          ? <OrderLink id={n.order_id} style={{ color: tone }}>{n.order_title}</OrderLink>
+          : n.master_id
+            ? <MasterLink id={n.master_id} style={{ color: tone }}>{n.master_name}</MasterLink>
+            : <span style={{ color: tone }}>{n.master_name || n.label}</span>;
+        // Вид — мелкой подписью, когда сам по себе не очевиден (лицевой счёт, фин-агент,
+        // обязательство); у расхода и оплаты заказ говорит сам за себя.
+        const kindNote = ["ledger", "zm_link", "creditor", "accountable", "receivable"].includes(n.kind)
+          || (n.kind === "expense" && n.purpose) || (n.kind === "payment" && n.extra_id)
+          ? n.label : null;
+        const title = n.title && n.title !== n.order_title && n.title !== n.master_name
+          && !(n.label && String(n.title).toLowerCase().startsWith(String(n.label).toLowerCase())) ? n.title : null;
         return (
-          <span key={e.expense_id ?? e.id ?? i}>
-            <OrderLink id={e.order_id} style={{ color: "#4A7C59" }}>{where}</OrderLink>
-            {/* Комментарий разноски — то самое «за какие работы». Не дублируем,
-                если он совпадает с названием заказа. */}
-            {e.title && e.title !== where && (
-              <span> — {e.title.length > 60 ? e.title.slice(0, 57) + "…" : e.title}</span>
-            )}
-            {i < rows.length - 1 ? " · " : ""}
+          <span key={n.expense_id ?? n.payment_id ?? n.ledger_id ?? n.creditor_id ?? i}>
+            {where}
+            {kindNote && (n.order_title || n.master_id || n.master_name) && <span style={{ color: "#A89070" }}> · {kindNote}</span>}
+            {title && <span> — {title.length > 60 ? title.slice(0, 57) + "…" : title}</span>}
+            {i < shown.length - 1 ? " · " : ""}
           </span>
         );
       })}

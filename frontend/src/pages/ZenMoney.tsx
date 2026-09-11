@@ -554,17 +554,20 @@ export default function ZenMoneyPage() {
   // Куда разнесены траты. 31 из 33 разнесённых списаний — с личной карты
   // (ключи zen: в /expenses/map), и до этого лента их никак не отмечала:
   // разнесённая Яндекс-доставка выглядела ровно как неразобранная.
-  const { data: expensesMapData = {} } = useQuery({
-    queryKey: ["expenses-map"],
-    queryFn: inboxApi.map,
+  // С 11.09.2026 — единая карта (расходы, лицевой счёт мастеров, привязки
+  // фин-агента, платежи, переводы себе): выплаты Малафееву с лицевого счёта
+  // стояли в ленте без подписи, хотя разнесены.
+  const { data: allocMapData } = useQuery({
+    queryKey: ["alloc-map"],
+    queryFn: financeApi.allocMap,
   });
   const expensesByZenTx = useMemo(() => {
     const m = new Map<string, any[]>();
-    for (const [key, rows] of Object.entries(expensesMapData as Record<string, any[]>)) {
+    for (const [key, rows] of Object.entries((allocMapData?.map ?? {}) as Record<string, any[]>)) {
       if (key.startsWith("zen:")) m.set(key.slice(4), rows);
     }
     return m;
-  }, [expensesMapData]);
+  }, [allocMapData]);
 
   const [undoGroup, setUndoGroup] = useState<string | null>(null);
   const undoExpenseGroup = useMutation({

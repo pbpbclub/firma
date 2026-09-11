@@ -80,7 +80,9 @@ def _allocated_ids() -> tuple[set, set, bool]:
     try:
         conn = get_production()
         try:
-            for tbl in ("expenses", "creditors", "accountable_ops"):
+            # master_ledger (11.09.2026): выплата с лицевого счёта — та же разноска,
+            # инбокс предлагал разнести уже выплаченное Малафееву/Спектру
+            for tbl in ("expenses", "creditors", "accountable_ops", "master_ledger"):
                 for col, dest in (("finance_tx_id", bank), ("zenmoney_tx_id", zen)):
                     try:
                         for r in conn.execute(f"SELECT DISTINCT {col} FROM {tbl} WHERE {col} IS NOT NULL AND {col} != ''"):
@@ -88,6 +90,17 @@ def _allocated_ids() -> tuple[set, set, bool]:
                     except sqlite3.OperationalError as e:
                         if "no such column" not in str(e) and "no such table" not in str(e):
                             degraded = True
+        finally:
+            conn.close()
+    except Exception:
+        degraded = True
+    try:
+        conn = get_production()
+        try:
+            for r in conn.execute("SELECT DISTINCT zenmoney_tx_id FROM payments WHERE zenmoney_tx_id IS NOT NULL AND zenmoney_tx_id != ''"):
+                zen.add(str(r[0]))
+            for r in conn.execute("SELECT DISTINCT bank_tx_id FROM payments WHERE bank_tx_id IS NOT NULL AND bank_tx_id != ''"):
+                bank.add(str(r[0]))
         finally:
             conn.close()
     except Exception:
@@ -184,7 +197,9 @@ def inbox(
                         continue
                     res = _resolve_payee(r["counterparty"] or "", rules, masters_match)
                     # Контрагент помечен «личное» правилом — не бизнес-расход, мимо Разноски.
-                    if res.get("entity_type") == "personal" and not show_dismissed:
+                    # «self» — перевод себе (11.09.2026): с р/с ИП это owner_draw, заводится
+                    # скриптом/фин-агентом, в инбоксе не висит.
+                    if res.get("entity_type") in ("personal", "self") and not show_dismissed:
                         continue
                     out.append({
                         "id": str(r["id"]), "source": "bank", "date": r["date"], "amount": r["amount"],
@@ -237,9 +252,9 @@ def inbox(
                     if str(r["id"]) in dismissed and not show_dismissed:
                         continue
                     res = _resolve_payee(r["payee"] or "", rules, masters_match)
-                    # Контрагент помечен «личное» (друг, разовое) — в личном ZM-леджере
-                    # трата остаётся, а из Разноски убираем.
-                    if res.get("entity_type") == "personal" and not show_dismissed:
+                    # Контрагент помечен «личное» (друг, разовое) или «перевод себе» —
+                    # в личном ZM-леджере трата остаётся, а из Разноски убираем.
+                    if res.get("entity_type") in ("personal", "self") and not show_dismissed:
                         continue
                     try:
                         tags = _json.loads(r["tags"] or "[]")

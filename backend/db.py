@@ -2214,3 +2214,24 @@ def ensure_machine_expense_guard():
         conn.commit()
     finally:
         conn.close()
+
+
+def ensure_self_transfer_rules():
+    """Правила «перевод себе» (payee_rules.entity_type='self', 11.09.2026): владелец
+    под разными написаниями в ZenMoney и банке. Инбокс такие списания не показывает,
+    единая карта подписывает «Перевод себе»; с р/с ИП — owner_draw. Список правит
+    Юра в «Правилах плательщиков», здесь только стартовый набор (INSERT OR IGNORE)."""
+    conn = get_production()
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(payee_rules)").fetchall()}
+        if not cols:
+            return
+        for pat in ("юрий н.", "юрий владимирович н", "юрий владимирович н.", "iurii n.",
+                    "некрасов юрий", "некрасов юрий владимирович"):
+            if not conn.execute("SELECT 1 FROM payee_rules WHERE pattern = ? AND match_type = 'exact'", (pat,)).fetchone():
+                conn.execute(
+                    "INSERT INTO payee_rules (pattern, match_type, display_name, entity_type, entity_name) VALUES (?, 'exact', 'Перевод себе', 'self', 'Юрий Некрасов')",
+                    (pat,))
+        conn.commit()
+    finally:
+        conn.close()
