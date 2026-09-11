@@ -1,12 +1,13 @@
 // Разделы приложения — один список для сайдбара (десктоп) и нижней панели (телефон).
 import {
   SquaresFour, FileText, TrendUp, Package, Calculator, CurrencyDollar, BookOpen,
-  Vault, HandCoins, Receipt, Stack,
+  Vault, HandCoins, Receipt, Stack, PencilRuler,
 } from "@phosphor-icons/react";
 
 export const NAV = [
   { to: "/", icon: SquaresFour, label: "Главная" },
   { to: "/orders", icon: FileText, label: "Заказы" },
+  { to: "/design", icon: PencilRuler, label: "Проектные" },
   { to: "/finance", icon: TrendUp, label: "ДДС" },
   { to: "/zenmoney", icon: HandCoins, label: "Личные" },
   { to: "/expenses", icon: Receipt, label: "Разноска" },

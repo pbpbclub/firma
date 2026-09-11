@@ -213,6 +213,7 @@ function NewOrderModal({ onClose, onCreated }: {
   const [deadline, setDeadline] = useState("");
   const [priority, setPriority] = useState("normal");
   const [brand, setBrand] = useState("");
+  const [activity, setActivity] = useState("production");   // production | design (11.09.2026)
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [creatingCustomer, setCreatingCustomer] = useState(false);
@@ -288,6 +289,7 @@ function NewOrderModal({ onClose, onCreated }: {
         deadline: deadline || null,
         priority,
         brand: brand || null,
+        activity,
       });
       qc.invalidateQueries({ queryKey: ["orders-v2"] });
       onCreated(order.id);
@@ -416,6 +418,14 @@ function NewOrderModal({ onClose, onCreated }: {
               style={{ width: "100%", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none", background: "#fff", color: brand ? "#1A1A1A" : "#A89070" }}>
               <option value="">— не выбран —</option>
               {(brandsList as any[]).map((b: any) => <option key={b.id} value={b.name}>{b.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>ВИД ДЕЯТЕЛЬНОСТИ</div>
+            <select value={activity} onChange={e => setActivity(e.target.value)}
+              style={{ width: "100%", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none", background: "#fff", color: activity === "design" ? "#E8592A" : "#1A1A1A" }}>
+              <option value="production">Производство</option>
+              <option value="design">Проектные работы (чертежи, модели)</option>
             </select>
           </div>
           {error && <div style={{ fontSize: 11, color: "#8B3A3A" }}>{error}</div>}

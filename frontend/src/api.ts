@@ -21,6 +21,9 @@ api.interceptors.response.use(
 );
 
 export const ordersApi = {
+  // Папки конструктора → заказ (ТЗ Mac 11.09.2026)
+  projectDirs: () => api.get("/orders/project-dirs").then((r) => r.data),
+  setProjectDirs: (id: string, dirs: string[]) => api.put(`/orders/${id}/project-dirs`, { dirs }).then((r) => r.data),
   // Полнота выборки — страницами по 200 (потолок бэка), а не подобранным limit:
   // клиентский дефолт, равный потолку, лишь сдвигал тихое обрезание на 201-й
   // заказ (code_rules 25.08.2026). Признак «есть ещё» — полная страница.
@@ -69,7 +72,7 @@ export const ordersApi = {
   // «Расчёты с клиентом закрыты»: долг не считается, цена/платежи/маржа не меняются
   settle: (id: string, note?: string) => api.post(`/orders/${id}/settle`, { note: note || null }).then((r) => r.data),
   unsettle: (id: string) => api.post(`/orders/${id}/unsettle`).then((r) => r.data),
-  create: (data: { title: string; customer_id?: string | null; deadline?: string | null; priority?: string; brand?: string | null }) =>
+  create: (data: { title: string; customer_id?: string | null; deadline?: string | null; priority?: string; brand?: string | null; activity?: string }) =>
     api.post("/orders", data).then((r) => r.data),
   update: (id: string, data: Record<string, any>) => api.patch(`/orders/${id}`, data).then((r) => r.data),
   updateBrand: (id: string, brand: string | null) => api.patch(`/orders/${id}/brand`, { brand }).then((r) => r.data),
@@ -385,6 +388,25 @@ export const snoozeApi = {
   set: (kind: "creditor" | "receivable" | "order", id: string, data: { until: string | null; reason: string }) =>
     api.put(`/finance/snoozes/${kind}/${id}`, data).then((r) => r.data),
   remove: (kind: string, id: string) => api.delete(`/finance/snoozes/${kind}/${id}`).then((r) => r.data),
+};
+
+// Машинное время агентов — направление «Проектные работы» (11.09.2026).
+export const machineUsageApi = {
+  list: (params?: { order_id?: string; month?: string; agent?: string; unassigned?: boolean; date_from?: string; date_to?: string }) =>
+    api.get("/machine-usage", { params }).then((r) => r.data),
+  summary: (params?: { date_from?: string; date_to?: string; activity?: string }) =>
+    api.get("/machine-usage/summary", { params }).then((r) => r.data),
+  create: (data: Record<string, any>) => api.post("/machine-usage", data).then((r) => r.data),
+  importEntries: (entries: Record<string, any>[], source = "manual") =>
+    api.post("/machine-usage/import", { entries, source }).then((r) => r.data),
+  patch: (id: string, data: { order_id?: string; hours?: number; note?: string; agent?: string }) =>
+    api.patch(`/machine-usage/${id}`, data).then((r) => r.data),
+  remove: (id: string) => api.delete(`/machine-usage/${id}`).then((r) => r.data),
+  models: () => api.get("/machine-usage/models").then((r) => r.data),
+  putModel: (data: { model: string; price_in: number; price_out: number; price_cache_write: number; price_cache_read: number; note?: string }) =>
+    api.put("/machine-usage/models", data).then((r) => r.data),
+  deleteModel: (model: string) => api.delete(`/machine-usage/models/${encodeURIComponent(model)}`).then((r) => r.data),
+  putSettings: (data: { usd_rate: number }) => api.put("/machine-usage/settings", data).then((r) => r.data),
 };
 
 export const ledgerApi = {

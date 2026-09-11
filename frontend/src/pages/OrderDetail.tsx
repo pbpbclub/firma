@@ -328,6 +328,7 @@ export default function OrderDetail() {
         title: order.title || "",
         status: order.status || "draft",
         brand: order.brand || "",
+        activity: order.activity || "production",
         priority: order.priority || "normal",
         deadline: order.deadline ? order.deadline.split("T")[0] : "",
         discount: order.discount ? String(order.discount) : "",
@@ -498,6 +499,7 @@ export default function OrderDetail() {
     saveMutation.mutate({
       title: form.title.trim() || undefined,
       brand: form.brand || null,
+      activity: form.activity || "production",
       priority: form.priority,
       deadline: form.deadline || null,
       discount: parseFloat(form.discount) || 0,
@@ -1283,6 +1285,31 @@ export default function OrderDetail() {
                 ? <TransitPanel transit={order.transit} tax={order.tax}
                     taxPct={order.tax_pct} netProfit={order.net_profit} />
                 : <PlanFactDuel planFact={order.plan_fact} />}
+              {/* Машинное время агентов (11.09.2026): токены — заголовок величины,
+                  рубли рядом; в себестоимость входит расходом, здесь — справка */}
+              {(order.machine_usage?.rows_n > 0 || order.activity === "design") && (
+                <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid #EDEBE6", fontSize: 12, color: "#6B6355", lineHeight: 1.6 }}>
+                  <SectionLabel>МАШИННОЕ ВРЕМЯ</SectionLabel>
+                  {order.machine_usage?.rows_n > 0 ? (
+                    <div style={{ marginTop: 6 }}>
+                      <span style={{ fontFamily: MONO, color: "#1A1A1A", fontWeight: 600 }}>
+                        {(order.machine_usage.tokens_total / 1e6).toLocaleString("ru-RU", { maximumFractionDigits: 1 })} млн токенов
+                      </span>
+                      {" "}(cache-read {(order.machine_usage.cache_read / 1e6).toLocaleString("ru-RU", { maximumFractionDigits: 1 })};
+                      output {(order.machine_usage.tokens_out / 1e6).toLocaleString("ru-RU", { maximumFractionDigits: 2 })})
+                      {" · "}<span style={{ fontFamily: MONO }}>{fmtMoney(order.machine_usage.amount)}</span>
+                      {" · "}<span style={{ fontFamily: MONO }}>{order.machine_usage.hours.toLocaleString("ru-RU", { maximumFractionDigits: 1 })} ч</span>
+                      {" · "}{order.machine_usage.sessions} сес.
+                      {" — "}<span onClick={() => navigate("/design")} style={{ color: "#E8592A", cursor: "pointer", textDecoration: "underline" }}>проектные работы</span>
+                    </div>
+                  ) : <div style={{ marginTop: 6, color: "#A89070" }}>Сессий агентов по заказу ещё нет — придут по API с мака или от фин-агента.</div>}
+                  {order.project_dirs?.length > 0 && (
+                    <div style={{ marginTop: 4, fontSize: 11, color: "#A89070" }}>
+                      папки конструктора: {order.project_dirs.map((d: string) => <span key={d} style={{ fontFamily: MONO, background: "#F2EFE9", padding: "1px 6px", marginRight: 4 }}>{d}</span>)}
+                    </div>
+                  )}
+                </div>
+              )}
               <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid #EDEBE6" }}>
                 <div style={{ marginBottom: 12 }}><SectionLabel>ЛЕСТНИЦА ПРИБЫЛИ</SectionLabel></div>
                 <ProfitLadder order={order} paidTotal={paidTotal} />

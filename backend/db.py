@@ -1985,3 +1985,146 @@ def ensure_media_schema():
         MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
     except OSError as e:
         print(f"[migration] каталог медиатеки {MEDIA_ROOT} не создан: {e}")
+
+
+def ensure_order_activity_schema():
+    """Вид деятельности заказа и папки проекта конструктора (11.09.2026).
+
+    activity: production (изготовление, дефолт всем текущим) | design (проектные
+    работы — чертежи, модели; Профи.ру, бренд pbpb). Без признака проектные заказы
+    размывают маржу производства: у них нет материалов и мастеров, себестоимость —
+    сессии агента, цены демпинговые (ТЗ фин-агента 09.09.2026). CHECK на orders
+    пересозданием не вешаем — значения проверяет роутер.
+
+    order_project_dirs: папка в ~/Documents/Construction/Blender-Claude/ на маке →
+    заказ (ТЗ Mac 11.09.2026). Папка уникальна, у заказа папок может быть несколько
+    («МАФ» и «МАФ-02» → ORD-034). По карте суточная выгрузка сессий конструктора
+    привязывается к заказу без ручной правки на маке."""
+    conn = get_production()
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(orders)").fetchall()}
+        if cols and "activity" not in cols:
+            conn.execute("ALTER TABLE orders ADD COLUMN activity TEXT NOT NULL DEFAULT 'production'")
+            # Первые проектные заказы (Профи.ру, 09.09.2026) — единственные на момент миграции
+            conn.execute("UPDATE orders SET activity = 'design' WHERE number IN ('ORD-052', 'ORD-053', 'ORD-054')")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS order_project_dirs (
+                dir        TEXT PRIMARY KEY,
+                order_id   TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+            """
+        )
+        # Стартовая карта из ТЗ Mac (проверена по транскриптам 11.09.2026); INSERT OR
+        # IGNORE — правки через API не перетираются рестартом
+        seed = [("мост_бассейн", "ORD-052"), ("подголовник", "ORD-054"), ("МАФ", "ORD-034"),
+                ("МАФ-02", "ORD-034"), ("рассекатель_ЛОСЬ", "ORD-049"), ("мебель_temple", "ORD-047"),
+                ("лавки_temple", "ORD-047"), ("перегородка_Рамил", "ORD-046"), ("Mirra", "ORD-045"),
+                ("вешалка_Dakel", "ORD-042")]
+        for d, num in seed:
+            conn.execute(
+                "INSERT OR IGNORE INTO order_project_dirs (dir, order_id) "
+                "SELECT ?, id FROM orders WHERE number = ?", (d, num))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# Тариф API за 1M токенов по четырём видам (навык claude-api, сверено фин-агентом
+# 09.09.2026). Запись в кэш — 2.0× input (часовой кэш Claude Code), чтение — 0.1×
+# input, кроме Fable/Mythos 5.1: у них фиксированные $0.25.
+MODEL_PRICES_SEED = {
+    "claude-fable-5-1":          (10.0, 50.0, 20.0, 0.25),
+    "claude-mythos-5-1":         (10.0, 50.0, 20.0, 0.25),
+    "claude-fable-5":            (10.0, 50.0, 20.0, 1.0),
+    "claude-opus-5":             (5.0,  25.0, 10.0, 0.5),
+    "claude-opus-4-8":           (5.0,  25.0, 10.0, 0.5),
+    "claude-opus-4-7":           (5.0,  25.0, 10.0, 0.5),
+    "claude-opus-4-6":           (5.0,  25.0, 10.0, 0.5),
+    "claude-sonnet-5":           (2.0,  10.0, 4.0,  0.2),
+    "claude-sonnet-4-6":         (3.0,  15.0, 6.0,  0.3),
+    "claude-haiku-4-5":          (1.0,  5.0,  2.0,  0.1),
+    "claude-haiku-4-5-20251001": (1.0,  5.0,  2.0,  0.1),
+}
+
+
+def ensure_machine_usage_schema():
+    """Машинное время агентов — единая таблица Фирмы (решение Юры 11.09.2026).
+
+    Себестоимость проектных заказов — сессии конструктора: токены и часы. Деньги
+    считает токен (тариф модели × курс), час — вторая координата, ставки часа нет
+    (ТЗ фин-агента 09.09.2026). Запись приходит через API от любого источника
+    (мак, фин-агент, другие площадки); расход по заказу заводится тем же путём, что
+    из карточки (expense_id — связь), поэтому _plan_fact ничего нового не знает.
+    Тариф и курс — снимок на момент записи: правка справочника прошлое не трогает."""
+    conn = get_production()
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS model_prices (
+                model             TEXT PRIMARY KEY,
+                price_in          REAL NOT NULL,
+                price_out         REAL NOT NULL,
+                price_cache_write REAL NOT NULL,
+                price_cache_read  REAL NOT NULL,
+                note              TEXT,
+                updated_at        TEXT DEFAULT (datetime('now'))
+            )
+            """
+        )
+        for model, (pin, pout, pcw, pcr) in MODEL_PRICES_SEED.items():
+            conn.execute(
+                "INSERT OR IGNORE INTO model_prices (model, price_in, price_out, price_cache_write, price_cache_read, note) "
+                "VALUES (?, ?, ?, ?, ?, 'seed 11.09.2026')", (model, pin, pout, pcw, pcr))
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key        TEXT PRIMARY KEY,
+                value      TEXT,
+                updated_at TEXT DEFAULT (datetime('now'))
+            )
+            """
+        )
+        conn.execute("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('usd_rate', '100')")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS machine_usage (
+                id           TEXT PRIMARY KEY,
+                order_id     TEXT REFERENCES orders(id) ON DELETE SET NULL,
+                work_date    TEXT NOT NULL,
+                agent        TEXT NOT NULL,
+                platform     TEXT,
+                model        TEXT,
+                sessions     INTEGER NOT NULL DEFAULT 0,
+                hours        REAL NOT NULL DEFAULT 0,
+                tokens_in    INTEGER NOT NULL DEFAULT 0,
+                tokens_out   INTEGER NOT NULL DEFAULT 0,
+                cache_write  INTEGER NOT NULL DEFAULT 0,
+                cache_read   INTEGER NOT NULL DEFAULT 0,
+                usd          REAL,
+                fx_rate      REAL,
+                amount       REAL,
+                expense_id   TEXT REFERENCES expenses(id) ON DELETE SET NULL,
+                project_dir  TEXT,
+                ext_key      TEXT UNIQUE,
+                source       TEXT,
+                note         TEXT,
+                created_at   TEXT DEFAULT (datetime('now')),
+                updated_at   TEXT
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_machine_usage_order ON machine_usage(order_id, work_date)")
+        conn.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS trg_machine_usage_updated_at
+            AFTER UPDATE ON machine_usage FOR EACH ROW
+            BEGIN
+                UPDATE machine_usage SET updated_at = datetime('now') WHERE id = NEW.id;
+            END
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()

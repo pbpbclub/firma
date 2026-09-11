@@ -33,7 +33,7 @@ const MASTER = 'cd944ae3-6ff3-47e3-b9e5-5badab341f63';
 const ROUTES = ['/', '/orders', '/orders?mode=silent', '/orders?mode=ready', '/orders?mode=summary',
   `/orders/${ORD}`, `/orders/${ORD}/estimate`, '/finance', '/debtors', '/expenses',
   '/wiki/clients', `/wiki/contractors/${MASTER}`, '/catalog', '/taxes', '/funds', '/zenmoney',
-  '/general-expenses', '/admin'];
+  '/general-expenses', '/admin', '/design'];
 
 const defects = [];   // жёсткие дефекты: попадут в код выхода
 let smallTotal = 0;   // мелкие мишени — справочно, код выхода не красят

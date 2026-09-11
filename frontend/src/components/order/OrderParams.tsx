@@ -14,6 +14,7 @@ import { BRANDS, ORDER_STATUSES } from "../domain";
 
 export type OrderFormState = {
   title: string; status: string; brand: string; priority: string;
+  activity: string;   // production | design — вид деятельности (11.09.2026)
   deadline: string; customer_id: string; price_plan: string; cost_plan: string;
   discount: string; discount_note: string;
 };
@@ -72,6 +73,7 @@ export function OrderParams({ order, form, field, customers, onStatusChanged }: 
               ? <StatusPicker orderId={order.id} current={form.status} onChange={onStatusChanged} />
               : <span style={{ color: statusMeta?.color, fontWeight: 600 }}>{statusMeta?.label ?? form.status}</span>}
             {form.brand && <> · <span style={{ color: brandColor, fontWeight: 600 }}>{form.brand}</span></>}
+            {form.activity === "design" && <> · <span style={{ color: "#E8592A" }}>проектные работы</span></>}
             {customerName && <> · <CustomerLink id={form.customer_id || order?.customer_id}>{customerName}</CustomerLink></>}
             {form.deadline && <> · до <span style={{ fontFamily: MONO }}>{fmtDate(form.deadline)}</span></>}
             {form.priority !== "normal" && <> · {PRIORITY_LABELS[form.priority] ?? form.priority}</>}
@@ -90,6 +92,16 @@ export function OrderParams({ order, form, field, customers, onStatusChanged }: 
                 style={{ border: `1px solid ${form.brand ? brandColor : "#EDEBE6"}`, padding: "6px 10px", fontSize: 12, fontWeight: 600, outline: "none", background: "#fff", color: form.brand ? brandColor : "#A89070", cursor: "pointer", fontFamily: "inherit" }}>
                 <option value="">— без бренда —</option>
                 {BRANDS.map(b => <option key={b.value} value={b.value}>{b.value}</option>)}
+              </select>
+            </div>
+            <div>
+              {/* Вид деятельности: проектные заказы (чертежи, модели) не смешиваются с
+                  мебелью в сводках маржи — у них себестоимость = машинное время */}
+              <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>ВИД ДЕЯТЕЛЬНОСТИ</div>
+              <select value={form.activity} onChange={e => field({ activity: e.target.value })}
+                style={{ border: "1px solid #EDEBE6", padding: "6px 10px", fontSize: 12, outline: "none", background: "#fff", cursor: "pointer", fontFamily: "inherit", color: form.activity === "design" ? "#E8592A" : "#1A1A1A" }}>
+                <option value="production">Производство</option>
+                <option value="design">Проектные работы</option>
               </select>
             </div>
             <div>

@@ -26,6 +26,11 @@ STATUS_LABELS = {
     "cancelled": "Отменён",
 }
 
+# Вид деятельности (11.09.2026): production — изготовление, design — проектные работы
+# (чертежи, модели; себестоимость = машинное время агентов, см. routers/machine_usage.py)
+ACTIVITIES = ("production", "design")
+ACTIVITY_LABELS = {"production": "Производство", "design": "Проектные работы"}
+
 PRIORITY_LABELS = {
     "low": "Низкий",
     "normal": "Обычный",
@@ -39,6 +44,7 @@ def list_orders(
     status: Optional[str] = None,
     search: Optional[str] = None,
     brand: Optional[str] = None,
+    activity: Optional[str] = None,      # production | design (11.09.2026)
     archived: bool = False,
     limit: int = Query(50, le=200),
     offset: int = Query(0, ge=0),
@@ -54,7 +60,8 @@ def list_orders(
             SELECT
                 o.id, o.number, o.title, o.status, o.priority,
                 o.deadline, o.price_plan, o.cost_plan, o.created_at,
-                o.archived, o.brand, o.settled_at,
+                o.archived, o.brand, o.settled_at, o.activity,
+                (SELECT GROUP_CONCAT(d.dir, '\u001f') FROM order_project_dirs d WHERE d.order_id = o.id) AS project_dirs_raw,
                 c.id AS customer_id,
                 c.name AS customer_name,
                 c.full_name AS customer_full_name,
@@ -81,6 +88,9 @@ def list_orders(
         if brand:
             sql += " AND o.brand = ?"
             params.append(brand)
+        if activity:
+            sql += " AND o.activity = ?"
+            params.append(activity)
         if search:
             sql += " AND (o.title LIKE ? OR o.number LIKE ? OR c.name LIKE ?)"
             params += [f"%{search}%"] * 3
@@ -119,8 +129,10 @@ def list_orders(
                 cost_fact = round((tf.get("fact") or 0) + (tf.get("fact_extra") or 0), 2)
             else:
                 cost_fact = fcosts.get(r["id"], 0.0)
+            row = dict(r)
+            row["project_dirs"] = [d for d in (row.pop("project_dirs_raw") or "").split("\u001f") if d]
             out.append({
-                **dict(r),
+                **row,
                 # см. карточку заказа: цифры берём из активной сметы, поля — кэш
                 "price_plan": m["revenue"],
                 "cost_plan": m["cost"],
@@ -1095,6 +1107,20 @@ SILENT_ASK, SILENT_REFRESH, SILENT_ARCHIVE = 14, 30, 60
 SILENT_STATUSES = ("draft", "estimate", "project")
 
 
+@router.get("/project-dirs")
+def project_dirs():
+    """Плоская карта «папка конструктора → номер заказа» по незаархивированным
+    заказам (ТЗ Mac 11.09.2026): мак забирает её перед суточной выгрузкой сессий,
+    серверная карта главнее локальной."""
+    conn = get_production()
+    try:
+        return {r["dir"]: r["number"] for r in conn.execute("""
+            SELECT d.dir, o.number FROM order_project_dirs d JOIN orders o ON o.id = d.order_id
+             WHERE COALESCE(o.archived, 0) = 0 ORDER BY d.dir""").fetchall()}
+    finally:
+        conn.close()
+
+
 @router.get("/silent")
 def silent_orders(min_days: int = Query(SILENT_ASK, ge=0)):
     """«Молчат» — просчёты и проекты без движения (правило фин-агента,
@@ -1273,7 +1299,54 @@ def get_order(order_id: str):
             "extras_total": m["extras"],
             "payments": [dict(p) for p in payments],
             "estimate_sets": [dict(e) for e in estimate_sets],
+            # Машинное время агентов по заказу (11.09.2026): токены — заголовок
+            # величины, рубли рядом; сами строки — GET /machine-usage?order_id=
+            "machine_usage": _machine_usage_totals(conn, oid),
+            "project_dirs": [r["dir"] for r in conn.execute(
+                "SELECT dir FROM order_project_dirs WHERE order_id = ? ORDER BY dir", (oid,)).fetchall()],
         }
+    finally:
+        conn.close()
+
+
+def _machine_usage_totals(conn, oid: str) -> dict:
+    r = conn.execute("""
+        SELECT COUNT(*) AS rows_n, COALESCE(SUM(sessions),0) AS sessions, COALESCE(SUM(hours),0) AS hours,
+               COALESCE(SUM(tokens_in),0) AS tokens_in, COALESCE(SUM(tokens_out),0) AS tokens_out,
+               COALESCE(SUM(cache_write),0) AS cache_write, COALESCE(SUM(cache_read),0) AS cache_read,
+               COALESCE(SUM(usd),0) AS usd, COALESCE(SUM(amount),0) AS amount
+          FROM machine_usage WHERE order_id = ?""", (oid,)).fetchone()
+    d = dict(r)
+    d["tokens_total"] = d["tokens_in"] + d["tokens_out"] + d["cache_write"] + d["cache_read"]
+    d["hours"] = round(d["hours"], 2)
+    d["usd"] = round(d["usd"], 2)
+    d["amount"] = round(d["amount"], 2)
+    return d
+
+
+class ProjectDirsIn(BaseModel):
+    dirs: list[str]
+
+
+@router.put("/{order_id}/project-dirs")
+def set_project_dirs(order_id: str, body: ProjectDirsIn):
+    """Заменить набор папок заказа. Папка уникальна: занята другим заказом — 409 с
+    его номером, переназначать надо явно (снять там, поставить здесь)."""
+    conn = get_production()
+    try:
+        oid = _resolve_order(conn, order_id)
+        dirs = sorted({(d or "").strip() for d in body.dirs if (d or "").strip()})
+        for d in dirs:
+            other = conn.execute("""SELECT o.number FROM order_project_dirs pd JOIN orders o ON o.id = pd.order_id
+                                     WHERE pd.dir = ? AND pd.order_id != ?""", (d, oid)).fetchone()
+            if other:
+                raise HTTPException(status_code=409, detail={"error": "dir_taken", "dir": d, "order_number": other["number"]})
+        conn.execute("DELETE FROM order_project_dirs WHERE order_id = ?", (oid,))
+        for d in dirs:
+            conn.execute("INSERT INTO order_project_dirs (dir, order_id) VALUES (?, ?)", (d, oid))
+        audit(conn, "order", oid, "update", f"Папки проекта: {', '.join(dirs) or '—'}")
+        conn.commit()
+        return {"order_id": oid, "dirs": dirs}
     finally:
         conn.close()
 
@@ -1599,7 +1672,9 @@ async def update_order(order_id: str, body: dict = Body(...)):
         if not r:
             raise HTTPException(status_code=404, detail="Not found")
 
-        allowed = {"title", "priority", "deadline", "customer_id", "price_plan", "cost_plan", "brand", "status", "finance_tx_id", "discount", "discount_note"}
+        allowed = {"title", "priority", "deadline", "customer_id", "price_plan", "cost_plan", "brand", "status", "finance_tx_id", "discount", "discount_note", "activity"}
+        if "activity" in body and body["activity"] not in ACTIVITIES:
+            raise HTTPException(status_code=400, detail=f"activity must be one of {'|'.join(ACTIVITIES)}")
         # Статус идёт тем же путём, что и PATCH /{id}/status: завершение заказа
         # закрывает расчёты с подрядчиками и требует подтверждения (см. _apply_status).
         status_applied = "status" in body and body["status"] != r["status"]
@@ -1706,10 +1781,13 @@ async def create_order(body: dict = Body(...), user=Depends(get_current_user)):
         max_num = row["max_num"] if row and row["max_num"] is not None else 0
         number = f"ORD-{max_num + 1:03d}"
 
+        activity = body.get("activity") or "production"
+        if activity not in ACTIVITIES:
+            raise HTTPException(status_code=400, detail=f"activity must be one of {'|'.join(ACTIVITIES)}")
         new_id = str(uuid4())
         conn.execute(
-            """INSERT INTO orders (id, number, title, status, priority, deadline, customer_id, brand, brand_id, created_at)
-               VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, (SELECT id FROM brands WHERE name = ? COLLATE NOCASE), datetime('now'))""",
+            """INSERT INTO orders (id, number, title, status, priority, deadline, customer_id, brand, brand_id, activity, created_at)
+               VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, (SELECT id FROM brands WHERE name = ? COLLATE NOCASE), ?, datetime('now'))""",
             (
                 new_id,
                 number,
@@ -1719,6 +1797,7 @@ async def create_order(body: dict = Body(...), user=Depends(get_current_user)):
                 body.get("customer_id") or None,
                 body.get("brand") or None,
                 body.get("brand") or None,
+                activity,
             ),
         )
         audit(conn, "order", new_id, "create", f"Создан заказ «{title}» ({number})")
@@ -2371,27 +2450,36 @@ def list_obligations(order_id: str):
         conn.close()
 
 
+def _insert_expense(conn, oid: str, body: ExpenseIn, matched_by: str = "order-card") -> str:
+    """Единственная точка «завести расход по заказу»: карточка заказа и машинное
+    время агентов (routers/machine_usage.py) идут через неё, чтобы автопривязка
+    обязательства, касса и аудит не разъезжались между дверями. Без commit."""
+    _validate_expense(body)
+    eid = str(uuid4())
+    conn.execute(
+        """INSERT INTO expenses (id, order_id, title, amount, category, supplier, master_id,
+                                 expense_date, source, creditor_id, finance_tx_id, zenmoney_tx_id,
+                                 payment_source, accountable_person_id, extra_id, settled_by,
+                                 match_status, matched_by, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), 'manual', ?, ?, ?, ?, ?, ?, ?, 'manual', ?, datetime('now'))""",
+        (eid, oid, body.title.strip(), body.amount, body.category, body.supplier, body.master_id,
+         body.expense_date, _autolink_creditor(conn, oid, body), body.finance_tx_id, body.zenmoney_tx_id,
+         body.payment_source, body.accountable_person_id if body.payment_source == "accountable" else None,
+         _check_extra(conn, oid, body.extra_id), body.settled_by, matched_by)
+    )
+    _sync_cash_fund(conn, eid, body)
+    audit(conn, "expense", eid, "create",
+          f"Расход {body.amount:g} ₽ «{body.title.strip()}» ({body.category})")
+    return eid
+
+
 @router.post("/{order_id}/expenses", status_code=201)
 def add_expense(order_id: str, body: ExpenseIn):
     _validate_expense(body)
     conn = get_production()
     try:
         oid = _resolve_order(conn, order_id)
-        eid = str(uuid4())
-        conn.execute(
-            """INSERT INTO expenses (id, order_id, title, amount, category, supplier, master_id,
-                                     expense_date, source, creditor_id, finance_tx_id, zenmoney_tx_id,
-                                     payment_source, accountable_person_id, extra_id, settled_by,
-                                     match_status, matched_by, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), 'manual', ?, ?, ?, ?, ?, ?, ?, 'manual', 'order-card', datetime('now'))""",
-            (eid, oid, body.title.strip(), body.amount, body.category, body.supplier, body.master_id,
-             body.expense_date, _autolink_creditor(conn, oid, body), body.finance_tx_id, body.zenmoney_tx_id,
-             body.payment_source, body.accountable_person_id if body.payment_source == "accountable" else None,
-             _check_extra(conn, oid, body.extra_id), body.settled_by)
-        )
-        _sync_cash_fund(conn, eid, body)
-        audit(conn, "expense", eid, "create",
-              f"Расход {body.amount:g} ₽ «{body.title.strip()}» ({body.category})")
+        eid = _insert_expense(conn, oid, body)
         conn.commit()
         return dict(conn.execute("SELECT * FROM expenses WHERE id = ?", (eid,)).fetchone())
     finally:
