@@ -12,7 +12,7 @@ import Debtors from "./pages/Debtors";
 import Catalog from "./pages/Catalog";
 import Taxes from "./pages/Taxes";
 import EstimateEditor from "./pages/EstimateEditor";
-import DesignWork from "./pages/DesignWork";
+import MachineTime from "./pages/MachineTime";
 import OrderDetail from "./pages/OrderDetail";
 import Funds from "./pages/Funds";
 import ZenMoney from "./pages/ZenMoney";
@@ -64,7 +64,8 @@ const router = createBrowserRouter([
       { path: "/orders", element: <OrdersV2 /> },
       { path: "/orders/:id", element: <OrderDetail /> },
       { path: "/orders/:orderId/estimate", element: <EstimateEditor /> },
-      { path: "/design", element: <DesignWork /> },
+      { path: "/machine-time", element: <MachineTime /> },
+      { path: "/design", element: <Navigate to="/machine-time" replace /> },
       { path: "/finance", element: <Finance /> },
       { path: "/debtors", element: <Debtors /> },
       { path: "/wiki", element: <Navigate to="/wiki/clients" replace /> },

@@ -2128,3 +2128,49 @@ def ensure_machine_usage_schema():
         conn.commit()
     finally:
         conn.close()
+
+
+def ensure_activities_schema():
+    """Виды прибыли — справочник-ярлык (решение Юры 11.09.2026).
+
+    «Проектные работы» — не флаг, а один из видов рядом с производством и транзитом;
+    видов будет несколько (площадки, направления). Модели затрат у вида нет — это
+    ярлык для фильтров и сводок; способ расчёта себестоимости остаётся у данных
+    (транзит — признак сметы, машинное время — machine_usage). Ведёт Юра в вики,
+    как бренды. orders.activity хранит code вида."""
+    conn = get_production()
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS activities (
+                id          TEXT PRIMARY KEY,
+                code        TEXT UNIQUE NOT NULL,
+                name        TEXT UNIQUE NOT NULL,
+                color       TEXT,
+                description TEXT,
+                sort_order  INTEGER DEFAULT 0,
+                is_default  INTEGER DEFAULT 0,
+                created_at  TEXT DEFAULT (datetime('now')),
+                updated_at  TEXT
+            )
+            """
+        )
+        import uuid as _uuid
+        seed = [
+            ("production", "Производство", "#1A1A1A", "Изготовление мебели и изделий: материалы, мастера, сборка", 1, 1),
+            ("transit", "Транзит", "#B8860B", "Агентские и транзитные заказы: выплата контрагенту, наша доля — разница", 2, 0),
+            ("design", "Проектные работы", "#E8592A", "Чертежи, 3D-модели, расчёты (Профи.ру, бренд pbpb): себестоимость — машинное время агентов", 3, 0),
+        ]
+        for code, name, color, desc, order, default in seed:
+            conn.execute(
+                "INSERT OR IGNORE INTO activities (id, code, name, color, description, sort_order, is_default) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)", (str(_uuid.uuid4()), code, name, color, desc, order, default))
+        # Транзитные заказы помечаются по признаку активной сметы — один раз, дальше ярлык живёт сам
+        conn.execute("""
+            UPDATE orders SET activity = 'transit'
+             WHERE activity = 'production' AND id IN (
+                SELECT es.order_id FROM estimate_sets es
+                 WHERE es.payment_type = 'transit' AND es.status != 'superseded')""")
+        conn.commit()
+    finally:
+        conn.close()

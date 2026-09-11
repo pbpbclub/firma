@@ -50,8 +50,8 @@ export const ordersApi = {
   },
   get: (id: string) => api.get(`/orders/${id}`).then((r) => r.data),
   // scope: active (в работе) | completed (итог закрытых) | all
-  planFactSummary: (scope: "active" | "completed" | "all" = "active") =>
-    api.get("/orders/plan-fact-summary", { params: { scope } }).then((r) => r.data),
+  planFactSummary: (scope: "active" | "completed" | "all" = "active", activity?: string) =>
+    api.get("/orders/plan-fact-summary", { params: { scope, ...(activity ? { activity } : {}) } }).then((r) => r.data),
   // A8: накладные месяца и их раскладка по заказам в производстве
   overheadSummary: () => api.get("/orders/overhead-summary").then((r) => r.data),
   // Карточка «План / факт» PDF — тем же движком, что КП.
@@ -108,6 +108,14 @@ export const customersApi = {
   update: (id: string, data: Record<string, any>) => api.put(`/customers/${id}`, data).then((r) => r.data),
   delete: (id: string) => api.delete(`/customers/${id}`).then((r) => r.data),
   lookupInn: (inn: string) => api.get("/customers/lookup-inn", { params: { inn } }).then((r) => r.data),
+};
+
+// Виды прибыли — справочник-ярлык (производство / транзит / проектные / …), 11.09.2026
+export const activitiesApi = {
+  list: () => api.get("/activities").then((r) => r.data),
+  create: (data: Record<string, any>) => api.post("/activities", data).then((r) => r.data),
+  update: (id: string, data: Record<string, any>) => api.patch(`/activities/${id}`, data).then((r) => r.data),
+  delete: (id: string) => api.delete(`/activities/${id}`).then((r) => r.data),
 };
 
 export const brandsApi = {
@@ -399,14 +407,12 @@ export const machineUsageApi = {
   create: (data: Record<string, any>) => api.post("/machine-usage", data).then((r) => r.data),
   importEntries: (entries: Record<string, any>[], source = "manual") =>
     api.post("/machine-usage/import", { entries, source }).then((r) => r.data),
-  patch: (id: string, data: { order_id?: string; hours?: number; note?: string; agent?: string }) =>
-    api.patch(`/machine-usage/${id}`, data).then((r) => r.data),
+  patch: (id: string, data: Record<string, any>) => api.patch(`/machine-usage/${id}`, data).then((r) => r.data),
   remove: (id: string) => api.delete(`/machine-usage/${id}`).then((r) => r.data),
   models: () => api.get("/machine-usage/models").then((r) => r.data),
   putModel: (data: { model: string; price_in: number; price_out: number; price_cache_write: number; price_cache_read: number; note?: string }) =>
     api.put("/machine-usage/models", data).then((r) => r.data),
   deleteModel: (model: string) => api.delete(`/machine-usage/models/${encodeURIComponent(model)}`).then((r) => r.data),
-  putSettings: (data: { usd_rate: number }) => api.put("/machine-usage/settings", data).then((r) => r.data),
 };
 
 export const ledgerApi = {

@@ -26,10 +26,14 @@ STATUS_LABELS = {
     "cancelled": "Отменён",
 }
 
-# Вид деятельности (11.09.2026): production — изготовление, design — проектные работы
-# (чертежи, модели; себестоимость = машинное время агентов, см. routers/machine_usage.py)
-ACTIVITIES = ("production", "design")
-ACTIVITY_LABELS = {"production": "Производство", "design": "Проектные работы"}
+# Вид прибыли (11.09.2026) — справочник activities (routers/activities.py), заказ
+# хранит код. Проверка — по таблице, не по списку в коде: виды заводит Юра в вики.
+def _check_activity(conn, code) -> str:
+    from routers.activities import codes
+    known = codes(conn)
+    if code not in known:
+        raise HTTPException(status_code=400, detail=f"activity must be one of {'|'.join(sorted(known))}")
+    return code
 
 PRIORITY_LABELS = {
     "low": "Низкий",
@@ -61,6 +65,7 @@ def list_orders(
                 o.id, o.number, o.title, o.status, o.priority,
                 o.deadline, o.price_plan, o.cost_plan, o.created_at,
                 o.archived, o.brand, o.settled_at, o.activity,
+                act.name AS activity_name, act.color AS activity_color,
                 (SELECT GROUP_CONCAT(d.dir, '\u001f') FROM order_project_dirs d WHERE d.order_id = o.id) AS project_dirs_raw,
                 c.id AS customer_id,
                 c.name AS customer_name,
@@ -73,6 +78,7 @@ def list_orders(
                 COALESCE(SUM(p.amount), 0) AS paid_total
             FROM orders o
             LEFT JOIN customers c ON c.id = o.customer_id
+            LEFT JOIN activities act ON act.code = o.activity
             LEFT JOIN payments p ON p.order_id = o.id
             WHERE o.archived = ?
         """
@@ -1007,7 +1013,8 @@ SUMMARY_SCOPES = {
 
 
 @router.get("/plan-fact-summary")
-def plan_fact_summary(scope: str = Query("active", description="active | completed | all")):
+def plan_fact_summary(scope: str = Query("active", description="active | completed | all"),
+                      activity: Optional[str] = Query(None, description="код вида прибыли (activities.code)")):
     """Сводка план/факт одним экраном (ТЗ 12).
 
     scope=completed — итог закрытых проектов: «что заложили, что вышло, сколько
@@ -1017,12 +1024,15 @@ def plan_fact_summary(scope: str = Query("active", description="active | complet
         raise HTTPException(status_code=400, detail=f"scope must be {'|'.join(SUMMARY_SCOPES)}")
     conn = get_production()
     try:
+        # Фильтр по виду прибыли (11.09.2026): проектные и транзит размывают среднюю
+        # маржу производства — у них другая экономика, смотреть надо порознь.
+        act_sql, act_params = ("", []) if not activity else (" AND o.activity = ?", [activity])
         rows = conn.execute(
-            f"""SELECT o.id, o.number, o.title, o.status, o.price_plan, o.cost_plan,
+            f"""SELECT o.id, o.number, o.title, o.status, o.price_plan, o.cost_plan, o.activity,
                       COALESCE(SUM(p.amount), 0) AS paid_total
                FROM orders o LEFT JOIN payments p ON p.order_id = o.id
-               WHERE {SUMMARY_SCOPES[scope]}
-               GROUP BY o.id ORDER BY o.deadline IS NULL, o.deadline ASC""",
+               WHERE {SUMMARY_SCOPES[scope]}{act_sql}
+               GROUP BY o.id ORDER BY o.deadline IS NULL, o.deadline ASC""", act_params,
         ).fetchall()
         # Допы — одним запросом на всю сводку: _plan_fact зовётся в цикле, и без
         # предрасчёта _margin читал бы order_extras на каждый заказ (code_rules 27.07).
@@ -1037,7 +1047,7 @@ def plan_fact_summary(scope: str = Query("active", description="active | complet
                 "id": r["id"],
                 "number": r["number"],
                 "title": r["title"],
-                "status": r["status"],
+                "status": r["status"], "activity": r["activity"],
                 "status_label": STATUS_LABELS.get(r["status"], r["status"]),
                 # Выручка из план-факта: для draft-смет это сет, а не устаревшее поле заказа.
                 "price_plan": pf["revenue"],
@@ -1302,6 +1312,7 @@ def get_order(order_id: str):
             # Машинное время агентов по заказу (11.09.2026): токены — заголовок
             # величины, рубли рядом; сами строки — GET /machine-usage?order_id=
             "machine_usage": _machine_usage_totals(conn, oid),
+            **_activity_meta(conn, order.get("activity")),
             "project_dirs": [r["dir"] for r in conn.execute(
                 "SELECT dir FROM order_project_dirs WHERE order_id = ? ORDER BY dir", (oid,)).fetchall()],
         }
@@ -1309,18 +1320,30 @@ def get_order(order_id: str):
         conn.close()
 
 
+def _activity_meta(conn, code) -> dict:
+    r = conn.execute("SELECT name, color FROM activities WHERE code = ?", (code or "production",)).fetchone()
+    return {"activity_name": r["name"] if r else code, "activity_color": r["color"] if r else None}
+
+
 def _machine_usage_totals(conn, oid: str) -> dict:
+    """Машинное время по заказу — у.е. (токены) и часы по моделям; $ — справочная
+    оценка по тарифу API, не деньги (решение Юры 11.09.2026)."""
     r = conn.execute("""
         SELECT COUNT(*) AS rows_n, COALESCE(SUM(sessions),0) AS sessions, COALESCE(SUM(hours),0) AS hours,
                COALESCE(SUM(tokens_in),0) AS tokens_in, COALESCE(SUM(tokens_out),0) AS tokens_out,
                COALESCE(SUM(cache_write),0) AS cache_write, COALESCE(SUM(cache_read),0) AS cache_read,
-               COALESCE(SUM(usd),0) AS usd, COALESCE(SUM(amount),0) AS amount
+               COALESCE(SUM(usd),0) AS usd_est
           FROM machine_usage WHERE order_id = ?""", (oid,)).fetchone()
     d = dict(r)
     d["tokens_total"] = d["tokens_in"] + d["tokens_out"] + d["cache_write"] + d["cache_read"]
     d["hours"] = round(d["hours"], 2)
-    d["usd"] = round(d["usd"], 2)
-    d["amount"] = round(d["amount"], 2)
+    d["usd_est"] = round(d["usd_est"], 2)
+    d["models"] = [dict(m) for m in conn.execute("""
+        SELECT COALESCE(model, 'без модели') AS model, COALESCE(SUM(sessions),0) AS sessions,
+               ROUND(COALESCE(SUM(hours),0), 2) AS hours,
+               COALESCE(SUM(tokens_in + tokens_out + cache_write + cache_read),0) AS tokens_total,
+               ROUND(COALESCE(SUM(usd),0), 2) AS usd_est
+          FROM machine_usage WHERE order_id = ? GROUP BY model ORDER BY tokens_total DESC""", (oid,)).fetchall()]
     return d
 
 
@@ -1673,8 +1696,8 @@ async def update_order(order_id: str, body: dict = Body(...)):
             raise HTTPException(status_code=404, detail="Not found")
 
         allowed = {"title", "priority", "deadline", "customer_id", "price_plan", "cost_plan", "brand", "status", "finance_tx_id", "discount", "discount_note", "activity"}
-        if "activity" in body and body["activity"] not in ACTIVITIES:
-            raise HTTPException(status_code=400, detail=f"activity must be one of {'|'.join(ACTIVITIES)}")
+        if "activity" in body:
+            _check_activity(conn, body["activity"])
         # Статус идёт тем же путём, что и PATCH /{id}/status: завершение заказа
         # закрывает расчёты с подрядчиками и требует подтверждения (см. _apply_status).
         status_applied = "status" in body and body["status"] != r["status"]
@@ -1781,9 +1804,7 @@ async def create_order(body: dict = Body(...), user=Depends(get_current_user)):
         max_num = row["max_num"] if row and row["max_num"] is not None else 0
         number = f"ORD-{max_num + 1:03d}"
 
-        activity = body.get("activity") or "production"
-        if activity not in ACTIVITIES:
-            raise HTTPException(status_code=400, detail=f"activity must be one of {'|'.join(ACTIVITIES)}")
+        activity = _check_activity(conn, body.get("activity") or "production")
         new_id = str(uuid4())
         conn.execute(
             """INSERT INTO orders (id, number, title, status, priority, deadline, customer_id, brand, brand_id, activity, created_at)

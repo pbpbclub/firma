@@ -12,7 +12,7 @@ import { RowCard } from "../components/ui/RowCard";
 import { ObligationsConfirmModal } from "../components/order/ObligationsConfirmModal";
 import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ordersApi, customersApi, brandsApi, estimatesApi, financeApi } from "../api";
+import { ordersApi, customersApi, brandsApi, estimatesApi, financeApi, activitiesApi } from "../api";
 import { MagnifyingGlass, DotsThree, Plus, Files, CaretRight, Archive, ArrowCounterClockwise, CaretDown, X, Trash, UserCircle } from "@phosphor-icons/react";
 import { ColumnFilter, AmountFilter } from "../components/TableFilters";
 import { ProfitLadder, PlanFactDuel } from "../components/OrderFinance";
@@ -229,6 +229,7 @@ function NewOrderModal({ onClose, onCreated }: {
     queryFn: () => customersApi.list(""),
   });
 
+  const { data: activitiesList = [] } = useQuery({ queryKey: ["activities"], queryFn: activitiesApi.list });
   const { data: brandsList = [] } = useQuery({
     queryKey: ["brands"],
     queryFn: brandsApi.list,
@@ -423,9 +424,8 @@ function NewOrderModal({ onClose, onCreated }: {
           <div>
             <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>ВИД ДЕЯТЕЛЬНОСТИ</div>
             <select value={activity} onChange={e => setActivity(e.target.value)}
-              style={{ width: "100%", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none", background: "#fff", color: activity === "design" ? "#E8592A" : "#1A1A1A" }}>
-              <option value="production">Производство</option>
-              <option value="design">Проектные работы (чертежи, модели)</option>
+              style={{ width: "100%", border: "1px solid #EDEBE6", padding: "7px 10px", fontSize: 13, outline: "none", background: "#fff", color: "#1A1A1A" }}>
+              {(activitiesList as any[]).map((a: any) => <option key={a.code} value={a.code}>{a.name}</option>)}
             </select>
           </div>
           {error && <div style={{ fontSize: 11, color: "#8B3A3A" }}>{error}</div>}
@@ -446,6 +446,10 @@ export default function OrdersV2() {
   const [customerFilter, setCustomerFilter] = useState("");
   const [titleFilter, setTitleFilter] = useState("");
   const [brandFilter, setBrandFilter] = useState("");
+  // Вид прибыли (справочник activities, 11.09.2026): один фильтр на список и «Сводку П/Ф» —
+  // проектные и транзит размывают среднюю маржу производства, смотреть надо порознь.
+  const [activityFilter, setActivityFilter] = useState("");
+  const { data: activitiesList = [] } = useQuery({ queryKey: ["activities"], queryFn: activitiesApi.list });
   const clearFilters = () => { setCustomerFilter(""); setTitleFilter(""); setStatusFilter(""); setAmountMin(""); setAmountMax(""); setFactMin(""); setFactMax(""); setBrandFilter(""); setPage(0); setSelectedIds(new Set()); setSelected(null); };
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -512,8 +516,8 @@ export default function OrdersV2() {
   // отбрасывал completed, и посмотреть закрытый заказ можно было только поштучно.
   const [summaryScope, setSummaryScope] = useState<"active" | "completed" | "all">("active");
   const { data: summary } = useQuery({
-    queryKey: ["orders-plan-fact-summary", summaryScope],
-    queryFn: () => ordersApi.planFactSummary(summaryScope),
+    queryKey: ["orders-plan-fact-summary", summaryScope, activityFilter],
+    queryFn: () => ordersApi.planFactSummary(summaryScope, activityFilter || undefined),
     enabled: mode === "summary",
   });
 
@@ -611,13 +615,14 @@ export default function OrdersV2() {
     if (titleFilter) r = r.filter((o: any) => o.title === titleFilter);
     if (statusFilter) r = r.filter((o: any) => ((STATUS_MAP[o.status] || {}).label || o.status) === statusFilter);
     if (brandFilter) r = r.filter((o: any) => o.brand === brandFilter);
+    if (activityFilter) r = r.filter((o: any) => (o.activity || "production") === activityFilter);
     if (amountMin) r = r.filter((o: any) => (o.price_plan || 0) >= parseFloat(amountMin));
     if (amountMax) r = r.filter((o: any) => (o.price_plan || 0) <= parseFloat(amountMax));
     if (factMin) r = r.filter((o: any) => (o.cost_fact || 0) >= parseFloat(factMin));
     if (factMax) r = r.filter((o: any) => (o.cost_fact || 0) <= parseFloat(factMax));
     return applySort(r, SORT_GETTERS);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allData, customerFilter, titleFilter, statusFilter, brandFilter, amountMin, amountMax, factMin, factMax, sort]);
+  }, [allData, customerFilter, titleFilter, statusFilter, brandFilter, activityFilter, amountMin, amountMax, factMin, factMax, sort]);
   const totalCount = filteredData.length;
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
   const pageData = filteredData.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
@@ -815,6 +820,22 @@ export default function OrdersV2() {
               Архив
             </button>
           </div>
+          {/* Виды прибыли — чипы (все / производство / транзит / проектные / …) */}
+          {(activitiesList as any[]).length > 1 && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 10 }}>
+              {[{ code: "", name: "Все виды", color: "#1A1A1A" }, ...(activitiesList as any[])].map((a: any) => {
+                const on = activityFilter === a.code;
+                return (
+                  <button key={a.code} type="button" onClick={() => { setActivityFilter(a.code); setPage(0); setSelectedIds(new Set()); }}
+                    style={{ fontSize: 11, fontWeight: 600, padding: "3px 9px", cursor: "pointer", fontFamily: "inherit",
+                             border: `1px solid ${on ? (a.color || "#1A1A1A") : "#EDEBE6"}`, background: on ? (a.color || "#1A1A1A") : "#fff",
+                             color: on ? "#fff" : (a.color || "#6B6355") }}>
+                    {a.name}{a.code && a.orders_count != null ? <span style={{ opacity: 0.7 }}> · {a.orders_count}</span> : null}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Один раздел за раз — по значению mode, а не по очереди булевых флагов,

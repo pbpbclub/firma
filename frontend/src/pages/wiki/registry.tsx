@@ -1,8 +1,8 @@
 import { useState } from "react";
 import type { ComponentType, ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { User, Wrench, Truck, Palette, Buildings, Plus, LinkSimple, X } from "@phosphor-icons/react";
-import { customersApi, mastersApi, brandsApi, businessUnitsApi, financeApi } from "../../api";
+import { User, Wrench, Truck, Palette, Buildings, Plus, LinkSimple, X, ChartPieSlice } from "@phosphor-icons/react";
+import { customersApi, mastersApi, brandsApi, businessUnitsApi, financeApi, activitiesApi } from "../../api";
 import { MONO } from "../../components/ui/Num";
 import { T } from "../../components/ui/type";
 import type { FieldDef } from "../../components/EditModal";
@@ -35,6 +35,7 @@ import { ContractorDetail, CONTRACTOR_FIELDS, STATUS_COLORS, CONTRACTOR_STATUS_L
 import { PRICE_SUPPLIER_LABELS } from "./PriceSync";
 import { BrandDetail, BrandModal } from "./BrandDetail";
 import { UnitDetail, UnitModal } from "./UnitDetail";
+import { ActivityDetail, ActivityModal } from "./ActivityDetail";
 
 export type WikiColumn = {
   key: string;
@@ -267,7 +268,23 @@ const units: WikiCategory = {
   ],
 };
 
-export const WIKI_CATEGORIES: WikiCategory[] = [clients, contractors, suppliers, brands, units];
+// Виды прибыли — ярлык (производство / транзит / проектные / …), решение Юры 11.09.2026.
+const activities: WikiCategory = {
+  key: "activities", label: "Виды прибыли", singular: "вид прибыли", icon: ChartPieSlice,
+  adapter: { list: () => activitiesApi.list(), create: activitiesApi.create, serverSearch: false },
+  searchFields: ["name", "code", "description"],
+  Detail: ActivityDetail,
+  createModal: ActivityModal,
+  avatar: { kind: "colorDot" },
+  columns: [
+    { key: "name", label: "НАЗВАНИЕ", width: "1.2fr", filter: true, render: (r) => nameCell(r.name) },
+    { key: "code", label: "КОД", width: "140px", render: (r) => numText(r.code) },
+    { key: "description", label: "ОПИСАНИЕ", width: "2fr", render: (r) => subCell(r.description) },
+    { key: "orders_count", label: "ЗАКАЗОВ", width: "90px", align: "right", render: (r) => <span style={{ ...T.num }}>{r.orders_count || "—"}</span> },
+  ],
+};
+
+export const WIKI_CATEGORIES: WikiCategory[] = [clients, contractors, suppliers, brands, activities, units];
 
 export function findCategory(key: string | undefined): WikiCategory {
   return WIKI_CATEGORIES.find(c => c.key === key) || WIKI_CATEGORIES[0];

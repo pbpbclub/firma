@@ -2,9 +2,9 @@
 // Карточка открывается деньгами и план-фактом; форма правки — под катом.
 // Состояние формы живёт в OrderDetail (кнопка «Сохранить» в топ-баре).
 import { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { CaretDown, CaretRight, Phone, EnvelopeSimple } from "@phosphor-icons/react";
-import { customersApi } from "../../api";
+import { customersApi, activitiesApi } from "../../api";
 import { CustomerLink } from "../ui/links";
 import { contactHref } from "../ui/ContactLinks";
 import { MONO } from "../ui/Num";
@@ -37,6 +37,10 @@ export function OrderParams({ order, form, field, customers, onStatusChanged }: 
 
   const statusMeta = ORDER_STATUSES.find(s => s.value === form.status);
   const brandColor = BRANDS.find(b => b.value === form.brand)?.color || "#A89070";
+  // Виды прибыли — справочник (activities), не список в коде: заводит Юра в вики
+  const { data: activities = [] } = useQuery({ queryKey: ["activities"], queryFn: activitiesApi.list });
+  const activityMeta = (activities as any[]).find((a: any) => a.code === form.activity);
+  const activityColor = activityMeta?.color || "#1A1A1A";
   const customerName = (customers as any[]).find((c: any) => String(c.id) === form.customer_id)?.name
     || order?.customer_name;
 
@@ -73,7 +77,7 @@ export function OrderParams({ order, form, field, customers, onStatusChanged }: 
               ? <StatusPicker orderId={order.id} current={form.status} onChange={onStatusChanged} />
               : <span style={{ color: statusMeta?.color, fontWeight: 600 }}>{statusMeta?.label ?? form.status}</span>}
             {form.brand && <> · <span style={{ color: brandColor, fontWeight: 600 }}>{form.brand}</span></>}
-            {form.activity === "design" && <> · <span style={{ color: "#E8592A" }}>проектные работы</span></>}
+            {activityMeta && !activityMeta.is_default && <> · <span style={{ color: activityColor, fontWeight: 600 }}>{activityMeta.name}</span></>}
             {customerName && <> · <CustomerLink id={form.customer_id || order?.customer_id}>{customerName}</CustomerLink></>}
             {form.deadline && <> · до <span style={{ fontFamily: MONO }}>{fmtDate(form.deadline)}</span></>}
             {form.priority !== "normal" && <> · {PRIORITY_LABELS[form.priority] ?? form.priority}</>}
@@ -99,9 +103,8 @@ export function OrderParams({ order, form, field, customers, onStatusChanged }: 
                   мебелью в сводках маржи — у них себестоимость = машинное время */}
               <div style={{ fontSize: 9, color: "#A89070", letterSpacing: "0.06em", marginBottom: 4 }}>ВИД ДЕЯТЕЛЬНОСТИ</div>
               <select value={form.activity} onChange={e => field({ activity: e.target.value })}
-                style={{ border: "1px solid #EDEBE6", padding: "6px 10px", fontSize: 12, outline: "none", background: "#fff", cursor: "pointer", fontFamily: "inherit", color: form.activity === "design" ? "#E8592A" : "#1A1A1A" }}>
-                <option value="production">Производство</option>
-                <option value="design">Проектные работы</option>
+                style={{ border: `1px solid ${activityColor === "#1A1A1A" ? "#EDEBE6" : activityColor}`, padding: "6px 10px", fontSize: 12, outline: "none", background: "#fff", cursor: "pointer", fontFamily: "inherit", color: activityColor }}>
+                {(activities as any[]).map((a: any) => <option key={a.code} value={a.code}>{a.name}</option>)}
               </select>
             </div>
             <div>

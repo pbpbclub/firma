@@ -1285,9 +1285,9 @@ export default function OrderDetail() {
                 ? <TransitPanel transit={order.transit} tax={order.tax}
                     taxPct={order.tax_pct} netProfit={order.net_profit} />
                 : <PlanFactDuel planFact={order.plan_fact} />}
-              {/* Машинное время агентов (11.09.2026): токены — заголовок величины,
-                  рубли рядом; в себестоимость входит расходом, здесь — справка */}
-              {(order.machine_usage?.rows_n > 0 || order.activity === "design") && (
+              {/* Машинное время агентов (11.09.2026): у.е. — токены и часы по моделям;
+                  рублями не считается, в себестоимость не входит. $ по тарифу — справочно */}
+              {(order.machine_usage?.rows_n > 0 || (order.activity && order.activity !== "production")) && (
                 <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid #EDEBE6", fontSize: 12, color: "#6B6355", lineHeight: 1.6 }}>
                   <SectionLabel>МАШИННОЕ ВРЕМЯ</SectionLabel>
                   {order.machine_usage?.rows_n > 0 ? (
@@ -1295,12 +1295,17 @@ export default function OrderDetail() {
                       <span style={{ fontFamily: MONO, color: "#1A1A1A", fontWeight: 600 }}>
                         {(order.machine_usage.tokens_total / 1e6).toLocaleString("ru-RU", { maximumFractionDigits: 1 })} млн токенов
                       </span>
-                      {" "}(cache-read {(order.machine_usage.cache_read / 1e6).toLocaleString("ru-RU", { maximumFractionDigits: 1 })};
-                      output {(order.machine_usage.tokens_out / 1e6).toLocaleString("ru-RU", { maximumFractionDigits: 2 })})
-                      {" · "}<span style={{ fontFamily: MONO }}>{fmtMoney(order.machine_usage.amount)}</span>
                       {" · "}<span style={{ fontFamily: MONO }}>{order.machine_usage.hours.toLocaleString("ru-RU", { maximumFractionDigits: 1 })} ч</span>
                       {" · "}{order.machine_usage.sessions} сес.
-                      {" — "}<span onClick={() => navigate("/design")} style={{ color: "#E8592A", cursor: "pointer", textDecoration: "underline" }}>проектные работы</span>
+                      {" · "}<span style={{ color: "#A89070" }}>${(order.machine_usage.usd_est || 0).toLocaleString("ru-RU", { maximumFractionDigits: 0 })} по тарифу API, справочно</span>
+                      <div style={{ marginTop: 4, display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
+                        {(order.machine_usage.models || []).map((m: any) => (
+                          <span key={m.model} style={{ fontFamily: MONO, fontSize: 10.5, background: "#F2EFE9", padding: "2px 6px", color: "#1A1A1A" }}>
+                            {String(m.model).replace(/^claude-/, "")} · {(m.tokens_total / 1e6).toLocaleString("ru-RU", { maximumFractionDigits: 1 })} млн
+                          </span>
+                        ))}
+                        <span onClick={() => navigate("/machine-time")} style={{ color: "#E8592A", cursor: "pointer", textDecoration: "underline", fontSize: 11 }}>все сессии</span>
+                      </div>
                     </div>
                   ) : <div style={{ marginTop: 6, color: "#A89070" }}>Сессий агентов по заказу ещё нет — придут по API с мака или от фин-агента.</div>}
                   {order.project_dirs?.length > 0 && (
