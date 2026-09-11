@@ -115,7 +115,8 @@ export default function MachineTime() {
   // Деньги — только реальные; $ по тарифу — серым, справочно.
   const metrics = t ? [
     { label: "ЗАКАЗОВ", value: String(t.orders), color: "#1A1A1A" },
-    { label: "ВЫРУЧКА", value: fmt(t.revenue), color: "#4A7C59", sub: `оплачено ${fmt(t.paid_total)}` },
+    // Цена — чёрным, зелёное — только полученные деньги (правило Юры 11.09.2026)
+    { label: "ВЫРУЧКА", value: fmt(t.revenue), color: "#1A1A1A", sub: <>оплачено <span style={{ color: "#4A7C59", ...num }}>{fmt(t.paid_total)}</span></> },
     { label: "ЧАСЫ", value: fmtHours(t.hours), color: "#1A1A1A", sub: `${t.sessions} сес.` },
     { label: "ТОКЕНЫ", value: fmtTok(t.tokens_total), color: "#1A1A1A", sub: "у.е. машинного времени" },
     { label: "₽ / ЧАС", value: t.rub_per_hour != null ? fmt(t.rub_per_hour) : "—", color: "#E8592A", sub: "выручка на час работы" },
@@ -213,7 +214,7 @@ export default function MachineTime() {
                   </td>
                   <td style={td}><ActivityPill name={o.activity_name} color={o.activity_color} /></td>
                   <td style={{ ...td, color: "#6B6355" }}>{o.customer_name || "—"}</td>
-                  <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap", ...num }}>{fmt(o.revenue)}<div style={{ fontSize: 10, color: "#A89070" }}>опл. {fmt(o.paid_total)}</div></td>
+                  <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap", ...num }}>{fmt(o.revenue)}<div style={{ fontSize: 10, color: "#4A7C59" }}>опл. {fmt(o.paid_total)}</div></td>
                   <td style={td}><ModelChips models={o.models} /></td>
                   <td style={{ ...td, textAlign: "right", ...num }}>{fmtHours(o.hours)}</td>
                   <td style={{ ...td, textAlign: "right", ...num }}>{fmtTok(o.tokens_total)}</td>

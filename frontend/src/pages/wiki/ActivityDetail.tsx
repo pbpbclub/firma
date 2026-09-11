@@ -35,7 +35,7 @@ export function ActivityDetail({ row, onClose }: { row: any; onClose: () => void
         avatar={{ kind: "colorDot", color: a.color || "#A89070" }}
         metrics={[
           { label: "Заказов", value: String(list.length), color: "#1A1A1A" },
-          { label: "Цена заказов", value: fmt(revenue), color: "#4A7C59" },
+          { label: "Цена заказов", value: fmt(revenue), color: "#1A1A1A" },
         ]}
         onEdit={() => setEditing(true)}
         onClose={onClose}
