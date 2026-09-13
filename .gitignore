@@ -32,3 +32,6 @@ yarn-error.log*
 
 # invoice.py при запуске из дерева разработки создаёт рядом свой data/ (счета, ассеты)
 /data/
+
+# задание ночного ревью (пишет review_lite, читает compact_resume) — не код
+logs/current_task.txt
