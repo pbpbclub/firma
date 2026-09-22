@@ -32,9 +32,11 @@ def login(body: LoginRequest):
         if not user or not pwd_ctx.verify(body.password, user["password_hash"]):
             raise HTTPException(status_code=401, detail="Неверный email или пароль")
         token = create_token(user["email"])
+        from privacy import is_owner
         return {
             "token": token,
-            "user": {"email": user["email"], "name": user["name"], "role": user["role"]},
+            "user": {"email": user["email"], "name": user["name"], "role": user["role"],
+                     "is_owner": is_owner(user)},
         }
     finally:
         conn.close()
@@ -42,7 +44,12 @@ def login(body: LoginRequest):
 
 @router.get("/me")
 def me(user=Depends(get_current_user)):
-    return {"email": user["email"], "name": user["name"], "role": user["role"]}
+    # is_owner ВЫЧИСЛЯЕТСЯ (privacy.py), в auth.db его нет: иначе admin выдал бы
+    # его себе через заведение пользователя. Фронту он нужен только чтобы не
+    # рисовать лишние пункты меню — защита остаётся на сервере.
+    from privacy import is_owner
+    return {"email": user["email"], "name": user["name"], "role": user["role"],
+            "is_owner": is_owner(user)}
 
 
 @router.get("/users")

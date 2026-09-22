@@ -4,6 +4,7 @@ import { Loading } from "../components/ui/Loading";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Briefcase, MagnifyingGlass, X, ArrowsClockwise, Tag, PencilSimple, Trash, LinkSimple } from "@phosphor-icons/react";
 import { zenmoneyApi, payeeRulesApi, mastersApi, customersApi, financeApi, inboxApi } from "../api";
+import { getUser } from "../auth";
 import { AllocNote } from "../components/money/AllocNote";
 import { useIsMobile, M } from "../components/ui/responsive";
 import { RowCard } from "../components/ui/RowCard";
@@ -458,10 +459,12 @@ function RecurringSection() {
   );
 }
 
-// ── Личные траты (для Юры лично): переводы на Райффайзен (ZM-оттоки на карты вне
-// ZenMoney) + всё, что помечено «Личное» в Разноске. Личный счётчик, на бизнес не влияет.
+// ── Личные траты (для Юры лично): переводы себе (payee_rules entity_type='self'),
+// вывод себе за границу и всё, помеченное «Личное» в Разноске. Личный счётчик,
+// на бизнес не влияет. Подписи приходят с сервера — тут их не дублируем.
 function PersonalSpendingSection() {
-  const { data } = useQuery({ queryKey: ["personal-spending"], queryFn: financeApi.personalSpending });
+  const who = getUser()?.email || "";
+  const { data } = useQuery({ queryKey: ["personal-spending", who], queryFn: financeApi.personalSpending });
   const cats = (data?.categories ?? []).filter((c: any) => c.count > 0);
   if (!cats.length) return null;
   return (
@@ -504,11 +507,14 @@ export default function ZenMoneyPage() {
   // заграничные карты живут своим разделом. Чипы появляются, только если
   // валют больше одной (у бухгалтера их нет вовсе).
   const [currency, setCurrency] = useState("RUB");
+  // Личные данные кэшируются на пользователя: в одном браузере после перелогина
+  // React Query отдал бы предыдущему владельцу кэш предыдущего — и наоборот.
+  const who = getUser()?.email || "";
 
   const syncMutation = useMutation({
     mutationFn: zenmoneyApi.sync,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["zm-accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["zm-accounts", who] });
       queryClient.invalidateQueries({ queryKey: ["zm-cashflow"] });
       queryClient.invalidateQueries({ queryKey: ["zm-report"] });
       queryClient.invalidateQueries({ queryKey: ["zm-transactions"] });
@@ -584,12 +590,12 @@ export default function ZenMoneyPage() {
   });
 
   const { data: accounts = [] } = useQuery({
-    queryKey: ["zm-accounts"],
+    queryKey: ["zm-accounts", who],
     queryFn: zenmoneyApi.accounts,
   });
 
   const { data: summary } = useQuery({
-    queryKey: ["zm-accounts-summary"],
+    queryKey: ["zm-accounts-summary", who],
     queryFn: zenmoneyApi.accountsSummary,
   });
   const totals: any[] = summary?.totals || [];
@@ -600,17 +606,17 @@ export default function ZenMoneyPage() {
   }, [currencies.join(","), currency]);
 
   const { data: cashflow = [] } = useQuery({
-    queryKey: ["zm-cashflow", currency],
+    queryKey: ["zm-cashflow", currency, who],
     queryFn: () => zenmoneyApi.cashflow(6, currency),
   });
 
   const { data: report } = useQuery({
-    queryKey: ["zm-report", selectedMonth, currency],
+    queryKey: ["zm-report", selectedMonth, currency, who],
     queryFn: () => zenmoneyApi.report(selectedMonth, currency),
   });
 
   const { data: allTransactions = [] } = useQuery({
-    queryKey: ["zm-transactions", selectedMonth, search, currency],
+    queryKey: ["zm-transactions", selectedMonth, search, currency, who],
     queryFn: () =>
       zenmoneyApi.transactions({
         month: selectedMonth,
@@ -1206,7 +1212,7 @@ export default function ZenMoneyPage() {
             комиссии ИП): из Разноски они скрыты автоматом, объёмы видны здесь. */}
         <RecurringSection />
 
-        {/* Личные траты: Райффайзен-переводы + помеченное «Личное» — счётчик для Юры */}
+        {/* Личные траты: переводы себе, вывод за границу, помеченное «Личное» */}
         <PersonalSpendingSection />
 
         {/* Cashflow chart */}

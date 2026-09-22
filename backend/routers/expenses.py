@@ -226,7 +226,8 @@ def inbox(
         zscope = scope_for(user)
         conn = get_zenmoney()
         try:
-            frag, fparams = zscope.tx_sql()
+            # both_legs: в разноске кросс-строке делать нечего — это не расход
+            frag, fparams = zscope.tx_sql(both_legs=True)
             sql = "SELECT * FROM zm_transactions WHERE outcome > 0 AND income = 0 AND deleted = 0" + frag
             params: list = list(fparams)
             if date_from:
@@ -241,7 +242,13 @@ def inbox(
                 sql += " AND (payee LIKE ? OR comment LIKE ?)"; params += [f"%{search}%"] * 2
             sql += " ORDER BY date DESC, id DESC LIMIT ? OFFSET ?"
             import json as _json
-            from routers.finance import ZEN_OWN_PAYEES, zen_recurring_category
+            from routers.finance import zen_recurring_category
+            from alloc_map import is_self, self_patterns
+            pconn = get_production()
+            try:
+                zen_self_patterns = self_patterns(pconn)
+            finally:
+                pconn.close()
             CHUNK, offset, done = 500, 0, False
             while not done and len(out) < limit:
                 page = conn.execute(sql, params + [CHUNK, offset]).fetchall()
@@ -254,8 +261,9 @@ def inbox(
                     # Не рублёвая нога — расходом по заказу быть не может.
                     if zscope.row_currency(r, "outcome") != "RUB":
                         continue
-                    # Перевод себе на карту вне ZenMoney (Райффайзен) — не расход.
-                    if (r["payee"] or "").strip() in ZEN_OWN_PAYEES:
+                    # Перевод себе — не расход. Признак один: payee_rules
+                    # entity_type='self' (ZEN_OWN_PAYEES убран 22.09.2026).
+                    if is_self(r["payee"], zen_self_patterns):
                         continue
                     # Личные регулярки (подписки/связь/услуги карт) → «Регулярные траты».
                     if zen_recurring_category(r["payee"]):

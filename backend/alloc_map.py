@@ -21,6 +21,7 @@ import sqlite3
 from typing import Optional
 
 from db import get_production, get_zenmoney, get_finance
+from zm_scope import ABROAD_LABEL, ABROAD_LABEL_IN
 
 KIND_LABELS = {
     "expense": "Расход", "payment": "Оплата заказа", "ledger": "Лицевой счёт",
@@ -178,7 +179,12 @@ def build(with_transactions: bool = True, scope=None) -> dict:
                         continue
                     k = f"zen:{r['id']}"
                     if (r["income"] or 0) > 0 and (r["outcome"] or 0) > 0:
-                        put("self_transfer", k, label="Перевод между своими счетами")
+                        # Перевод, пересекающий границу, подписывается отдельно:
+                        # это вывод себе за границу, а не движение между картами.
+                        kind = scope.classify(r) if scope is not None else "public"
+                        put("self_transfer", k,
+                            label={"cross_out": ABROAD_LABEL, "cross_in": ABROAD_LABEL_IN}.get(
+                                kind, "Перевод между своими счетами"))
                     elif is_self(r["payee"], selfp):
                         put("self_transfer", k, label="Пополнение с р/с ИП (вывод владельца)" if (r["income"] or 0) > 0 else "Перевод себе")
         finally:

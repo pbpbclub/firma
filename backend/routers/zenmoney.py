@@ -246,7 +246,11 @@ def get_transactions(
         for r in rows:
             if not scope.row_in_currency(r, currency):
                 continue
-            d = dict(r)
+            if not scope.visible(r):
+                continue
+            # Маска — последним действием: она обнуляет вторую ногу, а это
+            # признак расхода во всём проекте (см. zm_scope.Scope.mask).
+            d = scope.mask(r)
             d["currency"] = currency
             d["outcome_currency"] = scope.row_currency(r, "outcome")
             d["income_currency"] = scope.row_currency(r, "income")
@@ -520,7 +524,7 @@ def get_business_transactions(months: int = Query(3, le=12), user=Depends(get_cu
     conn = get_zenmoney()
     try:
         date_from = (datetime.now() - timedelta(days=30 * months)).strftime("%Y-%m-%d")
-        frag, fparams = scope.tx_sql()
+        frag, fparams = scope.tx_sql(both_legs=True)
         rows = conn.execute(
             "SELECT * FROM zm_transactions WHERE deleted=0 AND date >= ?" + frag + " ORDER BY date DESC",
             [date_from] + list(fparams),
@@ -579,7 +583,7 @@ def suggest_for_creditor(name: str = "", amount: float = 0, limit: int = Query(1
     scope = scope_for(user)
     conn = get_zenmoney()
     try:
-        frag, fparams = scope.tx_sql()
+        frag, fparams = scope.tx_sql(both_legs=True)
         rows = conn.execute(
             "SELECT * FROM zm_transactions WHERE deleted=0 AND outcome > 0 AND income = 0" + frag
             + " ORDER BY date DESC LIMIT 500", list(fparams)

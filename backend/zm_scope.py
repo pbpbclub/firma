@@ -36,6 +36,12 @@ UNKNOWN_CURRENCY = "unknown"
 # (иначе «unknown» нарисовался бы рублями — ровно то, от чего уходим).
 CURRENCY_SIGNS = {"RUB": "₽", "GEL": "₾", "USD": "$", "EUR": "€", "TRY": "₺"}
 
+# Единственные подписи заграничного перевода — и в маске, и в карте разноски.
+# Направление важно: «ушло» и «вернулось» — разные события, и бухгалтер по
+# подписи должна понимать, куда смотреть в остатке.
+ABROAD_LABEL = "Себе за границу"
+ABROAD_LABEL_IN = "Себе из-за границы"
+
 
 @dataclass(frozen=True)
 class Account:
@@ -204,25 +210,55 @@ class Scope:
         return "cross_out" if out_pub else "cross_in"
 
     def visible(self, row) -> bool:
-        """Видна ли строка пользователю целиком. Владельцу — всё; остальным —
-        только полностью публичные строки.
-
-        🔒 Кросс-строки на этом этапе просто скрыты. Показывать бухгалтеру
-        рублёвую ногу будет маскирование (волна 2), и делать это можно ТОЛЬКО
-        после классификации: маска обнуляет вторую ногу, а `outcome>0, income=0` —
-        признак расхода во всём проекте, и замаскированный вывод за границу уехал
-        бы в «Разноску» как расход к разноске.
-        """
+        """Видна ли строка пользователю. Владельцу — всё; остальным — публичные
+        и ПЕРЕСЕКАЮЩИЕ границу (последние только в маске, см. `mask`).
+        Строка между двумя приватными счетами не видна никому, кроме владельца."""
         if self.is_owner:
             return True
-        return self.classify(row) == "public"
+        return self.classify(row) in ("public", "cross_out", "cross_in")
+
+    def mask(self, row) -> dict:
+        """Обезличенная публичная нога кросс-строки.
+
+        🔒 Вызывать ТОЛЬКО на выходе, после классификации и после агрегатов.
+        Маска обнуляет вторую ногу, а `outcome > 0 and income = 0` — признак
+        расхода во всём проекте (`zenmoney.py`, `expenses.py`, `alloc_map.py`).
+        Замаскируешь раньше — вывод себе за границу уедет бухгалтеру в «Разноску»
+        как расход к разноске и встанет в расходы по категориям.
+
+        Что остаётся: дата и рублёвая сумма ухода. Что уходит: вторая нога,
+        её счёт и валюта, курс, назначение платежа, категория.
+        """
+        d = dict(row) if not isinstance(row, dict) else dict(row)
+        kind = self.classify(row)
+        if self.is_owner or kind not in ("cross_out", "cross_in"):
+            return d
+        if kind == "cross_out":
+            d["income"], d["income_account"], d["income_currency"] = 0, None, None
+            d["outcome_currency"] = self.row_currency(row, "outcome")
+        else:
+            d["outcome"], d["outcome_account"], d["outcome_currency"] = 0, None, None
+            d["income_currency"] = self.row_currency(row, "income")
+        label = ABROAD_LABEL if kind == "cross_out" else ABROAD_LABEL_IN
+        d["payee"] = label
+        d["comment"] = None
+        d["tags"] = "[]"
+        d["display_category"] = label
+        d["masked"] = True
+        d["abroad"] = True
+        return d
 
     def filter_rows(self, rows) -> list:
         return [r for r in rows if self.visible(r)]
 
-    def tx_sql(self, alias: str = "") -> tuple[str, list]:
-        """Фрагмент WHERE для запросов к zm_transactions: обе ноги — публичные.
-        Пустой фрагмент для владельца."""
+    def tx_sql(self, alias: str = "", both_legs: bool = False) -> tuple[str, list]:
+        """Фрагмент WHERE для запросов к zm_transactions.
+
+        По умолчанию — строки, КАСАЮЩИЕСЯ публичного контура (хотя бы одной ногой):
+        перевод себе за границу бухгалтер видит рублёвой ногой, иначе у неё в
+        остатке Райффайзена появится дырка — деньги ушли, а строки нет.
+        `both_legs=True` — только полностью публичные (разноска, подсказки: там
+        кросс-строке делать нечего). Владельцу фильтр не навешивается."""
         if self.is_owner:
             return "", []
         titles = self.public_titles()
@@ -230,7 +266,8 @@ class Scope:
             return " AND 0", []
         p = f"{alias}." if alias else ""
         marks = ",".join("?" * len(titles))
-        return (f" AND {p}outcome_account IN ({marks}) AND {p}income_account IN ({marks})",
+        op = "AND" if both_legs else "OR"
+        return (f" AND ({p}outcome_account IN ({marks}) {op} {p}income_account IN ({marks}))",
                 titles + titles)
 
     # ── валюта строки ────────────────────────────────────────────────────────

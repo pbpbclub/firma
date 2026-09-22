@@ -109,11 +109,14 @@ def test_clerk_sees_no_private_or_pending_account(scope_mod):
     assert all(t["currency"] == "RUB" for t in clerk(scope_mod).totals())
 
 
-def test_clerk_does_not_see_private_or_cross_rows(scope_mod):
+def test_clerk_sees_public_and_cross_rows_only(scope_mod):
+    """Приватное и неоднозначное скрыто; кросс-строка остаётся — но в маске
+    (см. test_clerk_sees_masked_cross_row): иначе у бухгалтера деньги уходят
+    с Райффайзена в никуда и остаток не сходится."""
     s = clerk(scope_mod)
     rows = [dict(zip(("id", "date", "income", "outcome", "income_account", "outcome_account", "payee"), t)) for t in TX]
     visible = {r["id"] for r in s.filter_rows(rows)}
-    assert visible == {"t-pub"}, "приватные, неоднозначные и кросс-строки бухгалтеру не видны"
+    assert visible == {"t-pub", "t-cross"}
     assert s.classify(rows[1]) == "cross_out"
     assert owner(scope_mod).classify(rows[2]) == "private_internal"
 
@@ -126,7 +129,14 @@ def test_tx_sql_filters_by_public_titles(scope_mod):
         rows = conn.execute("SELECT id FROM zm_transactions WHERE deleted=0" + frag, params).fetchall()
     finally:
         conn.close()
-    assert {r["id"] for r in rows} == {"t-pub"}
+    assert {r["id"] for r in rows} == {"t-pub", "t-cross"}
+    frag2, params2 = clerk(scope_mod).tx_sql(both_legs=True)
+    conn = db.get_zenmoney()
+    try:
+        strict = conn.execute("SELECT id FROM zm_transactions WHERE deleted=0" + frag2, params2).fetchall()
+    finally:
+        conn.close()
+    assert {r["id"] for r in strict} == {"t-pub"}, "в разноске кросс-строке делать нечего"
     assert owner(scope_mod).tx_sql() == ("", []), "владельцу фильтр не навешивается"
 
 
@@ -157,3 +167,72 @@ def test_account_meta_endpoint_is_owner_only(scope_mod, monkeypatch):
         assert False, "бухгалтер-админ не должен проходить гейт"
     except HTTPException as e:
         assert e.status_code == 403
+
+
+# ── Волна 2: маска, а не сокрытие ───────────────────────────────────────────
+
+def test_clerk_sees_masked_cross_row(scope_mod):
+    """Бухгалтер видит рублёвую ногу вывода и не видит вторую."""
+    s = clerk(scope_mod)
+    row = dict(zip(("id", "date", "income", "outcome", "income_account", "outcome_account", "payee"), TX[1]))
+    assert s.visible(row), "деньги ушли с рублёвой карты — строка обязана остаться, иначе остаток не сойдётся"
+    m = s.mask(row)
+    assert m["outcome"] == 9511.5 and m["outcome_account"] == "Mir Cashback Card"
+    assert m["income"] == 0 and m["income_account"] is None
+    assert m["payee"] == scope_mod.ABROAD_LABEL
+    assert m.get("income_currency") is None, "валюта второй ноги — часть личного контура"
+    assert m["abroad"] is True
+
+
+def test_owner_row_is_not_masked(scope_mod):
+    row = dict(zip(("id", "date", "income", "outcome", "income_account", "outcome_account", "payee"), TX[1]))
+    m = owner(scope_mod).mask(row)
+    assert m["income"] == 300.0 and m["income_account"] == "Сола ₾"
+
+
+def test_private_internal_row_stays_hidden(scope_mod):
+    row = dict(zip(("id", "date", "income", "outcome", "income_account", "outcome_account", "payee"), TX[2]))
+    assert not clerk(scope_mod).visible(row), "трата в кафе Тбилиси бухгалтеру не видна"
+
+
+def test_mask_does_not_turn_transfer_into_expense(scope_mod, monkeypatch):
+    """🔒 Классифицируй → агрегируй → маскируй.
+
+    Если замаскировать раньше агрегата, вывод себе за границу встанет
+    бухгалтеру в расходы по категориям (income=0 — признак расхода везде)."""
+    monkeypatch.delenv("FIRMA_PRIVATE_OWNERS", raising=False)
+    from routers import zenmoney as zr
+    clerk_user = {"email": "nekrasovael@mail.ru", "role": "admin"}
+    rep = zr.get_report(month="2026-07", currency="RUB", user=clerk_user)
+    assert rep["expenses"] == 0, "вывод себе за границу — не расход"
+    assert rep["transfers"] == 9511.5, "он перевод, и остаётся переводом"
+    assert all(c["category"] != scope_mod.ABROAD_LABEL for c in rep["categories"])
+
+
+def test_abroad_summary_same_for_clerk_and_owner(scope_mod, monkeypatch):
+    monkeypatch.delenv("FIRMA_PRIVATE_OWNERS", raising=False)
+    from routers import finance as fr
+    owner_user = {"email": "yuranek@pbpb.club", "role": "admin"}
+    clerk_user = {"email": "nekrasovael@mail.ru", "role": "admin"}
+    a = fr.abroad_summary(months=12, user=owner_user)
+    b = fr.abroad_summary(months=12, user=clerk_user)
+    assert a["total"] == b["total"] == 9511.5
+    assert b["rows"] and all("amount_rub" in r and "date" in r for r in b["rows"])
+    assert all("currency" not in r and "received" not in r for r in b["rows"]), "из-за границы не отдаём ничего"
+
+
+def test_zen_inbox_runs_and_skips_foreign_rows(scope_mod, monkeypatch):
+    """Инбокс разноски: рублёвые публичные строки и ничего заграничного.
+
+    Тест существует потому, что zen-ветка инбокса — единственное место, где
+    «перевод себе» и валютный фильтр стоят рядом с постраничным обходом:
+    22.09.2026 переменная правил там оказалась объявлена в соседней ветке,
+    и ручка падала 500 на живом сервере, а не в тестах."""
+    monkeypatch.delenv("FIRMA_PRIVATE_OWNERS", raising=False)
+    from routers import expenses as er
+    for who in ({"email": "yuranek@pbpb.club", "role": "admin"},
+                {"email": "nekrasovael@mail.ru", "role": "admin"}):
+        res = er.inbox(source="zen", date_from="2026-01-01", limit=50, user=who)
+        items = res["items"] if isinstance(res, dict) else res
+        assert all("Universal" not in str(i.get("account") or "") for i in items)
+        assert all(i.get("amount") for i in items)

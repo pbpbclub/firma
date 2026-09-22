@@ -155,7 +155,6 @@ OWN_TRANSFER_SQL = "(purpose LIKE '%еревод собственных%' OR pur
 # ZenMoney: переводы себе на карты ВНЕ ZenMoney (Райффайзен и т.п.) выглядят
 # расходом с получателем-Юрой без парной ноги. Матчить payee ТОЧНО — рядом
 # есть чужой «Юрий Николаевич Г.».
-ZEN_OWN_PAYEES = {"Юрий Владимирович Н", "Юрий Владимирович Н.", "Юрий Н.", "IURII N."}
 
 # Под-категории личных трат (градация «Личное» в Разноске). «Прочее» — фолбэк
 # для неразмеченного. Держать в синхроне с PERSONAL_SUBCATS во фронте (ExpensesInbox.tsx).
@@ -256,6 +255,56 @@ def _transfer_tx_ids() -> set:
         }
     finally:
         conn.close()
+
+
+@router.get("/abroad-summary")
+def abroad_summary(months: int = Query(12, le=36), user=Depends(get_current_user)):
+    """Сколько ушло себе за границу — по месяцам и строками, в рублях.
+
+    Видно всем, включая бухгалтера (решение Юры 22.09.2026): деньги уходят
+    с рублёвой карты, и без этой строки у неё не сойдётся остаток. НЕ отдаём
+    ничего из-за границы: ни счёта получения, ни пришедшей суммы, ни курса,
+    ни маршрута — это личный контур владельца."""
+    from db import get_zenmoney
+    from zm_scope import scope_for
+    scope = scope_for(user)
+    conn = get_zenmoney()
+    try:
+        rows = conn.execute(
+            "SELECT id, date, income, outcome, income_account, outcome_account"
+            " FROM zm_transactions WHERE deleted = 0 ORDER BY date DESC"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    by_month: dict[str, dict] = {}
+    items = []
+    for r in rows:
+        # Считаем ТОЛЬКО ногу, пересекающую границу: внутрироссийский шаг
+        # (Т-Банк → Райффайзен) и конвертации внутри заграничных счетов сюда
+        # не идут — иначе один вывод посчитается дважды.
+        if scope.classify(r) != "cross_out":
+            continue
+        if scope.row_currency(r, "outcome") != "RUB":
+            continue
+        amount = round(r["outcome"] or 0, 2)
+        period = (r["date"] or "")[:7]
+        if not period:
+            continue
+        slot = by_month.setdefault(period, {"period": period, "amount_rub": 0.0, "count": 0})
+        slot["amount_rub"] = round(slot["amount_rub"] + amount, 2)
+        slot["count"] += 1
+        items.append({"id": str(r["id"]), "date": r["date"], "amount_rub": amount})
+
+    periods = sorted(by_month.values(), key=lambda m: m["period"])[-months:]
+    keep = {p["period"] for p in periods}
+    items = [i for i in items if (i["date"] or "")[:7] in keep]
+    return {
+        "months": periods,
+        "rows": items,
+        "total": round(sum(p["amount_rub"] for p in periods), 2),
+        "count": sum(p["count"] for p in periods),
+    }
 
 
 @router.get("/alloc-map")
@@ -491,11 +540,15 @@ def recurring_summary():
 
 @router.get("/personal-spending")
 def personal_spending():
-    """Личная статистика Юры (не бизнес): (1) переводы на Райффайзен — ZM-оттоки
-    на карты вне ZenMoney (ZEN_OWN_PAYEES), личный расход-прокси; (2) помеченное
-    «Личное» в Разноске — разовый скрыв (inbox_dismissed.reason='Личное') и
-    правило (payee_rules.entity_type='personal'). Read-only, на бизнес-цифры не
-    влияет. Контуры непересекающиеся: Райффайзен-переводы исключены из bucket B."""
+    """Личная статистика Юры (не бизнес): (1) переводы себе — ZM-оттоки владельцу
+    (payee_rules.entity_type='self') плюс переводы, пересекающие границу; (2)
+    помеченное «Личное» в Разноске — разовый скрыв (inbox_dismissed.reason='Личное')
+    и правило (payee_rules.entity_type='personal'). Read-only, на бизнес-цифры не
+    влияет. Контуры непересекающиеся: переводы себе исключены из bucket B.
+
+    Признак «перевод себе» с 22.09.2026 ОДИН — `payee_rules.entity_type='self'`
+    (список правит Юра в «Правилах плательщиков»). Отдельного ZEN_OWN_PAYEES
+    больше нет: пятая правда о переводе себе умерла, шестая не заводится."""
     from datetime import date as _date
     today = _date.today()
     cur_month = today.strftime("%Y-%m")
@@ -505,7 +558,8 @@ def personal_spending():
     six_months_ago = f"{y}-{m:02d}-01"
     # Райффайзен-переводы + помеченное личным с градацией по под-категориям.
     # Ключ под-категории: "sub:{Название}"; в UI строка «Личное · {Название}».
-    cats = {"raiffeisen": {"key": "raiffeisen", "label": "Переводы на Райффайзен"}}
+    cats = {"raiffeisen": {"key": "raiffeisen", "label": "Переводы себе"},
+            "abroad": {"key": "abroad", "label": "Себе за границу"}}
     for sc in PERSONAL_SUBCATS:
         cats[f"sub:{sc}"] = {"key": f"sub:{sc}", "label": f"Личное · {sc}"}
     for c in cats.values():
@@ -525,8 +579,10 @@ def personal_spending():
         return f"sub:{sc}" if f"sub:{sc}" in cats else "sub:Прочее"
 
     # personal-правила (pattern → под-категория) + разовые dismiss «Личное[: субкат]»
+    from alloc_map import is_self, self_patterns
     prod = get_production()
     try:
+        selfp = self_patterns(prod)
         personal_patterns = {
             (r["pattern"] or "").strip().lower(): (r["category"] or "").strip() or "Прочее"
             for r in prod.execute(
@@ -560,12 +616,22 @@ def personal_spending():
                 continue
             payee = (r["payee"] or "").strip()
             amount = r["outcome"] or 0
-            if payee in ZEN_OWN_PAYEES:
+            if is_self(payee, selfp):
                 add("raiffeisen", r["date"], amount)
             elif payee.lower() in personal_patterns:
                 add(sub_key(personal_patterns[payee.lower()]), r["date"], amount)
             elif str(r["id"]) in dismissed_zen:
                 add(sub_key(dismissed_zen[str(r["id"])]), r["date"], amount)
+
+        # Вывод себе за границу — отдельной строкой и ТОЛЬКО ногой, пересекающей
+        # границу: внутрироссийский шаг уже посчитан выше как «перевод себе»,
+        # а конвертации внутри заграничных счетов сюда не идут вовсе.
+        for r in zconn.execute(
+            "SELECT id, date, income, outcome, income_account, outcome_account FROM zm_transactions "
+            "WHERE deleted = 0 AND income > 0 AND outcome > 0"
+        ):
+            if zscope.classify(r) == "cross_out" and zscope.row_currency(r, "outcome") == "RUB":
+                add("abroad", r["date"], r["outcome"] or 0)
     finally:
         zconn.close()
 

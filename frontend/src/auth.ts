@@ -6,6 +6,11 @@ export interface User {
   email: string;
   name: string;
   role: "admin" | "viewer";
+  // Личный заграничный контур. Вычисляется на сервере (privacy.py) и в auth.db
+  // не хранится: роль границей приватности быть не может — admin завёл бы себе
+  // нового пользователя с любой ролью. Здесь флаг нужен только чтобы не рисовать
+  // лишние пункты меню; защита — на сервере.
+  is_owner?: boolean;
 }
 
 export function getToken(): string | null {
