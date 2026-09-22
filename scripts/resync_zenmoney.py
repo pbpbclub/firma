@@ -14,14 +14,14 @@
 - меняем ровно одно поле `zm_meta.server_ts`, сам импорт делает их скрипт
   (`/opt/fin-agent/tools/zenmoney.py sync` — тот же, что дёргает кнопка
   «Синхронизировать» в интерфейсе);
-- перед записью кладём копию файла рядом;
+- перед записью кладём копию базы рядом (родной `backup()`, а не копия файла:
+  база в WAL, и `shutil.copy2` дал бы снимок без последних коммитов);
 - отказываемся работать, если счета ещё не переименованы: пересинк тогда
   ничего не изменит, а полный проход по API незачем гонять впустую.
 
     python3 scripts/resync_zenmoney.py            # только проверка
     python3 scripts/resync_zenmoney.py --apply    # пересинк
 """
-import shutil
 import sqlite3
 import subprocess
 import sys
@@ -71,7 +71,16 @@ def main() -> int:
         return 0
 
     backup = ZEN.with_name(f"zenmoney.before-resync-{datetime.now():%Y%m%d-%H%M}.db")
-    shutil.copy2(ZEN, backup)
+    # 🔒 База в WAL: часть коммитов живёт в `-wal`, и копирование одного файла
+    # (shutil.copy2) даёт снимок без последних транзакций — страховку, которая
+    # не восстановит. Копия делается родным backup() — он забирает и WAL.
+    src = sqlite3.connect(f"file:{ZEN}?mode=ro", uri=True, timeout=15)
+    dst = sqlite3.connect(backup)
+    try:
+        src.backup(dst)
+    finally:
+        dst.close()
+        src.close()
     print(f"Копия: {backup}")
 
     w = sqlite3.connect(ZEN, timeout=30)

@@ -63,11 +63,16 @@ def region_transactions(
     limit: int = Query(300, le=2000),
     user=Depends(require_owner),
 ):
-    """Лента операций по картам региона."""
+    """Лента операций по картам региона.
+
+    `capped` — выборка упёрлась в потолок SQL (`abroad.ROW_CAP`): `total_found`
+    тогда считает не весь период, а его хвост. `truncated` — про страницу
+    (`limit`), это разные вещи и на экране пишутся по-разному."""
     scope = scope_for(user)
     rows = abroad.fetch_rows(scope, code, date_from=date_from or _months_ago(months),
-                             date_to=date_to, search=search, limit=20000)
-    items = abroad.decorate(rows, scope, abroad.load_rules())
+                             date_to=date_to, search=search, limit=abroad.ROW_CAP)
+    capped = abroad.capped(rows)
+    items = abroad.decorate(rows, scope, abroad.load_rules(), abroad.region_titles(scope, code))
     if category:
         # Категория есть только у трат: приход и конвертация не «прочее»,
         # у них категории нет вовсе — иначе фильтр «Прочее» собирал бы переводы.
@@ -82,17 +87,27 @@ def region_transactions(
         items = [i for i in items if i["amount"] <= amount_max]
     truncated = len(items) > limit
     return {"items": items[:limit], "truncated": truncated, "total_found": len(items),
+            "capped": capped, "row_cap": abroad.ROW_CAP,
             "titles": abroad.region_titles(scope, code)}
 
 
 @router.get("/{code}/spending")
-def region_spending(code: str, months: int = Query(6, le=36), user=Depends(require_owner)):
-    """Аналитика: месяц к месяцу, категории, топ получателей, регулярные списания."""
+def region_spending(code: str, months: int = Query(6, le=36), currency: str | None = None,
+                    user=Depends(require_owner)):
+    """Аналитика: месяц к месяцу, категории, топ получателей, регулярные списания.
+
+    `currency` — по какой валюте считать (`unknown` — строки без разделённой
+    валюты). Не передан и валют несколько → берётся самая крупная, признак
+    `currency_auto`: складывать лари с долларами в один итог нельзя."""
     scope = scope_for(user)
-    rows = abroad.fetch_rows(scope, code, date_from=_months_ago(months), limit=20000)
-    items = abroad.decorate(rows, scope, abroad.load_rules())
-    res = abroad.spending(items)
+    rows = abroad.fetch_rows(scope, code, date_from=_months_ago(months), limit=abroad.ROW_CAP)
+    items = abroad.decorate(rows, scope, abroad.load_rules(), abroad.region_titles(scope, code))
+    res = abroad.spending(items, currency=currency)
     res["months_requested"] = months
+    # Упёрлись в потолок выборки — сводка посчитана по хвосту периода, а не по
+    # всему окну: экран обязан это сказать, иначе цифры читаются как полные.
+    res["capped"] = abroad.capped(rows)
+    res["row_cap"] = abroad.ROW_CAP
     res["ambiguous_accounts"] = sum(1 for a in scope.accounts(include_cash=True)
                                     if a.region == code and a.ambiguous)
     return res
@@ -103,8 +118,8 @@ def region_categories(code: str, months: int = Query(6, le=36), user=Depends(req
     """Справочник + сколько операций в каждой категории за период (чтобы видеть,
     насколько «Прочее» велико и что пора разметить)."""
     scope = scope_for(user)
-    rows = abroad.fetch_rows(scope, code, date_from=_months_ago(months), limit=20000)
-    items = abroad.decorate(rows, scope, abroad.load_rules())
+    rows = abroad.fetch_rows(scope, code, date_from=_months_ago(months), limit=abroad.ROW_CAP)
+    items = abroad.decorate(rows, scope, abroad.load_rules(), abroad.region_titles(scope, code))
     used: dict[str, int] = {}
     for i in items:
         if i["kind"] == "expense":
@@ -114,6 +129,11 @@ def region_categories(code: str, months: int = Query(6, le=36), user=Depends(req
 
 @router.get("/{code}/rules")
 def region_rules(code: str, user=Depends(require_owner)):
+    """⚠ Справочник правил ОБЩИЙ на все регионы: в `abroad_payee_rules` региона
+    нет, `code` в пути — только адрес страницы. Значит, правило, заведённое или
+    снятое на странице Турции, перекрашивает и историю Грузии. Пока регион один,
+    это не мешает; разделять — только решением Юры (миграция + судьба уже
+    заведённых правил: общие или грузинские)."""
     return abroad.load_rules()
 
 

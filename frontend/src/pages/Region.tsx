@@ -134,6 +134,16 @@ export default function Region() {
         {code === "ge" ? "Грузия" : code.toUpperCase()}
       </h1>
 
+      {/* Курс не обновился: показываем последний загруженный, а не выдаём его за сегодняшний */}
+      {signal?.fx_refresh && signal.fx_refresh.ok === false && (
+        <div style={{ marginTop: 14, padding: "10px 12px", border: "1px solid #EDEBE6", background: "#FAF8F5",
+                      fontSize: 12, color: "#6B6355", lineHeight: 1.5, maxWidth: 760 }}>
+          <b style={{ color: "#8B3A3A" }}>Курс сегодня не загрузился</b> — Нацбанк не ответил
+          ({signal.fx_refresh.error || "сеть недоступна"}). Ниже последний сохранённый курс
+          за {signal?.date || "—"}, сегодняшним он не является.
+        </div>
+      )}
+
       {/* Одинаковые названия счетов: честно говорим, что именно из-за этого не работает */}
       {!!signal?.ambiguous?.length && (
         <div style={{ marginTop: 14, padding: "10px 12px", border: "1px solid #EDEBE6", background: "#FAF8F5",
@@ -384,7 +394,16 @@ function TxTab({ code, who }: { code: string; who: string }) {
 
       <div style={{ padding: "8px 0", fontSize: 11, color: "#6B6355", display: "flex",
                     justifyContent: "space-between", borderBottom: "1px solid #F2EFE9" }}>
-        <span>{data?.total_found ?? 0} операций{data?.truncated ? " · показаны первые 400" : ""}</span>
+        <span>
+          {data?.total_found ?? 0} операций{data?.truncated ? " · показаны первые 400" : ""}
+          {/* Обрезание на уровне SQL: период показан не целиком, и счётчик слева —
+              только по последним строкам. Молчать об этом нельзя. */}
+          {data?.capped && (
+            <span style={{ color: "#B8860B" }}>
+              {" "}· период обрезан: взяты последние {data.row_cap} операций
+            </span>
+          )}
+        </span>
         {hasFilters && (
           <button type="button" onClick={() => {
             setSearch(""); setCategory(""); setKind(""); setDateFrom(""); setDateTo("");
@@ -463,8 +482,12 @@ function TxTab({ code, who }: { code: string; who: string }) {
 function StatsTab({ code, who }: { code: string; who: string }) {
   const isMobile = useIsMobile();
   const [months, setMonths] = useState(6);
+  // Валюта считается отдельно: складывать лари с долларами нельзя, поэтому
+  // сводка всегда про ОДНУ валюту, а переключатель показывает, какие есть.
+  const [curFilter, setCurFilter] = useState<string | null>(null);
   const { data, isLoading } = useQuery({
-    queryKey: ["region-stats", code, who, months], queryFn: () => regionsApi.spending(code, months),
+    queryKey: ["region-stats", code, who, months, curFilter],
+    queryFn: () => regionsApi.spending(code, months, curFilter),
   });
   if (isLoading) return <Loading />;
 
@@ -504,10 +527,40 @@ function StatsTab({ code, who }: { code: string; who: string }) {
         ))}
       </div>
 
+      {/* Валюты периода: итог всегда по одной из них */}
+      {(data?.by_currency ?? []).length > 1 && (
+        <div style={{ display: "flex", gap: 6, marginBottom: 14, alignItems: "center", flexWrap: "wrap",
+                      ...(isMobile ? M.tabStrip : null) }}>
+          {(data?.by_currency ?? []).map((g: any) => {
+            const on = (data?.currency_filter ?? null) === g.key;
+            return (
+              <button key={g.key} type="button" onClick={() => setCurFilter(g.key)}
+                style={{ padding: "4px 10px", fontSize: 11, fontFamily: "inherit", cursor: "pointer", flexShrink: 0,
+                         border: `1px solid ${on ? "#E8592A" : "#EDEBE6"}`,
+                         background: on ? "#FFF8F5" : "none", color: on ? "#1A1A1A" : "#A89070" }}>
+                {g.currency ?? "без валюты"} · {g.count}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       <div style={LABEL}>ПОТРАЧЕНО ЗА {months} МЕС · {data?.count ?? 0} ОПЕРАЦИЙ</div>
       <div style={{ fontSize: 26, fontWeight: 700, fontFamily: MONO, letterSpacing: "-0.03em", marginTop: 4 }}>
         {fmtAmount(spent, cur)}
       </div>
+      {(data?.by_currency ?? []).length > 1 && (
+        <div style={{ marginTop: 6, fontSize: 11, color: "#6B6355", lineHeight: 1.5, maxWidth: 620 }}>
+          Итог, столбики и получатели — только по выбранной валюте: суммы разных валют
+          не складываются. Остальные валюты — переключателем выше.
+        </div>
+      )}
+      {data?.capped && (
+        <div style={{ marginTop: 6, fontSize: 11, color: "#B8860B", lineHeight: 1.5, maxWidth: 620 }}>
+          Период обрезан: в расчёт взяты последние {data.row_cap} операций, а не всё окно —
+          итог и столбики месяцев неполные. Сузь период.
+        </div>
+      )}
       {mixed && (
         <div style={{ marginTop: 6, fontSize: 11, color: "#B8860B", lineHeight: 1.5, maxWidth: 620 }}>
           Валюта операций пока не разделена: в суммах смешаны лари и доллары. Знак валюты

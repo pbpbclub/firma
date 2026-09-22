@@ -23,6 +23,11 @@ from db import get_production, get_zenmoney
 CASH_COMMENT = "cash withdrawal"
 FALLBACK = "other"
 
+# Потолок выборки из zm_transactions на один запрос. LIMIT режет строки ДО
+# python-фильтров ленты, поэтому упёршийся потолок обязан доезжать до экрана
+# признаком (`capped`), а не читаться как полная история периода.
+ROW_CAP = 20000
+
 
 # ── справочник ───────────────────────────────────────────────────────────────
 
@@ -110,14 +115,34 @@ def fetch_rows(scope, code: str, date_from: str | None = None, date_to: str | No
         conn.close()
 
 
-def decorate(rows: list[dict], scope, rules: list[dict]) -> list[dict]:
-    """Строка → вид для ленты: направление, сумма, валюта (если известна), категория."""
+def capped(rows: list[dict]) -> bool:
+    """Упёрлась ли выборка в потолок SQL. Ровно ROW_CAP строк считаем обрезанием
+    (лучше лишняя плашка, чем молча укороченный период)."""
+    return len(rows) >= ROW_CAP
+
+
+def decorate(rows: list[dict], scope, rules: list[dict], titles: list[str] | None = None) -> list[dict]:
+    """Строка → вид для ленты: направление, сумма, валюта (если известна), категория.
+
+    🔒 У двуногой строки нога выбирается по ПРИНАДЛЕЖНОСТИ счёта региону, а не по
+    знаку сумм. Пополнение грузинской карты с рублёвого счёта — одна строка
+    (`ушло 9 511,50 ₽ с Райффайзена, пришло 300 ₾`): фиксированный `side='outcome'`
+    подставлял бы в ленту региона рублёвую сумму, рублёвую валюту и чужой счёт.
+    `titles` — названия счетов региона (`region_titles`); без них поведение прежнее.
+    """
     cats = {c["code"]: c["title"] for c in categories()}
+    own = set(titles or [])
     out = []
     for r in rows:
         inc, out_ = r.get("income") or 0, r.get("outcome") or 0
+        out_acc, in_acc = r.get("outcome_account"), r.get("income_account")
         if inc > 0 and out_ > 0:
-            kind, amount, side = "transfer", out_, "outcome"
+            # Обе ноги свои (обмен внутри региона) либо региона не знаем — прежняя
+            # нога расхода; иначе берём ту, что принадлежит региону.
+            if own and in_acc in own and out_acc not in own:
+                kind, amount, side = "transfer", inc, "income"
+            else:
+                kind, amount, side = "transfer", out_, "outcome"
         elif out_ > 0:
             kind, amount, side = "expense", out_, "outcome"
         else:
@@ -136,7 +161,7 @@ def decorate(rows: list[dict], scope, rules: list[dict]) -> list[dict]:
             "payee": r.get("payee"), "comment": r.get("comment"),
             "category": cat, "category_title": cats.get(cat) if cat else None,
             "zen_tag": tags[0] if tags else None,
-            "account": r.get("outcome_account") if side == "outcome" else r.get("income_account"),
+            "account": out_acc if side == "outcome" else in_acc,
         })
     return out
 
@@ -223,9 +248,39 @@ def recurring(items: list[dict], min_months: int = 3) -> list[dict]:
     return sorted(out, key=lambda x: -x["per_month"])
 
 
-def spending(items: list[dict]) -> dict:
-    """Сводка: месяц к месяцу, категории, топ получателей, регулярные списания."""
+UNKNOWN = "unknown"
+
+
+def currency_groups(items: list[dict]) -> list[dict]:
+    """Траты по валютам ноги. Ключ `unknown` — валюта ещё не разделена."""
+    agg: dict[str, dict] = {}
+    for i in items:
+        if i["kind"] != "expense":
+            continue
+        key = i["currency"] or UNKNOWN
+        slot = agg.setdefault(key, {"key": key, "currency": None if key == UNKNOWN else key,
+                                    "total": 0.0, "count": 0})
+        slot["total"] = round(slot["total"] + i["amount"], 2)
+        slot["count"] += 1
+    return sorted(agg.values(), key=lambda s: -s["total"])
+
+
+def spending(items: list[dict], currency: str | None = None) -> dict:
+    """Сводка: месяц к месяцу, категории, топ получателей, регулярные списания.
+
+    🔒 Суммы разных валют не складываются. Если в наборе больше одной валюты,
+    сводка считается ПО ОДНОЙ из них (самой крупной, `currency_auto`), а остальные
+    перечислены в `by_currency` — переключатель на экране. Иначе доллары
+    (APPLE.COM/BILL, ANTHROPIC) и лари (SPAR) давали бы один бессмысленный итог,
+    и столбики месяцев с топом получателей оставались бы смешанными навсегда.
+    """
     cats = {c["code"]: c["title"] for c in categories()}
+    groups = currency_groups(items)
+    auto = False
+    if currency is None and len(groups) > 1:
+        currency, auto = groups[0]["key"], True
+    if currency:
+        items = [i for i in items if (i["currency"] or UNKNOWN) == currency]
     by_month, by_cat, by_payee = {}, {}, {}
     income_by_month: dict[str, float] = defaultdict(float)
     spent = 0.0
@@ -259,4 +314,8 @@ def spending(items: list[dict]) -> dict:
         # сказать, что суммы смешаны, а не рисовать ₾.
         "currency": next(iter(known)) if len(known) == 1 and not any(c is None for c in currencies) else None,
         "currency_split": bool(known) and not any(c is None for c in currencies),
+        # Какие валюты вообще есть в периоде и по какой посчитана эта сводка.
+        "by_currency": groups,
+        "currency_filter": currency,
+        "currency_auto": auto,
     }
