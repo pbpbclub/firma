@@ -2362,3 +2362,115 @@ def ensure_fx_rates_schema():
         conn.commit()
     finally:
         conn.close()
+
+
+def ensure_abroad_categories_schema():
+    """Справочник категорий заграничных трат (решение Юры 22.09.2026).
+
+    Почему свой, а не теги ZenMoney: у грузинской карты тег пустой у 59% расходов,
+    а непустой — шумовой (`Entertainment` висит на SPAR и Nikora, это дефолт банка,
+    а не категория). Зато `payee` плотный и осмысленный, поэтому категория выводится
+    из получателя, как в `payee_rules`, но ОТДЕЛЬНОЙ таблицей: те правила ведут
+    бизнес-разноску, мешать личные траты за границей с подрядчиками нельзя.
+
+    Сид идёт INSERT OR IGNORE — правки Юры из интерфейса рестарт не перетирает
+    (тот же приём, что `ensure_self_transfer_rules`).
+    """
+    conn = get_production()
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS abroad_categories (
+                code       TEXT PRIMARY KEY,
+                title      TEXT NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                active     INTEGER NOT NULL DEFAULT 1
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS abroad_payee_rules (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                pattern    TEXT NOT NULL,
+                match_type TEXT NOT NULL DEFAULT 'contains'
+                           CHECK (match_type IN ('exact', 'prefix', 'contains')),
+                category   TEXT NOT NULL,
+                note       TEXT,
+                created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT
+            )
+        """)
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_abroad_rule ON abroad_payee_rules(pattern, match_type)")
+
+        cats = [
+            ("groceries",     "Продукты",            10),
+            ("cafe",          "Кафе и бары",         20),
+            ("delivery",      "Доставка еды",        30),
+            ("transport",     "Транспорт",           40),
+            ("health",        "Здоровье",            50),
+            ("subscriptions", "Подписки и сервисы",  60),
+            ("home",          "Дом и связь",         70),
+            ("shopping",      "Покупки",             80),
+            ("cash",          "Снятие наличных",     90),
+            ("housing",       "Жильё",              100),
+            ("entertainment", "Развлечения",        110),
+            ("travel",        "Поездки",            120),
+            ("people",        "Людям и услуги",     130),
+            ("other",         "Прочее",             999),
+        ]
+        for code, title, order in cats:
+            conn.execute("INSERT OR IGNORE INTO abroad_categories (code, title, sort_order) VALUES (?, ?, ?)",
+                         (code, title, order))
+
+        # Стартовые правила — по РЕАЛЬНЫМ получателям из базы (топ-60 по частоте,
+        # 01.03–22.09.2026). Паттерн хранится в нижнем регистре, сравнение по payee.
+        rules = [
+            # продукты
+            ("spar", "groceries"), ("nikora", "groceries"), ("bear market", "groceries"),
+            ("europroduct", "groceries"), ("carrefour", "groceries"), ("asian market", "groceries"),
+            ("veji shop", "groceries"), ("ori nabiji", "groceries"), ("alcosphero", "groceries"),
+            ("goodwille", "groceries"), ("goodwill", "groceries"), ("fresco", "groceries"),
+            ("market", "groceries"), ("agrohub", "groceries"), ("boomerang wines", "groceries"),
+            ("wine", "groceries"), ("magnit", "groceries"),
+            # кафе и бары
+            ("bnkr caffee", "cafe"), ("kitchen bon", "cafe"), ("mimosa bar", "cafe"),
+            ("mimoza bar", "cafe"), ("opiumi", "cafe"), ("secret place", "cafe"),
+            ("craft beer", "cafe"), ("beer bar", "cafe"), ("entree", "cafe"),
+            ("mukhudo", "cafe"), ("muhudo", "cafe"), ("tea house", "cafe"),
+            ("fire and noise", "cafe"), ("rhyme 2018", "cafe"), ("caffe", "cafe"),
+            ("coffee", "cafe"), ("restaurant", "cafe"),
+            # доставка
+            ("wolt", "delivery"), ("glovo", "delivery"),
+            # транспорт
+            ("yandex go", "transport"), ("yandex.go", "transport"), ("bolttaxi", "transport"),
+            ("taximaxim", "transport"), ("toplu tasima", "transport"), ("metro", "transport"),
+            # здоровье
+            ("pharmadepot", "health"), ("aversi", "health"), ("psp", "health"), ("gpc", "health"),
+            # подписки и сервисы
+            ("apple.com/bill", "subscriptions"), ("openai", "subscriptions"),
+            ("anthropic", "subscriptions"), ("google *", "subscriptions"),
+            ("lovable", "subscriptions"), ("youtubepremium", "subscriptions"),
+            ("spotify", "subscriptions"), ("telegram", "subscriptions"),
+            # дом и связь
+            ("magticom", "home"), ("silknet", "home"), ("clean house", "home"),
+            ("lampionebi", "home"),
+            # покупки
+            ("temu.com", "shopping"), ("avm", "shopping"), ("shop marina", "shopping"),
+            ("zara", "shopping"), ("ikea", "shopping"), ("h and m", "shopping"),
+            ("tradeinn", "shopping"),
+            # развлечения и поездки
+            ("tkt.ge", "entertainment"), ("chateau", "entertainment"),
+            ("cinema", "entertainment"), ("hotel", "travel"), ("booking", "travel"),
+            ("airlines", "travel"), ("aviasales", "travel"),
+            # снятие наличных — отдельная ветка ещё и по comment='Cash withdrawal'
+            ("bank of georgia", "cash"),
+            # переводы людям: транслитерация ИП и физлиц в выписке BOG
+            ("i/e ", "people"), ("p/e ", "people"), ("i.m ", "people"), ("i/m ", "people"),
+            ("shps ", "people"), ("llc ", "people"), ("ltd ", "people"),
+        ]
+        for pattern, cat in rules:
+            conn.execute(
+                "INSERT OR IGNORE INTO abroad_payee_rules (pattern, match_type, category, note)"
+                " VALUES (?, 'contains', ?, 'стартовый набор 22.09.2026')",
+                (pattern, cat))
+        conn.commit()
+    finally:
+        conn.close()

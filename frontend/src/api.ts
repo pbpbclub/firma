@@ -471,6 +471,23 @@ export const workTypesApi = {
     api.post(`/work-types/${workTypeId}/masters/${masterId}`).then((r) => r.data),
 };
 
+// Заграничный контур: операции по картам региона, категории трат, правила.
+// Все ручки закрыты владельцем на сервере (privacy.require_owner).
+export const regionsApi = {
+  list: () => api.get("/regions").then((r) => r.data),
+  transactions: (code: string, params?: Record<string, string | number>) =>
+    api.get(`/regions/${code}/transactions`, { params }).then((r) => r.data),
+  spending: (code: string, months = 6) =>
+    api.get(`/regions/${code}/spending`, { params: { months } }).then((r) => r.data),
+  categories: (code: string, months = 6) =>
+    api.get(`/regions/${code}/categories`, { params: { months } }).then((r) => r.data),
+  rules: (code: string) => api.get(`/regions/${code}/rules`).then((r) => r.data),
+  addRule: (code: string, body: { payee?: string; pattern?: string; category: string; match_type?: string }) =>
+    api.post(`/regions/${code}/rules`, body).then((r) => r.data),
+  deleteRule: (code: string, id: number) =>
+    api.delete(`/regions/${code}/rules/${id}`).then((r) => r.data),
+};
+
 // Курсы Нацбанка Грузии и сигнал обмена (личный заграничный контур).
 export const fxApi = {
   series: (base = "USD", quote = "GEL", days = 90) =>

@@ -9,14 +9,26 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
-import { fxApi, financeApi, zenmoneyApi } from "../api";
+import { fxApi, financeApi, regionsApi, zenmoneyApi } from "../api";
 import { useMe } from "../auth";
 import { Loading } from "../components/ui/Loading";
 import { MONO } from "../components/ui/Num";
 import { fmtAmount, currencySign } from "../components/ui/format";
 import { useIsMobile, M } from "../components/ui/responsive";
+import { RowCard } from "../components/ui/RowCard";
+import { ColumnFilter, PeriodFilter, AmountFilter } from "../components/TableFilters";
+import { Modal } from "../components/ui/Modal";
 
 const LABEL: React.CSSProperties = { fontSize: 10, color: "#A89070", letterSpacing: "0.06em" };
+
+const MONTH_RU = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+// «2026-03» → «мар»; у января добавляем год, иначе граница лет не читается.
+function monthLabel(period: string): string {
+  const [y, m] = (period || "").split("-");
+  const idx = Number(m) - 1;
+  if (idx < 0 || idx > 11) return period;
+  return idx === 0 ? `${MONTH_RU[idx]} ${String(y).slice(2)}` : MONTH_RU[idx];
+}
 
 const VERDICT: Record<string, { text: string; color: string }> = {
   good:    { text: "Сегодня менять выгодно", color: "#4A7C59" },
@@ -67,6 +79,9 @@ export default function Region() {
   const who = user?.email || "";
   const isOwner = !!user?.is_owner;
   const [reserve, setReserve] = useState<string>("");
+  // Взаимоисключающие режимы экрана — одно состояние, а не три булевых:
+  // иначе вкладка меняет свой фильтр, но не гасит чужой режим.
+  const [tab, setTab] = useState<"fx" | "tx" | "stats">("fx");
 
   const { data: signal, isLoading } = useQuery({
     queryKey: ["fx-signal", who], queryFn: fxApi.signal,
@@ -131,6 +146,27 @@ export default function Region() {
         </div>
       )}
 
+      {/* Вкладки: курс · операции · аналитика */}
+      <div style={{ display: "flex", gap: 0, marginTop: 18, borderBottom: "1px solid #EDEBE6",
+                    ...(isMobile ? M.tabStrip : null) }}>
+        {([["fx", "Обмен"], ["tx", "Операции"], ["stats", "Аналитика"]] as const).map(([key, label]) => (
+          <button key={key} type="button" onClick={() => setTab(key)}
+            style={{
+              padding: "8px 14px", fontSize: 13, fontFamily: "inherit", cursor: "pointer",
+              background: "none", border: "none", flexShrink: 0,
+              color: tab === key ? "#1A1A1A" : "#A89070",
+              fontWeight: tab === key ? 600 : 400,
+              borderBottom: tab === key ? "2px solid #E8592A" : "2px solid transparent",
+            }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "tx" && <TxTab code={code} who={who} />}
+      {tab === "stats" && <StatsTab code={code} who={who} />}
+
+      {tab === "fx" && (<>
       {/* ── Обмен: главный блок ────────────────────────────────────────── */}
       <div style={{ marginTop: 26 }}>
         <div style={LABEL}>ОБМЕН ДОЛЛАРОВ НА ЛАРИ</div>
@@ -244,10 +280,289 @@ export default function Region() {
               <div title={`${m.period}: ${fmtAmount(m.amount_rub, "RUB")} · ${m.count}`}
                 style={{ width: isMobile ? 18 : 26, background: "#E8592A",
                          height: Math.max(Math.round((m.amount_rub / maxMonth) * 50), 2) }} />
-              <span style={{ fontSize: 9, color: "#A89070" }}>{m.period.slice(5)}</span>
+              <span style={{ fontSize: 9, color: "#A89070" }}>{monthLabel(m.period)}</span>
             </div>
           ))}
         </div>
+      </div>
+      </>)}
+    </div>
+  );
+}
+
+// ── Операции по карте региона ────────────────────────────────────────────────
+// Категория не хранится в строке, а выводится на чтении из правил «получатель →
+// категория». Поэтому разметка одного получателя перекрашивает сразу все его
+// операции, включая прошлогодние, — перебирать ленту руками не нужно.
+const TX_GRID = "74px 1fr 150px 110px";
+
+function TxTab({ code, who }: { code: string; who: string }) {
+  const isMobile = useIsMobile();
+  const qc = useQueryClient();
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("");
+  const [kind, setKind] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [amountMin, setAmountMin] = useState("");
+  const [amountMax, setAmountMax] = useState("");
+  const [assign, setAssign] = useState<{ payee: string; current: string | null } | null>(null);
+
+  const { data: cats = [] } = useQuery({
+    queryKey: ["region-cats", code, who], queryFn: () => regionsApi.categories(code, 12),
+  });
+  const { data, isLoading } = useQuery({
+    queryKey: ["region-tx", code, who, search, category, kind, dateFrom, dateTo, amountMin, amountMax],
+    queryFn: () => regionsApi.transactions(code, {
+      months: 12, limit: 400,
+      ...(search ? { search } : {}),
+      ...(category ? { category } : {}),
+      ...(kind ? { kind } : {}),
+      ...(dateFrom ? { date_from: dateFrom } : {}),
+      ...(dateTo ? { date_to: dateTo } : {}),
+      ...(amountMin ? { amount_min: Number(amountMin) } : {}),
+      ...(amountMax ? { amount_max: Number(amountMax) } : {}),
+    }),
+  });
+
+  const addRule = useMutation({
+    mutationFn: (body: { payee: string; category: string }) => regionsApi.addRule(code, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["region-tx", code] });
+      qc.invalidateQueries({ queryKey: ["region-cats", code] });
+      qc.invalidateQueries({ queryKey: ["region-stats", code] });
+      setAssign(null);
+    },
+  });
+
+  const items: any[] = data?.items ?? [];
+  const catTitles = ["Все", ...cats.map((c: any) => c.title)];
+  const titleToCode = Object.fromEntries(cats.map((c: any) => [c.title, c.code]));
+  const hasFilters = !!(search || category || kind || dateFrom || dateTo || amountMin || amountMax);
+
+  const KIND_RU: Record<string, string> = { expense: "трата", income: "приход", transfer: "перевод" };
+
+  return (
+    <div style={{ marginTop: 18, maxWidth: 1000 }}>
+      {/* Подвкладки направления */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 12, ...(isMobile ? M.tabStrip : null) }}>
+        {[["", "Все"], ["expense", "Траты"], ["income", "Приходы"], ["transfer", "Переводы"]].map(([k, l]) => (
+          <button key={k} type="button" onClick={() => setKind(k)}
+            style={{ padding: "4px 10px", fontSize: 11, fontFamily: "inherit", cursor: "pointer", flexShrink: 0,
+                     border: `1px solid ${kind === k ? "#E8592A" : "#EDEBE6"}`,
+                     background: kind === k ? "#E8592A" : "none",
+                     color: kind === k ? "#FFFFFF" : "#A89070" }}>{l}</button>
+        ))}
+        {!isMobile && (
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Поиск по получателю…"
+            style={{ marginLeft: 8, padding: "4px 8px", fontSize: 12, fontFamily: "inherit",
+                     border: "1px solid #EDEBE6", minWidth: 180, flexShrink: 0 }} />
+        )}
+      </div>
+
+      {/* На телефоне поиск — своей строкой: в ряду чипов он уезжал за край экрана */}
+      {isMobile && (
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Поиск по получателю…"
+          style={{ width: "100%", boxSizing: "border-box", padding: "8px 10px", fontSize: 13,
+                   fontFamily: "inherit", border: "1px solid #EDEBE6", marginBottom: 12 }} />
+      )}
+
+      {/* Шапка-фильтры: на телефоне — ряд чипов вместо грида */}
+      <div style={isMobile ? M.filterRow : {
+        display: "grid", gridTemplateColumns: TX_GRID, alignItems: "center",
+        padding: "10px 0 6px", borderBottom: "1px solid #EDEBE6",
+      }}>
+        <PeriodFilter label="ДАТА" from={dateFrom} to={dateTo}
+          onChange={(f, t) => { setDateFrom(f); setDateTo(t); }} />
+        <div style={{ ...LABEL }}>{isMobile ? "" : "ПОЛУЧАТЕЛЬ"}</div>
+        <ColumnFilter label="КАТЕГОРИЯ" options={catTitles}
+          value={cats.find((c: any) => c.code === category)?.title || ""}
+          onChange={(v) => setCategory(v === "Все" ? "" : (titleToCode[v] || ""))} />
+        <AmountFilter label="СУММА" min={amountMin} max={amountMax}
+          onChange={(mn, mx) => { setAmountMin(mn); setAmountMax(mx); }} align="right" />
+      </div>
+
+      <div style={{ padding: "8px 0", fontSize: 11, color: "#6B6355", display: "flex",
+                    justifyContent: "space-between", borderBottom: "1px solid #F2EFE9" }}>
+        <span>{data?.total_found ?? 0} операций{data?.truncated ? " · показаны первые 400" : ""}</span>
+        {hasFilters && (
+          <button type="button" onClick={() => {
+            setSearch(""); setCategory(""); setKind(""); setDateFrom(""); setDateTo("");
+            setAmountMin(""); setAmountMax("");
+          }} style={{ background: "none", border: "none", fontFamily: "inherit", fontSize: 10,
+                      color: "#E8592A", cursor: "pointer" }}>✕ Сбросить</button>
+        )}
+      </div>
+
+      {isLoading && <Loading />}
+      {!isLoading && items.length === 0 && (
+        <div style={{ padding: "24px 0", fontSize: 13, color: "#6B6355" }}>Операций не нашлось</div>
+      )}
+
+      {items.map((t: any) => {
+        const sign = t.kind === "income" ? "+" : "−";
+        const color = t.kind === "income" ? "#4A7C59" : t.kind === "transfer" ? "#6B6355" : "#1A1A1A";
+        const catCell = t.kind === "expense" ? (
+          <button type="button" onClick={() => setAssign({ payee: (t.payee || "").trim(), current: t.category })}
+            style={{ background: "none", border: "none", padding: 0, fontFamily: "inherit", fontSize: 10,
+                     cursor: "pointer", textAlign: "left",
+                     color: t.category === "other" ? "#B8860B" : "#A89070" }}>
+            {t.category_title || "назначить"}
+          </button>
+        ) : <span style={{ fontSize: 10, color: "#A89070" }}>{KIND_RU[t.kind]}</span>;
+
+        return isMobile ? (
+          <RowCard key={t.id}
+            title={t.payee || t.comment || "—"}
+            sub={<>{String(t.date || "").slice(5)}{t.comment && t.payee ? <> · {t.comment}</> : null}</>}
+            right={<span style={{ color }}>{sign}{fmtAmount(t.amount, t.currency)}</span>}
+            meta={catCell}
+          />
+        ) : (
+          <div key={t.id} style={{ display: "grid", gridTemplateColumns: TX_GRID, padding: "7px 0",
+                                   borderBottom: "1px solid #F2EFE9", alignItems: "start" }}>
+            <div style={{ fontSize: 11, color: "#6B6355", fontFamily: MONO }}>{String(t.date || "").slice(5)}</div>
+            <div>
+              <div style={{ fontSize: 12, color: "#1A1A1A" }}>{t.payee || "—"}</div>
+              {t.comment && <div style={{ fontSize: 10, color: "#A89070" }}>{t.comment}</div>}
+            </div>
+            <div>{catCell}</div>
+            <div style={{ fontSize: 12, fontWeight: 500, fontFamily: MONO, textAlign: "right", color }}>
+              {sign}{fmtAmount(t.amount, t.currency)}
+            </div>
+          </div>
+        );
+      })}
+
+      {assign && (
+        <Modal size="sm" eyebrow={`КАТЕГОРИЯ · ${(assign.payee || "без получателя").toUpperCase()}`}
+               onClose={() => setAssign(null)}>
+          <div style={{ fontSize: 12, color: "#6B6355", marginBottom: 12, lineHeight: 1.5 }}>
+            Правило запомнится и перекрасит ВСЕ операции этого получателя — прошлые тоже.
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+            {cats.map((c: any) => (
+              <button key={c.code} type="button" disabled={addRule.isPending}
+                onClick={() => addRule.mutate({ payee: assign.payee, category: c.code })}
+                style={{ padding: "8px 10px", fontSize: 12, fontFamily: "inherit", cursor: "pointer",
+                         textAlign: "left",
+                         border: `1px solid ${assign.current === c.code ? "#E8592A" : "#EDEBE6"}`,
+                         background: assign.current === c.code ? "#FFF8F5" : "#FFFFFF",
+                         color: "#1A1A1A" }}>
+                {c.title}
+              </button>
+            ))}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ── Аналитика трат ───────────────────────────────────────────────────────────
+function StatsTab({ code, who }: { code: string; who: string }) {
+  const isMobile = useIsMobile();
+  const [months, setMonths] = useState(6);
+  const { data, isLoading } = useQuery({
+    queryKey: ["region-stats", code, who, months], queryFn: () => regionsApi.spending(code, months),
+  });
+  if (isLoading) return <Loading />;
+
+  const mixed = !data?.currency_split;
+  const cur = data?.currency ?? null;
+  const maxMonth = Math.max(...(data?.months ?? []).map((m: any) => m.total), 1);
+  const spent = data?.spent ?? 0;
+
+  const Row = ({ title, total, count, extra, pct, currency }: any) => (
+    <div style={{ padding: "6px 0", borderBottom: "1px solid #F2EFE9" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, gap: 10 }}>
+        <span style={{ fontSize: 11, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis",
+                       whiteSpace: "nowrap" }}>{title}</span>
+        <span style={{ fontSize: 11, fontWeight: 500, color: "#8B3A3A", fontFamily: MONO, whiteSpace: "nowrap" }}>
+          {fmtAmount(total, currency ?? cur)}
+          {count != null && <span style={{ color: "#A89070", fontWeight: 400 }}> · {count}</span>}
+          {extra}
+        </span>
+      </div>
+      {pct != null && (
+        <div style={{ height: 2, background: "#F2EFE9" }}>
+          <div style={{ height: 2, width: `${Math.max(pct, 1)}%`, background: "#E8592A" }} />
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div style={{ marginTop: 18, maxWidth: 1000 }}>
+      <div style={{ display: "flex", gap: 6, marginBottom: 16, ...(isMobile ? M.tabStrip : null) }}>
+        {[3, 6, 12].map(m => (
+          <button key={m} type="button" onClick={() => setMonths(m)}
+            style={{ padding: "4px 10px", fontSize: 11, fontFamily: "inherit", cursor: "pointer", flexShrink: 0,
+                     border: `1px solid ${months === m ? "#E8592A" : "#EDEBE6"}`,
+                     background: months === m ? "#E8592A" : "none",
+                     color: months === m ? "#FFFFFF" : "#A89070" }}>{m} мес</button>
+        ))}
+      </div>
+
+      <div style={LABEL}>ПОТРАЧЕНО ЗА {months} МЕС · {data?.count ?? 0} ОПЕРАЦИЙ</div>
+      <div style={{ fontSize: 26, fontWeight: 700, fontFamily: MONO, letterSpacing: "-0.03em", marginTop: 4 }}>
+        {fmtAmount(spent, cur)}
+      </div>
+      {mixed && (
+        <div style={{ marginTop: 6, fontSize: 11, color: "#B8860B", lineHeight: 1.5, maxWidth: 620 }}>
+          Валюта операций пока не разделена: в суммах смешаны лари и доллары. Знак валюты
+          поэтому не ставим — станет точно после переименования счетов и пересинка.
+        </div>
+      )}
+
+      {/* Месяц к месяцу */}
+      <div style={{ marginTop: 24 }}>
+        <div style={LABEL}>МЕСЯЦ К МЕСЯЦУ</div>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: isMobile ? 6 : 10, marginTop: 12, height: 80 }}>
+          {(data?.months ?? []).map((m: any) => (
+            <div key={m.period} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+              <span style={{ fontSize: 9, color: "#6B6355", fontFamily: MONO }}>{Math.round(m.total)}</span>
+              <div title={`${m.period}: ${fmtAmount(m.total, m.currency ?? cur)} · ${m.count}`}
+                style={{ width: isMobile ? 22 : 34, background: "#E8592A",
+                         height: Math.max(Math.round((m.total / maxMonth) * 56), 2) }} />
+              <span style={{ fontSize: 9, color: "#A89070" }}>{monthLabel(m.period)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Категории */}
+      <div style={{ marginTop: 26 }}>
+        <div style={{ ...LABEL, marginBottom: 8 }}>НА ЧТО УХОДЯТ ДЕНЬГИ</div>
+        {(data?.categories ?? []).map((c: any) => (
+          <Row key={c.category} title={c.title} total={c.total} count={c.count} currency={c.currency}
+            pct={Math.round((c.total / (spent || 1)) * 100)} />
+        ))}
+      </div>
+
+      {/* Топ получателей */}
+      <div style={{ marginTop: 26 }}>
+        <div style={{ ...LABEL, marginBottom: 8 }}>ТОП ПОЛУЧАТЕЛЕЙ</div>
+        {(data?.top_payees ?? []).map((p: any) => (
+          <Row key={p.payee} title={p.title} total={p.total} count={p.count} currency={p.currency}
+            extra={<span style={{ color: "#A89070", fontWeight: 400 }}> · ср. {Math.round(p.avg)}</span>} />
+        ))}
+      </div>
+
+      {/* Регулярные списания */}
+      <div style={{ marginTop: 26, marginBottom: 24 }}>
+        <div style={{ ...LABEL, marginBottom: 8 }}>РЕГУЛЯРНЫЕ СПИСАНИЯ</div>
+        <div style={{ fontSize: 11, color: "#A89070", marginBottom: 8 }}>
+          получатели, которым платишь три месяца подряд и чаще
+        </div>
+        {(data?.recurring ?? []).length === 0 && (
+          <div style={{ fontSize: 12, color: "#6B6355" }}>Пока не набралось</div>
+        )}
+        {(data?.recurring ?? []).map((r: any) => (
+          <Row key={r.payee} title={`${r.payee}${r.category_title ? ` · ${r.category_title}` : ""}`}
+            total={r.per_month} currency={r.currency}
+            extra={<span style={{ color: "#A89070", fontWeight: 400 }}>/мес · {r.months} мес</span>} />
+        ))}
       </div>
     </div>
   );
