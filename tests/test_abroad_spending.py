@@ -27,6 +27,9 @@ TX = [
     ("t10", "2026-06-20", 0.0, 5.99, "Universal Account", "Universal Account", "APPLE.COM/BILL", None),
     # рублёвая строка — в регион не входит
     ("t11", "2026-09-19", 0.0, 5000.0, "Black", "Black", "Леонид Г.", None),
+    # пополнение грузинской карты с рублёвой: ушло 9 511,50 ₽, пришло 300 ₾ —
+    # одна строка с ДВУМЯ ногами в разных валютах
+    ("t12", "2026-09-17", 300.0, 9511.50, "Universal Account", "Black", "Себе", None),
 ]
 
 
@@ -68,7 +71,7 @@ def scope(mod, owner=True):
 
 def items(mod):
     s = scope(mod)
-    return mod.decorate(mod.fetch_rows(s, "ge"), s, mod.load_rules())
+    return mod.decorate(mod.fetch_rows(s, "ge"), s, mod.load_rules(), mod.region_titles(s, "ge"))
 
 
 def test_seed_creates_categories_and_rules(migrated):
@@ -86,6 +89,17 @@ def test_rows_selected_by_account_title_not_currency(mod):
     assert {"t1", "t2", "t3", "t6"} <= ids
     s = scope(mod)
     assert s.currency_of("Universal Account") == "unknown"
+
+
+def test_two_legged_row_shows_the_leg_of_the_region(mod):
+    """Пополнение карты региона с рублёвого счёта: в ленте Грузии обязана быть
+    ГРУЗИНСКАЯ нога (300 ₾ на BOG), а не рублёвая сумма с чужого счёта."""
+    t12 = next(i for i in items(mod) if i["id"] == "t12")
+    assert t12["kind"] == "transfer"
+    assert t12["amount"] == 300.0, "9 511,50 ₽ — нога чужого счёта, не наша"
+    assert t12["account"] == "Universal Account"
+    # Валюта у счетов-тёзок пока неизвестна — но она уж точно не рублёвая.
+    assert t12["currency"] != "RUB"
 
 
 def test_category_from_payee(mod):
@@ -153,15 +167,26 @@ def test_currency_appears_once_accounts_are_renamed(mod, migrated, tmp_path, mon
     importlib.reload(mod)
 
     s = zm_scope.Scope(owner=True)
-    its = mod.decorate(mod.fetch_rows(s, "ge"), s, mod.load_rules())
+    its = mod.decorate(mod.fetch_rows(s, "ge"), s, mod.load_rules(),
+                       mod.region_titles(s, "ge"))
     res = mod.spending(its)
-    # Итог по всем тратам остаётся без валюты — она РАЗНАЯ, а не неизвестная,
-    # и это другая причина: лари с долларами не складываются никогда.
-    assert res["currency"] is None
-    subs = next(c for c in res["categories"] if c["category"] == "subscriptions")
+    # Валюты РАЗНЫЕ, а не неизвестные: одного итога на всё нет — сводка считается
+    # по одной валюте, остальные перечислены переключателем.
+    keys = {g["key"] for g in res["by_currency"]}
+    assert keys == {"GEL", "USD"}
+    assert res["currency_auto"] is True and res["currency_filter"] == res["by_currency"][0]["key"]
+    assert res["currency"] == res["currency_filter"], "итог подписан своей валютой"
+    gel, usd = mod.spending(its, currency="GEL"), mod.spending(its, currency="USD")
+    assert gel["currency"] == "GEL" and usd["currency"] == "USD"
+    assert all(c["currency"] == "GEL" for c in gel["categories"])
+    subs = next(c for c in usd["categories"] if c["category"] == "subscriptions")
     assert subs["currency"] == "USD", "подписки в долларах перестают быть «непонятно чем»"
-    groc = next(c for c in res["categories"] if c["category"] == "groceries")
+    groc = next(c for c in gel["categories"] if c["category"] == "groceries")
     assert groc["currency"] == "GEL"
+    # 🔒 Лари с долларами не складываются ни в одной проекции.
+    assert round(gel["spent"] + usd["spent"], 2) == round(
+        sum(g["total"] for g in res["by_currency"]), 2)
+    assert gel["spent"] != round(gel["spent"] + usd["spent"], 2)
 
 
 def test_every_region_endpoint_is_owner_only(mod):

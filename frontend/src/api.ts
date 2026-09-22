@@ -477,8 +477,11 @@ export const regionsApi = {
   list: () => api.get("/regions").then((r) => r.data),
   transactions: (code: string, params?: Record<string, string | number>) =>
     api.get(`/regions/${code}/transactions`, { params }).then((r) => r.data),
-  spending: (code: string, months = 6) =>
-    api.get(`/regions/${code}/spending`, { params: { months } }).then((r) => r.data),
+  // currency — по какой валюте считать («unknown» = строки без разделённой валюты).
+  // Не передан и валют несколько → сервер берёт самую крупную (currency_auto).
+  spending: (code: string, months = 6, currency?: string | null) =>
+    api.get(`/regions/${code}/spending`, { params: { months, ...(currency ? { currency } : null) } })
+      .then((r) => r.data),
   categories: (code: string, months = 6) =>
     api.get(`/regions/${code}/categories`, { params: { months } }).then((r) => r.data),
   rules: (code: string) => api.get(`/regions/${code}/rules`).then((r) => r.data),

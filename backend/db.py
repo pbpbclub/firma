@@ -2373,8 +2373,12 @@ def ensure_abroad_categories_schema():
     из получателя, как в `payee_rules`, но ОТДЕЛЬНОЙ таблицей: те правила ведут
     бизнес-разноску, мешать личные траты за границей с подрядчиками нельзя.
 
-    Сид идёт INSERT OR IGNORE — правки Юры из интерфейса рестарт не перетирает
-    (тот же приём, что `ensure_self_transfer_rules`).
+    🔒 Стартовый набор заводится РОВНО ОДИН РАЗ, под маркером
+    `app_settings.abroad_seeded`. Одного `INSERT OR IGNORE` мало: он не перетирает
+    правку категории, но правило, СНЯТОЕ Юрой через `DELETE /regions/{code}/rules/{id}`,
+    воскресало при ближайшем рестарте — и снять его было нечем.
+    (Маркер лежит в `app_settings`, её создаёт `ensure_machine_usage_schema`,
+    вызываемая в `startup()` раньше этой функции.)
     """
     conn = get_production()
     try:
@@ -2399,6 +2403,11 @@ def ensure_abroad_categories_schema():
             )
         """)
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_abroad_rule ON abroad_payee_rules(pattern, match_type)")
+
+        seeded = conn.execute("SELECT 1 FROM app_settings WHERE key = 'abroad_seeded'").fetchone()
+        if seeded:
+            conn.commit()
+            return
 
         cats = [
             ("groceries",     "Продукты",            10),
@@ -2471,6 +2480,8 @@ def ensure_abroad_categories_schema():
                 "INSERT OR IGNORE INTO abroad_payee_rules (pattern, match_type, category, note)"
                 " VALUES (?, 'contains', ?, 'стартовый набор 22.09.2026')",
                 (pattern, cat))
+        conn.execute("INSERT OR REPLACE INTO app_settings (key, value, updated_at)"
+                     " VALUES ('abroad_seeded', '22.09.2026', datetime('now'))")
         conn.commit()
     finally:
         conn.close()

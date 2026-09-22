@@ -27,12 +27,24 @@ def _reserve(conn) -> float:
         return 0.0
 
 
+def _refresh_status() -> dict:
+    """Ленивая подтяжка курса + её исход для экрана.
+
+    🔒 Результат `fx.refresh()` нельзя выбрасывать: сбой сети (`ok: False`) — это
+    «курс на вчера», и человек обязан это видеть, иначе вчерашнее число читается
+    как сегодняшнее. Ключи одинаковы в обеих ветках (правило 2026-09-07)."""
+    r = fx.refresh() or {}
+    return {"ok": bool(r.get("ok", False)), "error": r.get("error"),
+            "skipped": r.get("skipped"), "stored": r.get("stored", 0)}
+
+
 @router.get("/series")
 def get_series(base: str = "USD", quote: str = "GEL", days: int = Query(90, le=365),
                user=Depends(get_current_user)):
     """Официальный курс по дням. Сеть дёргаем лениво — раз в сутки."""
-    fx.refresh()
-    return {"base": base.upper(), "quote": quote.upper(), "rows": fx.series(base.upper(), quote.upper(), days)}
+    return {"base": base.upper(), "quote": quote.upper(),
+            "rows": fx.series(base.upper(), quote.upper(), days),
+            "fx_refresh": _refresh_status()}
 
 
 @router.post("/refresh")
@@ -68,7 +80,7 @@ def get_signal(user=Depends(require_owner)):
     Свободно = остаток доллара − неснижаемый запас. Остаток берём через линзу:
     счёт без назначенной валюты (или с неоднозначным названием) в расчёт не
     идёт — лучше промолчать, чем посоветовать менять несуществующие деньги."""
-    fx.refresh()
+    refresh = _refresh_status()
     scope = scope_for(user)
     conn = get_production()
     try:
@@ -99,5 +111,6 @@ def get_signal(user=Depends(require_owner)):
         "gel_if_converted": round(free * sig["rate"], 2) if sig.get("rate") else None,
         "unconfigured": unconfigured,
         "ambiguous": ambiguous,
+        "fx_refresh": refresh,
     })
     return sig
