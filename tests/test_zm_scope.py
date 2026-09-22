@@ -236,3 +236,29 @@ def test_zen_inbox_runs_and_skips_foreign_rows(scope_mod, monkeypatch):
         items = res["items"] if isinstance(res, dict) else res
         assert all("Universal" not in str(i.get("account") or "") for i in items)
         assert all(i.get("amount") for i in items)
+
+
+def test_ambiguous_title_blocks_rows_not_balances(scope_mod, migrated):
+    """Одинаковое название бьёт по СТРОКАМ, а не по остаткам.
+
+    Валюта счёта известна по id — остаток в лари посчитать можно. Нельзя другое:
+    понять, какому из трёх счетов принадлежит строка, потому что в
+    zm_transactions нога хранится названием."""
+    migrated.execute("UPDATE zm_account_meta SET currency = 'GEL', visibility = 'private' WHERE account_id = '17525302'")
+    migrated.execute("UPDATE zm_account_meta SET currency = 'USD', visibility = 'private' WHERE account_id = '78f8908d'")
+    migrated.commit()
+    import importlib
+    import zm_scope
+    importlib.reload(zm_scope)
+    s = zm_scope.Scope(owner=True)
+
+    totals = {t["currency"]: t["total"] for t in s.totals()}
+    assert totals["GEL"] == 104.52 + 300.0, "остаток лари считается, хотя имя делят три счёта"
+    assert totals["USD"] == 101.06
+    assert s.account_of("Universal Account") is None, "строку всё равно не привязать"
+    assert s.currency_of("Universal Account") == "unknown"
+    assert s.ambiguous_count() == 3
+
+    # И бухгалтеру эти деньги по-прежнему не видны
+    clerk_totals = {t["currency"] for t in zm_scope.Scope(owner=False).totals()}
+    assert clerk_totals == {"RUB"}

@@ -11,19 +11,20 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { DotsThreeOutline, SignOut, X } from "@phosphor-icons/react";
-import { NAV, MOBILE_TABS } from "./nav";
-import { getUser, logout } from "../auth";
+import { MOBILE_TABS, navFor } from "./nav";
+import { logout, useMe } from "../auth";
 
 const ACTIVE = "#E8592A", IDLE = "#A89070";
 
 export function MobileShell({ children }: { children: ReactNode }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const location = useLocation();
-  const user = getUser();
+  const { data: user } = useMe();
   useEffect(() => { setMoreOpen(false); }, [location.pathname]);   // ушли по ссылке — лист закрыт
 
-  const tabs = MOBILE_TABS.map(to => NAV.find(n => n.to === to)!);
-  const rest = NAV.filter(n => !MOBILE_TABS.includes(n.to));
+  const visible = navFor(user);
+  const tabs = MOBILE_TABS.map(to => visible.find(n => n.to === to)!).filter(Boolean);
+  const rest = visible.filter(n => !MOBILE_TABS.includes(n.to));
   const moreActive = rest.some(n => location.pathname.startsWith(n.to)) || location.pathname === "/admin";
 
   return (

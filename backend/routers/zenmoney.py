@@ -86,7 +86,10 @@ def get_accounts_summary(user=Depends(get_current_user)):
     """Итоги ПО ВАЛЮТАМ вместо одного числа: сложить лари с рублями нельзя.
     `pending_count` — счета без настроенной валюты (плашка владельцу)."""
     s = scope_for(user)
-    return {"totals": s.totals(), "pending_count": s.pending_count() if s.is_owner else 0,
+    return {"totals": s.totals(),
+            "pending_count": s.pending_count() if s.is_owner else 0,
+            # Счета с одинаковым названием: остатки считаются, строки — нет.
+            "ambiguous_count": s.ambiguous_count() if s.is_owner else 0,
             "is_owner": s.is_owner}
 
 

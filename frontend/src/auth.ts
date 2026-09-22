@@ -1,4 +1,5 @@
 import axios from "axios";
+import { useQuery } from "@tanstack/react-query";
 
 const BASE = "/api/auth";
 
@@ -40,6 +41,38 @@ export async function login(email: string, password: string): Promise<User> {
   setToken(r.data.token);
   localStorage.setItem("firma_user", JSON.stringify(r.data.user));
   return r.data.user;
+}
+
+// Обновить сохранённого пользователя с сервера.
+// Нужно потому, что `is_owner` появился 22.09.2026, а в localStorage у уже
+// залогиненных лежит старый объект без него: без этого вызова пункт «Грузия»
+// не появился бы до перелогина, а он живёт 30 дней.
+export async function refreshUser(): Promise<User | null> {
+  try {
+    const r = await axios.get(`${BASE}/me`, { headers: { Authorization: `Bearer ${getToken()}` } });
+    localStorage.setItem("firma_user", JSON.stringify(r.data));
+    return r.data as User;
+  } catch {
+    return getUser();   // сеть или 401 — молча остаёмся на сохранённом
+  }
+}
+
+// Единый источник «кто я» для компонентов: React Query кэширует ответ на сессию,
+// поэтому /auth/me не дёргается на каждый экран, а is_owner везде один и тот же.
+// Локальный объект тоже обновляем — им пользуется сайдбар до первой загрузки.
+export function useMe() {
+  return useQuery({
+    queryKey: ["auth-me"],
+    queryFn: async () => {
+      const u = await refreshUser();
+      return u;
+    },
+    staleTime: 5 * 60 * 1000,
+    // placeholderData, а НЕ initialData: initialData считается свежими данными,
+    // и при staleTime запрос не уходит вовсе — сохранённый объект без is_owner
+    // так и остался бы единственной правдой (поймано на живом экране 22.09.2026).
+    placeholderData: getUser() ?? undefined,
+  });
 }
 
 export function logout() {

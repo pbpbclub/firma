@@ -1,13 +1,16 @@
 import { useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { SignOut, List } from "@phosphor-icons/react";
-import { getUser, logout } from "../auth";
-import { NAV as nav } from "./nav";
+import { logout, useMe } from "../auth";
+import { navFor } from "./nav";
 import { MobileShell } from "./MobileShell";
 import { useIsMobile } from "./ui/responsive";
 
 export default function Layout({ children }: { children: React.ReactNode }) {
-  const user = getUser();
+  // Пользователь перечитывается с сервера один раз за загрузку страницы:
+  // is_owner в сохранённом объекте может быть от старой версии (см. auth.refreshUser).
+  const { data: user } = useMe();
+  const nav = navFor(user);
   const location = useLocation();
   const [expanded, setExpanded] = useState(false);
   // Телефон — свой каркас (нижняя панель вместо сайдбара, без бежевой рамки).

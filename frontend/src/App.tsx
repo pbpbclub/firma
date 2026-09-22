@@ -16,6 +16,7 @@ import MachineTime from "./pages/MachineTime";
 import OrderDetail from "./pages/OrderDetail";
 import Funds from "./pages/Funds";
 import ZenMoney from "./pages/ZenMoney";
+import Region from "./pages/Region";
 import Admin from "./pages/Admin";
 import GeneralExpenses from "./pages/GeneralExpenses";
 import ExpensesInbox from "./pages/ExpensesInbox";
@@ -75,6 +76,7 @@ const router = createBrowserRouter([
       { path: "/taxes", element: <Taxes /> },
       { path: "/funds", element: <Funds /> },
       { path: "/zenmoney", element: <ZenMoney /> },
+      { path: "/region/:code", element: <Region /> },
       { path: "/expenses", element: <ExpensesInbox /> },
       { path: "/general-expenses", element: <GeneralExpenses /> },
       { path: "/admin", element: <Admin /> },

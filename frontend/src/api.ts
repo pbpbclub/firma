@@ -150,6 +150,10 @@ export const financeApi = {
   byBrand: () => api.get("/finance/by-brand").then((r) => r.data),
   recurring: () => api.get("/finance/recurring").then((r) => r.data),
   personalSpending: () => api.get("/finance/personal-spending").then((r) => r.data),
+  // Сколько ушло себе за границу — в рублях, по месяцам и строками.
+  // Видно всем: деньги уходят с рублёвой карты, иначе у бухгалтера не сойдётся остаток.
+  abroadSummary: (months = 12) =>
+    api.get("/finance/abroad-summary", { params: { months } }).then((r) => r.data),
   transactions: (params?: Record<string, string>) =>
     api.get("/finance/transactions", { params }).then((r) => r.data),
   summary: () => api.get("/finance/summary").then((r) => r.data),
@@ -465,6 +469,16 @@ export const workTypesApi = {
     api.delete(`/work-types/${workTypeId}/masters/${masterId}`).then((r) => r.data),
   linkMaster: (workTypeId: string, masterId: string) =>
     api.post(`/work-types/${workTypeId}/masters/${masterId}`).then((r) => r.data),
+};
+
+// Курсы Нацбанка Грузии и сигнал обмена (личный заграничный контур).
+export const fxApi = {
+  series: (base = "USD", quote = "GEL", days = 90) =>
+    api.get("/fx/series", { params: { base, quote, days } }).then((r) => r.data),
+  signal: () => api.get("/fx/signal").then((r) => r.data),
+  refresh: () => api.post("/fx/refresh").then((r) => r.data),
+  setReserve: (usd_reserve: number) =>
+    api.put("/fx/reserve", { usd_reserve }).then((r) => r.data),
 };
 
 export const zenmoneyApi = {

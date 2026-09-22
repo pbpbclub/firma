@@ -105,12 +105,11 @@ def _load_accounts(meta: dict, aliases: dict) -> list[Account]:
     for r in rows:
         m = meta.get(r["id"]) or {}
         ambiguous = by_title.get(r["title"], 0) > 1
+        # Валюта и видимость известны ПО ID и от одинаковых названий не страдают:
+        # остаток счёта привязан к id. Неоднозначность бьёт только по СТРОКАМ —
+        # в zm_transactions нога хранится названием (см. account_of).
         visibility = m.get("visibility") or PENDING
         currency = m.get("currency") or UNKNOWN_CURRENCY
-        if ambiguous:
-            # Название делят несколько счетов: в zm_transactions ноги хранятся
-            # названием, значит валюту и принадлежность строки установить нечем.
-            visibility, currency = PENDING, UNKNOWN_CURRENCY
         out.append(Account(
             id=r["id"], title=r["title"], type=r["type"], balance=r["balance"] or 0.0,
             currency=currency, region=m.get("region"), visibility=visibility,
@@ -154,8 +153,14 @@ class Scope:
         return account.visibility == PUBLIC
 
     def pending_count(self) -> int:
-        """Сколько счетов ждут настройки — плашка владельцу."""
+        """Сколько счетов ждут настройки валюты — плашка владельцу."""
         return sum(1 for a in self._accounts if not a.configured)
+
+    def ambiguous_count(self) -> int:
+        """Счета, делящие название с другим. Остатки у них считаются (валюта
+        известна по id), а СТРОКИ разнести нечем: нога хранится названием.
+        Лечится переименованием в ZenMoney + полным пересинком фин-агента."""
+        return sum(1 for a in self._accounts if a.ambiguous)
 
     def totals(self, include_cash: bool = False) -> list[dict]:
         """Итоги ПО ВАЛЮТАМ. Одного числа здесь нет и быть не может.

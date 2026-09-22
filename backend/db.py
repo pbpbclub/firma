@@ -2332,3 +2332,33 @@ def ensure_zm_account_meta_schema():
         conn.commit()
     finally:
         conn.close()
+
+
+def ensure_fx_rates_schema():
+    """Официальные курсы Нацбанка Грузии (решение Юры 22.09.2026).
+
+    Нужны, чтобы отвечать на вопрос «сегодня выгодно менять доллары на лари?»:
+    свои сделки на него не отвечают — в дни без обмена данных просто нет.
+    Храним в production.db, а НЕ в analytics.db.fx_rates (та таблица фин-агента,
+    пустая и чужая; писать в чужую базу нельзя).
+
+    `rate` — сколько `quote` за ОДНУ единицу `base` (NBG отдаёт рубли за 100,
+    приводим к одному при загрузке, иначе 3,1 «лари за рубль» поселится в базе).
+    """
+    conn = get_production()
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS fx_rates (
+                date       TEXT NOT NULL,              -- дата, НА которую курс действует
+                base       TEXT NOT NULL,              -- USD | EUR | RUB
+                quote      TEXT NOT NULL DEFAULT 'GEL',
+                rate       REAL NOT NULL,
+                source     TEXT NOT NULL DEFAULT 'nbg',
+                fetched_at TEXT DEFAULT (datetime('now')),
+                PRIMARY KEY (date, base, quote, source)
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_fx_pair_date ON fx_rates(base, quote, date)")
+        conn.commit()
+    finally:
+        conn.close()
