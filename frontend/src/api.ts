@@ -469,14 +469,17 @@ export const workTypesApi = {
 
 export const zenmoneyApi = {
   accounts: () => api.get("/zenmoney/accounts").then((r) => r.data),
+  // Итоги ТОЛЬКО по валютам: одного числа у личных счетов больше нет —
+  // сложить лари с рублями нельзя (валютный замок 22.09.2026).
+  accountsSummary: () => api.get("/zenmoney/accounts-summary").then((r) => r.data),
   balanceAtDate: (date: string) =>
     api.get("/zenmoney/balance-at-date", { params: { date } }).then((r) => r.data),
   transactions: (params?: Record<string, string | number>) =>
     api.get("/zenmoney/transactions", { params }).then((r) => r.data),
-  report: (month?: string) =>
-    api.get("/zenmoney/report", { params: month ? { month } : {} }).then((r) => r.data),
-  cashflow: (months?: number) =>
-    api.get("/zenmoney/cashflow", { params: months ? { months } : {} }).then((r) => r.data),
+  report: (month?: string, currency?: string) =>
+    api.get("/zenmoney/report", { params: { ...(month ? { month } : {}), ...(currency ? { currency } : {}) } }).then((r) => r.data),
+  cashflow: (months?: number, currency?: string) =>
+    api.get("/zenmoney/cashflow", { params: { ...(months ? { months } : {}), ...(currency ? { currency } : {}) } }).then((r) => r.data),
   business: (months?: number) =>
     api.get("/zenmoney/business", { params: months ? { months } : {} }).then((r) => r.data),
   sync: () => api.post("/zenmoney/sync").then((r) => r.data),

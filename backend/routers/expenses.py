@@ -7,12 +7,13 @@
 """
 import sqlite3
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional, List
 from uuid import uuid4
 from datetime import date, timedelta
 
+from auth import get_current_user
 from db import get_production, get_finance, get_zenmoney
 from routers.zenmoney import _load_payee_rules, _resolve_payee, _CATEGORY_RU, contractor_tokens
 
@@ -150,8 +151,12 @@ def inbox(
     amount_max: Optional[float] = None,
     show_dismissed: bool = False,
     limit: int = Query(100, le=2000),
+    user=Depends(get_current_user),
 ):
-    """Неразнесённые списания. payee_hint — подсказка поставщика/категории."""
+    """Неразнесённые списания. payee_hint — подсказка поставщика/категории.
+
+    Заграничные карты в инбокс не попадают: это личные деньги другой валюты,
+    расходом по заказу они быть не могут (валютный замок 22.09.2026)."""
     bank_done, zen_done, degraded = _allocated_ids()
     dismissed = _dismissed_out_map(source)
     rules = _load_payee_rules()
@@ -217,10 +222,13 @@ def inbox(
     else:
         if not date_from:
             date_from = (date.today() - timedelta(days=ZEN_DEFAULT_DAYS)).isoformat()
+        from zm_scope import scope_for
+        zscope = scope_for(user)
         conn = get_zenmoney()
         try:
-            sql = "SELECT * FROM zm_transactions WHERE outcome > 0 AND income = 0 AND deleted = 0"
-            params: list = []
+            frag, fparams = zscope.tx_sql()
+            sql = "SELECT * FROM zm_transactions WHERE outcome > 0 AND income = 0 AND deleted = 0" + frag
+            params: list = list(fparams)
             if date_from:
                 sql += " AND date >= ?"; params.append(date_from)
             if date_to:
@@ -242,6 +250,9 @@ def inbox(
                 offset += CHUNK
                 for r in page:
                     if str(r["id"]) in zen_done:
+                        continue
+                    # Не рублёвая нога — расходом по заказу быть не может.
+                    if zscope.row_currency(r, "outcome") != "RUB":
                         continue
                     # Перевод себе на карту вне ZenMoney (Райффайзен) — не расход.
                     if (r["payee"] or "").strip() in ZEN_OWN_PAYEES:
@@ -373,6 +384,17 @@ def create_from_tx(body: FromTxIn):
             c.close()
         if not tx:
             raise HTTPException(status_code=404, detail="Транзакция не найдена")
+        # 🔒 Себестоимость заказа ведётся в рублях. Трата с заграничной карты
+        # (или со счёта, валюта которого ещё не назначена) расходом по заказу
+        # стать не может: курс у неё свой, и в план-факт она пришла бы как рубли.
+        from zm_scope import scope_for
+        zcur = scope_for(None, owner=True).row_currency(tx, "outcome")
+        if zcur != "RUB":
+            raise HTTPException(
+                status_code=400,
+                detail="foreign_currency_tx: транзакция не в рублях (%s) — расходом по заказу не заводится"
+                       % (zcur if zcur != "unknown" else "валюта счёта не назначена"),
+            )
         tx_amount, tx_date = tx["outcome"], tx["date"]
         tx_payee, tx_note = tx["payee"], tx["comment"]
 

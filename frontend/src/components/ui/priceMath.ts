@@ -24,6 +24,26 @@ export function fmtMoney(n: number | null | undefined): string {
   return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) + " ₽";
 }
 
+// ── Валюты (22.09.2026) ──────────────────────────────────────────────────────
+// fmtMoney остаётся рублёвым: он стоит в сотне мест, где деньги по определению
+// рубли. Всё, что пришло из ZenMoney со своей валютой, печатается fmtAmount —
+// иначе лари нарисовались бы рублями, что и есть тот баг, от которого уходим.
+export const CURRENCY_SIGN: Record<string, string> = {
+  RUB: "₽", GEL: "₾", USD: "$", EUR: "€", TRY: "₺",
+};
+
+export function currencySign(currency?: string | null): string {
+  return CURRENCY_SIGN[(currency || "").toUpperCase()] || "";
+}
+
+export function fmtAmount(n: number | null | undefined, currency?: string | null): string {
+  if (n === null || n === undefined || Number.isNaN(n)) return "—";
+  const num = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n);
+  const sign = currencySign(currency);
+  // Неизвестная валюта знака не получает: «12 345» честнее, чем «12 345 ₽».
+  return sign ? `${num} ${sign}` : num;
+}
+
 // Число без валюты (для строк «Итого»).
 export function fmtNum(n: number | null | undefined): string {
   if (n === null || n === undefined || Number.isNaN(n)) return "—";

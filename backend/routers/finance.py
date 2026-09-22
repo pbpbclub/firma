@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from auth import get_current_user
 from pydantic import BaseModel
 from typing import Optional, List
 from audit import audit
@@ -258,12 +259,13 @@ def _transfer_tx_ids() -> set:
 
 
 @router.get("/alloc-map")
-def alloc_map():
+def alloc_map(user=Depends(get_current_user)):
     """Единая карта «чем разнесена транзакция» для ДДС и «Личных» (аудит 11.09.2026):
     расходы, платежи, лицевой счёт, привязки фин-агента, обязательства, подотчёт,
     счета, скрытое, переводы себе, служебное. См. backend/alloc_map.py."""
     from alloc_map import build
-    return build()
+    from zm_scope import scope_for
+    return build(scope=scope_for(user))
 
 
 @router.get("/transactions")
@@ -458,13 +460,19 @@ def recurring_summary():
     finally:
         conn.close()
 
+    # Регулярные траты — рублёвый контур: подписка в лари это другие деньги,
+    # и в одну сумму с рублёвой она не складывается (валютный замок 22.09.2026).
     from db import get_zenmoney
+    from zm_scope import scope_for
+    zscope = scope_for(None, owner=True)
     zconn = get_zenmoney()
     try:
         for r in zconn.execute(
-            "SELECT date, outcome, payee FROM zm_transactions "
+            "SELECT date, outcome, payee, income_account, outcome_account FROM zm_transactions "
             "WHERE outcome > 0 AND income = 0 AND deleted = 0 ORDER BY date DESC"
         ):
+            if zscope.row_currency(r, "outcome") != "RUB":
+                continue
             cat = zen_recurring_category(r["payee"])
             if cat:
                 add(cat, r["date"], r["outcome"] or 0, r["payee"])
@@ -538,12 +546,18 @@ def personal_spending():
 
     # ZenMoney: Райффайзен-переводы + помеченное личным (кроме Райффайзен-переводов)
     from db import get_zenmoney
+    from zm_scope import scope_for
+    zscope = scope_for(None, owner=True)
     zconn = get_zenmoney()
     try:
         for r in zconn.execute(
-            "SELECT id, date, outcome, payee FROM zm_transactions "
+            "SELECT id, date, outcome, payee, income_account, outcome_account FROM zm_transactions "
             "WHERE outcome > 0 AND income = 0 AND deleted = 0"
         ):
+            # Траты заграничных карт живут в своём разделе и в рублёвую
+            # «личную» статистику не подмешиваются.
+            if zscope.row_currency(r, "outcome") != "RUB":
+                continue
             payee = (r["payee"] or "").strip()
             amount = r["outcome"] or 0
             if payee in ZEN_OWN_PAYEES:

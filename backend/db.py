@@ -2017,8 +2017,10 @@ def ensure_order_activity_schema():
             """
         )
         # Стартовая карта из ТЗ Mac (проверена по транскриптам 11.09.2026); INSERT OR
-        # IGNORE — правки через API не перетираются рестартом
-        seed = [("мост_бассейн", "ORD-052"), ("подголовник", "ORD-054"), ("МАФ", "ORD-034"),
+        # IGNORE — правки через API не перетираются рестартом.
+        # `cols` пуст = таблицы orders ещё нет (пустая база, первый старт): сеять
+        # нечего и незачем — SELECT по несуществующей таблице ронял всю миграцию.
+        seed = [] if not cols else [("мост_бассейн", "ORD-052"), ("подголовник", "ORD-054"), ("МАФ", "ORD-034"),
                 ("МАФ-02", "ORD-034"), ("рассекатель_ЛОСЬ", "ORD-049"), ("мебель_temple", "ORD-047"),
                 ("лавки_temple", "ORD-047"), ("перегородка_Рамил", "ORD-046"), ("Mirra", "ORD-045"),
                 ("вешалка_Dakel", "ORD-042")]
@@ -2170,12 +2172,17 @@ def ensure_activities_schema():
             conn.execute(
                 "INSERT OR IGNORE INTO activities (id, code, name, color, description, sort_order, is_default) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)", (str(_uuid.uuid4()), code, name, color, desc, order, default))
-        # Транзитные заказы помечаются по признаку активной сметы — один раз, дальше ярлык живёт сам
-        conn.execute("""
-            UPDATE orders SET activity = 'transit'
-             WHERE activity = 'production' AND id IN (
-                SELECT es.order_id FROM estimate_sets es
-                 WHERE es.payment_type = 'transit' AND es.status != 'superseded')""")
+        # Транзитные заказы помечаются по признаку активной сметы — один раз, дальше
+        # ярлык живёт сам. На пустой базе (первый старт) таблиц ещё нет — размечать
+        # нечего, а падение здесь роняло всю цепочку startup-миграций.
+        have = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('orders','estimate_sets')")}
+        if {"orders", "estimate_sets"} <= have:
+            conn.execute("""
+                UPDATE orders SET activity = 'transit'
+                 WHERE activity = 'production' AND id IN (
+                    SELECT es.order_id FROM estimate_sets es
+                     WHERE es.payment_type = 'transit' AND es.status != 'superseded')""")
         conn.commit()
     finally:
         conn.close()
@@ -2193,6 +2200,10 @@ def ensure_machine_expense_guard():
        машина получателем не бывает. Материалы/доставка не трогаем."""
     conn = get_production()
     try:
+        # Пустая база (первый старт): таблицы expenses ещё нет — вешать триггер не на что.
+        # Миграция идемпотентна, на следующем старте замок встанет.
+        if not conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='expenses'").fetchone():
+            return
         conn.execute("DROP TRIGGER IF EXISTS trg_expenses_no_machine_time_ins")
         conn.execute("DROP TRIGGER IF EXISTS trg_expenses_no_machine_time_upd")
         for ev, name in (("INSERT", "trg_expenses_no_machine_time_ins"), ("UPDATE", "trg_expenses_no_machine_time_upd")):
@@ -2232,6 +2243,92 @@ def ensure_self_transfer_rules():
                 conn.execute(
                     "INSERT INTO payee_rules (pattern, match_type, display_name, entity_type, entity_name) VALUES (?, 'exact', 'Перевод себе', 'self', 'Юрий Некрасов')",
                     (pat,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_zm_account_meta_schema():
+    """Реестр счетов ZenMoney: валюта + регион + видимость (22.09.2026).
+
+    `zenmoney.db` валюту не хранит вообще (zm_accounts: id/title/type/balance/archive),
+    поэтому после подключения карт Bank of Georgia лари, доллары и евро складывались
+    с рублями в одно число. Реестр — единственный источник правды о валюте счёта;
+    читает его только `zm_scope.py`.
+
+    Fail-closed: счёта нет в реестре → currency='unknown', visibility='pending' —
+    не суммируется нигде и виден только владельцу. Сид идёт по ЗАХАРДКОЖЕННЫМ UUID,
+    а не «всё, что сейчас в базе»: миграция, приехавшая после синка новых карт,
+    иначе записала бы лари как рубли.
+
+    `zm_transactions` хранит НАЗВАНИЕ счёта, а не id, поэтому:
+      - алиасы держат прежние названия (переименование в ZenMoney не должно ронять
+        историю из приватного контура);
+      - три счёта BOG называются одинаково («Universal Account») — такое название
+        неоднозначно, и линза трактует его как pending, пока Юра не переименует
+        счета в ZenMoney, а фин-агент не сделает полный пересинк.
+    """
+    conn = get_production()
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS zm_account_meta (
+                account_id  TEXT PRIMARY KEY,
+                title       TEXT NOT NULL,
+                currency    TEXT NOT NULL DEFAULT 'unknown',
+                region      TEXT,
+                visibility  TEXT NOT NULL DEFAULT 'pending'
+                            CHECK (visibility IN ('public', 'private', 'pending')),
+                role        TEXT,
+                note        TEXT,
+                created_at  TEXT DEFAULT (datetime('now')),
+                updated_at  TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS zm_account_aliases (
+                title      TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL REFERENCES zm_account_meta(account_id) ON DELETE CASCADE
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_zm_meta_visibility ON zm_account_meta(visibility)")
+
+        # Рублёвые счета РФ, существовавшие до подключения заграничных карт.
+        # Mir Cashback Card (Райффайзен) — тоже рубли, но это ИСТОЧНИК вывода:
+        # через него идут Золотая корона и Avosend.
+        rub_public = [
+            ("e4a53422-eb8c-45de-8585-c5743ea5ab73", "ALL Airlines", None),
+            ("c8efea56-929b-42cc-844d-f72880bf5144", "Black", None),
+            ("81edcd65-f9ac-43e4-a106-9f1760890244", "Cash", None),
+            ("8c479c93-2b29-451b-b763-3875f8f72fb3", "Debts", None),
+            ("8af50bc5-5922-4203-b484-b112ac4ab15c", "MasterCard Mass", None),
+            ("67009398-0461-45c5-b965-4364ef88de3c", "Mir Cashback Card", "source"),
+            ("938bc0a6-e972-4ce0-abc5-a73322d2378e", "Брокерский счёт", None),
+            ("52397e14-1da2-42be-b58e-3f1d9a0872c0", "Кредитная СберКарта", None),
+            ("71c95936-f183-4a29-99fd-de00ce93f590", "Накопительный счёт", None),
+            ("ec1b9751-3723-4132-9a46-eff9ff27b595", "Платёжный счёт", None),
+            ("9803face-ac1b-4fae-868d-61666746b456", "Сберегательный счет", None),
+            ("8fb9d484-02d1-4c79-980e-04751251eb0d", "Т-Мобайл", None),
+            ("2f254a19-f263-4b89-b004-08599ab04dac", "Текущий счёт", None),
+            ("fe3eeefa-3a2e-429b-adcc-4ee54d654f8b", "Тинькофф Платинум", None),
+            ("dd11b780-c520-4f9c-a2d0-db720d0b63b4", "Универсальный на 5 лет", None),
+        ]
+        for aid, title, role in rub_public:
+            conn.execute(
+                "INSERT OR IGNORE INTO zm_account_meta (account_id, title, currency, region, visibility, role)"
+                " VALUES (?, ?, 'RUB', NULL, 'public', ?)",
+                (aid, title, role),
+            )
+        # Счета Bank of Georgia: валюту назначает Юра в интерфейсе. До этого —
+        # pending: ни в один итог не попадают и видны только владельцу.
+        for aid in ("17525302-6d6e-4778-8608-f5e4846bd9c2",
+                    "78f8908d-d6e2-4ce0-a698-2f251b0c77a4",
+                    "017783a4-6939-4e73-892a-f7f937a8024d"):
+            conn.execute(
+                "INSERT OR IGNORE INTO zm_account_meta (account_id, title, currency, region, visibility, role, note)"
+                " VALUES (?, 'Universal Account', 'unknown', 'ge', 'pending', 'target',"
+                " 'Bank of Georgia: назначить валюту после переименования счёта в ZenMoney')",
+                (aid,),
+            )
         conn.commit()
     finally:
         conn.close()

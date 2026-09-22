@@ -1,6 +1,6 @@
 // Единое форматирование денег и дат. Деньги — реэкспорт из priceMath (там же
 // математика наценки): один источник вместо локальных fmt() в каждой странице.
-export { fmtMoney, fmtNum } from "./priceMath";
+export { fmtMoney, fmtNum, fmtAmount, currencySign, CURRENCY_SIGN } from "./priceMath";
 import { fmtMoney as _fm } from "./priceMath";
 
 // Вариант с прочерком на нуле — историческое поведение большинства экранов

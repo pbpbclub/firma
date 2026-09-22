@@ -78,9 +78,13 @@ def service_label(counterparty: Optional[str]) -> Optional[str]:
     return None
 
 
-def build(with_transactions: bool = True) -> dict:
+def build(with_transactions: bool = True, scope=None) -> dict:
     """Карта по всем источникам. with_transactions=False — только по записям
-    (без прохода по лентам банка/ZenMoney за self_transfer/service)."""
+    (без прохода по лентам банка/ZenMoney за self_transfer/service).
+
+    `scope` — линза ZenMoney (`zm_scope.scope_for`): ключи `zen:` невидимых
+    пользователю транзакций из карты вырезаются, иначе подпись «чем разнесено»
+    рассказывала бы о приватных строках тому, кто самих строк не видит."""
     out: dict = {}
     degraded: list = []
 
@@ -157,14 +161,21 @@ def build(with_transactions: bool = True) -> dict:
     finally:
         conn.close()
 
+    zen_visible = None
     try:
         zc = get_zenmoney()
         try:
+            if scope is not None and not scope.is_owner:
+                zen_visible = {str(r["id"]) for r in zc.execute(
+                    "SELECT id, income_account, outcome_account FROM zm_transactions WHERE deleted = 0"
+                ).fetchall() if scope.visible(r)}
             for r in zc.execute("SELECT zm_tx_id, order_id, contractor_name, note FROM zm_links WHERE zm_tx_id IS NOT NULL").fetchall():
                 put("zm_link", f"zen:{r['zm_tx_id']}", order_id=r["order_id"], master_name=r["contractor_name"],
                     title=r["note"], label="Разноска фин-агента")
             if with_transactions:
-                for r in zc.execute("SELECT id, payee, income, outcome FROM zm_transactions WHERE deleted = 0").fetchall():
+                for r in zc.execute("SELECT id, payee, income, outcome, income_account, outcome_account FROM zm_transactions WHERE deleted = 0").fetchall():
+                    if scope is not None and not scope.visible(r):
+                        continue
                     k = f"zen:{r['id']}"
                     if (r["income"] or 0) > 0 and (r["outcome"] or 0) > 0:
                         put("self_transfer", k, label="Перевод между своими счетами")
@@ -174,6 +185,10 @@ def build(with_transactions: bool = True) -> dict:
             zc.close()
     except Exception as e:
         degraded.append(f"zenmoney: {e}")
+
+    if zen_visible is not None:
+        for k in [k for k in out if k.startswith("zen:") and k[4:] not in zen_visible]:
+            out.pop(k, None)
 
     # order_title у zm_link — по order_id из production (одним запросом)
     zl_orders = {n["order_id"] for notes in out.values() for n in notes if n["kind"] == "zm_link" and n.get("order_id")}

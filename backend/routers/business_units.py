@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from db import get_production, get_finance, get_zenmoney
+from zm_scope import scope_for
 import uuid
 
 router = APIRouter()
@@ -25,14 +26,19 @@ def _bank_balances() -> dict:
 
 
 def _zenmoney_total() -> float:
-    conn = get_zenmoney()
+    """Личные деньги как источник остатка бизнес-счёта — ТОЛЬКО рубли.
+
+    Раньше здесь складывались балансы всех счетов подряд: после подключения карт
+    Bank of Georgia в «рублёвый» остаток попали бы лари, доллары и евро. Ненастроенные
+    и приватные счета линза сюда тоже не отдаёт, и type='cash' наконец отсечён —
+    отрицательный «кэш» это артефакт трекинга ZenMoney, а не деньги на счёте."""
     try:
-        row = conn.execute("SELECT COALESCE(SUM(balance), 0) AS s FROM zm_accounts WHERE archive=0").fetchone()
-        return round(row["s"] or 0, 2)
+        totals = scope_for(None, owner=True).totals()
+        return round(next((t["total"] for t in totals if t["currency"] == "RUB"), 0.0), 2)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"zenmoney.db недоступна: {e}")
-    finally:
-        conn.close()
 
 
 def _account_balance(acc: dict, bank_bal: dict, zen_total: float) -> float:

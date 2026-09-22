@@ -10,6 +10,7 @@ import { RowCard } from "../components/ui/RowCard";
 import { ColumnFilter, PeriodFilter, AmountFilter } from "../components/TableFilters";
 import { Modal, ConfirmModal } from "../components/ui/Modal";
 import { MONO } from "../components/ui/Num";
+import { fmtAmount, currencySign } from "../components/ui/format";
 import { IconButton } from "../components/ui/IconButton";
 
 // abs намеренный: направление операции показывают цвет/колонка, не знак
@@ -499,6 +500,10 @@ export default function ZenMoneyPage() {
   const [zmSummaryOpen, setZmSummaryOpen] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth);
   const [showBusiness, setShowBusiness] = useState(false);
+  // Валютный контур экрана. Рубли по умолчанию: «Личные» — рублёвый экран,
+  // заграничные карты живут своим разделом. Чипы появляются, только если
+  // валют больше одной (у бухгалтера их нет вовсе).
+  const [currency, setCurrency] = useState("RUB");
 
   const syncMutation = useMutation({
     mutationFn: zenmoneyApi.sync,
@@ -583,21 +588,33 @@ export default function ZenMoneyPage() {
     queryFn: zenmoneyApi.accounts,
   });
 
+  const { data: summary } = useQuery({
+    queryKey: ["zm-accounts-summary"],
+    queryFn: zenmoneyApi.accountsSummary,
+  });
+  const totals: any[] = summary?.totals || [];
+  const currencies: string[] = totals.map((t: any) => t.currency);
+  // Валюта могла исчезнуть (счёт скрыли) — не держим экран в пустом контуре.
+  useEffect(() => {
+    if (currencies.length && !currencies.includes(currency)) setCurrency(currencies[0]);
+  }, [currencies.join(","), currency]);
+
   const { data: cashflow = [] } = useQuery({
-    queryKey: ["zm-cashflow"],
-    queryFn: () => zenmoneyApi.cashflow(6),
+    queryKey: ["zm-cashflow", currency],
+    queryFn: () => zenmoneyApi.cashflow(6, currency),
   });
 
   const { data: report } = useQuery({
-    queryKey: ["zm-report", selectedMonth],
-    queryFn: () => zenmoneyApi.report(selectedMonth),
+    queryKey: ["zm-report", selectedMonth, currency],
+    queryFn: () => zenmoneyApi.report(selectedMonth, currency),
   });
 
   const { data: allTransactions = [] } = useQuery({
-    queryKey: ["zm-transactions", selectedMonth, search],
+    queryKey: ["zm-transactions", selectedMonth, search, currency],
     queryFn: () =>
       zenmoneyApi.transactions({
         month: selectedMonth,
+        currency,
         ...(search ? { search } : {}),
         limit: 300,
       }),
@@ -668,9 +685,6 @@ export default function ZenMoneyPage() {
   const maxVal = Math.max(...(cashflow as any[]).map((r: any) => Math.max(r.incomes, r.expenses)), 1);
   const CHART_H = 60;
 
-  // Total balance
-  const totalBalance = (accounts as any[]).reduce((s: number, a: any) => s + (a.balance || 0), 0);
-
   // Business stats
   const bizExpense = (businessTx as any[])
     .filter((t: any) => t.outcome > 0 && t.income === 0)
@@ -687,8 +701,12 @@ export default function ZenMoneyPage() {
           style={{ order: -2, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px",
                    background: "#FAF8F5", border: "none", borderBottom: "1px solid #EDEBE6", fontFamily: "inherit", cursor: "pointer", flexShrink: 0 }}>
           <span style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>ИТОГО ПО СЧЕТАМ · {zmSummaryOpen ? "свернуть" : "сводка"}</span>
-          <span style={{ fontSize: 16, fontWeight: 700, fontFamily: MONO, color: "#1A1A1A" }}>
-            {fmt((accounts as any[]).reduce((sum: number, a: any) => sum + (a.balance || 0), 0))} ₽
+          <span style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
+            {(totals.length ? totals : [{ currency: "RUB", total: 0 }]).map((t: any, i: number) => (
+              <span key={t.currency} style={{ fontSize: i === 0 ? 16 : 13, fontWeight: 700, fontFamily: MONO, color: i === 0 ? "#1A1A1A" : "#6B6355" }}>
+                {fmtAmount(t.total, t.currency)}
+              </span>
+            ))}
           </span>
         </button>
       )}
@@ -842,13 +860,13 @@ export default function ZenMoneyPage() {
               <div>
                 <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>РАСХОДЫ</div>
                 <div style={{ fontSize: isMobile ? 16 : 18, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", color: "#8B3A3A" }}>
-                  {fmt(report.expenses)} ₽
+                  {fmtAmount(report.expenses, report.currency)}
                 </div>
               </div>
               <div>
                 <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em" }}>ДОХОДЫ</div>
                 <div style={{ fontSize: isMobile ? 16 : 18, fontWeight: 700, fontFamily: MONO, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", color: "#4A7C59" }}>
-                  {fmt(report.incomes)} ₽
+                  {fmtAmount(report.incomes, report.currency)}
                 </div>
               </div>
               <div>
@@ -858,7 +876,7 @@ export default function ZenMoneyPage() {
                   color: report.incomes - report.expenses >= 0 ? "#4A7C59" : "#8B3A3A",
                 }}>
                   {report.incomes - report.expenses >= 0 ? "+" : "−"}
-                  {fmt(report.incomes - report.expenses)} ₽
+                  {fmtAmount(report.incomes - report.expenses, report.currency)}
                 </div>
               </div>
               <div style={isMobile ? undefined : { marginLeft: "auto", alignSelf: "center" }}>
@@ -972,7 +990,7 @@ export default function ZenMoneyPage() {
                 title={tx.payee || tx.comment || "—"}
                 sub={<>{String(tx.date || "").slice(0, 10)}{(tx.display_category || (tx.tags as string[])?.[0]) ? <> · {tx.display_category || (tx.tags as string[])?.[0]}</> : null}
                   {tx.payee && tx.comment ? <> · {tx.comment}</> : null}</>}
-                right={<span style={{ color: isIncome ? "#4A7C59" : "#1A1A1A" }}>{isIncome ? "+" : "−"}{fmt(amount)} ₽</span>}
+                right={<span style={{ color: isIncome ? "#4A7C59" : "#1A1A1A" }}>{isIncome ? "+" : "−"}{fmtAmount(amount, isIncome ? tx.income_currency : tx.outcome_currency)}</span>}
                 rightSub={creditorByZenTx.has(String(tx.id)) ? <span style={{ color: "#4A7C59" }}>{creditorByZenTx.get(String(tx.id))?.name}</span> : undefined}
                 badge={isBiz && (tx.matched_contractor || tx.is_business_income) ? <>
                   {tx.matched_contractor && <span style={{ fontSize: 10, color: tx.matched_via === "rule" ? "#4A7C59" : "#E8592A", border: `1px solid ${tx.matched_via === "rule" ? "#D0E0D4" : "#F0D8D0"}`, padding: "2px 6px" }}>{tx.matched_contractor}</span>}
@@ -1067,7 +1085,7 @@ export default function ZenMoneyPage() {
                     color: isIncome ? "#4A7C59" : "#1A1A1A",
                     fontFamily: MONO, fontVariantNumeric: "tabular-nums",
                   }}>
-                    {isIncome ? "+" : "−"}{fmt(amount)} ₽
+                    {isIncome ? "+" : "−"}{fmtAmount(amount, isIncome ? tx.income_currency : tx.outcome_currency)}
                   </div>
                   {creditorByZenTx.has(String(tx.id)) && (
                     <div style={{ fontSize: 10, color: "#4A7C59", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -1117,17 +1135,44 @@ export default function ZenMoneyPage() {
         borderBottom: isMobile ? "1px solid #EDEBE6" : "none",
       }}>
 
-        {/* Total balance */}
+        {/* Итого — ОТДЕЛЬНОЙ строкой на каждую валюту: лари с рублями не
+            складываются, поэтому одного числа здесь нет и быть не может. */}
         <div style={{ marginBottom: 24 }}>
           <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 6 }}>ИТОГО</div>
-          <div style={{
-            fontSize: 28, fontWeight: 700, letterSpacing: "-0.03em",
-            color: totalBalance >= 0 ? "#1A1A1A" : "#8B3A3A",
-            fontFamily: MONO, fontVariantNumeric: "tabular-nums",
-          }}>
-            {totalBalance < 0 ? "−" : ""}{fmt(totalBalance)} ₽
-          </div>
+          {(totals.length ? totals : [{ currency: "RUB", total: 0 }]).map((t: any, i: number) => (
+            <div key={t.currency} style={{
+              fontSize: i === 0 ? 28 : 18, fontWeight: 700, letterSpacing: "-0.03em",
+              color: t.total >= 0 ? "#1A1A1A" : "#8B3A3A",
+              fontFamily: MONO, fontVariantNumeric: "tabular-nums",
+              marginTop: i === 0 ? 0 : 2,
+            }}>
+              {t.total < 0 ? "−" : ""}{fmtAmount(Math.abs(t.total), t.currency)}
+            </div>
+          ))}
+          {!!summary?.pending_count && (
+            <div style={{ marginTop: 8, fontSize: 11, color: "#B8860B", lineHeight: 1.4 }}>
+              {summary.pending_count} {summary.pending_count === 1 ? "счёт ждёт" : "счета ждут"} настройки:
+              валюта не назначена, в итог не входят
+            </div>
+          )}
         </div>
+
+        {/* Валютные контуры: лента, категории и кэшфлоу считаются в одной валюте */}
+        {currencies.length > 1 && (
+          <div style={{ display: "flex", gap: 6, marginBottom: 20, flexWrap: "wrap" }}>
+            {currencies.map((c: string) => (
+              <button key={c} type="button" onClick={() => setCurrency(c)}
+                style={{
+                  padding: "4px 10px", fontSize: 11, fontFamily: "inherit", cursor: "pointer",
+                  border: `1px solid ${currency === c ? "#E8592A" : "#EDEBE6"}`,
+                  background: currency === c ? "#E8592A" : "none",
+                  color: currency === c ? "#FFFFFF" : "#A89070",
+                }}>
+                {c} {currencySign(c)}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Accounts */}
         <div style={{ marginBottom: 28 }}>
@@ -1150,7 +1195,7 @@ export default function ZenMoneyPage() {
                     color: acc.balance >= 0 ? "#1A1A1A" : "#8B3A3A",
                     fontFamily: MONO, fontVariantNumeric: "tabular-nums",
                   }}>
-                    {acc.balance < 0 ? "−" : ""}{fmt(acc.balance)} ₽
+                    {acc.balance < 0 ? "−" : ""}{fmtAmount(Math.abs(acc.balance), acc.currency)}
                   </div>
                 </div>
               ))}
@@ -1182,11 +1227,11 @@ export default function ZenMoneyPage() {
                   <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: CHART_H }}>
                     <div
                       style={{ width: 10, height: incH, background: "#4A7C59" }}
-                      title={`Доходы: ${fmt(r.incomes)} ₽`}
+                      title={`Доходы: ${fmtAmount(r.incomes, currency)}`}
                     />
                     <div
                       style={{ width: 10, height: expH, background: "#EDEBE6" }}
-                      title={`Расходы: ${fmt(r.expenses)} ₽`}
+                      title={`Расходы: ${fmtAmount(r.expenses, currency)}`}
                     />
                   </div>
                   <div style={{ fontSize: 8, color: "#A89070" }}>{MONTHS_RU[parseInt(m) - 1]}</div>
