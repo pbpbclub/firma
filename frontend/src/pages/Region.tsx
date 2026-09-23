@@ -7,6 +7,7 @@
 // официальный курс Нацбанка ≠ курс, по которому меняет банк, и это здесь сказано
 // прямо, а не спрятано в мелкий шрифт.
 import { useRef, useState } from "react";
+import { ArrowsClockwise } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { fxApi, financeApi, regionsApi, zenmoneyApi } from "../api";
@@ -184,7 +185,10 @@ export default function Region() {
 
       <div style={{ flex: "1 1 0", minWidth: 0, minHeight: 0, overflowY: "auto",
                     padding: isMobile ? `20px ${M.pageX}px 32px` : "32px 40px 40px" }}>
-        <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.03em", margin: 0 }}>{title}</h1>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.03em", margin: 0 }}>{title}</h1>
+          <SyncButton />
+        </div>
 
         {/* Курс не обновился: показываем последний загруженный, а не выдаём его за сегодняшний */}
         {signal?.fx_refresh && signal.fx_refresh.ok === false && (
@@ -224,6 +228,44 @@ export default function Region() {
                  reserveRef={reserveRef} />
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Синхронизация ZenMoney прямо из раздела ─────────────────────────────────
+// Тот же общий синк, что кнопка в «Личных» (забирает все счета, BOG тоже), но после
+// него обновляется ВЕСЬ экран: панель, вкладки, курсы. 🔒 Ручка при сбое отвечает
+// 200 с `ok:false` — успехом считаем только `ok:true`, иначе показываем ошибку.
+function SyncButton() {
+  const qc = useQueryClient();
+  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+  const sync = useMutation({
+    mutationFn: zenmoneyApi.sync,
+    onSuccess: (res: any) => {
+      if (!res?.ok) {
+        setNote({ ok: false, text: `не вышло: ${res?.error || "синк не ответил"}` });
+        return;
+      }
+      const m = String(res.output || "").match(/транзакций:\s*(\d+)/);
+      const n = m ? Number(m[1]) : null;
+      setNote({ ok: true, text: n == null ? "обновлено" : n === 0 ? "новых операций нет" : `новых операций: ${n}` });
+      qc.invalidateQueries();
+    },
+    onError: () => setNote({ ok: false, text: "не вышло: сервер не ответил" }),
+  });
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      {note && !sync.isPending && (
+        <span style={{ fontSize: 11, color: note.ok ? "#4A7C59" : "#8B3A3A" }}>{note.text}</span>
+      )}
+      <button type="button" onClick={() => { setNote(null); sync.mutate(); }} disabled={sync.isPending}
+        title="Подтянуть свежие операции из ZenMoney (все счета, включая Грузию)"
+        style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "1px solid #EDEBE6",
+                 padding: "6px 12px", fontSize: 12, fontFamily: "inherit", color: "#6B6355",
+                 cursor: sync.isPending ? "default" : "pointer", opacity: sync.isPending ? 0.6 : 1 }}>
+        <ArrowsClockwise size={13} style={{ animation: sync.isPending ? "spin 1s linear infinite" : "none" }} />
+        {sync.isPending ? "Синхронизация…" : "Синхронизировать"}
+      </button>
     </div>
   );
 }
