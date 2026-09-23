@@ -703,6 +703,7 @@ function TxTab({ code, who }: { code: string; who: string }) {
       {assign && (
         <Modal size="sm" eyebrow={`КАТЕГОРИЯ · ${(assign.payee || "без получателя").toUpperCase()}`}
                onClose={() => setAssign(null)}>
+          <div style={{ padding: "16px 24px 20px" }}>
           <div style={{ fontSize: 12, color: "#6B6355", marginBottom: 12, lineHeight: 1.5 }}>
             Правило запомнится и перекрасит ВСЕ операции этого получателя — прошлые тоже.
           </div>
@@ -718,6 +719,7 @@ function TxTab({ code, who }: { code: string; who: string }) {
                 {c.title}
               </button>
             ))}
+          </div>
           </div>
         </Modal>
       )}
@@ -809,6 +811,8 @@ function DrillModal({ code, who, drill, onClose }: { code: string; who: string; 
 
   return (
     <Modal size="lg" eyebrow={drill.title.toUpperCase()} onClose={onClose}>
+      {/* Тело Modal полей не задаёт — их даёт вызывающий (иначе суммы режутся краем) */}
+      <div style={{ padding: "16px 24px 20px" }}>
       {isLoading && <Loading />}
       {!isLoading && (<>
         <div style={{ display: "flex", gap: 18, alignItems: "baseline", flexWrap: "wrap", marginBottom: 12 }}>
@@ -862,6 +866,7 @@ function DrillModal({ code, who, drill, onClose }: { code: string; who: string; 
           ✎ у категории — поменять; правило запомнится и перекрасит все операции этого получателя.
         </div>
       </>)}
+      </div>
     </Modal>
   );
 }
@@ -1423,6 +1428,7 @@ function TopupsTab({ code, who }: { code: string; who: string }) {
 
       {list && (
         <Modal size="lg" eyebrow={list.title.toUpperCase()} onClose={() => setList(null)}>
+          <div style={{ padding: "16px 24px 20px" }}>
           <div style={{ fontSize: 20, fontWeight: 700, fontFamily: MONO, marginBottom: 12 }}>
             {list.kind === "out"
               ? fmtAmount(list.items.reduce((a, i) => a + i.amount_rub, 0), "RUB")
@@ -1449,6 +1455,7 @@ function TopupsTab({ code, who }: { code: string; who: string }) {
                 </span>
               </div>
             ))}
+          </div>
           </div>
         </Modal>
       )}
