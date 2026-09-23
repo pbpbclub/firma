@@ -21,6 +21,26 @@ import { Modal } from "../components/ui/Modal";
 
 const LABEL: React.CSSProperties = { fontSize: 10, color: "#A89070", letterSpacing: "0.06em" };
 
+// Предупреждение сворачивается в строку: на телефоне развёрнутый текст занимал
+// половину экрана и отодвигал сам раздел вниз.
+function Note({ tone, head, children }: { tone: string; head: React.ReactNode; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ marginTop: 16, padding: "9px 12px", borderLeft: `2px solid ${tone}`,
+                  background: "#FAF8F5", fontSize: 12, color: "#6B6355", lineHeight: 1.6, maxWidth: 820 }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "baseline", justifyContent: "space-between" }}>
+        <span><b style={{ color: tone }}>{head}</b></span>
+        <button type="button" onClick={() => setOpen(v => !v)}
+          style={{ background: "none", border: "none", padding: 0, fontFamily: "inherit", fontSize: 11,
+                   color: "#E8592A", cursor: "pointer", flexShrink: 0 }}>
+          {open ? "свернуть" : "подробнее"}
+        </button>
+      </div>
+      {open && <div style={{ marginTop: 6 }}>{children}</div>}
+    </div>
+  );
+}
+
 const MONTH_RU = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
 // «2026-03» → «мар»; у января добавляем год, иначе граница лет не читается.
 function monthLabel(period: string): string {
@@ -39,31 +59,43 @@ const VERDICT: Record<string, { text: string; color: string }> = {
 };
 
 // График курса: тонкая линия по дизайн-системе (без карточек и скруглений).
+// Подписи min/max вынесены на ось СПРАВА, а не поверх линии: раньше «макс 2.648»
+// лежало прямо на графике и читалось как часть кривой.
 function RateChart({ rows, days }: { rows: any[]; days: number }) {
   const isMobile = useIsMobile();
-  const H = 120;
-  const W = isMobile ? 340 : 720;
+  const H = 132;
+  const TOP = 8;                         // поля, иначе верхняя подпись обрезается краем svg
+  const AXIS = 58;                       // колонка под подписи значений
+  const W = isMobile ? 300 : 520;        // ширина самой кривой
   if (rows.length < 2) return <div style={{ fontSize: 12, color: "#6B6355" }}>Мало точек для графика</div>;
   const vals = rows.map(r => r.rate);
   const lo = Math.min(...vals), hi = Math.max(...vals);
+  const mid = (lo + hi) / 2;
   const span = hi - lo || 1;
   const x = (i: number) => (i / (rows.length - 1)) * W;
-  const y = (v: number) => H - ((v - lo) / span) * H;
+  const y = (v: number) => TOP + (H - ((v - lo) / span) * H);
   const path = rows.map((r, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(r.rate).toFixed(1)}`).join(" ");
   const last = rows[rows.length - 1];
+  const tick = (v: number, label: string) => (
+    <g key={label}>
+      <line x1={0} y1={y(v)} x2={W} y2={y(v)} stroke="#F2EFE9" strokeWidth={1} />
+      <text x={W + 8} y={y(v) + 3} style={{ fontSize: 10, fill: "#A89070" }}>{label}</text>
+    </g>
+  );
   return (
-    <div style={{ overflowX: "auto" }}>
-      <svg width={W} height={H + 18} style={{ display: "block" }}>
-        {/* медиана — опорная линия, чтобы «выше/ниже обычного» читалось глазами */}
-        <line x1={0} y1={y((lo + hi) / 2)} x2={W} y2={y((lo + hi) / 2)} stroke="#EDEBE6" strokeWidth={1} />
-        <path d={path} fill="none" stroke="#E8592A" strokeWidth={1.5} />
-        <circle cx={x(rows.length - 1)} cy={y(last.rate)} r={3} fill="#E8592A" />
-        <text x={0} y={H + 14} style={{ fontSize: 10, fill: "#A89070" }}>{rows[0].date}</text>
-        <text x={W} y={H + 14} textAnchor="end" style={{ fontSize: 10, fill: "#A89070" }}>{last.date}</text>
-        <text x={0} y={12} style={{ fontSize: 10, fill: "#A89070" }}>макс {hi}</text>
-        <text x={0} y={H - 2} style={{ fontSize: 10, fill: "#A89070" }}>мин {lo}</text>
-      </svg>
-      <div style={{ ...LABEL, marginTop: 2 }}>КУРС USD → GEL ЗА {days} ДНЕЙ · НАЦБАНК ГРУЗИИ</div>
+    <div>
+      <div style={{ ...LABEL, marginBottom: 10 }}>КУРС USD → GEL ЗА {days} ДНЕЙ · НАЦБАНК ГРУЗИИ</div>
+      <div style={{ overflowX: "auto" }}>
+        <svg width={W + AXIS} height={H + TOP + 24} style={{ display: "block" }}>
+          {tick(hi, String(hi))}
+          {tick(mid, mid.toFixed(3))}
+          {tick(lo, String(lo))}
+          <path d={path} fill="none" stroke="#E8592A" strokeWidth={1.5} />
+          <circle cx={x(rows.length - 1)} cy={y(last.rate)} r={3} fill="#E8592A" />
+          <text x={0} y={H + TOP + 20} style={{ fontSize: 10, fill: "#A89070" }}>{rows[0].date}</text>
+          <text x={W} y={H + TOP + 20} textAnchor="end" style={{ fontSize: 10, fill: "#A89070" }}>{last.date}</text>
+        </svg>
+      </div>
     </div>
   );
 }
@@ -95,8 +127,9 @@ export default function Region() {
     queryKey: ["abroad-summary", who], queryFn: () => financeApi.abroadSummary(12),
     enabled: isOwner,
   });
+  // Счета страны берём с явным region: в «Личных» их больше нет (там домашний контур).
   const { data: accounts = [] } = useQuery({
-    queryKey: ["zm-accounts", who], queryFn: zenmoneyApi.accounts,
+    queryKey: ["zm-accounts", code, who], queryFn: () => zenmoneyApi.accounts(code),
     enabled: isOwner,
   });
 
@@ -124,45 +157,44 @@ export default function Region() {
   if (isLoading) return <Loading />;
 
   const v = VERDICT[signal?.verdict || "no_data"];
-  const regionAccounts = (accounts as any[]).filter((a: any) => a.region === code);
+  const regionAccounts = accounts as any[];
   const months = abroad?.months ?? [];
   const maxMonth = Math.max(...months.map((m: any) => m.amount_rub), 1);
 
   return (
-    <div style={{ padding: isMobile ? `20px ${M.pageX}px 32px` : "32px 40px", overflowY: "auto", height: "100%" }}>
+    <div style={{ padding: isMobile ? `20px ${M.pageX}px 32px` : "32px 40px 40px", overflowY: "auto",
+                  height: "100%", maxWidth: 1180 }}>
       <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.03em", margin: 0 }}>
         {code === "ge" ? "Грузия" : code.toUpperCase()}
       </h1>
 
       {/* Курс не обновился: показываем последний загруженный, а не выдаём его за сегодняшний */}
       {signal?.fx_refresh && signal.fx_refresh.ok === false && (
-        <div style={{ marginTop: 14, padding: "10px 12px", border: "1px solid #EDEBE6", background: "#FAF8F5",
-                      fontSize: 12, color: "#6B6355", lineHeight: 1.5, maxWidth: 760 }}>
-          <b style={{ color: "#8B3A3A" }}>Курс сегодня не загрузился</b> — Нацбанк не ответил
-          ({signal.fx_refresh.error || "сеть недоступна"}). Ниже последний сохранённый курс
-          за {signal?.date || "—"}, сегодняшним он не является.
-        </div>
+        <Note tone="#8B3A3A" head={`Курс сегодня не загрузился — показан за ${signal?.date || "—"}`}>
+          Нацбанк не ответил ({signal.fx_refresh.error || "сеть недоступна"}). Это последний
+          сохранённый курс, сегодняшним он не является.
+        </Note>
       )}
 
       {/* Одинаковые названия счетов: честно говорим, что именно из-за этого не работает */}
       {!!signal?.ambiguous?.length && (
-        <div style={{ marginTop: 14, padding: "10px 12px", border: "1px solid #EDEBE6", background: "#FAF8F5",
-                      fontSize: 12, color: "#6B6355", lineHeight: 1.5, maxWidth: 760 }}>
-          <b style={{ color: "#B8860B" }}>{signal.ambiguous.length} счёта делят одно название</b> в ZenMoney
-          («{signal.ambiguous[0].title}»). Остатки считаются — валюта у счёта известна. А вот отдельные
-          операции к ним привязать нечем: в транзакциях нога хранится НАЗВАНИЕМ счёта. Переименуй счета
-          в ZenMoney (например «Сола ₾ / $ / €») и попроси фин-агента сделать полный пересинк — история
-          перепишется, и появятся твои реальные курсы обмена, спред банка и разбор маршрутов.
-        </div>
+        <Note tone="#B8860B"
+              head={`${signal.ambiguous.length} счёта делят одно название — валюта операций не разделена`}>
+          В ZenMoney они все зовутся «{signal.ambiguous[0].title}». Остатки считаются: валюта у счёта
+          известна. А вот отдельные операции к ним привязать нечем — в транзакциях нога хранится
+          НАЗВАНИЕМ счёта. Переименуй счета в ZenMoney (например «Сола ₾ / $ / €») и скажи мне —
+          я сделаю полный пересинк. История перепишется, и появятся твои реальные курсы обмена,
+          спред банка и разбор маршрутов.
+        </Note>
       )}
 
       {/* Вкладки: курс · операции · аналитика */}
-      <div style={{ display: "flex", gap: 0, marginTop: 18, borderBottom: "1px solid #EDEBE6",
+      <div style={{ display: "flex", gap: 0, marginTop: 24, borderBottom: "1px solid #EDEBE6",
                     ...(isMobile ? M.tabStrip : null) }}>
         {([["fx", "Обмен"], ["tx", "Операции"], ["stats", "Аналитика"]] as const).map(([key, label]) => (
           <button key={key} type="button" onClick={() => setTab(key)}
             style={{
-              padding: "8px 14px", fontSize: 13, fontFamily: "inherit", cursor: "pointer",
+              padding: "10px 16px", fontSize: 13, fontFamily: "inherit", cursor: "pointer",
               background: "none", border: "none", flexShrink: 0,
               color: tab === key ? "#1A1A1A" : "#A89070",
               fontWeight: tab === key ? 600 : 400,
@@ -176,126 +208,142 @@ export default function Region() {
       {tab === "tx" && <TxTab code={code} who={who} />}
       {tab === "stats" && <StatsTab code={code} who={who} />}
 
-      {tab === "fx" && (<>
-      {/* ── Обмен: главный блок ────────────────────────────────────────── */}
-      <div style={{ marginTop: 26 }}>
-        <div style={LABEL}>ОБМЕН ДОЛЛАРОВ НА ЛАРИ</div>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
-          <div style={{ fontSize: 32, fontWeight: 700, letterSpacing: "-0.03em", fontFamily: MONO, color: "#1A1A1A" }}>
-            {signal?.rate ?? "—"} ₾
-          </div>
-          <div style={{ fontSize: 12, color: "#6B6355" }}>за $1 · {signal?.date}</div>
-        </div>
-        <div style={{ marginTop: 6, fontSize: 14, fontWeight: 600, color: v.color }}>{v.text}</div>
-        <div style={{ marginTop: 2, fontSize: 12, color: "#6B6355" }}>{signal?.note}</div>
+      {tab === "fx" && (
+      <div style={{ display: "grid", marginTop: 28,
+                    gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1.6fr) minmax(280px, 1fr)",
+                    gap: isMobile ? 32 : 48, alignItems: "start" }}>
 
-        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, max-content)",
-                      gap: isMobile ? "10px 18px" : 28, marginTop: 16 }}>
-          {[["худший за 30 дней", signal?.worst_30], ["обычный (медиана)", signal?.median_30],
-            ["лучший за 30 дней", signal?.best_30], ["дней в расчёте", signal?.days_30]].map(([l, val]: any) => (
-            <div key={l}>
-              <div style={LABEL}>{String(l).toUpperCase()}</div>
-              <div style={{ fontSize: 15, fontWeight: 600, fontFamily: MONO, marginTop: 3 }}>{val ?? "—"}</div>
-            </div>
-          ))}
-        </div>
+        {/* ── Левая колонка: курс и его история ──────────────────────── */}
+        <div>
+          <div style={LABEL}>ОБМЕН ДОЛЛАРОВ НА ЛАРИ</div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 40, fontWeight: 700, letterSpacing: "-0.03em", fontFamily: MONO,
+                           color: "#1A1A1A", lineHeight: 1 }}>
+              {signal?.rate ?? "—"}
+            </span>
+            <span style={{ fontSize: 15, color: "#6B6355" }}>₾ за $1</span>
+            <span style={{ fontSize: 12, color: "#A89070" }}>· {signal?.date}</span>
+          </div>
 
-        <div style={{ marginTop: 10, fontSize: 11, color: "#A89070", lineHeight: 1.5, maxWidth: 640 }}>
-          Курс официальный, от Нацбанка Грузии. Банк меняет по своему — обычно чуть хуже; когда операции
-          обмена станут разборными, здесь появится твой реальный спред к этой линии.
-        </div>
-      </div>
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid #EDEBE6" }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: v.color }}>{v.text}</div>
+            <div style={{ marginTop: 4, fontSize: 12, color: "#6B6355" }}>{signal?.note}</div>
+          </div>
 
-      {/* ── Сколько свободно менять ───────────────────────────────────── */}
-      <div style={{ marginTop: 28 }}>
-        <div style={LABEL}>СКОЛЬКО МОЖНО ПОМЕНЯТЬ</div>
-        <div style={{ display: "flex", gap: isMobile ? 18 : 32, marginTop: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <div>
-            <div style={{ fontSize: 11, color: "#6B6355" }}>на долларовом счёте</div>
-            <div style={{ fontSize: 20, fontWeight: 700, fontFamily: MONO }}>
-              {fmtAmount(signal?.balances?.USD ?? 0, "USD")}
-            </div>
-          </div>
-          <div>
-            <div style={{ fontSize: 11, color: "#6B6355" }}>держу про запас</div>
-            <div style={{ fontSize: 20, fontWeight: 700, fontFamily: MONO, color: "#6B6355" }}>
-              {fmtAmount(signal?.usd_reserve ?? 0, "USD")}
-            </div>
-          </div>
-          <div>
-            <div style={{ fontSize: 11, color: "#6B6355" }}>свободно</div>
-            <div style={{ fontSize: 20, fontWeight: 700, fontFamily: MONO, color: "#4A7C59" }}>
-              {fmtAmount(signal?.usd_free ?? 0, "USD")}
-            </div>
-          </div>
-          {!!signal?.gel_if_converted && (
-            <div>
-              <div style={{ fontSize: 11, color: "#6B6355" }}>это по сегодняшнему курсу</div>
-              <div style={{ fontSize: 20, fontWeight: 700, fontFamily: MONO }}>
-                {fmtAmount(signal.gel_if_converted, "GEL")}
+          {/* Разброс за месяц — четыре числа в ряд, разделённые линиями */}
+          <div style={{ display: "grid", marginTop: 20,
+                        gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)",
+                        borderTop: "1px solid #EDEBE6", borderBottom: "1px solid #EDEBE6" }}>
+            {[["худший за 30 дней", signal?.worst_30], ["обычный курс", signal?.median_30],
+              ["лучший за 30 дней", signal?.best_30], ["дней в расчёте", signal?.days_30]]
+              .map(([l, val]: any, i: number) => (
+              <div key={l} style={{
+                padding: "12px 14px",
+                borderLeft: i % (isMobile ? 2 : 4) === 0 ? "none" : "1px solid #EDEBE6",
+                borderTop: isMobile && i > 1 ? "1px solid #EDEBE6" : "none",
+              }}>
+                <div style={{ ...LABEL, fontSize: 9 }}>{String(l).toUpperCase()}</div>
+                <div style={{ fontSize: 16, fontWeight: 600, fontFamily: MONO, marginTop: 6 }}>{val ?? "—"}</div>
               </div>
-            </div>
-          )}
-        </div>
-        <div style={{ display: "flex", gap: 8, marginTop: 14, alignItems: "center", flexWrap: "wrap" }}>
-          <span style={{ fontSize: 12, color: "#6B6355" }}>Неснижаемый запас в долларах:</span>
-          <input value={reserve} onChange={e => setReserve(e.target.value.replace(/[^\d.]/g, ""))}
-            placeholder={String(signal?.usd_reserve ?? 0)}
-            style={{ width: 90, padding: "5px 8px", border: "1px solid #EDEBE6", fontFamily: MONO, fontSize: 13 }} />
-          <button type="button" disabled={!reserve || saveReserve.isPending}
-            onClick={() => saveReserve.mutate(Number(reserve))}
-            style={{ padding: "5px 12px", fontSize: 12, fontFamily: "inherit", cursor: "pointer",
-                     border: "1px solid #E8592A", background: "#E8592A", color: "#FFFFFF" }}>
-            Сохранить
-          </button>
-          <span style={{ fontSize: 11, color: "#A89070" }}>ниже этой суммы менять не предлагаем</span>
-        </div>
-      </div>
+            ))}
+          </div>
 
-      {/* ── График ────────────────────────────────────────────────────── */}
-      <div style={{ marginTop: 30 }}>
-        <RateChart rows={series?.rows ?? []} days={90} />
-      </div>
+          <div style={{ marginTop: 26 }}>
+            <RateChart rows={series?.rows ?? []} days={90} />
+          </div>
 
-      {/* ── Остатки ───────────────────────────────────────────────────── */}
-      <div style={{ marginTop: 30 }}>
-        <div style={LABEL}>СЧЕТА</div>
-        <div style={{ marginTop: 8 }}>
-          {regionAccounts.length === 0 && (
-            <div style={{ fontSize: 12, color: "#6B6355" }}>Счета региона не настроены</div>
-          )}
-          {regionAccounts.map((a: any) => (
-            <div key={a.id} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0",
-                                     borderBottom: "1px solid #F2EFE9", maxWidth: 480 }}>
-              <span style={{ fontSize: 12, color: "#6B6355" }}>
-                {a.title} <span style={{ color: "#A89070" }}>{currencySign(a.currency)}</span>
-              </span>
-              <span style={{ fontSize: 13, fontWeight: 600, fontFamily: MONO }}>
-                {fmtAmount(a.balance, a.currency)}
-              </span>
-            </div>
-          ))}
+          <div style={{ marginTop: 16, fontSize: 11, color: "#A89070", lineHeight: 1.6 }}>
+            Курс официальный, от Нацбанка Грузии. Банк меняет по своему — обычно чуть хуже;
+            когда операции обмена станут разборными, здесь появится твой реальный спред к этой линии.
+          </div>
         </div>
-      </div>
 
-      {/* ── Выведено себе за границу ──────────────────────────────────── */}
-      <div style={{ marginTop: 30, marginBottom: 20 }}>
-        <div style={LABEL}>ВЫВЕДЕНО СЕБЕ ЗА ГРАНИЦУ · {abroad?.count ?? 0} ПЕРЕВОДОВ</div>
-        <div style={{ fontSize: 22, fontWeight: 700, fontFamily: MONO, marginTop: 6 }}>
-          {fmtAmount(abroad?.total ?? 0, "RUB")}
-        </div>
-        <div style={{ display: "flex", alignItems: "flex-end", gap: 4, marginTop: 14, height: 60 }}>
-          {months.map((m: any) => (
-            <div key={m.period} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-              <div title={`${m.period}: ${fmtAmount(m.amount_rub, "RUB")} · ${m.count}`}
-                style={{ width: isMobile ? 18 : 26, background: "#E8592A",
-                         height: Math.max(Math.round((m.amount_rub / maxMonth) * 50), 2) }} />
-              <span style={{ fontSize: 9, color: "#A89070" }}>{monthLabel(m.period)}</span>
+        {/* ── Правая колонка: сколько менять, счета, вывод ────────────── */}
+        <div>
+          <div style={LABEL}>СКОЛЬКО МОЖНО ПОМЕНЯТЬ</div>
+          <div style={{ marginTop: 10 }}>
+            {[
+              ["на долларовом счёте", fmtAmount(signal?.balances?.USD ?? 0, "USD"), "#1A1A1A"],
+              ["держу про запас", fmtAmount(signal?.usd_reserve ?? 0, "USD"), "#6B6355"],
+              ["свободно", fmtAmount(signal?.usd_free ?? 0, "USD"), "#4A7C59"],
+              ...(signal?.gel_if_converted
+                ? [["по сегодняшнему курсу", fmtAmount(signal.gel_if_converted, "GEL"), "#6B6355"]]
+                : []),
+            ].map(([label, value, color]: any) => (
+              <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline",
+                                        gap: 12, padding: "9px 2px 9px 0", borderBottom: "1px solid #F2EFE9" }}>
+                <span style={{ fontSize: 12, color: "#6B6355" }}>{label}</span>
+                <span style={{ fontSize: 17, fontWeight: 700, fontFamily: MONO, color,
+                               whiteSpace: "nowrap" }}>{value}</span>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontSize: 11, color: "#6B6355", marginBottom: 6 }}>
+              Неснижаемый запас в долларах
             </div>
-          ))}
+            <div style={{ display: "flex", gap: 8 }}>
+              <input value={reserve} onChange={e => setReserve(e.target.value.replace(/[^\d.]/g, ""))}
+                placeholder={String(signal?.usd_reserve ?? 0)}
+                style={{ flex: 1, minWidth: 0, padding: "7px 10px", border: "1px solid #EDEBE6",
+                         fontFamily: MONO, fontSize: 13 }} />
+              <button type="button" disabled={!reserve || saveReserve.isPending}
+                onClick={() => saveReserve.mutate(Number(reserve))}
+                style={{ padding: "7px 14px", fontSize: 12, fontFamily: "inherit", cursor: "pointer",
+                         border: "1px solid #E8592A", background: "#E8592A", color: "#FFFFFF",
+                         flexShrink: 0 }}>
+                Сохранить
+              </button>
+            </div>
+            <div style={{ fontSize: 11, color: "#A89070", marginTop: 6 }}>
+              ниже этой суммы менять не предлагаем
+            </div>
+          </div>
+
+          <div style={{ marginTop: 32 }}>
+            <div style={LABEL}>СЧЕТА</div>
+            <div style={{ marginTop: 10 }}>
+              {regionAccounts.length === 0 && (
+                <div style={{ fontSize: 12, color: "#6B6355" }}>Счета региона не настроены</div>
+              )}
+              {regionAccounts.map((a: any) => (
+                <div key={a.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline",
+                                         gap: 12, padding: "9px 2px 9px 0", borderBottom: "1px solid #F2EFE9" }}>
+                  <span style={{ fontSize: 12, color: "#6B6355", overflow: "hidden",
+                                 textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {a.title} <span style={{ color: "#A89070" }}>{currencySign(a.currency)}</span>
+                  </span>
+                  <span style={{ fontSize: 14, fontWeight: 600, fontFamily: MONO, whiteSpace: "nowrap" }}>
+                    {fmtAmount(a.balance, a.currency)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ marginTop: 32, marginBottom: 12 }}>
+            <div style={LABEL}>ВЫВЕДЕНО СЕБЕ ЗА ГРАНИЦУ</div>
+            <div style={{ fontSize: 22, fontWeight: 700, fontFamily: MONO, marginTop: 8 }}>
+              {fmtAmount(abroad?.total ?? 0, "RUB")}
+            </div>
+            <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>
+              {abroad?.count ?? 0} переводов за год
+            </div>
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 5, marginTop: 16, height: 56 }}>
+              {months.map((m: any) => (
+                <div key={m.period} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }}>
+                  <div title={`${m.period}: ${fmtAmount(m.amount_rub, "RUB")} · ${m.count}`}
+                    style={{ width: 20, background: "#E8592A",
+                             height: Math.max(Math.round((m.amount_rub / maxMonth) * 44), 2) }} />
+                  <span style={{ fontSize: 9, color: "#A89070" }}>{monthLabel(m.period)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
-      </>)}
+      )}
     </div>
   );
 }
@@ -304,7 +352,7 @@ export default function Region() {
 // Категория не хранится в строке, а выводится на чтении из правил «получатель →
 // категория». Поэтому разметка одного получателя перекрашивает сразу все его
 // операции, включая прошлогодние, — перебирать ленту руками не нужно.
-const TX_GRID = "74px 1fr 150px 110px";
+const TX_GRID = "84px minmax(0, 1fr) 170px 120px";
 
 function TxTab({ code, who }: { code: string; who: string }) {
   const isMobile = useIsMobile();
@@ -355,7 +403,7 @@ function TxTab({ code, who }: { code: string; who: string }) {
   return (
     <div style={{ marginTop: 18, maxWidth: 1000 }}>
       {/* Подвкладки направления */}
-      <div style={{ display: "flex", gap: 6, marginBottom: 12, ...(isMobile ? M.tabStrip : null) }}>
+      <div style={{ display: "flex", gap: 6, marginBottom: 16, ...(isMobile ? M.tabStrip : null) }}>
         {[["", "Все"], ["expense", "Траты"], ["income", "Приходы"], ["transfer", "Переводы"]].map(([k, l]) => (
           <button key={k} type="button" onClick={() => setKind(k)}
             style={{ padding: "4px 10px", fontSize: 11, fontFamily: "inherit", cursor: "pointer", flexShrink: 0,
@@ -380,7 +428,7 @@ function TxTab({ code, who }: { code: string; who: string }) {
       {/* Шапка-фильтры: на телефоне — ряд чипов вместо грида */}
       <div style={isMobile ? M.filterRow : {
         display: "grid", gridTemplateColumns: TX_GRID, alignItems: "center",
-        padding: "10px 0 6px", borderBottom: "1px solid #EDEBE6",
+        padding: "14px 0 8px", borderBottom: "1px solid #EDEBE6",
       }}>
         <PeriodFilter label="ДАТА" from={dateFrom} to={dateTo}
           onChange={(f, t) => { setDateFrom(f); setDateTo(t); }} />
@@ -392,8 +440,8 @@ function TxTab({ code, who }: { code: string; who: string }) {
           onChange={(mn, mx) => { setAmountMin(mn); setAmountMax(mx); }} align="right" />
       </div>
 
-      <div style={{ padding: "8px 0", fontSize: 11, color: "#6B6355", display: "flex",
-                    justifyContent: "space-between", borderBottom: "1px solid #F2EFE9" }}>
+      <div style={{ padding: "10px 0", fontSize: 11, color: "#6B6355", display: "flex",
+                    justifyContent: "space-between", gap: 12, borderBottom: "1px solid #F2EFE9" }}>
         <span>
           {data?.total_found ?? 0} операций{data?.truncated ? " · показаны первые 400" : ""}
           {/* Обрезание на уровне SQL: период показан не целиком, и счётчик слева —
@@ -438,8 +486,8 @@ function TxTab({ code, who }: { code: string; who: string }) {
             meta={catCell}
           />
         ) : (
-          <div key={t.id} style={{ display: "grid", gridTemplateColumns: TX_GRID, padding: "7px 0",
-                                   borderBottom: "1px solid #F2EFE9", alignItems: "start" }}>
+          <div key={t.id} style={{ display: "grid", gridTemplateColumns: TX_GRID, padding: "10px 0",
+                                   borderBottom: "1px solid #F2EFE9", alignItems: "baseline", gap: 12 }}>
             <div style={{ fontSize: 11, color: "#6B6355", fontFamily: MONO }}>{String(t.date || "").slice(5)}</div>
             <div>
               <div style={{ fontSize: 12, color: "#1A1A1A" }}>{t.payee || "—"}</div>
@@ -497,11 +545,11 @@ function StatsTab({ code, who }: { code: string; who: string }) {
   const spent = data?.spent ?? 0;
 
   const Row = ({ title, total, count, extra, pct, currency }: any) => (
-    <div style={{ padding: "6px 0", borderBottom: "1px solid #F2EFE9" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, gap: 10 }}>
-        <span style={{ fontSize: 11, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis",
+    <div style={{ padding: "9px 0", borderBottom: "1px solid #F2EFE9" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, gap: 12 }}>
+        <span style={{ fontSize: 12, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis",
                        whiteSpace: "nowrap" }}>{title}</span>
-        <span style={{ fontSize: 11, fontWeight: 500, color: "#8B3A3A", fontFamily: MONO, whiteSpace: "nowrap" }}>
+        <span style={{ fontSize: 12, fontWeight: 500, color: "#8B3A3A", fontFamily: MONO, whiteSpace: "nowrap" }}>
           {fmtAmount(total, currency ?? cur)}
           {count != null && <span style={{ color: "#A89070", fontWeight: 400 }}> · {count}</span>}
           {extra}
@@ -569,24 +617,28 @@ function StatsTab({ code, who }: { code: string; who: string }) {
       )}
 
       {/* Месяц к месяцу */}
-      <div style={{ marginTop: 24 }}>
+      <div style={{ marginTop: 34, maxWidth: 560 }}>
         <div style={LABEL}>МЕСЯЦ К МЕСЯЦУ</div>
-        <div style={{ display: "flex", alignItems: "flex-end", gap: isMobile ? 6 : 10, marginTop: 12, height: 80 }}>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: isMobile ? 8 : 14, marginTop: 16, height: 96 }}>
           {(data?.months ?? []).map((m: any) => (
             <div key={m.period} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
               <span style={{ fontSize: 9, color: "#6B6355", fontFamily: MONO }}>{Math.round(m.total)}</span>
               <div title={`${m.period}: ${fmtAmount(m.total, m.currency ?? cur)} · ${m.count}`}
-                style={{ width: isMobile ? 22 : 34, background: "#E8592A",
-                         height: Math.max(Math.round((m.total / maxMonth) * 56), 2) }} />
+                style={{ width: isMobile ? 26 : 44, background: "#E8592A",
+                         height: Math.max(Math.round((m.total / maxMonth) * 68), 2) }} />
               <span style={{ fontSize: 9, color: "#A89070" }}>{monthLabel(m.period)}</span>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Категории */}
-      <div style={{ marginTop: 26 }}>
-        <div style={{ ...LABEL, marginBottom: 8 }}>НА ЧТО УХОДЯТ ДЕНЬГИ</div>
+      {/* Категории и получатели — двумя колонками: по одной на брата, иначе
+          строка на 1000 пикселей с коротким баром читается как пустая полоса */}
+      <div style={{ display: "grid", marginTop: 34,
+                    gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: isMobile ? 28 : 48,
+                    alignItems: "start" }}>
+      <div>
+        <div style={{ ...LABEL, marginBottom: 10 }}>НА ЧТО УХОДЯТ ДЕНЬГИ</div>
         {(data?.categories ?? []).map((c: any) => (
           <Row key={c.category} title={c.title} total={c.total} count={c.count} currency={c.currency}
             pct={Math.round((c.total / (spent || 1)) * 100)} />
@@ -594,17 +646,19 @@ function StatsTab({ code, who }: { code: string; who: string }) {
       </div>
 
       {/* Топ получателей */}
-      <div style={{ marginTop: 26 }}>
-        <div style={{ ...LABEL, marginBottom: 8 }}>ТОП ПОЛУЧАТЕЛЕЙ</div>
+      <div>
+        <div style={{ ...LABEL, marginBottom: 10 }}>ТОП ПОЛУЧАТЕЛЕЙ</div>
         {(data?.top_payees ?? []).map((p: any) => (
           <Row key={p.payee} title={p.title} total={p.total} count={p.count} currency={p.currency}
             extra={<span style={{ color: "#A89070", fontWeight: 400 }}> · ср. {Math.round(p.avg)}</span>} />
         ))}
       </div>
 
+      </div>
+
       {/* Регулярные списания */}
-      <div style={{ marginTop: 26, marginBottom: 24 }}>
-        <div style={{ ...LABEL, marginBottom: 8 }}>РЕГУЛЯРНЫЕ СПИСАНИЯ</div>
+      <div style={{ marginTop: 34, marginBottom: 28, maxWidth: 560 }}>
+        <div style={{ ...LABEL, marginBottom: 10 }}>РЕГУЛЯРНЫЕ СПИСАНИЯ</div>
         <div style={{ fontSize: 11, color: "#A89070", marginBottom: 8 }}>
           получатели, которым платишь три месяца подряд и чаще
         </div>

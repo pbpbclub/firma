@@ -139,22 +139,35 @@ class Scope:
                 self._by_title[title] = [src]
 
     # ── счета ────────────────────────────────────────────────────────────────
-    def accounts(self, include_cash: bool = False, include_archived: bool = False) -> list[Account]:
+    def accounts(self, include_cash: bool = False, include_archived: bool = False,
+                 region: str | None = "any") -> list[Account]:
         """Видимые пользователю счета. type='cash' исключается по умолчанию:
-        отрицательный «кэш» — артефакт трекинга ZenMoney (правило /accounts)."""
+        отрицательный «кэш» — артефакт трекинга ZenMoney (правило /accounts).
+
+        `region`: "any" — все; None — только домашние (без региона); код страны —
+        счета этой страны. Решение Юры 23.09.2026: заграничные карты живут ТОЛЬКО
+        в своём разделе, в «Личных» их остатков быть не должно — иначе одни и те же
+        деньги считаются в двух местах и непонятно, где правда."""
         out = [a for a in self._accounts if self.sees(a)]
         if not include_cash:
             out = [a for a in out if a.type != "cash"]
+        if region != "any":
+            out = [a for a in out if a.region == region]
         return sorted(out, key=lambda a: -a.balance)
+
+    def home_accounts(self, include_cash: bool = False) -> list[Account]:
+        """Домашний контур — счета без страны."""
+        return self.accounts(include_cash=include_cash, region=None)
 
     def sees(self, account: Account) -> bool:
         if self.is_owner:
             return True
         return account.visibility == PUBLIC
 
-    def pending_count(self) -> int:
+    def pending_count(self, region: str | None = "any") -> int:
         """Сколько счетов ждут настройки валюты — плашка владельцу."""
-        return sum(1 for a in self._accounts if not a.configured)
+        return sum(1 for a in self._accounts
+                   if not a.configured and (region == "any" or a.region == region))
 
     def ambiguous_count(self) -> int:
         """Счета, делящие название с другим. Остатки у них считаются (валюта
@@ -162,12 +175,12 @@ class Scope:
         Лечится переименованием в ZenMoney + полным пересинком фин-агента."""
         return sum(1 for a in self._accounts if a.ambiguous)
 
-    def totals(self, include_cash: bool = False) -> list[dict]:
+    def totals(self, include_cash: bool = False, region: str | None = "any") -> list[dict]:
         """Итоги ПО ВАЛЮТАМ. Одного числа здесь нет и быть не может.
         Ненастроенные счета в итог не идут — молча сложить их «в рубли» и есть
         тот баг, ради которого реестр заводился."""
         agg: dict[str, dict] = {}
-        for a in self.accounts(include_cash=include_cash):
+        for a in self.accounts(include_cash=include_cash, region=region):
             if not a.configured:
                 continue
             slot = agg.setdefault(a.currency, {"currency": a.currency, "total": 0.0, "count": 0,

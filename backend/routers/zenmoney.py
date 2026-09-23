@@ -72,22 +72,26 @@ def sync_zenmoney(user=Depends(require_owner)):
 
 
 @router.get("/accounts")
-def get_accounts(user=Depends(get_current_user)):
+def get_accounts(region: Optional[str] = None, user=Depends(get_current_user)):
     """Счета, видимые пользователю, КАЖДЫЙ со своей валютой.
 
+    По умолчанию — ТОЛЬКО домашний контур: заграничные карты живут в своём
+    разделе (решение Юры 23.09.2026), иначе один и тот же остаток показывается
+    в двух местах. `?region=ge` — счета конкретной страны (для её раздела).
+
     Форма ответа прежняя (id/title/type/balance) плюс `currency` — фронт не ломается.
-    type='cash' по-прежнему исключён: отрицательный «кэш» — артефакт трекинга
-    ZenMoney. Приватные и ненастроенные счета в ответ не попадают."""
-    return [a.as_dict() for a in scope_for(user).accounts()]
+    type='cash' исключён: отрицательный «кэш» — артефакт трекинга ZenMoney."""
+    return [a.as_dict() for a in scope_for(user).accounts(region=region or None)]
 
 
 @router.get("/accounts-summary")
-def get_accounts_summary(user=Depends(get_current_user)):
+def get_accounts_summary(region: Optional[str] = None, user=Depends(get_current_user)):
     """Итоги ПО ВАЛЮТАМ вместо одного числа: сложить лари с рублями нельзя.
-    `pending_count` — счета без настроенной валюты (плашка владельцу)."""
+    Как и /accounts — по умолчанию домашний контур."""
     s = scope_for(user)
-    return {"totals": s.totals(),
-            "pending_count": s.pending_count() if s.is_owner else 0,
+    reg = region or None
+    return {"totals": s.totals(region=reg),
+            "pending_count": s.pending_count(region=reg) if s.is_owner else 0,
             # Счета с одинаковым названием: остатки считаются, строки — нет.
             "ambiguous_count": s.ambiguous_count() if s.is_owner else 0,
             "is_owner": s.is_owner}
@@ -165,7 +169,8 @@ def get_balance_at_date(date: str, user=Depends(get_current_user)):
     try:
         # Счета берём из линзы: приватные и ненастроенные сюда не попадают,
         # а у каждого известна валюта (type='cash' линза отсекает сама).
-        rows = [a for a in scope.accounts() if a.configured]
+        # Домашний контур: заграничные карты показываются в своём разделе.
+        rows = [a for a in scope.home_accounts() if a.configured]
         accounts = []
         for r in rows:
             # В zm_transactions income_account/outcome_account хранят НАЗВАНИЕ счёта (title), не id.

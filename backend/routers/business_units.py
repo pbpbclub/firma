@@ -33,7 +33,7 @@ def _zenmoney_total() -> float:
     и приватные счета линза сюда тоже не отдаёт, и type='cash' наконец отсечён —
     отрицательный «кэш» это артефакт трекинга ZenMoney, а не деньги на счёте."""
     try:
-        totals = scope_for(None, owner=True).totals()
+        totals = scope_for(None, owner=True).totals(region=None)
         return round(next((t["total"] for t in totals if t["currency"] == "RUB"), 0.0), 2)
     except HTTPException:
         raise

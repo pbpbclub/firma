@@ -591,12 +591,13 @@ export default function ZenMoneyPage() {
 
   const { data: accounts = [] } = useQuery({
     queryKey: ["zm-accounts", who],
-    queryFn: zenmoneyApi.accounts,
+    // Без аргумента — домашний контур: заграничные карты живут в своём разделе.
+    queryFn: () => zenmoneyApi.accounts(),
   });
 
   const { data: summary } = useQuery({
     queryKey: ["zm-accounts-summary", who],
-    queryFn: zenmoneyApi.accountsSummary,
+    queryFn: () => zenmoneyApi.accountsSummary(),
   });
   const totals: any[] = summary?.totals || [];
   const currencies: string[] = totals.map((t: any) => t.currency);

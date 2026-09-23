@@ -502,10 +502,14 @@ export const fxApi = {
 };
 
 export const zenmoneyApi = {
-  accounts: () => api.get("/zenmoney/accounts").then((r) => r.data),
+  // Без region — домашний контур: заграничные карты показываются только в своём
+  // разделе (решение Юры 23.09.2026), иначе остаток виден в двух местах сразу.
+  accounts: (region?: string) =>
+    api.get("/zenmoney/accounts", { params: region ? { region } : {} }).then((r) => r.data),
   // Итоги ТОЛЬКО по валютам: одного числа у личных счетов больше нет —
   // сложить лари с рублями нельзя (валютный замок 22.09.2026).
-  accountsSummary: () => api.get("/zenmoney/accounts-summary").then((r) => r.data),
+  accountsSummary: (region?: string) =>
+    api.get("/zenmoney/accounts-summary", { params: region ? { region } : {} }).then((r) => r.data),
   balanceAtDate: (date: string) =>
     api.get("/zenmoney/balance-at-date", { params: { date } }).then((r) => r.data),
   transactions: (params?: Record<string, string | number>) =>

@@ -46,18 +46,20 @@ def scope_mod(migrated, tmp_path, monkeypatch):
     monkeypatch.setattr(db, "ZENMONEY_DB", zen)
 
     # Сид миграции знает боевые UUID; в тесте id укорочены — заводим реестр руками.
-    for aid, title, cur, vis in [
-        ("c8efea56", "Black", "RUB", "public"),
-        ("8af50bc5", "MasterCard Mass", "RUB", "public"),
-        ("67009398", "Mir Cashback Card", "RUB", "public"),
-        ("81edcd65", "Cash", "RUB", "public"),
-        ("17525302", "Universal Account", "unknown", "pending"),
-        ("78f8908d", "Universal Account", "unknown", "pending"),
-        ("017783a4", "Universal Account", "unknown", "pending"),
-        ("aaaa1111", "Сола ₾", "GEL", "private"),
+    # region как в бою: у карт Bank of Georgia он есть даже до назначения валюты —
+    # это признак «заграничная карта», а не следствие валюты.
+    for aid, title, cur, vis, region in [
+        ("c8efea56", "Black", "RUB", "public", None),
+        ("8af50bc5", "MasterCard Mass", "RUB", "public", None),
+        ("67009398", "Mir Cashback Card", "RUB", "public", None),
+        ("81edcd65", "Cash", "RUB", "public", None),
+        ("17525302", "Universal Account", "unknown", "pending", "ge"),
+        ("78f8908d", "Universal Account", "unknown", "pending", "ge"),
+        ("017783a4", "Universal Account", "unknown", "pending", "ge"),
+        ("aaaa1111", "Сола ₾", "GEL", "private", "ge"),
     ]:
         migrated.execute("INSERT OR REPLACE INTO zm_account_meta (account_id,title,currency,visibility,region)"
-                         " VALUES (?,?,?,?,?)", (aid, title, cur, vis, "ge" if cur == "GEL" else None))
+                         " VALUES (?,?,?,?,?)", (aid, title, cur, vis, region))
     migrated.commit()
 
     import importlib
@@ -262,3 +264,18 @@ def test_ambiguous_title_blocks_rows_not_balances(scope_mod, migrated):
     # И бухгалтеру эти деньги по-прежнему не видны
     clerk_totals = {t["currency"] for t in zm_scope.Scope(owner=False).totals()}
     assert clerk_totals == {"RUB"}
+
+
+def test_home_contour_excludes_foreign_accounts(scope_mod, monkeypatch):
+    """Решение Юры 23.09.2026: заграничные карты — только в своём разделе.
+
+    «Личные» показывают домашний контур; иначе один и тот же остаток считается
+    дважды и непонятно, где правда."""
+    monkeypatch.delenv("FIRMA_PRIVATE_OWNERS", raising=False)
+    s = owner(scope_mod)
+    home = {a.title for a in s.home_accounts()}
+    assert "Сола ₾" not in home and "Universal Account" not in home
+    assert "Black" in home
+    assert all(t["currency"] == "RUB" for t in s.totals(region=None))
+    ge = {a.title for a in s.accounts(region="ge")}
+    assert ge == {"Сола ₾", "Universal Account"}, "раздел страны видит свои счета"
