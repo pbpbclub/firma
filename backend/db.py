@@ -2420,6 +2420,7 @@ def ensure_abroad_categories_schema():
             ("shopping",      "Покупки",             80),
             ("cash",          "Снятие наличных",     90),
             ("housing",       "Жильё",              100),
+            ("infra",         "Инфраструктура",      65),   # AI, инструменты, облака — решение Юры 23.09.2026
             ("entertainment", "Развлечения",        110),
             ("travel",        "Поездки",            120),
             ("people",        "Людям и услуги",     130),
@@ -2453,11 +2454,17 @@ def ensure_abroad_categories_schema():
             ("taximaxim", "transport"), ("toplu tasima", "transport"), ("metro", "transport"),
             # здоровье
             ("pharmadepot", "health"), ("aversi", "health"), ("psp", "health"), ("gpc", "health"),
-            # подписки и сервисы
-            ("apple.com/bill", "subscriptions"), ("openai", "subscriptions"),
-            ("anthropic", "subscriptions"), ("google *", "subscriptions"),
-            ("lovable", "subscriptions"), ("youtubepremium", "subscriptions"),
+            # инфраструктура: AI, инструменты разработки, облака — Юра хочет видеть
+            # оплату своей инфраструктуры отдельно от личных подписок (23.09.2026)
+            ("apple.com/bill", "infra"), ("openai", "infra"), ("anthropic", "infra"),
+            ("lovable", "infra"), ("cursor", "infra"), ("github", "infra"),
+            ("vercel", "infra"), ("supabase", "infra"), ("notion", "infra"),
+            ("figma", "infra"), ("cloudflare", "infra"), ("google *cloud", "infra"),
+            ("digitalocean", "infra"), ("hetzner", "infra"), ("timeweb", "infra"),
+            # личные подписки
+            ("google *", "subscriptions"), ("youtubepremium", "subscriptions"),
             ("spotify", "subscriptions"), ("telegram", "subscriptions"),
+            ("netflix", "subscriptions"),
             # дом и связь
             ("magticom", "home"), ("silknet", "home"), ("clean house", "home"),
             ("lampionebi", "home"),
@@ -2482,6 +2489,43 @@ def ensure_abroad_categories_schema():
                 (pattern, cat))
         conn.execute("INSERT OR REPLACE INTO app_settings (key, value, updated_at)"
                      " VALUES ('abroad_seeded', '22.09.2026', datetime('now'))")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_abroad_infra_seed():
+    """Вторая волна сида — «Инфраструктура» (решение Юры 23.09.2026).
+
+    Юра хочет видеть оплату своей инфраструктуры (AI, инструменты, облака) отдельно
+    от личных подписок. Как и первая волна — РОВНО ОДИН РАЗ, под своим маркером
+    `app_settings.abroad_seeded_infra`: категория и новые правила — INSERT OR IGNORE,
+    а сидовые правила Anthropic/OpenAI/Apple/Lovable переезжают в новую категорию
+    ТОЛЬКО если ещё несут сидовую заметку — правку Юры из интерфейса не перетираем.
+    «google *» ловил бы и Google Cloud, но частное правило длиннее и побеждает
+    (`abroad.load_rules` сортирует по длине)."""
+    conn = get_production()
+    try:
+        if not conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='abroad_categories'").fetchone():
+            return
+        if conn.execute("SELECT 1 FROM app_settings WHERE key = 'abroad_seeded_infra'").fetchone():
+            return
+        conn.execute("INSERT OR IGNORE INTO abroad_categories (code, title, sort_order) VALUES ('infra', 'Инфраструктура', 65)")
+        infra = ["apple.com/bill", "openai", "anthropic", "lovable", "cursor", "github", "vercel",
+                 "supabase", "notion", "figma", "cloudflare", "google *cloud", "digitalocean",
+                 "hetzner", "timeweb"]
+        for pattern in infra:
+            conn.execute(
+                "INSERT OR IGNORE INTO abroad_payee_rules (pattern, match_type, category, note)"
+                " VALUES (?, 'contains', 'infra', 'инфраструктура — решение Юры 23.09.2026')", (pattern,))
+            conn.execute(
+                "UPDATE abroad_payee_rules SET category = 'infra', updated_at = datetime('now')"
+                " WHERE pattern = ? AND match_type = 'contains' AND category != 'infra'"
+                "   AND note = 'стартовый набор 22.09.2026'", (pattern,))
+        conn.execute("INSERT OR IGNORE INTO abroad_payee_rules (pattern, match_type, category, note)"
+                     " VALUES ('netflix', 'contains', 'subscriptions', 'инфраструктура — решение Юры 23.09.2026')")
+        conn.execute("INSERT OR REPLACE INTO app_settings (key, value, updated_at)"
+                     " VALUES ('abroad_seeded_infra', '23.09.2026', datetime('now'))")
         conn.commit()
     finally:
         conn.close()

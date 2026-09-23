@@ -106,7 +106,7 @@ def test_category_from_payee(mod):
     by = {i["id"]: i["category"] for i in items(mod)}
     assert by["t1"] == "groceries" and by["t2"] == "groceries"
     assert by["t3"] == "transport"
-    assert by["t4"] == "subscriptions"
+    assert by["t4"] == "infra", "Apple — инфраструктура, не личная подписка (решение Юры 23.09.2026)"
     assert by["t8"] == "other", "незнакомый получатель — «прочее», а не выдуманная категория"
 
 
@@ -179,7 +179,7 @@ def test_currency_appears_once_accounts_are_renamed(mod, migrated, tmp_path, mon
     gel, usd = mod.spending(its, currency="GEL"), mod.spending(its, currency="USD")
     assert gel["currency"] == "GEL" and usd["currency"] == "USD"
     assert all(c["currency"] == "GEL" for c in gel["categories"])
-    subs = next(c for c in usd["categories"] if c["category"] == "subscriptions")
+    subs = next(c for c in usd["categories"] if c["category"] == "infra")
     assert subs["currency"] == "USD", "подписки в долларах перестают быть «непонятно чем»"
     groc = next(c for c in gel["categories"] if c["category"] == "groceries")
     assert groc["currency"] == "GEL"
@@ -243,3 +243,21 @@ def test_feed_rows_carry_account_and_ambiguity(mod):
     row = next(i for i in items(mod) if i["id"] == "t1")
     assert row["account"] == "Universal Account"
     assert row["account_ambiguous"] is True and row["account_id"] is None
+
+
+def test_infra_category_and_seed_migration(migrated):
+    """Инфраструктура (AI, инструменты) — своя категория (решение Юры 23.09.2026).
+    Сидовые правила переезжают в неё, ручная правка Юры — нет."""
+    cats = {r[0] for r in migrated.execute("SELECT code FROM abroad_categories")}
+    assert "infra" in cats
+    cat = migrated.execute("SELECT category FROM abroad_payee_rules WHERE pattern='anthropic'").fetchone()[0]
+    assert cat == "infra"
+    # Ручная правка: заметка не сидовая → миграция её не трогает
+    migrated.execute("UPDATE abroad_payee_rules SET category='subscriptions', note='Юра решил иначе'"
+                     " WHERE pattern='openai'")
+    migrated.commit()
+    import db
+    db.ensure_abroad_categories_schema()
+    db.ensure_abroad_infra_seed()
+    cat = migrated.execute("SELECT category FROM abroad_payee_rules WHERE pattern='openai'").fetchone()[0]
+    assert cat == "subscriptions", "правка из интерфейса не перетирается рестартом"
