@@ -282,7 +282,10 @@ function SidePanel({ code, who, accounts, onGotoReserve }: {
             )}
             <br />
             {sm?.runway_months != null
-              ? <>хватит на ~{sm.runway_months} мес</>
+              ? (sm.runway_months >= 1
+                  ? <>хватит на ~{sm.runway_months} мес</>
+                  // Меньше месяца — считаем в днях: «~0 мес» правдиво, но нечитаемо
+                  : <>остатка хватит на ~{Math.max(1, Math.round(sm.runway_months * 30))} дн.</>)
               : <span style={{ color: "#A89070" }}>«на сколько хватит» — после разделения валют</span>}
           </div>
         </div>
