@@ -122,6 +122,22 @@ def fetch_rows(scope, code: str, date_from: str | None = None, date_to: str | No
         conn.close()
 
 
+def first_date(scope, code: str) -> str | None:
+    """С какой даты у карт региона вообще есть история (для честного сравнения)."""
+    titles = region_titles(scope, code)
+    if not titles:
+        return None
+    marks = ",".join("?" * len(titles))
+    conn = get_zenmoney()
+    try:
+        r = conn.execute(f"SELECT MIN(date) FROM zm_transactions WHERE deleted = 0"
+                         f" AND (outcome_account IN ({marks}) OR income_account IN ({marks}))",
+                         titles + titles).fetchone()
+        return (r[0] or "")[:10] or None
+    finally:
+        conn.close()
+
+
 def capped(rows: list[dict]) -> bool:
     """Упёрлась ли выборка в потолок SQL. Ровно ROW_CAP строк считаем обрезанием
     (лучше лишняя плашка, чем молча укороченный период)."""
@@ -319,6 +335,7 @@ def spending(items: list[dict], currency: str | None = None) -> dict:
         "categories": _flat(by_cat, "category", cats),
         "top_payees": _flat(by_payee, "payee")[:20],
         "recurring": recurring(items),
+        **shape(items),
         "spent": round(spent, 2),
         "count": sum(1 for i in items if i["kind"] == "expense"),
         # Одна валюта на все траты — печатаем со знаком; иначе экран обязан
@@ -329,6 +346,44 @@ def spending(items: list[dict], currency: str | None = None) -> dict:
         "by_currency": groups,
         "currency_filter": currency,
         "currency_auto": auto,
+    }
+
+
+# ── Форма трат для инфографики (23.09.2026) ─────────────────────────────────
+
+WEEKDAYS_RU = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+
+
+def shape(items: list[dict]) -> dict:
+    """Показатели для инфографики аналитики: дни недели, средний чек, день-рекорд,
+    среднее в день. Считается по уже отфильтрованным (одна валюта) тратам —
+    вызывающий `spending` фильтрует до вызова."""
+    from datetime import date as _d
+    exp = [i for i in items if i["kind"] == "expense" and i.get("date")]
+    by_dow = [{"dow": d, "label": WEEKDAYS_RU[d], "total": 0.0, "count": 0} for d in range(7)]
+    by_day: dict[str, float] = {}
+    for i in exp:
+        d = _d.fromisoformat(i["date"][:10])
+        slot = by_dow[d.weekday()]
+        slot["total"] = round(slot["total"] + i["amount"], 2)
+        slot["count"] += 1
+        by_day[d.isoformat()] = round(by_day.get(d.isoformat(), 0.0) + i["amount"], 2)
+    total = sum(i["amount"] for i in exp)
+    # Среднее в день — по календарным дням от первой до последней траты, а не по
+    # дням с тратами: иначе тихие дни не учитываются и «в день» завышено.
+    if by_day:
+        first, last = min(by_day), max(by_day)
+        span = (_d.fromisoformat(last) - _d.fromisoformat(first)).days + 1
+    else:
+        span = 0
+    top_day = max(by_day.items(), key=lambda kv: kv[1]) if by_day else None
+    return {
+        "by_weekday": by_dow,
+        "avg_check": round(total / len(exp), 2) if exp else 0.0,
+        "daily_avg": round(total / span, 2) if span else 0.0,
+        "active_days": len(by_day),
+        "span_days": span,
+        "max_day": {"date": top_day[0], "total": top_day[1]} if top_day else None,
     }
 
 
@@ -388,8 +443,13 @@ def compare(current: dict, previous: dict) -> dict:
     current["prev"] = {
         "spent": previous.get("spent", 0.0), "count": previous.get("count", 0),
         "categories": {k: v["total"] for k, v in prev_cats.items()},
+        "avg_check": previous.get("avg_check", 0.0),
+        "daily_avg": previous.get("daily_avg", 0.0),
     }
     current["spent_delta_pct"] = pct(current.get("spent", 0.0), previous.get("spent", 0.0))
+    current["count_delta_pct"] = pct(current.get("count", 0), previous.get("count", 0))
+    current["avg_check_delta_pct"] = pct(current.get("avg_check", 0.0), previous.get("avg_check", 0.0))
+    current["daily_avg_delta_pct"] = pct(current.get("daily_avg", 0.0), previous.get("daily_avg", 0.0))
     return current
 
 

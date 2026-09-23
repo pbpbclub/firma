@@ -261,3 +261,21 @@ def test_infra_category_and_seed_migration(migrated):
     db.ensure_abroad_infra_seed()
     cat = migrated.execute("SELECT category FROM abroad_payee_rules WHERE pattern='openai'").fetchone()[0]
     assert cat == "subscriptions", "правка из интерфейса не перетирается рестартом"
+
+
+def test_shape_for_infographics(mod):
+    """Дни недели, средний чек, среднее в день по КАЛЕНДАРНЫМ дням окна трат."""
+    sept = [i for i in items(mod) if i["date"] >= "2026-09-01"]
+    sh = mod.shape(sept)
+    spent = 12.40 + 8.00 + 6.50 + 90.00 + 22.00 + 17.00
+    assert sh["avg_check"] == round(spent / 6, 2)
+    assert sh["span_days"] == 20-8+1, "с 08.09 по 20.09 включительно"
+    assert sh["daily_avg"] == round(spent / 13, 2), "тихие дни тоже в знаменателе"
+    assert sh["max_day"] == {"date": "2026-09-10", "total": 90.0}
+    assert sum(d["count"] for d in sh["by_weekday"]) == 6
+    assert [d["label"] for d in sh["by_weekday"]][0] == "Пн"
+
+
+def test_first_date_of_region_history(mod):
+    """Прошлое окно раньше истории карты — огрызок; дельту по нему не показываем."""
+    assert mod.first_date(scope(mod), "ge") == "2026-06-20"

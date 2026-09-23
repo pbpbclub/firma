@@ -129,8 +129,17 @@ def region_spending(code: str, months: int = Query(6, le=36), currency: str | No
                                       date_to=p_to.isoformat(), limit=abroad.ROW_CAP)
         prev = abroad.spending(abroad.decorate(prev_rows, scope, rules, titles),
                                currency=res.get("currency_filter"))
-        res = abroad.compare(res, prev)
-        res["prev"]["period"] = {"from": p_from.isoformat(), "to": p_to.isoformat()}
+        # 🔒 Прошлое окно, которое начинается раньше истории карты, — огрызок:
+        # «полгода ▲ 683%» против месяца данных читается как взрыв трат. Такое
+        # сравнение не показываем вовсе, а честно помечаем `prev.partial`.
+        first = abroad.first_date(scope, code)
+        if first and p_from.isoformat() < first:
+            res["prev"] = {"partial": True, "history_from": first,
+                           "period": {"from": p_from.isoformat(), "to": p_to.isoformat()}}
+        else:
+            res = abroad.compare(res, prev)
+            res["prev"]["period"] = {"from": p_from.isoformat(), "to": p_to.isoformat()}
+            res["prev"]["partial"] = False
     # Упёрлись в потолок выборки — сводка посчитана по хвосту периода, а не по
     # всему окну: экран обязан это сказать, иначе цифры читаются как полные.
     res["capped"] = abroad.capped(rows)

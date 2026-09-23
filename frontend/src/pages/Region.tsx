@@ -495,15 +495,27 @@ function FxTab({ who, signal, abroad, reserve, setReserve, saveReserve, reserveR
             {fmtAmount(abroad?.total ?? 0, "RUB")}
           </div>
           <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>{abroad?.count ?? 0} переводов за год</div>
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 5, marginTop: 16, height: 56 }}>
+          {/* Сумма — над каждым столбиком, в тысячах: одного итога мало, чтобы
+              видеть, какой месяц был тяжёлым (просьба Юры 23.09.2026). */}
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 8, marginTop: 16, height: 104 }}>
             {months.map((m: any) => (
-              <div key={m.period} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }}>
-                <div title={`${m.period}: ${fmtAmount(m.amount_rub, "RUB")} · ${m.count}`}
-                  style={{ width: 20, background: "#E8592A",
-                           height: Math.max(Math.round((m.amount_rub / maxMonth) * 44), 2) }} />
+              <div key={m.period} style={{ display: "flex", flexDirection: "column", alignItems: "center",
+                                           gap: 3, flex: "1 1 0", minWidth: 0 }}>
+                <span style={{ fontSize: 10, fontWeight: 600, fontFamily: MONO, color: "#1A1A1A", whiteSpace: "nowrap" }}>
+                  {fmtK(m.amount_rub)}
+                </span>
+                <div title={`${m.period}: ${fmtAmount(m.amount_rub, "RUB")} · ${m.count} перев.`}
+                  style={{ width: "100%", maxWidth: 30, background: "#E8592A",
+                           height: Math.max(Math.round((m.amount_rub / maxMonth) * 60), 2) }} />
                 <span style={{ fontSize: 9, color: "#A89070" }}>{monthLabel(m.period)}</span>
+                <span style={{ fontSize: 9, color: "#C8C0B0", fontFamily: MONO }}>{m.count}×</span>
               </div>
             ))}
+          </div>
+          <div style={{ fontSize: 10, color: "#A89070", marginTop: 10, lineHeight: 1.5 }}>
+            тыс. ₽ в месяц · под столбиком — число переводов. Сюда пока идут только переводы одной
+            строкой (Золотая корона, прямые BOG); Avosend записан двумя строками и появится после
+            стыковки пар — август и сентябрь поэтому занижены.
           </div>
         </div>
       </div>
@@ -715,6 +727,17 @@ const PRESETS: Array<[string, string, number]> = [
   ["half", "Полгода", 182], ["year", "Год", 365],
 ];
 
+// «48,3 тыс» — подпись над столбиком: полная сумма в 30 пикселей не влезает.
+function fmtK(n: number): string {
+  if (!n) return "0";
+  if (Math.abs(n) >= 1000) return `${(n / 1000).toLocaleString("ru-RU", { maximumFractionDigits: n >= 100000 ? 0 : 1 })}к`;
+  return String(Math.round(n));
+}
+
+// Категориальная палитра в гамме Фирмы: от акцента к бежевому. Одна валюта —
+// один цвет не несёт смысла «хорошо/плохо», только различает доли.
+const CAT_COLORS = ["#E8592A", "#F08A5D", "#F5B08F", "#A89070", "#C8B89A", "#6B6355", "#D9D2C5"];
+
 function isoDaysAgo(n: number): string {
   const d = new Date(); d.setDate(d.getDate() - n);
   return d.toISOString().slice(0, 10);
@@ -764,7 +787,9 @@ function StatsTab({ code, who }: { code: string; who: string }) {
     ? (PRESETS.find(p => p[0] === period.preset)?.[1] ?? "").toUpperCase()
     : `${period.from} — ${period.to}`;
 
-  const Row = ({ title, total, count, extra, pct, currency, delta }: any) => (
+  // pct — ширина полосы (0..100); prevPct — где была эта же строка в прошлом
+  // периоде: тонкая чёрная засечка на полосе (как отметка плана в отчёте фин-агента).
+  const Row = ({ title, total, count, extra, pct, prevPct, currency, delta }: any) => (
     <div style={{ padding: "9px 0", borderBottom: "1px solid #F2EFE9" }}>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, gap: 12 }}>
         <span style={{ fontSize: 12, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis",
@@ -777,8 +802,12 @@ function StatsTab({ code, who }: { code: string; who: string }) {
         </span>
       </div>
       {pct != null && (
-        <div style={{ height: 2, background: "#F2EFE9" }}>
-          <div style={{ height: 2, width: `${Math.max(pct, 1)}%`, background: "#E8592A" }} />
+        <div style={{ position: "relative", height: 4, background: "#F2EFE9" }}>
+          <div style={{ height: 4, width: `${Math.min(Math.max(pct, 1), 100)}%`, background: "#E8592A" }} />
+          {prevPct != null && prevPct > 0 && (
+            <div title="прошлый период" style={{ position: "absolute", top: -3, left: `calc(${Math.min(prevPct, 100)}% - 1px)`,
+                                                 width: 2, height: 10, background: "#1A1A1A" }} />
+          )}
         </div>
       )}
     </div>
@@ -831,10 +860,15 @@ function StatsTab({ code, who }: { code: string; who: string }) {
         <span style={{ fontSize: 26, fontWeight: 700, fontFamily: MONO, letterSpacing: "-0.03em" }}>
           {fmtAmount(spent, cur)}
         </span>
-        {data?.prev && (
+        {data?.prev && !data.prev.partial && (
           <span style={{ fontSize: 12, color: "#6B6355" }}>
             прошлый период {fmtAmount(data.prev.spent, cur)}
             <Delta pct={data.spent_delta_pct} />
+          </span>
+        )}
+        {data?.prev?.partial && (
+          <span style={{ fontSize: 11, color: "#A89070" }}>
+            сравнения нет: история карты начинается с {data.prev.history_from}, прошлое такое же окно ею не покрыто
           </span>
         )}
       </div>
@@ -857,8 +891,71 @@ function StatsTab({ code, who }: { code: string; who: string }) {
         </div>
       )}
 
-      {/* Столбики по масштабу окна: дни / недели / месяцы */}
-      <div style={{ marginTop: 34, maxWidth: 640 }}>
+      {/* Показатели периода с дельтой к прошлому такому же окну */}
+      <div style={{ display: "grid", marginTop: 22,
+                    gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)",
+                    borderTop: "1px solid #EDEBE6", borderBottom: "1px solid #EDEBE6" }}>
+        {[
+          ["ОПЕРАЦИЙ", String(data?.count ?? 0), data?.count_delta_pct],
+          ["СРЕДНИЙ ЧЕК", fmtAmount(data?.avg_check ?? 0, cur), data?.avg_check_delta_pct],
+          ["В СРЕДНЕМ В ДЕНЬ", fmtAmount(data?.daily_avg ?? 0, cur), data?.daily_avg_delta_pct],
+          ["САМЫЙ ДОРОГОЙ ДЕНЬ", data?.max_day ? fmtAmount(data.max_day.total, cur) : "—", null],
+        ].map(([label, value, delta]: any, i: number) => (
+          <div key={label} style={{ padding: "12px 14px",
+                                    borderLeft: i % (isMobile ? 2 : 4) === 0 ? "none" : "1px solid #EDEBE6",
+                                    borderTop: isMobile && i > 1 ? "1px solid #EDEBE6" : "none" }}>
+            <div style={{ ...LABEL, fontSize: 9 }}>{label}</div>
+            <div style={{ fontSize: 16, fontWeight: 700, fontFamily: MONO, marginTop: 6, whiteSpace: "nowrap" }}>
+              {value}<Delta pct={delta} />
+            </div>
+            {label === "САМЫЙ ДОРОГОЙ ДЕНЬ" && data?.max_day && (
+              <div style={{ fontSize: 10, color: "#A89070", marginTop: 2 }}>{data.max_day.date}</div>
+            )}
+            {label === "В СРЕДНЕМ В ДЕНЬ" && (
+              <div style={{ fontSize: 10, color: "#A89070", marginTop: 2 }}>
+                тратил в {data?.active_days ?? 0} из {data?.span_days ?? 0} дн.
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Структура трат: одна полоса на 100%, доли категорий */}
+      {(data?.categories ?? []).length > 0 && (() => {
+        const cats = data.categories as any[];
+        const top = cats.slice(0, 6);
+        const rest = cats.slice(6).reduce((a: number, c: any) => a + c.total, 0);
+        const parts = [...top.map((c: any) => ({ title: c.title, total: c.total })),
+                       ...(rest > 0 ? [{ title: "остальное", total: rest }] : [])];
+        return (
+          <div style={{ marginTop: 28 }}>
+            <div style={LABEL}>СТРУКТУРА ТРАТ</div>
+            <div style={{ display: "flex", height: 14, marginTop: 12, background: "#F2EFE9" }}>
+              {parts.map((p, i) => (
+                <div key={p.title} title={`${p.title}: ${fmtAmount(p.total, cur)} · ${Math.round(p.total / (spent || 1) * 100)}%`}
+                  style={{ width: `${(p.total / (spent || 1)) * 100}%`, background: CAT_COLORS[i % CAT_COLORS.length],
+                           borderRight: i < parts.length - 1 ? "1px solid #FFFFFF" : "none" }} />
+              ))}
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 16px", marginTop: 10 }}>
+              {parts.map((p, i) => (
+                <span key={p.title} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: "#6B6355" }}>
+                  <span style={{ width: 8, height: 8, background: CAT_COLORS[i % CAT_COLORS.length], flexShrink: 0 }} />
+                  {p.title}
+                  <span style={{ fontFamily: MONO, color: "#1A1A1A", fontWeight: 600 }}>
+                    {Math.round(p.total / (spent || 1) * 100)}%
+                  </span>
+                </span>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Столбики по масштабу окна: дни / недели / месяцы · дни недели — рядом */}
+      <div style={{ display: "grid", marginTop: 34, gap: isMobile ? 28 : 48, alignItems: "start",
+                    gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1.6fr) minmax(0, 1fr)" }}>
+      <div style={{ minWidth: 0 }}>
         <div style={LABEL}>
           {data?.bucket_kind === "day" ? "ПО ДНЯМ" : data?.bucket_kind === "week" ? "ПО НЕДЕЛЯМ" : "ПО МЕСЯЦАМ"}
         </div>
@@ -886,21 +983,64 @@ function StatsTab({ code, who }: { code: string; who: string }) {
         </div>
       </div>
 
+      {/* По дням недели: где неделя тяжелее. Пунктир — средний день недели. */}
+      {(() => {
+        const wd = (data?.by_weekday ?? []) as any[];
+        const maxW = Math.max(...wd.map(d => d.total), 1);
+        const avgW = wd.length ? wd.reduce((a, d) => a + d.total, 0) / 7 : 0;
+        const H = 72;
+        return (
+          <div style={{ minWidth: 0 }}>
+            <div style={LABEL}>ПО ДНЯМ НЕДЕЛИ</div>
+            <div style={{ position: "relative", display: "flex", alignItems: "flex-end", gap: 8,
+                          marginTop: 16, height: H + 30 }}>
+              {avgW > 0 && (
+                <div title={`средний день недели: ${fmtAmount(avgW, cur)}`}
+                  style={{ position: "absolute", left: 0, right: 0, bottom: 16 + Math.round(avgW / maxW * H),
+                           borderTop: "1px dashed #A89070" }} />
+              )}
+              {wd.map(d => (
+                <div key={d.dow} style={{ flex: "1 1 0", display: "flex", flexDirection: "column",
+                                          alignItems: "center", gap: 3, minWidth: 0 }}>
+                  <span style={{ fontSize: 9, fontFamily: MONO, color: "#6B6355" }}>{fmtK(d.total)}</span>
+                  <div title={`${d.label}: ${fmtAmount(d.total, cur)} · ${d.count}`}
+                    style={{ width: "100%", maxWidth: 28,
+                             background: d.total === maxW ? "#E8592A" : "#F5B08F",
+                             height: Math.max(Math.round(d.total / maxW * H), 2) }} />
+                  <span style={{ fontSize: 10, color: d.dow >= 5 ? "#1A1A1A" : "#A89070" }}>{d.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+      </div>
+
       {/* Категории и получатели — двумя колонками */}
       <div style={{ display: "grid", marginTop: 34,
                     gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: isMobile ? 28 : 48,
                     alignItems: "start" }}>
         <div>
           <div style={{ ...LABEL, marginBottom: 10 }}>НА ЧТО УХОДЯТ ДЕНЬГИ</div>
-          {(data?.categories ?? []).map((c: any) => (
-            <Row key={c.category} title={c.title} total={c.total} count={c.count} currency={c.currency}
-              delta={c.delta_pct} pct={Math.round((c.total / (spent || 1)) * 100)} />
-          ))}
+          <div style={{ fontSize: 10, color: "#A89070", marginBottom: 6 }}>
+            полоса — доля от самой крупной категории · <span style={{ color: "#1A1A1A" }}>засечка</span> — прошлый период
+          </div>
+          {(() => {
+            const cats = (data?.categories ?? []) as any[];
+            const top = Math.max(...cats.map((c: any) => Math.max(c.total, c.prev_total ?? 0)), 1);
+            return cats.map((c: any) => (
+              <Row key={c.category} title={c.title} total={c.total} count={c.count} currency={c.currency}
+                delta={c.delta_pct} pct={c.total / top * 100}
+                prevPct={c.prev_total != null ? c.prev_total / top * 100 : null} />
+            ));
+          })()}
         </div>
         <div>
           <div style={{ ...LABEL, marginBottom: 10 }}>ТОП ПОЛУЧАТЕЛЕЙ</div>
-          {(data?.top_payees ?? []).map((p: any) => (
+          <div style={{ fontSize: 10, color: "#A89070", marginBottom: 6 }}>полоса — доля от всех трат периода</div>
+          {(data?.top_payees ?? []).slice(0, 12).map((p: any) => (
             <Row key={p.payee} title={p.title} total={p.total} count={p.count} currency={p.currency}
+              pct={p.total / (spent || 1) * 100}
               extra={<span style={{ color: "#A89070", fontWeight: 400 }}> · ср. {Math.round(p.avg)}</span>} />
           ))}
         </div>
@@ -915,11 +1055,35 @@ function StatsTab({ code, who }: { code: string; who: string }) {
         {(data?.recurring ?? []).length === 0 && (
           <div style={{ fontSize: 12, color: "#6B6355" }}>В этом окне не набралось — расширь период</div>
         )}
-        {(data?.recurring ?? []).map((r: any) => (
-          <Row key={r.payee} title={`${r.payee}${r.category_title ? ` · ${r.category_title}` : ""}`}
-            total={r.per_month} currency={r.currency}
-            extra={<span style={{ color: "#A89070", fontWeight: 400 }}>/мес · {r.months} мес</span>} />
-        ))}
+        {(() => {
+          const rec = (data?.recurring ?? []) as any[];
+          if (!rec.length) return null;
+          const perMonth = rec.reduce((a: number, r: any) => a + r.per_month, 0);
+          // Средний месяц окна: траты периода / число месяцев в нём
+          const monthsInWindow = Math.max(days / 30.4, 1);
+          const monthAvg = spent / monthsInWindow;
+          const share = monthAvg ? Math.min(perMonth / monthAvg, 1) : 0;
+          const maxR = Math.max(...rec.map((r: any) => r.per_month), 1);
+          return (<>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline",
+                          gap: 12, marginBottom: 6 }}>
+              <span style={{ fontSize: 12, color: "#1A1A1A" }}>
+                регулярные — {Math.round(share * 100)}% обычного месяца
+              </span>
+              <span style={{ fontSize: 13, fontWeight: 700, fontFamily: MONO }}>
+                {fmtAmount(perMonth, cur)}/мес
+              </span>
+            </div>
+            <div style={{ height: 8, background: "#F2EFE9", marginBottom: 14 }}>
+              <div style={{ height: 8, width: `${share * 100}%`, background: "#6B6355" }} />
+            </div>
+            {rec.map((r: any) => (
+              <Row key={r.payee} title={`${r.payee}${r.category_title ? ` · ${r.category_title}` : ""}`}
+                total={r.per_month} currency={r.currency} pct={r.per_month / maxR * 100}
+                extra={<span style={{ color: "#A89070", fontWeight: 400 }}>/мес · {r.months} мес</span>} />
+            ))}
+          </>);
+        })()}
       </div>
       </>)}
     </div>
