@@ -202,3 +202,44 @@ def test_every_region_endpoint_is_owner_only(mod):
         dep = params.get("user")
         assert dep is not None, f"{route.path}: нет параметра user"
         assert dep.default.dependency is privacy.require_owner, f"{route.path}: гейт не require_owner"
+
+
+# ── Период, дельта, столбики, счёт (23.09.2026) ─────────────────────────────
+
+def test_buckets_scale_with_window(mod):
+    its = items(mod)
+    assert mod.window_buckets(its, "2026-09-01", "2026-09-22")["bucket_kind"] == "day"
+    wk = mod.window_buckets(its, "2026-07-01", "2026-09-22")
+    assert wk["bucket_kind"] == "week"
+    assert all(b["period"] and b["period"][:4] == "2026" for b in wk["buckets"])
+    assert mod.window_buckets(its, "2026-01-01", "2026-09-22")["bucket_kind"] == "month"
+    # пустые дни остаются в ряду — тихий день не выпадает
+    day = mod.window_buckets(its, "2026-09-01", "2026-09-22")
+    assert len(day["buckets"]) == 22
+
+
+def test_compare_adds_deltas(mod):
+    its = items(mod)
+    cur = mod.spending([i for i in its if i["date"] >= "2026-09-01"])
+    prev = mod.spending([i for i in its if "2026-08-01" <= i["date"] < "2026-09-01"])
+    res = mod.compare(cur, prev)
+    assert res["prev"]["spent"] == 5.99, "в августе была одна трата — Apple"
+    subs = next(c for c in res["categories"] if c["category"] == "subscriptions") if any(
+        c["category"] == "subscriptions" for c in res["categories"]) else None
+    assert subs is None or subs["prev_total"] == 5.99
+    assert res["spent_delta_pct"] is not None
+
+
+def test_month_summary_uses_full_months_only(mod):
+    from datetime import date
+    ms = mod.month_summary(items(mod), today=date(2026, 9, 22))
+    assert ms["spent_mtd"] == round(12.40 + 8.00 + 6.50 + 90.00 + 22.00 + 17.00, 2)
+    assert ms["full_months"] == 3, "июнь, июль, август — текущий сентябрь в норму не входит"
+    assert ms["avg_month"] == round((5.99 + 5.99 + 5.99) / 3, 2)
+    assert ms["pace_pct"] == round(22 / 30, 3)
+
+
+def test_feed_rows_carry_account_and_ambiguity(mod):
+    row = next(i for i in items(mod) if i["id"] == "t1")
+    assert row["account"] == "Universal Account"
+    assert row["account_ambiguous"] is True and row["account_id"] is None

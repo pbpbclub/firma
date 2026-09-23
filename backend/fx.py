@@ -166,3 +166,99 @@ def signal(base: str = "USD", quote: str = QUOTE) -> dict:
         "median_30": sorted(vals30)[len(vals30) // 2] if vals30 else None,
         "days_30": len(vals30), "days_90": len(vals90),
     }
+
+
+# ── Пары в обе стороны (решение Юры 23.09.2026) ──────────────────────────────
+#
+# Один сигнал «$ → ₾: менять или ждать» Юре непонятен: ему нужно видеть, что на что
+# сейчас выгодно менять, по трём парам и в обе стороны. Для пары это ОДНО число —
+# перцентиль сегодняшнего курса в собственном разбросе — прочитанное с двух концов:
+# покупать валюту выгодно, когда она дёшева (перцентиль низкий), продавать — когда
+# дорога (высокий). Никаких прогнозов, только факт.
+#
+# Котировка — «человеческая»: ₽ за 1 ₾, ₽ за 1 $, ₾ за 1 $ (price_of — валюта,
+# которую оцениваем; in — в чём). NBG хранит всё как
+# «лари за единицу», рубль — за сто (уже приведён в _fetch), поэтому ₽/₾ = 1/(RUB→GEL),
+# а ₽/$ — отношение двух рядов по общим датам.
+
+PAIRS = {
+    "RUB_GEL": {"price_of": "GEL", "in": "RUB", "title": "Рубль ↔ лари"},
+    "RUB_USD": {"price_of": "USD", "in": "RUB", "title": "Рубль ↔ доллар"},
+    "USD_GEL": {"price_of": "USD", "in": "GEL", "title": "Доллар ↔ лари"},   # ₾ за 1 $ — цена доллара в лари
+}
+CUR_RU = {"GEL": "лари", "USD": "доллар", "RUB": "рубль", "EUR": "евро"}
+
+
+def pair_series(key: str, days: int = 90) -> list[dict]:
+    """Ряд {date, rate} в человеческой котировке пары."""
+    if key not in PAIRS:
+        raise ValueError(f"неизвестная пара {key}")
+    if key == "RUB_GEL":
+        return [{"date": r["date"], "rate": round(1 / r["rate"], 4)}
+                for r in series("RUB", QUOTE, days) if r["rate"]]
+    if key == "USD_GEL":
+        return [{"date": r["date"], "rate": round(r["rate"], 4)} for r in series("USD", QUOTE, days)]
+    # RUB_USD — производный: ₽ за $ = (₾ за $) / (₾ за ₽), по общим датам
+    rub = {r["date"]: r["rate"] for r in series("RUB", QUOTE, days) if r["rate"]}
+    return [{"date": r["date"], "rate": round(r["rate"] / rub[r["date"]], 4)}
+            for r in series("USD", QUOTE, days) if r["date"] in rub]
+
+
+def _direction(frm: str, to: str, buying: str, p: float, enough: bool) -> dict:
+    """Вердикт одного направления. `p` — доля дней, когда покупаемая валюта была
+    дешевле, чем сегодня. Покупателю хорошо при низком p, продавцу — при высоком;
+    здесь всегда считаем с точки зрения того, кто отдаёт `frm` и получает `to`."""
+    name = CUR_RU[buying]
+    cheap = 1 - p                      # доля дней, когда покупаемая валюта была ДОРОЖЕ
+    if not enough:
+        return {"from": frm, "to": to, "verdict": "unknown", "note": "мало данных (меньше 10 дней)"}
+    if p <= 0.2:
+        v, note = "good", f"{name} дешевле, чем в {int(cheap * 100)}% дней месяца — окно для обмена"
+    elif p >= 0.5:
+        v, note = "wait", f"{name} дороже, чем в {int(p * 100)}% дней месяца"
+    else:
+        v, note = "normal", f"{name} около обычного курса ({int(p * 100)}% дней были дешевле)"
+    return {"from": frm, "to": to, "verdict": v, "note": note}
+
+
+def pair_signal(key: str, days: int = 90) -> dict:
+    meta = PAIRS[key]
+    rows = pair_series(key, days)
+    base = {"key": key, "title": meta["title"], "price_of": meta["price_of"], "in": meta["in"],
+            "series": rows}
+    if not rows:
+        return {**base, "verdict": "no_data", "directions": [], "rate": None, "date": None}
+    today = rows[-1]
+    since30 = (date.today() - timedelta(days=30)).isoformat()
+    vals30 = [r["rate"] for r in rows if r["date"] >= since30]
+    vals90 = [r["rate"] for r in rows]
+    p30 = _percentile(vals30, today["rate"])      # доля дней, когда price_of была дешевле
+    enough = len(vals30) >= 10
+    X, Y = meta["price_of"], meta["in"]
+    # Y → X: покупаем X за Y — хорошо, когда X дёшев (p низкий).
+    buy = _direction(Y, X, X, p30, enough)
+    # X → Y: продаём X — хорошо, когда X дорог; это то же число с другого конца.
+    sell = _direction(X, Y, X, 1 - p30, enough)
+    if enough and sell["verdict"] != "unknown":
+        # Для продавца формулировка про «дороже»: перепишем ноту с его стороны.
+        name = CUR_RU[X]
+        if sell["verdict"] == "good":
+            sell["note"] = f"{name} дороже, чем в {int(p30 * 100)}% дней месяца — окно, чтобы продать"
+        elif sell["verdict"] == "wait":
+            sell["note"] = f"{name} дешевле, чем в {int((1 - p30) * 100)}% дней месяца"
+        else:
+            sell["note"] = f"{name} около обычного курса"
+    return {
+        **base,
+        "date": today["date"], "rate": today["rate"],
+        "pct_month": p30, "pct_quarter": _percentile(vals90, today["rate"]),
+        "best_30": max(vals30) if vals30 else None,       # самая дорогая price_of
+        "worst_30": min(vals30) if vals30 else None,
+        "median_30": sorted(vals30)[len(vals30) // 2] if vals30 else None,
+        "days_30": len(vals30), "days_90": len(vals90),
+        "directions": [buy, sell],
+    }
+
+
+def all_pairs(days: int = 90) -> list[dict]:
+    return [pair_signal(k, days) for k in PAIRS]

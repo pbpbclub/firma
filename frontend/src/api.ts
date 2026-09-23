@@ -479,9 +479,18 @@ export const regionsApi = {
     api.get(`/regions/${code}/transactions`, { params }).then((r) => r.data),
   // currency — по какой валюте считать («unknown» = строки без разделённой валюты).
   // Не передан и валют несколько → сервер берёт самую крупную (currency_auto).
-  spending: (code: string, months = 6, currency?: string | null) =>
-    api.get(`/regions/${code}/spending`, { params: { months, ...(currency ? { currency } : null) } })
-      .then((r) => r.data),
+  // Окно — датами (приоритет) либо months; compare — предыдущее окно той же длины.
+  spending: (code: string, params: { months?: number; date_from?: string; date_to?: string;
+                                     compare?: boolean; currency?: string | null } = {}) =>
+    api.get(`/regions/${code}/spending`, { params: {
+      ...(params.months ? { months: params.months } : {}),
+      ...(params.date_from ? { date_from: params.date_from } : {}),
+      ...(params.date_to ? { date_to: params.date_to } : {}),
+      ...(params.compare ? { compare: 1 } : {}),
+      ...(params.currency ? { currency: params.currency } : {}),
+    } }).then((r) => r.data),
+  // Сводка для панели со спидометрами — одним запросом.
+  summary: (code: string) => api.get(`/regions/${code}/summary`).then((r) => r.data),
   categories: (code: string, months = 6) =>
     api.get(`/regions/${code}/categories`, { params: { months } }).then((r) => r.data),
   rules: (code: string) => api.get(`/regions/${code}/rules`).then((r) => r.data),
@@ -496,6 +505,8 @@ export const fxApi = {
   series: (base = "USD", quote = "GEL", days = 90) =>
     api.get("/fx/series", { params: { base, quote, days } }).then((r) => r.data),
   signal: () => api.get("/fx/signal").then((r) => r.data),
+  // Три пары в обе стороны + ряд за период — одним запросом.
+  pairs: (days = 90) => api.get("/fx/pairs", { params: { days } }).then((r) => r.data),
   refresh: () => api.post("/fx/refresh").then((r) => r.data),
   setReserve: (usd_reserve: number) =>
     api.put("/fx/reserve", { usd_reserve }).then((r) => r.data),

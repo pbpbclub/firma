@@ -47,6 +47,13 @@ def get_series(base: str = "USD", quote: str = "GEL", days: int = Query(90, le=3
             "fx_refresh": _refresh_status()}
 
 
+@router.get("/pairs")
+def get_pairs(days: int = Query(90, le=365), user=Depends(get_current_user)):
+    """Три пары в обе стороны с рядом за период. Курс — справка, видна всем."""
+    fx.refresh()
+    return {"pairs": fx.all_pairs(days), "days": days}
+
+
 @router.post("/refresh")
 def post_refresh(force: bool = False, user=Depends(require_owner)):
     return fx.refresh(force=force)

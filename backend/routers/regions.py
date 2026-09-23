@@ -93,17 +93,44 @@ def region_transactions(
 
 @router.get("/{code}/spending")
 def region_spending(code: str, months: int = Query(6, le=36), currency: str | None = None,
-                    user=Depends(require_owner)):
-    """Аналитика: месяц к месяцу, категории, топ получателей, регулярные списания.
+                    date_from: str | None = None, date_to: str | None = None,
+                    compare: bool = False, user=Depends(require_owner)):
+    """Аналитика: столбики по масштабу окна, категории, топ получателей, регулярные.
+
+    Окно — `date_from`/`date_to` (приоритет) либо `months` (совместимость).
+    `compare=1` — рядом считается предыдущее окно ТОЙ ЖЕ длины впритык до
+    `date_from`, и в ответ ложатся `prev`, `spent_delta_pct`, `delta_pct` по
+    категориям (`abroad.compare`). Обе сводки — по одной валюте.
 
     `currency` — по какой валюте считать (`unknown` — строки без разделённой
     валюты). Не передан и валют несколько → берётся самая крупная, признак
     `currency_auto`: складывать лари с долларами в один итог нельзя."""
     scope = scope_for(user)
-    rows = abroad.fetch_rows(scope, code, date_from=_months_ago(months), limit=abroad.ROW_CAP)
-    items = abroad.decorate(rows, scope, abroad.load_rules(), abroad.region_titles(scope, code))
+    today = date.today().isoformat()
+    d_from = date_from or _months_ago(months)
+    d_to = date_to or today
+    if d_to < d_from:
+        raise HTTPException(status_code=400, detail="date_to раньше date_from")
+    rows = abroad.fetch_rows(scope, code, date_from=d_from, date_to=d_to, limit=abroad.ROW_CAP)
+    titles = abroad.region_titles(scope, code)
+    rules = abroad.load_rules()
+    items = abroad.decorate(rows, scope, rules, titles)
     res = abroad.spending(items, currency=currency)
     res["months_requested"] = months
+    res["period"] = {"from": d_from, "to": d_to}
+    res.update(abroad.window_buckets(items if not res.get("currency_filter") else
+                                     [i for i in items if (i["currency"] or abroad.UNKNOWN) == res["currency_filter"]],
+                                     d_from, d_to))
+    if compare:
+        span = (date.fromisoformat(d_to) - date.fromisoformat(d_from)).days + 1
+        p_to = date.fromisoformat(d_from) - timedelta(days=1)
+        p_from = p_to - timedelta(days=span - 1)
+        prev_rows = abroad.fetch_rows(scope, code, date_from=p_from.isoformat(),
+                                      date_to=p_to.isoformat(), limit=abroad.ROW_CAP)
+        prev = abroad.spending(abroad.decorate(prev_rows, scope, rules, titles),
+                               currency=res.get("currency_filter"))
+        res = abroad.compare(res, prev)
+        res["prev"]["period"] = {"from": p_from.isoformat(), "to": p_to.isoformat()}
     # Упёрлись в потолок выборки — сводка посчитана по хвосту периода, а не по
     # всему окну: экран обязан это сказать, иначе цифры читаются как полные.
     res["capped"] = abroad.capped(rows)
@@ -111,6 +138,63 @@ def region_spending(code: str, months: int = Query(6, le=36), currency: str | No
     res["ambiguous_accounts"] = sum(1 for a in scope.accounts(include_cash=True)
                                     if a.region == code and a.ambiguous)
     return res
+
+
+@router.get("/{code}/summary")
+def region_summary(code: str, user=Depends(require_owner)):
+    """Сводка для панели со спидометрами — одним запросом.
+
+    Траты месяца к обычным (`abroad.month_summary`), запас в долларах против
+    неснижаемого, остатки, «на сколько месяцев хватит». Последнее — только когда
+    валюта строк разделена: иначе делили бы лари на смесь лари с долларами."""
+    import fx
+    from routers.fx import _reserve
+    scope = scope_for(user)
+    rows = abroad.fetch_rows(scope, code, date_from=_months_ago(7), limit=abroad.ROW_CAP)
+    items = abroad.decorate(rows, scope, abroad.load_rules(), abroad.region_titles(scope, code))
+    groups = abroad.currency_groups(items)
+    split = bool(groups) and all(g["currency"] for g in groups)
+    # Норму месяца считаем по главной валюте трат (после разделения — лари)
+    main_cur = groups[0]["key"] if groups else None
+    month_items = [i for i in items if (i["currency"] or abroad.UNKNOWN) == main_cur] if main_cur else items
+    ms = abroad.month_summary(month_items)
+
+    conn = get_production()
+    try:
+        reserve = _reserve(conn)
+    finally:
+        conn.close()
+    balances: dict[str, float] = {}
+    ambiguous = 0
+    for a in scope.accounts(include_cash=True, region=code):
+        ambiguous += 1 if a.ambiguous else 0
+        if a.configured:
+            balances[a.currency] = round(balances.get(a.currency, 0) + (a.balance or 0), 2)
+    usd = balances.get("USD", 0.0)
+
+    runway = None
+    if split and ms["avg_month"] and main_cur in balances:
+        # Всё в главной валюте трат: остаток в ней + доллары по сегодняшнему курсу
+        total = balances.get(main_cur, 0.0)
+        if main_cur == "GEL" and usd:
+            sig = fx.signal("USD", "GEL")
+            if sig.get("rate"):
+                total += usd * sig["rate"]
+        runway = round(total / ms["avg_month"], 1)
+
+    return {
+        **ms,
+        "currency": main_cur if split else None,
+        "currency_split": split,
+        "usd_balance": usd, "usd_reserve": reserve,
+        "reserve_pct": round(usd / reserve, 3) if reserve else None,
+        "balances": balances,
+        "runway_months": runway,
+        "ambiguous_accounts": ambiguous,
+        "rates": [{"key": p["key"], "title": p["title"], "rate": p["rate"], "in": p["in"],
+                   "price_of": p["price_of"], "directions": p["directions"]}
+                  for p in fx.all_pairs(35)],
+    }
 
 
 @router.get("/{code}/categories")

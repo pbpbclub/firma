@@ -21,6 +21,13 @@ from collections import defaultdict
 from db import get_production, get_zenmoney
 
 CASH_COMMENT = "cash withdrawal"
+
+
+class _NoAccount:
+    id = None
+
+
+Account0 = _NoAccount()
 FALLBACK = "other"
 
 # Потолок выборки из zm_transactions на один запрос. LIMIT режет строки ДО
@@ -162,6 +169,10 @@ def decorate(rows: list[dict], scope, rules: list[dict], titles: list[str] | Non
             "category": cat, "category_title": cats.get(cat) if cat else None,
             "zen_tag": tags[0] if tags else None,
             "account": out_acc if side == "outcome" else in_acc,
+            # Счёт, с которого операция: пока три счёта BOG делят одно название,
+            # он неоднозначен — экран пишет «валюта?», а не выбирает наугад.
+            "account_id": (scope.account_of(out_acc if side == "outcome" else in_acc) or Account0).id,
+            "account_ambiguous": scope.account_of(out_acc if side == "outcome" else in_acc) is None,
         })
     return out
 
@@ -318,4 +329,92 @@ def spending(items: list[dict], currency: str | None = None) -> dict:
         "by_currency": groups,
         "currency_filter": currency,
         "currency_auto": auto,
+    }
+
+
+# ── Период: столбики по масштабу и дельта к предыдущему окну (23.09.2026) ────
+
+def window_buckets(items: list[dict], date_from: str, date_to: str) -> dict:
+    """Столбики по масштабу окна: ≤ 31 дня — по дням, ≤ 120 — по неделям (с
+    понедельника), дальше — по месяцам. Неделю по месяцам не покажешь (один
+    столбик), а год по дням — частокол из 365 палочек."""
+    from datetime import date as _d, timedelta as _td
+    d0, d1 = _d.fromisoformat(date_from), _d.fromisoformat(date_to)
+    days = (d1 - d0).days + 1
+    kind = "day" if days <= 31 else "week" if days <= 120 else "month"
+
+    def key_of(ds: str) -> str:
+        d = _d.fromisoformat(ds[:10])
+        if kind == "day":
+            return d.isoformat()
+        if kind == "week":
+            return (d - _td(days=d.weekday())).isoformat()
+        return d.strftime("%Y-%m")
+
+    agg: dict[str, dict] = {}
+    # Пустые корзины тоже нужны — иначе тихая неделя выпадает из ряда
+    cur = d0
+    while cur <= d1:
+        agg.setdefault(key_of(cur.isoformat()), {"period": key_of(cur.isoformat()), "total": 0.0, "count": 0})
+        cur += _td(days=1)
+    for i in items:
+        if i["kind"] != "expense" or not i.get("date"):
+            continue
+        # Строки вне окна в корзины не идут — иначе к недельному ряду
+        # прирастут чужие месяцы.
+        if not (date_from <= i["date"][:10] <= date_to):
+            continue
+        k = key_of(i["date"])
+        slot = agg.setdefault(k, {"period": k, "total": 0.0, "count": 0})
+        slot["total"] = round(slot["total"] + i["amount"], 2)
+        slot["count"] += 1
+    return {"bucket_kind": kind, "buckets": sorted(agg.values(), key=lambda b: b["period"]),
+            "days": days}
+
+
+def compare(current: dict, previous: dict) -> dict:
+    """Дельта текущей сводки к предыдущему окну той же длины: итог и категории.
+    Обе сводки должны быть посчитаны по одной валюте — иначе дельта бессмысленна."""
+    def pct(now: float, was: float):
+        if not was:
+            return None
+        return round((now - was) / was * 100)
+
+    prev_cats = {c["category"]: c for c in previous.get("categories", [])}
+    for c in current.get("categories", []):
+        was = prev_cats.get(c["category"], {}).get("total", 0.0)
+        c["prev_total"] = round(was, 2)
+        c["delta_pct"] = pct(c["total"], was)
+    current["prev"] = {
+        "spent": previous.get("spent", 0.0), "count": previous.get("count", 0),
+        "categories": {k: v["total"] for k, v in prev_cats.items()},
+    }
+    current["spent_delta_pct"] = pct(current.get("spent", 0.0), previous.get("spent", 0.0))
+    return current
+
+
+def month_summary(items: list[dict], today=None) -> dict:
+    """Для панели: потрачено с начала месяца против среднего полного месяца.
+    Средний месяц — по шести ПОЛНЫМ месяцам до текущего: текущий неполный
+    занизил бы «норму», и любой день читался бы как перерасход."""
+    from datetime import date as _d
+    import calendar
+    today = today or _d.today()
+    cur = today.strftime("%Y-%m")
+    by_month: dict[str, float] = {}
+    for i in items:
+        if i["kind"] != "expense" or not i.get("date"):
+            continue
+        m = i["date"][:7]
+        by_month[m] = round(by_month.get(m, 0.0) + i["amount"], 2)
+    full = sorted(k for k in by_month if k < cur)[-6:]
+    avg = round(sum(by_month[k] for k in full) / len(full), 2) if full else 0.0
+    dim = calendar.monthrange(today.year, today.month)[1]
+    return {
+        "spent_mtd": by_month.get(cur, 0.0),
+        "avg_month": avg,
+        "full_months": len(full),
+        "month_pct": round(by_month.get(cur, 0.0) / avg, 3) if avg else None,
+        "day_of_month": today.day, "days_in_month": dim,
+        "pace_pct": round(today.day / dim, 3),
     }
