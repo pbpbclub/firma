@@ -341,6 +341,35 @@ def list_usage(order_id: Optional[str] = None, month: Optional[str] = None,
         conn.close()
 
 
+# Траты на Профи.ру — источник проектных заказов (ТЗ Юры 23.09.2026). Ключ —
+# expenses.supplier, а не название строки: название пишут по-разному. Сравнение
+# в Python — SQLite LOWER() кириллицу не понижает.
+PROFI_SUPPLIER = "Профи.ру"
+_PROFI_KEYS = {"профи.ру", "профиру", "profi.ru", "profiru"}
+
+
+def _is_profi(supplier: Optional[str]) -> bool:
+    return (supplier or "").strip().lower().replace(" ", "") in _PROFI_KEYS
+
+
+def _profi_spend(conn, date_from: Optional[str], date_to: Optional[str]) -> dict:
+    """Всё время и период (по expense_date). Реальные деньги Фирмы — строки expenses;
+    личные траты, не разнесённые в Фирму, сюда не попадают."""
+    rows = [dict(r) for r in conn.execute(
+        """SELECT id, title, amount, supplier, expense_date, order_id, purpose FROM expenses
+            WHERE supplier IS NOT NULL AND COALESCE(purpose, '') != 'owner_draw'""").fetchall()
+            if _is_profi(r["supplier"])]
+    period = [r for r in rows
+              if (not date_from or (r["expense_date"] or "") >= date_from)
+              and (not date_to or (r["expense_date"] or "")[:10] <= date_to)]
+    return {
+        "supplier": PROFI_SUPPLIER,
+        "total_all": round(sum(r["amount"] or 0 for r in rows), 2), "count_all": len(rows),
+        "total_period": round(sum(r["amount"] or 0 for r in period), 2), "count_period": len(period),
+        "rows": sorted(period, key=lambda r: r["expense_date"] or "", reverse=True),
+    }
+
+
 @router.get("/summary")
 def summary(date_from: Optional[str] = None, date_to: Optional[str] = None,
             activity: Optional[str] = None, paid_only: bool = False):
@@ -432,6 +461,7 @@ def summary(date_from: Optional[str] = None, date_to: Optional[str] = None,
             a["usd_est"] = round(a["usd_est"] + (r["usd_est"] or 0), 2); a["sessions"] += r["sessions"] or 0; a["rows"] += 1
         return {
             "items": items,
+            "profi": _profi_spend(conn, date_from, date_to),
             "totals": {
                 "orders": len(items), "revenue": rev_t, "paid_total": tot("paid_total"), "people_paid": people_t,
                 "hours": hours_t, "sessions": tot("sessions"), "tokens_total": tokens_t, "usd_est": tot("usd_est"),

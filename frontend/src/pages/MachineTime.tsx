@@ -177,6 +177,29 @@ export default function MachineTime() {
         </div>
       )}
 
+      {q.data?.profi && (() => {
+        const p = q.data.profi;
+        const period = !!(from || to);
+        return (
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: isMobile ? 12 : 32,
+                        padding: isMobile ? "12px 16px" : "14px 24px", borderBottom: "1px solid #EDEBE6" }}>
+            <div style={{ ...lbl }}>ПРОФИ.РУ — ЛИДЫ</div>
+            <div style={{ fontSize: 12, color: "#6B6355" }}>
+              {period ? "за период " : "всего "}
+              <span style={{ fontSize: 16, fontWeight: 700, color: p.total_period ? "#8B3A3A" : "#A89070", ...num }}>{fmt(p.total_period)}</span>
+              <span style={{ color: "#A89070" }}> · {p.count_period} опл.</span>
+            </div>
+            {period && (
+              <div style={{ fontSize: 12, color: "#6B6355" }}>
+                за всё время <span style={{ fontWeight: 600, color: "#1A1A1A", ...num }}>{fmt(p.total_all)}</span>
+                <span style={{ color: "#A89070" }}> · {p.count_all} опл.</span>
+              </div>
+            )}
+            <div style={{ fontSize: 11, color: "#A89070" }}>расходы Фирмы с поставщиком «{p.supplier}»</div>
+          </div>
+        );
+      })()}
+
       {q.data && items.length === 0 && (
         <EmptyState title="Сессий агентов пока нет"
           hint="Оплаченных проектных заказов с сессиями за период нет. Записи приходят по API от мака и фин-агента." />
