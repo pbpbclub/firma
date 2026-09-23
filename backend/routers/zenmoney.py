@@ -6,7 +6,8 @@ from pydantic import BaseModel
 from db import get_zenmoney, get_analytics, get_production
 from privacy import require_owner
 import third_party
-from zm_scope import CURRENCY_SIGNS, scope_for
+from zm_scope import ABROAD_LABEL, CURRENCY_SIGNS, scope_for
+import abroad_routes
 import json
 import re
 import subprocess
@@ -251,6 +252,7 @@ def get_transactions(
 
         rows = conn.execute(sql, params).fetchall()
         rules = _load_payee_rules()
+        route_scope = scope_for(None, owner=True)
         result = []
         for r in rows:
             if not scope.row_in_currency(r, currency):
@@ -267,6 +269,15 @@ def get_transactions(
             resolved = _resolve_payee((d.get("payee") or "").strip(), rules, [])
             zen_cat = d["tags"][0] if d["tags"] else ""
             d["display_category"] = resolved.get("category") or _CATEGORY_RU.get(zen_cat) or (zen_cat or None)
+            route = abroad_routes.route_of(r, route_scope)
+            if route:
+                d["abroad"] = True
+                if scope.is_owner:
+                    d["abroad_route"] = abroad_routes.TITLES[route]
+                    d["display_category"] = f"{ABROAD_LABEL} · {abroad_routes.TITLES[route]}"
+                else:
+                    # Маршрут, получатель и назначение — личный контур владельца
+                    d["payee"], d["comment"], d["display_category"] = ABROAD_LABEL, None, ABROAD_LABEL
             result.append(d)
             if len(result) >= limit:
                 break
@@ -292,6 +303,7 @@ def get_report(month: Optional[str] = None, currency: Optional[str] = None,
         m2, y2 = (m + 1, y) if m < 12 else (1, y + 1)
         date_from, date_to = f"{month}-01", f"{y2}-{m2:02d}-01"
 
+        route_scope = scope_for(None, owner=True)   # маршрут не зависит от доступа
         frag, fparams = scope.tx_sql()
         rows = conn.execute(
             "SELECT * FROM zm_transactions WHERE date >= ? AND date < ? AND deleted=0" + frag,
@@ -309,7 +321,10 @@ def get_report(month: Optional[str] = None, currency: Optional[str] = None,
                 foreign += 1
             if not inc and not out:
                 continue
-            if inc > 0 and out > 0:
+            # Вывод себе за границу (Avosend, Корона, Узбекистан…) — перевод,
+            # а не расход, даже если записан одной ногой (решение Юры 23.09.2026)
+            abroad_route = abroad_routes.route_of(r, route_scope)
+            if (inc > 0 and out > 0) or abroad_route:
                 if out_cur == currency:
                     transfers += out
                 continue
@@ -350,16 +365,17 @@ def get_cashflow(months: int = Query(6, le=24), currency: Optional[str] = None,
     try:
         frag, fparams = scope.tx_sql()
         rows = conn.execute(
-            "SELECT id, date, income, outcome, income_account, outcome_account"
+            "SELECT id, date, income, outcome, income_account, outcome_account, payee, comment"
             " FROM zm_transactions WHERE deleted=0" + frag, list(fparams)).fetchall()
+        route_scope = scope_for(None, owner=True)
         agg: dict[str, dict] = {}
         marks = third_party.load_marks()
         for r in rows:
             inc, out = third_party.own_legs(r, marks)   # чужие деньги — не доход/расход
             if not inc and not out:
                 continue
-            if inc > 0 and out > 0:
-                continue
+            if (inc > 0 and out > 0) or abroad_routes.route_of(r, route_scope):
+                continue                      # переводы, в т.ч. вывод за границу — не расход
             month = (r["date"] or "")[:7]
             if not month:
                 continue

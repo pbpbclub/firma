@@ -279,3 +279,14 @@ def test_shape_for_infographics(mod):
 def test_first_date_of_region_history(mod):
     """Прошлое окно раньше истории карты — огрызок; дельту по нему не показываем."""
     assert mod.first_date(scope(mod), "ge") == "2026-06-20"
+
+
+def test_topup_sources(mod):
+    """Приход на карту страны: с рублёвой карты / от людей / без отправителя;
+    обмен внутри карты пополнением не считается."""
+    s = scope(mod)
+    t = mod.topups(mod.fetch_rows(s, "ge"), s, "ge")
+    by = {i["id"]: i["source"] for i in t["items"]}
+    assert by["t9"] == "people", "shps niu pheiment sistem — отправитель указан"
+    assert by["t12"] == "own", "кросс-строка с рублёвой карты"
+    assert t["items"][0]["date"] >= t["items"][-1]["date"]

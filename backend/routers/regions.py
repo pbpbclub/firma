@@ -58,6 +58,12 @@ def region_transactions(
     category: str | None = None,
     payee: str | None = None,
     kind: str | None = Query(None, pattern="^(expense|income|transfer|third_party)$"),
+    payee_key: str | None = None,     # точный получатель (склейка по регистру) — окно расшифровки
+    currency: str | None = None,      # валюта операции; «unknown» — не разделена
+    weekday: int | None = Query(None, ge=0, le=6),   # 0 = понедельник
+    date_exact: str | None = None,    # один день (столбик по дням)
+    bucket_from: str | None = None,   # столбик недели/месяца — от…
+    bucket_to: str | None = None,     # …до включительно
     amount_min: float | None = None,
     amount_max: float | None = None,
     limit: int = Query(300, le=2000),
@@ -81,6 +87,18 @@ def region_transactions(
         items = [i for i in items if payee.lower() in (i["payee"] or "").lower()]
     if kind:
         items = [i for i in items if i["kind"] == kind]
+    if payee_key:
+        items = [i for i in items if abroad.payee_key(i["payee"]) == payee_key]
+    if currency:
+        items = [i for i in items if (i["currency"] or abroad.UNKNOWN) == currency]
+    if weekday is not None:
+        items = [i for i in items if i["date"] and date.fromisoformat(i["date"][:10]).weekday() == weekday]
+    if date_exact:
+        items = [i for i in items if (i["date"] or "")[:10] == date_exact]
+    if bucket_from:
+        items = [i for i in items if (i["date"] or "")[:10] >= bucket_from]
+    if bucket_to:
+        items = [i for i in items if (i["date"] or "")[:10] <= bucket_to]
     if amount_min is not None:
         items = [i for i in items if i["amount"] >= amount_min]
     if amount_max is not None:
@@ -147,6 +165,54 @@ def region_spending(code: str, months: int = Query(6, le=36), currency: str | No
     res["ambiguous_accounts"] = sum(1 for a in scope.accounts(include_cash=True)
                                     if a.region == code and a.ambiguous)
     return res
+
+
+@router.get("/{code}/topups")
+def region_topups(code: str, date_from: str | None = None, date_to: str | None = None,
+                  months: int = Query(12, le=36), user=Depends(require_owner)):
+    """Как деньги попадают в страну: сколько ушло с рублёвых карт по каким
+    маршрутам (`abroad_routes`) и что пришло на карту страны от кого.
+
+    Две стороны одного движения показываются рядом, но НЕ стыкуются здесь: сумма
+    ушла в рублях, пришла в лари/долларах, по курсу сервиса и не всегда в тот же
+    день. Пара «ушло → пришло» — следующий шаг (стыковка), а не догадка по сумме."""
+    import abroad_routes
+    from db import get_zenmoney
+    scope = scope_for(user)
+    d_from = date_from or _months_ago(months)
+    d_to = date_to or date.today().isoformat()
+    conn = get_zenmoney()
+    try:
+        rows = conn.execute("SELECT * FROM zm_transactions WHERE deleted = 0 AND date >= ? AND date <= ?"
+                            " ORDER BY date DESC", (d_from, d_to)).fetchall()
+    finally:
+        conn.close()
+    out = abroad_routes.outflows(rows, scope)
+    by_month: dict[str, dict] = {}
+    routes: dict[str, dict] = {}
+    for o in out:
+        m = by_month.setdefault(o["date"][:7], {"period": o["date"][:7], "total": 0.0, "count": 0, "by_route": {}})
+        m["total"] = round(m["total"] + o["amount_rub"], 2)
+        m["count"] += 1
+        m["by_route"][o["route"]] = round(m["by_route"].get(o["route"], 0.0) + o["amount_rub"], 2)
+        r = routes.setdefault(o["route"], {"route": o["route"], "title": o["route_title"],
+                                           "total": 0.0, "count": 0, "last": None})
+        r["total"] = round(r["total"] + o["amount_rub"], 2)
+        r["count"] += 1
+        r["last"] = max(r["last"] or "", o["date"] or "")
+    for r in routes.values():
+        r["avg"] = round(r["total"] / r["count"], 2) if r["count"] else 0.0
+    return {
+        "period": {"from": d_from, "to": d_to},
+        "outflows": {
+            "items": out,
+            "months": sorted(by_month.values(), key=lambda m: m["period"]),
+            "routes": sorted(routes.values(), key=lambda r: -r["total"]),
+            "total": round(sum(o["amount_rub"] for o in out), 2),
+            "route_titles": abroad_routes.TITLES,
+        },
+        "inflows": abroad.topups(rows, scope, code),
+    }
 
 
 @router.get("/{code}/summary")

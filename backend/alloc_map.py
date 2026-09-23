@@ -174,7 +174,10 @@ def build(with_transactions: bool = True, scope=None) -> dict:
                 put("zm_link", f"zen:{r['zm_tx_id']}", order_id=r["order_id"], master_name=r["contractor_name"],
                     title=r["note"], label="Разноска фин-агента")
             if with_transactions:
-                for r in zc.execute("SELECT id, payee, income, outcome, income_account, outcome_account FROM zm_transactions WHERE deleted = 0").fetchall():
+                import abroad_routes
+                from zm_scope import scope_for as _sf
+                route_scope = _sf(None, owner=True)
+                for r in zc.execute("SELECT id, payee, comment, income, outcome, income_account, outcome_account FROM zm_transactions WHERE deleted = 0").fetchall():
                     if scope is not None and not scope.visible(r):
                         continue
                     k = f"zen:{r['id']}"
@@ -185,6 +188,8 @@ def build(with_transactions: bool = True, scope=None) -> dict:
                         put("self_transfer", k,
                             label={"cross_out": ABROAD_LABEL, "cross_in": ABROAD_LABEL_IN}.get(
                                 kind, "Перевод между своими счетами"))
+                    elif route_scope is not None and abroad_routes.route_of(r, route_scope):
+                        put("self_transfer", k, label=ABROAD_LABEL)
                     elif is_self(r["payee"], selfp):
                         put("self_transfer", k, label="Пополнение с р/с ИП (вывод владельца)" if (r["income"] or 0) > 0 else "Перевод себе")
         finally:

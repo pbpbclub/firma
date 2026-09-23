@@ -261,47 +261,59 @@ def _transfer_tx_ids() -> set:
 def abroad_summary(months: int = Query(12, le=36), user=Depends(get_current_user)):
     """Сколько ушло себе за границу — по месяцам и строками, в рублях.
 
+    Вывод опознаётся по МАРШРУТУ (`abroad_routes`): Avosend, Золотая корона,
+    Узбекистан, прямые переводы — до 23.09.2026 считались только строки «одной
+    записью», и сентябрь показывал 1 500 ₽ вместо ~156 тыс. через Avosend.
+
     Видно всем, включая бухгалтера (решение Юры 22.09.2026): деньги уходят
-    с рублёвой карты, и без этой строки у неё не сойдётся остаток. НЕ отдаём
-    ничего из-за границы: ни счёта получения, ни пришедшей суммы, ни курса,
-    ни маршрута — это личный контур владельца."""
+    с рублёвой карты, и без этой строки у неё не сойдётся остаток. Маршрут,
+    получатель и назначение — только владельцу; из-за границы не отдаётся ничего."""
     from db import get_zenmoney
     from zm_scope import scope_for
+    import abroad_routes
     scope = scope_for(user)
+    service = scope_for(None, owner=True)       # классификация не зависит от доступа
     conn = get_zenmoney()
     try:
-        rows = conn.execute(
-            "SELECT id, date, income, outcome, income_account, outcome_account"
-            " FROM zm_transactions WHERE deleted = 0 ORDER BY date DESC"
-        ).fetchall()
+        rows = conn.execute("SELECT * FROM zm_transactions WHERE deleted = 0 ORDER BY date DESC").fetchall()
     finally:
         conn.close()
+    items = abroad_routes.outflows(rows, service)
 
     by_month: dict[str, dict] = {}
-    items = []
-    for r in rows:
-        # Считаем ТОЛЬКО ногу, пересекающую границу: внутрироссийский шаг
-        # (Т-Банк → Райффайзен) и конвертации внутри заграничных счетов сюда
-        # не идут — иначе один вывод посчитается дважды.
-        if scope.classify(r) != "cross_out":
-            continue
-        if scope.row_currency(r, "outcome") != "RUB":
-            continue
-        amount = round(r["outcome"] or 0, 2)
-        period = (r["date"] or "")[:7]
-        if not period:
-            continue
-        slot = by_month.setdefault(period, {"period": period, "amount_rub": 0.0, "count": 0})
-        slot["amount_rub"] = round(slot["amount_rub"] + amount, 2)
+    for i in items:
+        period = (i["date"] or "")[:7]
+        slot = by_month.setdefault(period, {"period": period, "amount_rub": 0.0, "count": 0, "routes": {}})
+        slot["amount_rub"] = round(slot["amount_rub"] + i["amount_rub"], 2)
         slot["count"] += 1
-        items.append({"id": str(r["id"]), "date": r["date"], "amount_rub": amount})
+        r = slot["routes"].setdefault(i["route"], {"route": i["route"], "title": i["route_title"],
+                                                   "amount_rub": 0.0, "count": 0})
+        r["amount_rub"] = round(r["amount_rub"] + i["amount_rub"], 2)
+        r["count"] += 1
 
     periods = sorted(by_month.values(), key=lambda m: m["period"])[-months:]
     keep = {p["period"] for p in periods}
     items = [i for i in items if (i["date"] or "")[:7] in keep]
+    for p in periods:
+        p["routes"] = sorted(p["routes"].values(), key=lambda r: -r["amount_rub"])
+    totals: dict[str, dict] = {}
+    for i in items:
+        t = totals.setdefault(i["route"], {"route": i["route"], "title": i["route_title"], "amount_rub": 0.0, "count": 0})
+        t["amount_rub"] = round(t["amount_rub"] + i["amount_rub"], 2)
+        t["count"] += 1
+
+    if not scope.is_owner:
+        # Бухгалтеру — сумма и дата, без маршрута и деталей (решение 22.09.2026)
+        for p in periods:
+            p.pop("routes", None)
+        items = [{"id": i["id"], "date": i["date"], "amount_rub": i["amount_rub"]} for i in items]
+        route_totals = None
+    else:
+        route_totals = sorted(totals.values(), key=lambda r: -r["amount_rub"])
     return {
         "months": periods,
         "rows": items,
+        "routes": route_totals,
         "total": round(sum(p["amount_rub"] for p in periods), 2),
         "count": sum(p["count"] for p in periods),
     }
@@ -606,13 +618,17 @@ def personal_spending():
     zscope = scope_for(None, owner=True)
     zconn = get_zenmoney()
     try:
+        import abroad_routes
         for r in zconn.execute(
-            "SELECT id, date, outcome, payee, income_account, outcome_account FROM zm_transactions "
+            "SELECT id, date, income, outcome, payee, comment, income_account, outcome_account FROM zm_transactions "
             "WHERE outcome > 0 AND income = 0 AND deleted = 0"
         ):
             # Траты заграничных карт живут в своём разделе и в рублёвую
             # «личную» статистику не подмешиваются.
             if zscope.row_currency(r, "outcome") != "RUB":
+                continue
+            # Вывод себе за границу (Avosend, Корона…) — отдельная строка ниже
+            if abroad_routes.route_of(r, zscope):
                 continue
             payee = (r["payee"] or "").strip()
             amount = r["outcome"] or 0
@@ -626,12 +642,9 @@ def personal_spending():
         # Вывод себе за границу — отдельной строкой и ТОЛЬКО ногой, пересекающей
         # границу: внутрироссийский шаг уже посчитан выше как «перевод себе»,
         # а конвертации внутри заграничных счетов сюда не идут вовсе.
-        for r in zconn.execute(
-            "SELECT id, date, income, outcome, income_account, outcome_account FROM zm_transactions "
-            "WHERE deleted = 0 AND income > 0 AND outcome > 0"
-        ):
-            if zscope.classify(r) == "cross_out" and zscope.row_currency(r, "outcome") == "RUB":
-                add("abroad", r["date"], r["outcome"] or 0)
+        for r in abroad_routes.outflows(zconn.execute(
+                "SELECT * FROM zm_transactions WHERE deleted = 0 AND outcome > 0").fetchall(), zscope):
+            add("abroad", r["date"], r["amount_rub"])
     finally:
         zconn.close()
 

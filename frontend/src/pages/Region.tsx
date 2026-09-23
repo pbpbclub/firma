@@ -108,7 +108,7 @@ export default function Region() {
   const [reserve, setReserve] = useState<string>("");
   // Взаимоисключающие режимы экрана — одно состояние, а не три булевых:
   // иначе вкладка меняет свой фильтр, но не гасит чужой режим.
-  const [tab, setTab] = useState<"fx" | "tx" | "stats">("fx");
+  const [tab, setTab] = useState<"fx" | "topups" | "tx" | "stats">("fx");
   // Все хуки — до условных return ниже, иначе React меняет их число между
   // рендерами (ошибка #310 — поймана на живом экране 23.09.2026).
   const reserveRef = useRef<HTMLDivElement>(null);
@@ -161,7 +161,7 @@ export default function Region() {
   const tabs = (
     <div style={{ display: "flex", gap: 0, marginTop: 20, borderBottom: "1px solid #EDEBE6",
                   ...(isMobile ? M.tabStrip : null) }}>
-      {([["fx", "Обмен"], ["tx", "Операции"], ["stats", "Аналитика"]] as const).map(([key, label]) => (
+      {([["fx", "Обмен"], ["topups", "Пополнения"], ["tx", "Операции"], ["stats", "Аналитика"]] as const).map(([key, label]) => (
         <button key={key} type="button" onClick={() => setTab(key)}
           style={{
             padding: "10px 16px", fontSize: 13, fontFamily: "inherit", cursor: "pointer",
@@ -215,10 +215,11 @@ export default function Region() {
 
         {tabs}
 
+        {tab === "topups" && <TopupsTab code={code} who={who} />}
         {tab === "tx" && <TxTab code={code} who={who} />}
         {tab === "stats" && <StatsTab code={code} who={who} />}
         {tab === "fx" && (
-          <FxTab who={who} signal={signal} abroad={abroad}
+          <FxTab who={who} signal={signal} abroad={abroad} onGotoTopups={() => setTab("topups")}
                  reserve={reserve} setReserve={setReserve} saveReserve={saveReserve}
                  reserveRef={reserveRef} />
         )}
@@ -376,7 +377,7 @@ const DIR_RU: Record<string, { text: string; color: string }> = {
   unknown: { text: "мало данных",      color: "#A89070" },
 };
 
-function FxTab({ who, signal, abroad, reserve, setReserve, saveReserve, reserveRef }: any) {
+function FxTab({ who, signal, abroad, reserve, setReserve, saveReserve, reserveRef, onGotoTopups }: any) {
   const isMobile = useIsMobile();
   const { data: pairs, isLoading } = useQuery({
     queryKey: ["fx-pairs", who], queryFn: () => fxApi.pairs(90),
@@ -384,7 +385,6 @@ function FxTab({ who, signal, abroad, reserve, setReserve, saveReserve, reserveR
   if (isLoading) return <Loading />;
 
   const months = abroad?.months ?? [];
-  const maxMonth = Math.max(...months.map((m: any) => m.amount_rub), 1);
   // Три колонки по ~300px: кривая + ось (58) обязаны влезть, иначе подписи
   // оси режутся краем колонки.
   const chartW = isMobile ? 300 : 215;
@@ -495,28 +495,26 @@ function FxTab({ who, signal, abroad, reserve, setReserve, saveReserve, reserveR
           <div style={{ fontSize: 22, fontWeight: 700, fontFamily: MONO, marginTop: 8 }}>
             {fmtAmount(abroad?.total ?? 0, "RUB")}
           </div>
-          <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>{abroad?.count ?? 0} переводов за год</div>
-          {/* Сумма — над каждым столбиком, в тысячах: одного итога мало, чтобы
-              видеть, какой месяц был тяжёлым (просьба Юры 23.09.2026). */}
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 8, marginTop: 16, height: 104 }}>
-            {months.map((m: any) => (
-              <div key={m.period} style={{ display: "flex", flexDirection: "column", alignItems: "center",
-                                           gap: 3, flex: "1 1 0", minWidth: 0 }}>
-                <span style={{ fontSize: 10, fontWeight: 600, fontFamily: MONO, color: "#1A1A1A", whiteSpace: "nowrap" }}>
-                  {fmtK(m.amount_rub)}
-                </span>
-                <div title={`${m.period}: ${fmtAmount(m.amount_rub, "RUB")} · ${m.count} перев.`}
-                  style={{ width: "100%", maxWidth: 30, background: "#E8592A",
-                           height: Math.max(Math.round((m.amount_rub / maxMonth) * 60), 2) }} />
-                <span style={{ fontSize: 9, color: "#A89070" }}>{monthLabel(m.period)}</span>
-                <span style={{ fontSize: 9, color: "#C8C0B0", fontFamily: MONO }}>{m.count}×</span>
-              </div>
-            ))}
+          <div style={{ fontSize: 11, color: "#A89070", marginTop: 2 }}>
+            {abroad?.count ?? 0} переводов за год · в среднем {fmtAmount((abroad?.total ?? 0) / Math.max(months.length, 1), "RUB")} в месяц
           </div>
+          {/* По маршрутам, сумма над каждым месяцем (просьба Юры 23.09.2026) */}
+          {(() => {
+            const keys: string[] = (abroad?.routes ?? []).map((r: any) => r.route);
+            const withRoutes = months.map((m: any) => ({
+              ...m, by_route: Object.fromEntries((m.routes ?? []).map((r: any) => [r.route, r.amount_rub])),
+            }));
+            return (<>
+              <StackBars months={withRoutes} keys={keys} colors={ROUTE_COLORS}
+                valueOf={(m, k) => m.by_route?.[k] ?? 0} unit={n => fmtAmount(n, "RUB")}
+                onBar={() => onGotoTopups?.()} />
+              <Legend items={(abroad?.routes ?? []).map((r: any) => [r.title, ROUTE_COLORS[r.route] ?? "#A89070",
+                fmtK(r.amount_rub)] as [string, string, string])} />
+            </>);
+          })()}
           <div style={{ fontSize: 10, color: "#A89070", marginTop: 10, lineHeight: 1.5 }}>
-            тыс. ₽ в месяц · под столбиком — число переводов. Сюда пока идут только переводы одной
-            строкой (Золотая корона, прямые BOG); Avosend записан двумя строками и появится после
-            стыковки пар — август и сентябрь поэтому занижены.
+            тыс. ₽ в месяц по маршрутам: Avosend, Золотая корона, Узбекистан, прямые переводы.
+            Клик по месяцу — вкладка «Пополнения»: там каждый перевод и что пришло на карту.
           </div>
         </div>
       </div>
@@ -732,10 +730,141 @@ function TxTab({ code, who }: { code: string; who: string }) {
 // (у него уже есть пресеты и даты). Рядом с каждым числом — дельта к предыдущему
 // окну ТОЙ ЖЕ длины впритык: неделя сравнивается с прошлой неделей, месяц — с
 // прошлым месяцем. Одно состояние периода: чип ставит даты, ручные даты гасят чип.
+// n > 0 — скользящее окно в днях до сегодня; n = 0 — календарный месяц с 1-го.
+// «Этот месяц» появился 23.09.2026: Юра спросил про 443 ₾ «в этом месяце», а
+// экран считал СКОЛЬЗЯЩИЕ 30 дней (с 25.08) — за сентябрь там было 160 ₾.
 const PRESETS: Array<[string, string, number]> = [
-  ["week", "Неделя", 7], ["month", "Месяц", 30], ["quarter", "Квартал", 90],
-  ["half", "Полгода", 182], ["year", "Год", 365],
+  ["cmonth", "Этот месяц", 0], ["week", "7 дней", 7], ["month", "30 дней", 30],
+  ["quarter", "Квартал", 90], ["half", "Полгода", 182], ["year", "Год", 365],
 ];
+
+type Period = { preset: string | null; from: string; to: string };
+
+function presetPeriod(key: string): Period {
+  const p = PRESETS.find(x => x[0] === key) ?? PRESETS[0];
+  if (p[2] === 0) {
+    const d = new Date();
+    const first = new Date(d.getFullYear(), d.getMonth(), 1);
+    const iso = `${first.getFullYear()}-${String(first.getMonth() + 1).padStart(2, "0")}-01`;
+    return { preset: p[0], from: iso, to: isoDaysAgo(0) };
+  }
+  return { preset: p[0], from: isoDaysAgo(p[2] - 1), to: isoDaysAgo(0) };
+}
+
+// Чипы окон + «свой период». Одно состояние периода на вкладку: чип ставит даты,
+// ручные даты гасят чип.
+function PeriodPicker({ period, setPeriod }: { period: Period; setPeriod: (p: Period) => void }) {
+  const isMobile = useIsMobile();
+  return (
+    <div style={{ display: "flex", gap: 6, marginBottom: 16, alignItems: "center", flexWrap: "wrap",
+                  ...(isMobile ? M.tabStrip : null) }}>
+      {PRESETS.map(([key, label]) => (
+        <button key={key} type="button" onClick={() => setPeriod(presetPeriod(key))}
+          style={{ padding: "4px 10px", fontSize: 11, fontFamily: "inherit", cursor: "pointer", flexShrink: 0,
+                   border: `1px solid ${period.preset === key ? "#E8592A" : "#EDEBE6"}`,
+                   background: period.preset === key ? "#E8592A" : "none",
+                   color: period.preset === key ? "#FFFFFF" : "#A89070" }}>{label}</button>
+      ))}
+      <span style={{ flexShrink: 0, marginLeft: isMobile ? 0 : 6 }}>
+        <PeriodFilter label={period.preset ? "СВОЙ ПЕРИОД" : `${period.from} — ${period.to}`}
+          from={period.preset ? "" : period.from} to={period.preset ? "" : period.to}
+          onChange={(f, t) => {
+            if (!f && !t) { setPeriod(presetPeriod("cmonth")); return; }
+            setPeriod({ preset: null, from: f || isoDaysAgo(29), to: t || isoDaysAgo(0) });
+          }} />
+      </span>
+    </div>
+  );
+}
+
+// ── Окно расшифровки: из чего сложилась сумма ────────────────────────────────
+// Любая цифра аналитики открывает список операций, которые её дали, — с теми же
+// фильтрами, что посчитали цифру (период, валюта + категория / получатель / день).
+// Здесь же категорию можно поправить: правило перекрашивает все операции получателя.
+type Drill = { title: string; params: Record<string, string | number> } | null;
+
+function DrillModal({ code, who, drill, onClose }: { code: string; who: string; drill: Drill; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [assign, setAssign] = useState<string | null>(null);   // получатель, которому меняем категорию
+  const { data, isLoading } = useQuery({
+    queryKey: ["region-drill", code, who, JSON.stringify(drill?.params)],
+    queryFn: () => regionsApi.transactions(code, { limit: 500, ...(drill?.params ?? {}) }),
+    enabled: !!drill,
+  });
+  const { data: cats = [] } = useQuery({
+    queryKey: ["region-cats", code, who], queryFn: () => regionsApi.categories(code, 12), enabled: !!drill,
+  });
+  const addRule = useMutation({
+    mutationFn: (body: { payee: string; category: string }) => regionsApi.addRule(code, body),
+    onSuccess: () => {
+      ["region-drill", "region-tx", "region-cats", "region-stats", "region-summary"].forEach(k =>
+        qc.invalidateQueries({ queryKey: [k, code] }));
+      setAssign(null);
+    },
+  });
+  if (!drill) return null;
+  const items: any[] = data?.items ?? [];
+  const byCur: Record<string, number> = {};
+  items.forEach(i => { const k = i.currency ?? "?"; byCur[k] = (byCur[k] ?? 0) + (i.kind === "income" ? 0 : i.amount); });
+
+  return (
+    <Modal size="lg" eyebrow={drill.title.toUpperCase()} onClose={onClose}>
+      {isLoading && <Loading />}
+      {!isLoading && (<>
+        <div style={{ display: "flex", gap: 18, alignItems: "baseline", flexWrap: "wrap", marginBottom: 12 }}>
+          {Object.entries(byCur).map(([c, v]) => (
+            <span key={c} style={{ fontSize: 20, fontWeight: 700, fontFamily: MONO }}>
+              {fmtAmount(v, c === "?" ? null : c)}
+            </span>
+          ))}
+          <span style={{ fontSize: 12, color: "#6B6355" }}>{items.length} операций</span>
+        </div>
+        <div style={{ maxHeight: "55vh", overflowY: "auto", borderTop: "1px solid #EDEBE6" }}>
+          {items.map((t: any) => (
+            <div key={t.id} style={{ display: "grid", gridTemplateColumns: "74px minmax(0,1fr) auto", gap: 12,
+                                     padding: "8px 0", borderBottom: "1px solid #F2EFE9", alignItems: "baseline" }}>
+              <span style={{ fontSize: 11, color: "#6B6355", fontFamily: MONO }}>{String(t.date || "").slice(2, 10)}</span>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 12, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis",
+                              whiteSpace: "nowrap" }}>{t.payee || t.comment || "—"}</div>
+                <div style={{ fontSize: 10, color: "#A89070" }}>
+                  {t.account}
+                  {t.kind === "expense" && (
+                    <> · <button type="button" onClick={() => setAssign(assign === t.payee ? null : (t.payee || ""))}
+                        style={{ background: "none", border: "none", padding: 0, fontFamily: "inherit", fontSize: 10,
+                                 color: t.category === "other" ? "#B8860B" : "#E8592A", cursor: "pointer" }}>
+                      {t.category_title || "назначить"} ✎</button></>
+                  )}
+                </div>
+                {assign !== null && assign === t.payee && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
+                    {cats.map((c: any) => (
+                      <button key={c.code} type="button" disabled={addRule.isPending}
+                        onClick={() => addRule.mutate({ payee: t.payee || "", category: c.code })}
+                        style={{ padding: "3px 8px", fontSize: 10, fontFamily: "inherit", cursor: "pointer",
+                                 border: `1px solid ${t.category === c.code ? "#E8592A" : "#EDEBE6"}`,
+                                 background: t.category === c.code ? "#FFF8F5" : "#FFFFFF", color: "#1A1A1A" }}>
+                        {c.title}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <span style={{ fontSize: 12, fontWeight: 600, fontFamily: MONO, whiteSpace: "nowrap",
+                             color: t.kind === "income" ? "#4A7C59" : "#1A1A1A" }}>
+                {t.kind === "income" ? "+" : "−"}{fmtAmount(t.amount, t.currency)}
+              </span>
+            </div>
+          ))}
+          {items.length === 0 && <div style={{ padding: "18px 0", fontSize: 12, color: "#6B6355" }}>Операций нет</div>}
+        </div>
+        <div style={{ fontSize: 10, color: "#A89070", marginTop: 10 }}>
+          ✎ у категории — поменять; правило запомнится и перекрасит все операции этого получателя.
+        </div>
+      </>)}
+    </Modal>
+  );
+}
 
 // «48,3 тыс» — подпись над столбиком: полная сумма в 30 пикселей не влезает.
 function fmtK(n: number): string {
@@ -773,10 +902,8 @@ function Delta({ pct }: { pct: number | null | undefined }) {
 
 function StatsTab({ code, who }: { code: string; who: string }) {
   const isMobile = useIsMobile();
-  const [period, setPeriod] = useState<{ preset: string | null; from: string; to: string }>({
-    preset: "month", from: isoDaysAgo(29), to: isoDaysAgo(0),
-  });
-  const pick = (key: string, days: number) => setPeriod({ preset: key, from: isoDaysAgo(days - 1), to: isoDaysAgo(0) });
+  const [period, setPeriod] = useState<Period>(() => presetPeriod("cmonth"));
+  const [drill, setDrill] = useState<Drill>(null);
   // Валюта считается отдельно: складывать лари с долларами нельзя, поэтому
   // сводка всегда про ОДНУ валюту, а переключатель показывает, какие есть.
   const [curFilter, setCurFilter] = useState<string | null>(null);
@@ -787,6 +914,23 @@ function StatsTab({ code, who }: { code: string; who: string }) {
     enabled: !!period.from && !!period.to,
   });
 
+  // Расшифровка берёт ТЕ ЖЕ фильтры, что посчитали цифру: окно, валюту, траты.
+  const base: Record<string, string> = {
+    date_from: period.from, date_to: period.to, kind: "expense",
+    ...(data?.currency_filter ? { currency: data.currency_filter } : {}),
+  };
+  const open = (title: string, extra: Record<string, string | number>) =>
+    setDrill({ title, params: { ...base, ...extra } });
+  const bucketRange = (kind: string, p: string): Record<string, string> => {
+    if (kind === "day") return { date_exact: p };
+    if (kind === "week") {
+      const d = new Date(p + "T00:00:00"); d.setDate(d.getDate() + 6);
+      return { bucket_from: p, bucket_to: d.toISOString().slice(0, 10) };
+    }
+    const [y, m] = p.split("-").map(Number);
+    const last = new Date(y, m, 0).getDate();
+    return { bucket_from: `${p}-01`, bucket_to: `${p}-${String(last).padStart(2, "0")}` };
+  };
   const mixed = !data?.currency_split;
   const cur = data?.currency ?? null;
   const buckets: any[] = data?.buckets ?? [];
@@ -799,8 +943,9 @@ function StatsTab({ code, who }: { code: string; who: string }) {
 
   // pct — ширина полосы (0..100); prevPct — где была эта же строка в прошлом
   // периоде: тонкая чёрная засечка на полосе (как отметка плана в отчёте фин-агента).
-  const Row = ({ title, total, count, extra, pct, prevPct, currency, delta }: any) => (
-    <div style={{ padding: "9px 0", borderBottom: "1px solid #F2EFE9" }}>
+  const Row = ({ title, total, count, extra, pct, prevPct, currency, delta, onClick }: any) => (
+    <div onClick={onClick} title={onClick ? "из чего сложилась сумма" : undefined}
+         style={{ padding: "9px 0", borderBottom: "1px solid #F2EFE9", cursor: onClick ? "pointer" : "default" }}>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, gap: 12 }}>
         <span style={{ fontSize: 12, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis",
                        whiteSpace: "nowrap" }}>{title}</span>
@@ -826,24 +971,7 @@ function StatsTab({ code, who }: { code: string; who: string }) {
   return (
     <div style={{ marginTop: 18, maxWidth: 1000 }}>
       {/* Окно: чипы + свой период */}
-      <div style={{ display: "flex", gap: 6, marginBottom: 16, alignItems: "center", flexWrap: "wrap",
-                    ...(isMobile ? M.tabStrip : null) }}>
-        {PRESETS.map(([key, label, n]) => (
-          <button key={key} type="button" onClick={() => pick(key, n)}
-            style={{ padding: "4px 10px", fontSize: 11, fontFamily: "inherit", cursor: "pointer", flexShrink: 0,
-                     border: `1px solid ${period.preset === key ? "#E8592A" : "#EDEBE6"}`,
-                     background: period.preset === key ? "#E8592A" : "none",
-                     color: period.preset === key ? "#FFFFFF" : "#A89070" }}>{label}</button>
-        ))}
-        <span style={{ flexShrink: 0, marginLeft: isMobile ? 0 : 6 }}>
-          <PeriodFilter label={period.preset ? "СВОЙ ПЕРИОД" : `${period.from} — ${period.to}`}
-            from={period.preset ? "" : period.from} to={period.preset ? "" : period.to}
-            onChange={(f, t) => {
-              if (!f && !t) { pick("month", 30); return; }
-              setPeriod({ preset: null, from: f || isoDaysAgo(29), to: t || isoDaysAgo(0) });
-            }} />
-        </span>
-      </div>
+      <PeriodPicker period={period} setPeriod={setPeriod} />
 
       {/* Валюты периода: итог всегда по одной из них */}
       {(data?.by_currency ?? []).length > 1 && (
@@ -981,8 +1109,10 @@ function StatsTab({ code, who }: { code: string; who: string }) {
                 <span style={{ fontSize: 9, color: "#6B6355", fontFamily: MONO, height: 12 }}>
                   {showVal && b.total > 0 ? Math.round(b.total) : ""}
                 </span>
-                <div title={`${b.period}: ${fmtAmount(b.total, cur)} · ${b.count}`}
-                  style={{ width: w, background: b.total > 0 ? "#E8592A" : "#EDEBE6",
+                <div title={`${b.period}: ${fmtAmount(b.total, cur)} · ${b.count} — открыть`}
+                  onClick={() => b.total > 0 && open(`${bucketLabel(data?.bucket_kind, b.period)} · ${fmtAmount(b.total, cur)}`,
+                                                     bucketRange(data?.bucket_kind, b.period))}
+                  style={{ width: w, background: b.total > 0 ? "#E8592A" : "#EDEBE6", cursor: b.total > 0 ? "pointer" : "default",
                            height: Math.max(Math.round((b.total / maxBucket) * 64), 2) }} />
                 <span style={{ fontSize: 9, color: "#A89070", height: 12, whiteSpace: "nowrap" }}>
                   {showLbl ? bucketLabel(data?.bucket_kind, b.period) : ""}
@@ -1013,8 +1143,9 @@ function StatsTab({ code, who }: { code: string; who: string }) {
                 <div key={d.dow} style={{ flex: "1 1 0", display: "flex", flexDirection: "column",
                                           alignItems: "center", gap: 3, minWidth: 0 }}>
                   <span style={{ fontSize: 9, fontFamily: MONO, color: "#6B6355" }}>{fmtK(d.total)}</span>
-                  <div title={`${d.label}: ${fmtAmount(d.total, cur)} · ${d.count}`}
-                    style={{ width: "100%", maxWidth: 28,
+                  <div title={`${d.label}: ${fmtAmount(d.total, cur)} · ${d.count} — открыть`}
+                    onClick={() => d.total > 0 && open(`${d.label} · ${fmtAmount(d.total, cur)}`, { weekday: d.dow })}
+                    style={{ width: "100%", maxWidth: 28, cursor: d.total > 0 ? "pointer" : "default",
                              background: d.total === maxW ? "#E8592A" : "#F5B08F",
                              height: Math.max(Math.round(d.total / maxW * H), 2) }} />
                   <span style={{ fontSize: 10, color: d.dow >= 5 ? "#1A1A1A" : "#A89070" }}>{d.label}</span>
@@ -1040,6 +1171,7 @@ function StatsTab({ code, who }: { code: string; who: string }) {
             const top = Math.max(...cats.map((c: any) => Math.max(c.total, c.prev_total ?? 0)), 1);
             return cats.map((c: any) => (
               <Row key={c.category} title={c.title} total={c.total} count={c.count} currency={c.currency}
+                onClick={() => open(`${c.title} · ${fmtAmount(c.total, c.currency ?? cur)}`, { category: c.category })}
                 delta={c.delta_pct} pct={c.total / top * 100}
                 prevPct={c.prev_total != null ? c.prev_total / top * 100 : null} />
             ));
@@ -1050,6 +1182,7 @@ function StatsTab({ code, who }: { code: string; who: string }) {
           <div style={{ fontSize: 10, color: "#A89070", marginBottom: 6 }}>полоса — доля от всех трат периода</div>
           {(data?.top_payees ?? []).slice(0, 12).map((p: any) => (
             <Row key={p.payee} title={p.title} total={p.total} count={p.count} currency={p.currency}
+              onClick={() => open(`${p.title} · ${fmtAmount(p.total, p.currency ?? cur)}`, { payee_key: p.payee })}
               pct={p.total / (spent || 1) * 100}
               extra={<span style={{ color: "#A89070", fontWeight: 400 }}> · ср. {Math.round(p.avg)}</span>} />
           ))}
@@ -1089,6 +1222,7 @@ function StatsTab({ code, who }: { code: string; who: string }) {
             </div>
             {rec.map((r: any) => (
               <Row key={r.payee} title={`${r.payee}${r.category_title ? ` · ${r.category_title}` : ""}`}
+                onClick={() => open(`${r.payee} · регулярно`, { payee_key: r.payee.trim().toLowerCase() })}
                 total={r.per_month} currency={r.currency} pct={r.per_month / maxR * 100}
                 extra={<span style={{ color: "#A89070", fontWeight: 400 }}>/мес · {r.months} мес</span>} />
             ))}
@@ -1096,6 +1230,228 @@ function StatsTab({ code, who }: { code: string; who: string }) {
         })()}
       </div>
       </>)}
+      <DrillModal code={code} who={who} drill={drill} onClose={() => setDrill(null)} />
+    </div>
+  );
+}
+
+
+// ── Пополнения: как деньги попадают в страну ────────────────────────────────
+// Слева — сколько ушло с рублёвых карт и КАКИМ маршрутом (Avosend, Золотая корона,
+// Узбекистан, прямые переводы). Справа — что пришло на карту страны и от кого.
+// 🔒 Две стороны НЕ стыкуются по сумме: ушло рублями, пришло лари/долларами по курсу
+// сервиса и не всегда в тот же день — пара «ушло → пришло» будет отдельным шагом.
+const ROUTE_COLORS: Record<string, string> = {
+  avosend: "#E8592A", golden_crown: "#B8860B", uz_ms9: "#6B6355", bog_direct: "#4A7C59", direct: "#A89070",
+};
+const SOURCE_COLORS: Record<string, string> = { own: "#4A7C59", people: "#E8592A", anonymous: "#C8B89A" };
+
+function StackBars({ months, keys, colors, valueOf, onBar, unit }: {
+  months: any[]; keys: string[]; colors: Record<string, string>;
+  valueOf: (m: any, k: string) => number; onBar: (m: any) => void; unit: (n: number) => string;
+}) {
+  const isMobile = useIsMobile();
+  const max = Math.max(...months.map(m => keys.reduce((a, k) => a + valueOf(m, k), 0)), 1);
+  const H = 110;
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", gap: isMobile ? 6 : 10, height: H + 34, marginTop: 14,
+                  overflowX: "auto" }}>
+      {months.map(m => {
+        const total = keys.reduce((a, k) => a + valueOf(m, k), 0);
+        return (
+          <div key={m.period + (m.currency ?? "")} onClick={() => total > 0 && onBar(m)}
+               title={`${m.period}: ${unit(total)} — открыть`}
+               style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
+                        flex: "1 1 0", minWidth: 26, cursor: total > 0 ? "pointer" : "default" }}>
+            <span style={{ fontSize: 10, fontWeight: 600, fontFamily: MONO, whiteSpace: "nowrap" }}>{fmtK(total)}</span>
+            <div style={{ width: "100%", maxWidth: 34, display: "flex", flexDirection: "column-reverse",
+                          height: Math.max(Math.round(total / max * H), 2) }}>
+              {keys.map(k => {
+                const v = valueOf(m, k);
+                return v > 0 ? <div key={k} style={{ height: `${v / total * 100}%`, background: colors[k] ?? "#A89070",
+                                                     borderTop: "1px solid #FFFFFF" }} /> : null;
+              })}
+            </div>
+            <span style={{ fontSize: 9, color: "#A89070" }}>{monthLabel(m.period)}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function Legend({ items }: { items: Array<[string, string, string?]> }) {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px", marginTop: 10 }}>
+      {items.map(([label, color, extra]) => (
+        <span key={label} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: "#6B6355" }}>
+          <span style={{ width: 8, height: 8, background: color, flexShrink: 0 }} />{label}
+          {extra && <span style={{ fontFamily: MONO, color: "#1A1A1A", fontWeight: 600 }}>{extra}</span>}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+type ListDrill = { title: string; items: any[]; kind: "out" | "in" } | null;
+
+function TopupsTab({ code, who }: { code: string; who: string }) {
+  const isMobile = useIsMobile();
+  const [period, setPeriod] = useState<Period>(() => presetPeriod("half"));
+  const [list, setList] = useState<ListDrill>(null);
+  const { data, isLoading } = useQuery({
+    queryKey: ["region-topups", code, who, period.from, period.to],
+    queryFn: () => regionsApi.topups(code, { date_from: period.from, date_to: period.to }),
+  });
+
+  const out = data?.outflows;
+  const inn = data?.inflows;
+  const routeKeys: string[] = (out?.routes ?? []).map((r: any) => r.route);
+  const monthsOut: any[] = out?.months ?? [];
+  const avgMonth = monthsOut.length ? (out?.total ?? 0) / monthsOut.length : 0;
+  // Приходы — по валютам отдельно: лари и доллары в один столбик не складываются
+  const inCurs: string[] = Array.from(new Set<string>((inn?.months ?? []).map((m: any) => m.currency ?? "?")));
+  const [inCur, setInCur] = useState<string | null>(null);
+  const curIn = inCur ?? inCurs[0] ?? null;
+  const inMonths = (inn?.months ?? []).filter((m: any) => (m.currency ?? "?") === curIn);
+  const inTotal = inMonths.reduce((a: number, m: any) => a + m.total, 0);
+  const srcKeys = ["own", "people", "anonymous"];
+  const srcTotals = srcKeys.map(k => [k, inMonths.reduce((a: number, m: any) => a + (m.by_source?.[k] ?? 0), 0)] as [string, number]);
+  const curSign = curIn === "?" ? null : curIn;
+
+  return (
+    <div style={{ marginTop: 18, maxWidth: 1060 }}>
+      <PeriodPicker period={period} setPeriod={setPeriod} />
+      {isLoading && <Loading />}
+      {!isLoading && data && (
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,1fr) minmax(0,1fr)",
+                      gap: isMobile ? 36 : 48, alignItems: "start" }}>
+
+          {/* ── Ушло с рублёвых карт ───────────────────────────────── */}
+          <div style={{ minWidth: 0 }}>
+            <div style={LABEL}>УШЛО С РУБЛЁВЫХ КАРТ · ПО МАРШРУТАМ</div>
+            <div style={{ display: "flex", gap: 14, alignItems: "baseline", marginTop: 6, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 26, fontWeight: 700, fontFamily: MONO, letterSpacing: "-0.03em" }}>
+                {fmtAmount(out?.total ?? 0, "RUB")}
+              </span>
+              <span style={{ fontSize: 12, color: "#6B6355" }}>
+                в среднем {fmtAmount(avgMonth, "RUB")} в месяц · {(out?.items ?? []).length} переводов
+              </span>
+            </div>
+            <StackBars months={monthsOut} keys={routeKeys} colors={ROUTE_COLORS}
+              valueOf={(m, k) => m.by_route?.[k] ?? 0} unit={n => fmtAmount(n, "RUB")}
+              onBar={m => setList({ kind: "out", title: `Вывод · ${monthLabel(m.period)} ${m.period.slice(0, 4)}`,
+                                    items: (out?.items ?? []).filter((i: any) => i.date.startsWith(m.period)) })} />
+            <Legend items={(out?.routes ?? []).map((r: any) => [r.title, ROUTE_COLORS[r.route] ?? "#A89070",
+              `${Math.round(r.total / ((out?.total ?? 0) || 1) * 100)}%`] as [string, string, string])} />
+
+            <div style={{ marginTop: 22 }}>
+              {(out?.routes ?? []).map((r: any) => (
+                <div key={r.route} onClick={() => setList({ kind: "out", title: r.title,
+                                               items: (out?.items ?? []).filter((i: any) => i.route === r.route) })}
+                     style={{ padding: "9px 0", borderBottom: "1px solid #F2EFE9", cursor: "pointer" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 6 }}>
+                    <span style={{ fontSize: 12, color: "#1A1A1A", display: "inline-flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ width: 8, height: 8, background: ROUTE_COLORS[r.route] ?? "#A89070" }} />{r.title}
+                    </span>
+                    <span style={{ fontSize: 12, fontFamily: MONO, whiteSpace: "nowrap" }}>
+                      <b>{fmtAmount(r.total, "RUB")}</b>
+                      <span style={{ color: "#A89070" }}> · {r.count} · ср. {fmtK(r.avg)} · посл. {String(r.last).slice(5)}</span>
+                    </span>
+                  </div>
+                  <div style={{ height: 4, background: "#F2EFE9" }}>
+                    <div style={{ height: 4, width: `${r.total / ((out?.total ?? 0) || 1) * 100}%`,
+                                  background: ROUTE_COLORS[r.route] ?? "#A89070" }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: 10, color: "#A89070", marginTop: 10, lineHeight: 1.5 }}>
+              Считается нога, уходящая с рублёвой карты наружу. Шаг «Т-Банк → Райффайзен» — перевод
+              между своими и сюда не входит, иначе один вывод посчитался бы дважды. В «Личных» эти
+              суммы больше не расход, а перевод.
+            </div>
+          </div>
+
+          {/* ── Пришло на карту страны ─────────────────────────────── */}
+          <div style={{ minWidth: 0 }}>
+            <div style={LABEL}>ПРИШЛО НА КАРТУ · ОТ КОГО</div>
+            {inCurs.length > 1 && (
+              <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                {inCurs.map(c => (
+                  <button key={c} type="button" onClick={() => setInCur(c)}
+                    style={{ padding: "3px 9px", fontSize: 11, fontFamily: "inherit", cursor: "pointer",
+                             border: `1px solid ${c === curIn ? "#E8592A" : "#EDEBE6"}`,
+                             background: c === curIn ? "#FFF8F5" : "none", color: c === curIn ? "#1A1A1A" : "#A89070" }}>
+                    {c === "?" ? "без валюты" : `${c} ${currencySign(c)}`}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div style={{ fontSize: 26, fontWeight: 700, fontFamily: MONO, letterSpacing: "-0.03em", marginTop: 6 }}>
+              {fmtAmount(inTotal, curSign)}
+            </div>
+            <StackBars months={inMonths} keys={srcKeys} colors={SOURCE_COLORS}
+              valueOf={(m, k) => m.by_source?.[k] ?? 0} unit={n => fmtAmount(n, curSign)}
+              onBar={m => setList({ kind: "in", title: `Пополнения · ${monthLabel(m.period)} ${m.period.slice(0, 4)}`,
+                                    items: (inn?.items ?? []).filter((i: any) => i.date.startsWith(m.period) &&
+                                                                     (i.currency ?? "?") === curIn) })} />
+            <Legend items={srcTotals.filter(([, v]) => v > 0).map(([k, v]) =>
+              [inn?.sources?.[k] ?? k, SOURCE_COLORS[k], fmtAmount(v, curSign)] as [string, string, string])} />
+
+            <div style={{ ...LABEL, marginTop: 24, marginBottom: 6 }}>КТО ПРИСЫЛАЛ</div>
+            {(inn?.people ?? []).filter((p: any) => (p.currency ?? "?") === curIn).slice(0, 12).map((p: any) => (
+              <div key={p.key + p.currency} onClick={() => setList({ kind: "in", title: p.payee,
+                     items: (inn?.items ?? []).filter((i: any) => i.source === "people" &&
+                              (i.payee || "").trim().toLowerCase() === p.key) })}
+                   style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "8px 0",
+                            borderBottom: "1px solid #F2EFE9", cursor: "pointer" }}>
+                <span style={{ fontSize: 12 }}>{p.payee}</span>
+                <span style={{ fontSize: 12, fontFamily: MONO, whiteSpace: "nowrap" }}>
+                  <b style={{ color: "#4A7C59" }}>+{fmtAmount(p.total, curSign)}</b>
+                  <span style={{ color: "#A89070" }}> · {p.count}</span>
+                </span>
+              </div>
+            ))}
+            <div style={{ fontSize: 10, color: "#A89070", marginTop: 10, lineHeight: 1.5 }}>
+              «Без отправителя» — приходы с пустым получателем: так в выписке BOG ложатся зачисления
+              сервисов (Золотая корона, Avosend). Обмен ₾↔$↔€ внутри карты пополнением не считается.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {list && (
+        <Modal size="lg" eyebrow={list.title.toUpperCase()} onClose={() => setList(null)}>
+          <div style={{ fontSize: 20, fontWeight: 700, fontFamily: MONO, marginBottom: 12 }}>
+            {list.kind === "out"
+              ? fmtAmount(list.items.reduce((a, i) => a + i.amount_rub, 0), "RUB")
+              : fmtAmount(list.items.reduce((a, i) => a + i.amount, 0), curSign)}
+            <span style={{ fontSize: 12, fontWeight: 400, color: "#6B6355", marginLeft: 10 }}>{list.items.length} операций</span>
+          </div>
+          <div style={{ maxHeight: "55vh", overflowY: "auto", borderTop: "1px solid #EDEBE6" }}>
+            {list.items.map((i: any) => (
+              <div key={i.id} style={{ display: "grid", gridTemplateColumns: "74px minmax(0,1fr) auto", gap: 12,
+                                       padding: "8px 0", borderBottom: "1px solid #F2EFE9", alignItems: "baseline" }}>
+                <span style={{ fontSize: 11, color: "#6B6355", fontFamily: MONO }}>{String(i.date).slice(2, 10)}</span>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {list.kind === "out" ? i.route_title : (i.payee || i.source_title)}
+                  </div>
+                  <div style={{ fontSize: 10, color: "#A89070", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {list.kind === "out" ? `с ${i.account}${i.comment ? ` · ${i.comment}` : ""}`
+                                         : `на ${i.account}${i.from_account ? ` · с ${i.from_account} (${fmtAmount(i.sent_rub, "RUB")})` : ""}`}
+                  </div>
+                </div>
+                <span style={{ fontSize: 12, fontWeight: 600, fontFamily: MONO, whiteSpace: "nowrap",
+                               color: list.kind === "in" ? "#4A7C59" : "#1A1A1A" }}>
+                  {list.kind === "out" ? `−${fmtAmount(i.amount_rub, "RUB")}` : `+${fmtAmount(i.amount, i.currency)}`}
+                </span>
+              </div>
+            ))}
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

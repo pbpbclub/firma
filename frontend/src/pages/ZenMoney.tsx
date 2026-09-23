@@ -39,6 +39,14 @@ const BANK_MAP: Array<{ name: string; match: (t: string) => boolean; bg: string;
     bg: "#EF3124", text: "А", color: "#FFFFFF",
   },
   {
+    // Райффайзен: в ZenMoney карта называется «Mir Cashback Card», и лента
+    // показывала безликое «М». Фирменный жёлтый у Т-Банка уже занят — поэтому
+    // чёрный круг с жёлтой буквой, как в приложении Райффайзена.
+    name: "Райффайзен",
+    match: t => t === "mir cashback card" || t.includes("райфф") || t.includes("raiff"),
+    bg: "#1A1A1A", text: "R", color: "#FEE600",
+  },
+  {
     name: "Наличные",
     match: t => t === "cash" || t.includes("наличн"),
     bg: "#E8E4DA", text: "₽", color: "#6B6355",
@@ -1213,7 +1221,18 @@ export default function ZenMoneyPage() {
                     borderBottom: "1px solid #F2EFE9",
                   }}
                 >
-                  <div style={{ fontSize: 12, color: "#6B6355" }}>{acc.title}</div>
+                  {/* Значок банка и его имя рядом с названием карты: «Mir Cashback Card»
+                      сама по себе не говорит, что это Райффайзен. */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                    <BankBadge title={acc.title} />
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 12, color: "#6B6355", overflow: "hidden", textOverflow: "ellipsis",
+                                    whiteSpace: "nowrap" }}>{acc.title}</div>
+                      {detectBank(acc.title).name.length > 1 && (
+                        <div style={{ fontSize: 9, color: "#A89070" }}>{detectBank(acc.title).name}</div>
+                      )}
+                    </div>
+                  </div>
                   <div style={{
                     fontSize: 13, fontWeight: 600,
                     color: acc.balance >= 0 ? "#1A1A1A" : "#8B3A3A",

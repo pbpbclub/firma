@@ -498,6 +498,9 @@ export const regionsApi = {
       ...(params.compare ? { compare: 1 } : {}),
       ...(params.currency ? { currency: params.currency } : {}),
     } }).then((r) => r.data),
+  // Как деньги попадают в страну: выводы с рублёвых карт по маршрутам + приходы на карту.
+  topups: (code: string, params: { date_from?: string; date_to?: string } = {}) =>
+    api.get(`/regions/${code}/topups`, { params }).then((r) => r.data),
   // Сводка для панели со спидометрами — одним запросом.
   summary: (code: string) => api.get(`/regions/${code}/summary`).then((r) => r.data),
   categories: (code: string, months = 6) =>

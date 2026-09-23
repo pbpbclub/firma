@@ -223,7 +223,9 @@ def inbox(
         if not date_from:
             date_from = (date.today() - timedelta(days=ZEN_DEFAULT_DAYS)).isoformat()
         from zm_scope import scope_for
+        import abroad_routes
         zscope = scope_for(user)
+        route_scope = scope_for(None, owner=True)
         conn = get_zenmoney()
         try:
             # both_legs: в разноске кросс-строке делать нечего — это не расход
@@ -260,6 +262,9 @@ def inbox(
                         continue
                     # Не рублёвая нога — расходом по заказу быть не может.
                     if zscope.row_currency(r, "outcome") != "RUB":
+                        continue
+                    # Вывод себе за границу (Avosend, Корона…) — не расход
+                    if abroad_routes.route_of(r, route_scope):
                         continue
                     # Перевод себе — не расход. Признак один: payee_rules
                     # entity_type='self' (ZEN_OWN_PAYEES убран 22.09.2026).

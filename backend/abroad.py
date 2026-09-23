@@ -499,3 +499,69 @@ def month_summary(items: list[dict], today=None) -> dict:
         "day_of_month": today.day, "days_in_month": dim,
         "pace_pct": round(today.day / dim, 3),
     }
+
+
+# ── Пополнения карты страны (23.09.2026) ─────────────────────────────────────
+
+TOPUP_SOURCES = {
+    "own":       "С рублёвых карт",
+    "people":    "От людей",
+    "anonymous": "Без отправителя",
+}
+
+
+def topup_source(row, scope, titles: set[str]) -> str | None:
+    """Откуда пришли деньги на счёт страны. None — не пополнение: обмен внутри
+    карты (обе ноги свои) либо не приход вовсе.
+
+    «Без отправителя» — приход с пустым получателем. Так в выписке BOG ложатся
+    зачисления сервисов (Золотая корона, Avosend): ZenMoney не знает отправителя,
+    и честнее назвать их так, чем приписать маршрут по совпадению суммы."""
+    inc, out = row["income"] or 0, row["outcome"] or 0
+    if inc <= 0 or row["income_account"] not in titles:
+        return None
+    if out > 0:
+        if row["outcome_account"] in titles:
+            return None                          # обмен ₾↔$↔€ внутри карты
+        return "own"                             # кросс-строка с рублёвого счёта
+    return "people" if (row["payee"] or "").strip() else "anonymous"
+
+
+def topups(rows, scope, code: str) -> dict:
+    """Пополнения по месяцам и источникам, отдельно по валютам прихода."""
+    titles = set(region_titles(scope, code))
+    items, by_month = [], {}
+    for r in rows:
+        src = topup_source(r, scope, titles)
+        if not src:
+            continue
+        cur = scope.currency_of(r["income_account"])
+        cur = cur if cur != "unknown" else None
+        item = {"id": str(r["id"]), "date": r["date"], "amount": round(r["income"] or 0, 2),
+                "currency": cur, "source": src, "source_title": TOPUP_SOURCES[src],
+                "payee": r["payee"], "comment": r["comment"], "account": r["income_account"],
+                "from_account": r["outcome_account"] if src == "own" else None,
+                "sent_rub": round(r["outcome"] or 0, 2) if src == "own" else None}
+        items.append(item)
+        m = by_month.setdefault(((r["date"] or "")[:7], cur),
+                                {"period": (r["date"] or "")[:7], "currency": cur, "total": 0.0,
+                                 "count": 0, "by_source": {}})
+        m["total"] = round(m["total"] + item["amount"], 2)
+        m["count"] += 1
+        m["by_source"][src] = round(m["by_source"].get(src, 0.0) + item["amount"], 2)
+    people: dict[str, dict] = {}
+    for i in items:
+        if i["source"] != "people":
+            continue
+        k = payee_key(i["payee"])
+        p = people.setdefault((k, i["currency"]), {"payee": i["payee"], "key": k, "currency": i["currency"],
+                                                   "total": 0.0, "count": 0, "last": None})
+        p["total"] = round(p["total"] + i["amount"], 2)
+        p["count"] += 1
+        p["last"] = max(p["last"] or "", i["date"] or "")
+    return {
+        "items": sorted(items, key=lambda i: i["date"] or "", reverse=True),
+        "months": sorted(by_month.values(), key=lambda m: (m["period"], m["currency"] or "")),
+        "people": sorted(people.values(), key=lambda p: -p["total"]),
+        "sources": TOPUP_SOURCES,
+    }
