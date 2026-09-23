@@ -505,6 +505,7 @@ def month_summary(items: list[dict], today=None) -> dict:
 
 TOPUP_SOURCES = {
     "own":       "С рублёвых карт",
+    "other":     "С других счетов",
     "people":    "От людей",
     "anonymous": "Без отправителя",
 }
@@ -523,7 +524,14 @@ def topup_source(row, scope, titles: set[str]) -> str | None:
     if out > 0:
         if row["outcome_account"] in titles:
             return None                          # обмен ₾↔$↔€ внутри карты
-        return "own"                             # кросс-строка с рублёвого счёта
+        acc = scope.account_of(row["outcome_account"])
+        # 🔒 «С рублёвых карт» — только если счёт списания ДЕЙСТВИТЕЛЬНО домашний
+        # рублёвый (реестр, не знак ноги). Счёт вне реестра или заграничный счёт
+        # другой страны подписать рублями нельзя: сумма ушедшей ноги — не рубли,
+        # и источник не «свои карты» (fail-closed, как в zm_scope).
+        if acc and acc.region is None and acc.currency == "RUB":
+            return "own"                         # кросс-строка с рублёвого счёта
+        return "other"
     return "people" if (row["payee"] or "").strip() else "anonymous"
 
 
@@ -540,7 +548,9 @@ def topups(rows, scope, code: str) -> dict:
         item = {"id": str(r["id"]), "date": r["date"], "amount": round(r["income"] or 0, 2),
                 "currency": cur, "source": src, "source_title": TOPUP_SOURCES[src],
                 "payee": r["payee"], "comment": r["comment"], "account": r["income_account"],
-                "from_account": r["outcome_account"] if src == "own" else None,
+                "from_account": r["outcome_account"] if src in ("own", "other") else None,
+                # Рубли подписываем только у домашней рублёвой ноги — у «других
+                # счетов» валюта ушедшей суммы неизвестна, числа там не будет.
                 "sent_rub": round(r["outcome"] or 0, 2) if src == "own" else None}
         items.append(item)
         m = by_month.setdefault(((r["date"] or "")[:7], cur),

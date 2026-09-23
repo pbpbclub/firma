@@ -1291,7 +1291,7 @@ function StatsTab({ code, who }: { code: string; who: string }) {
 const ROUTE_COLORS: Record<string, string> = {
   avosend: "#E8592A", golden_crown: "#B8860B", uz_ms9: "#6B6355", bog_direct: "#4A7C59", direct: "#A89070",
 };
-const SOURCE_COLORS: Record<string, string> = { own: "#4A7C59", people: "#E8592A", anonymous: "#C8B89A" };
+const SOURCE_COLORS: Record<string, string> = { own: "#4A7C59", other: "#A89070", people: "#E8592A", anonymous: "#C8B89A" };
 
 function StackBars({ months, keys, colors, valueOf, onBar, unit }: {
   months: any[]; keys: string[]; colors: Record<string, string>;
@@ -1362,7 +1362,7 @@ function TopupsTab({ code, who }: { code: string; who: string }) {
   const curIn = inCur ?? inCurs[0] ?? null;
   const inMonths = (inn?.months ?? []).filter((m: any) => (m.currency ?? "?") === curIn);
   const inTotal = inMonths.reduce((a: number, m: any) => a + m.total, 0);
-  const srcKeys = ["own", "people", "anonymous"];
+  const srcKeys = ["own", "other", "people", "anonymous"];
   const srcTotals = srcKeys.map(k => [k, inMonths.reduce((a: number, m: any) => a + (m.by_source?.[k] ?? 0), 0)] as [string, number]);
   const curSign = curIn === "?" ? null : curIn;
 
@@ -1488,7 +1488,7 @@ function TopupsTab({ code, who }: { code: string; who: string }) {
                   </div>
                   <div style={{ fontSize: 10, color: "#A89070", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {list.kind === "out" ? `с ${i.account}${i.comment ? ` · ${i.comment}` : ""}`
-                                         : `на ${i.account}${i.from_account ? ` · с ${i.from_account} (${fmtAmount(i.sent_rub, "RUB")})` : ""}`}
+                                         : `на ${i.account}${i.from_account ? ` · с ${i.from_account}${i.sent_rub != null ? ` (${fmtAmount(i.sent_rub, "RUB")})` : ""}` : ""}`}
                   </div>
                 </div>
                 <span style={{ fontSize: 12, fontWeight: 600, fontFamily: MONO, whiteSpace: "nowrap",

@@ -290,3 +290,19 @@ def test_topup_sources(mod):
     assert by["t9"] == "people", "shps niu pheiment sistem — отправитель указан"
     assert by["t12"] == "own", "кросс-строка с рублёвой карты"
     assert t["items"][0]["date"] >= t["items"][-1]["date"]
+    sent = {i["id"]: i["sent_rub"] for i in t["items"]}
+    assert sent["t12"] == 9511.50, "ушедшая нога домашней рублёвой карты — в рублях"
+
+
+def test_topup_from_unknown_account_is_not_called_rubles(mod):
+    """Счёт списания вне реестра (или заграничный счёт другой страны) — источник
+    «С других счетов»: подписать его рублями нельзя (fail-closed)."""
+    s = scope(mod)
+    titles = set(mod.region_titles(s, "ge"))
+    row = {"id": "x1", "date": "2026-09-21", "income": 100.0, "outcome": 40.0,
+           "income_account": "Universal Account", "outcome_account": "Новый счёт",
+           "payee": None, "comment": None}
+    assert mod.topup_source(row, s, titles) == "other"
+    out = mod.topups([row], s, "ge")["items"][0]
+    assert out["sent_rub"] is None, "валюта ушедшей ноги неизвестна — числа нет"
+    assert out["from_account"] == "Новый счёт"
