@@ -19,6 +19,7 @@ import json
 from collections import defaultdict
 
 from db import get_production, get_zenmoney
+import third_party
 
 CASH_COMMENT = "cash withdrawal"
 
@@ -144,6 +145,10 @@ def capped(rows: list[dict]) -> bool:
     return len(rows) >= ROW_CAP
 
 
+def _known(cur: str) -> str | None:
+    return None if cur == "unknown" else cur
+
+
 def decorate(rows: list[dict], scope, rules: list[dict], titles: list[str] | None = None) -> list[dict]:
     """Строка → вид для ленты: направление, сумма, валюта (если известна), категория.
 
@@ -155,6 +160,7 @@ def decorate(rows: list[dict], scope, rules: list[dict], titles: list[str] | Non
     """
     cats = {c["code"]: c["title"] for c in categories()}
     own = set(titles or [])
+    marks = third_party.load_marks()
     out = []
     for r in rows:
         inc, out_ = r.get("income") or 0, r.get("outcome") or 0
@@ -170,6 +176,16 @@ def decorate(rows: list[dict], scope, rules: list[dict], titles: list[str] | Non
             kind, amount, side = "expense", out_, "outcome"
         else:
             kind, amount, side = "income", inc, "income"
+        # «Чужие деньги» (23.09.2026): помеченная часть ноги — не доход и не трата
+        # Юры. Нога целиком чужая → вид `third_party`, в итоги не идёт никуда.
+        mark = marks.get(str(r.get("id")))
+        tp = None
+        if mark and third_party.SIDE[mark["direction"]] == side:
+            tp_part = third_party.part(r, mark)
+            tp = {"person": mark["person"], "direction": mark["direction"], "amount": tp_part}
+            amount = round(amount - tp_part, 2)
+            if amount < third_party.EPS:
+                kind, amount = "third_party", tp_part
         cur = scope.row_currency(r, side)
         known = cur != "unknown"
         cat = categorize(r.get("payee"), r.get("comment"), rules) if kind == "expense" else None
@@ -189,6 +205,11 @@ def decorate(rows: list[dict], scope, rules: list[dict], titles: list[str] | Non
             # он неоднозначен — экран пишет «валюта?», а не выбирает наугад.
             "account_id": (scope.account_of(out_acc if side == "outcome" else in_acc) or Account0).id,
             "account_ambiguous": scope.account_of(out_acc if side == "outcome" else in_acc) is None,
+            "third_party": tp,
+            # Обе ноги как есть — окну пометки «чужие деньги» нужно выбрать ногу
+            "income": inc, "outcome": out_,
+            "income_currency": _known(scope.row_currency(r, "income")),
+            "outcome_currency": _known(scope.row_currency(r, "outcome")),
         })
     return out
 

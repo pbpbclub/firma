@@ -19,6 +19,7 @@ import { RowCard } from "../components/ui/RowCard";
 import { ColumnFilter, PeriodFilter, AmountFilter } from "../components/TableFilters";
 import { Modal } from "../components/ui/Modal";
 import { Gauge, type GaugeTone } from "../components/ui/Gauge";
+import { ThirdPartyBlock, ThirdPartyModal, ThirdPartyTag, useThirdParty } from "../components/money/ThirdParty";
 
 const LABEL: React.CSSProperties = { fontSize: 10, color: "#A89070", letterSpacing: "0.06em" };
 
@@ -540,6 +541,8 @@ function TxTab({ code, who }: { code: string; who: string }) {
   const [amountMin, setAmountMin] = useState("");
   const [amountMax, setAmountMax] = useState("");
   const [assign, setAssign] = useState<{ payee: string; current: string | null } | null>(null);
+  const thirdParty = useThirdParty(true);   // раздел и так только для владельца
+  const [tpTx, setTpTx] = useState<any>(null);
 
   const { data: cats = [] } = useQuery({
     queryKey: ["region-cats", code, who], queryFn: () => regionsApi.categories(code, 12),
@@ -573,13 +576,14 @@ function TxTab({ code, who }: { code: string; who: string }) {
   const titleToCode = Object.fromEntries(cats.map((c: any) => [c.title, c.code]));
   const hasFilters = !!(search || category || kind || dateFrom || dateTo || amountMin || amountMax);
 
-  const KIND_RU: Record<string, string> = { expense: "трата", income: "приход", transfer: "перевод" };
+  const KIND_RU: Record<string, string> = { expense: "трата", income: "приход", transfer: "перевод", third_party: "чужие" };
 
   return (
     <div style={{ marginTop: 18, maxWidth: 1000 }}>
+      <ThirdPartyBlock people={thirdParty.people} />
       {/* Подвкладки направления */}
       <div style={{ display: "flex", gap: 6, marginBottom: 16, ...(isMobile ? M.tabStrip : null) }}>
-        {[["", "Все"], ["expense", "Траты"], ["income", "Приходы"], ["transfer", "Переводы"]].map(([k, l]) => (
+        {[["", "Все"], ["expense", "Траты"], ["income", "Приходы"], ["transfer", "Переводы"], ["third_party", "Чужие"]].map(([k, l]) => (
           <button key={k} type="button" onClick={() => setKind(k)}
             style={{ padding: "4px 10px", fontSize: 11, fontFamily: "inherit", cursor: "pointer", flexShrink: 0,
                      border: `1px solid ${kind === k ? "#E8592A" : "#EDEBE6"}`,
@@ -643,9 +647,10 @@ function TxTab({ code, who }: { code: string; who: string }) {
       )}
 
       {items.map((t: any) => {
-        const sign = t.kind === "income" ? "+" : "−";
-        const color = t.kind === "income" ? "#4A7C59" : t.kind === "transfer" ? "#6B6355" : "#1A1A1A";
-        const catCell = t.kind === "expense" ? (
+        const sign = t.kind === "income" || t.third_party?.direction === "received" && t.kind === "third_party" ? "+" : "−";
+        const color = t.kind === "income" ? "#4A7C59" : t.kind === "transfer" || t.kind === "third_party" ? "#6B6355" : "#1A1A1A";
+        const tpTag = <ThirdPartyTag mark={thirdParty.byTx.get(String(t.id))} onOpen={() => setTpTx(t)} />;
+        const catCell = t.kind === "third_party" ? tpTag : t.kind === "expense" ? (
           <button type="button" onClick={() => setAssign({ payee: (t.payee || "").trim(), current: t.category })}
             style={{ background: "none", border: "none", padding: 0, fontFamily: "inherit", fontSize: 10,
                      cursor: "pointer", textAlign: "left",
@@ -653,6 +658,7 @@ function TxTab({ code, who }: { code: string; who: string }) {
             {t.category_title || "назначить"}
           </button>
         ) : <span style={{ fontSize: 10, color: "#A89070" }}>{KIND_RU[t.kind]}</span>;
+        const catWithMark = t.kind === "third_party" ? catCell : <>{catCell}<div>{tpTag}</div></>;
 
         const accCell = (
           <span style={{ fontSize: 10, color: "#6B6355", overflow: "hidden", textOverflow: "ellipsis",
@@ -673,7 +679,7 @@ function TxTab({ code, who }: { code: string; who: string }) {
               {t.currency ? ` ${currencySign(t.currency)}` : t.account_ambiguous ? " · валюта?" : ""}
               {t.comment && t.payee ? <> · {t.comment}</> : null}</>}
             right={<span style={{ color }}>{sign}{fmtAmount(t.amount, t.currency)}</span>}
-            meta={catCell}
+            meta={catWithMark}
           />
         ) : (
           <div key={t.id} style={{ display: "grid", gridTemplateColumns: TX_GRID, padding: "10px 0",
@@ -684,7 +690,7 @@ function TxTab({ code, who }: { code: string; who: string }) {
               {t.comment && <div style={{ fontSize: 10, color: "#A89070" }}>{t.comment}</div>}
             </div>
             <div style={{ minWidth: 0 }}>{accCell}</div>
-            <div>{catCell}</div>
+            <div>{catWithMark}</div>
             <div style={{ fontSize: 12, fontWeight: 500, fontFamily: MONO, textAlign: "right", color }}>
               {sign}{fmtAmount(t.amount, t.currency)}
             </div>
@@ -692,6 +698,10 @@ function TxTab({ code, who }: { code: string; who: string }) {
         );
       })}
 
+      {tpTx && (
+        <ThirdPartyModal tx={tpTx} mark={thirdParty.byTx.get(String(tpTx.id))}
+          people={thirdParty.people} onClose={() => setTpTx(null)} />
+      )}
       {assign && (
         <Modal size="sm" eyebrow={`КАТЕГОРИЯ · ${(assign.payee || "без получателя").toUpperCase()}`}
                onClose={() => setAssign(null)}>

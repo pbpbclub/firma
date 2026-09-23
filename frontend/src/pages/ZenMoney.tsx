@@ -4,7 +4,8 @@ import { Loading } from "../components/ui/Loading";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Briefcase, MagnifyingGlass, X, ArrowsClockwise, Tag, PencilSimple, Trash, LinkSimple } from "@phosphor-icons/react";
 import { zenmoneyApi, payeeRulesApi, mastersApi, customersApi, financeApi, inboxApi } from "../api";
-import { getUser } from "../auth";
+import { getUser, useMe } from "../auth";
+import { ThirdPartyBlock, ThirdPartyModal, ThirdPartyTag, useThirdParty } from "../components/money/ThirdParty";
 import { AllocNote } from "../components/money/AllocNote";
 import { useIsMobile, M } from "../components/ui/responsive";
 import { RowCard } from "../components/ui/RowCard";
@@ -548,6 +549,10 @@ export default function ZenMoneyPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [linkModal, setLinkModal] = useState<any>(null);
+  // «Чужие деньги» — личный контур владельца (бэк отдаёт только ему)
+  const { data: me } = useMe();
+  const thirdParty = useThirdParty(!!(me as any)?.is_owner);
+  const [tpTx, setTpTx] = useState<any>(null);
   const ZM_GRID = "28px 80px 36px 1fr 110px 100px 28px";
 
   const { data: allCreditors } = useQuery({
@@ -952,6 +957,8 @@ export default function ZenMoneyPage() {
             );
           })()}
 
+          {!showBusiness && <ThirdPartyBlock people={thirdParty.people} />}
+
           {/* Table header */}
           <div style={isMobile ? M.filterRow : {
             display: "grid",
@@ -1003,7 +1010,10 @@ export default function ZenMoneyPage() {
                   {tx.matched_contractor && <span style={{ fontSize: 10, color: tx.matched_via === "rule" ? "#4A7C59" : "#E8592A", border: `1px solid ${tx.matched_via === "rule" ? "#D0E0D4" : "#F0D8D0"}`, padding: "2px 6px" }}>{tx.matched_contractor}</span>}
                   {tx.is_business_income && <span style={{ fontSize: 10, color: "#4A7C59", background: "#EFF5F1", padding: "2px 6px" }}>от ИП</span>}
                 </> : undefined}
-                meta={expensesByZenTx.has(String(tx.id)) ? <AllocNote rows={expensesByZenTx.get(String(tx.id))!} onUndo={setUndoGroup} /> : undefined}
+                meta={expensesByZenTx.has(String(tx.id)) || thirdParty.byTx.has(String(tx.id)) ? <>
+                  {expensesByZenTx.has(String(tx.id)) && <AllocNote rows={expensesByZenTx.get(String(tx.id))!} onUndo={setUndoGroup} />}
+                  {thirdParty.byTx.has(String(tx.id)) && <ThirdPartyTag mark={thirdParty.byTx.get(String(tx.id))} onOpen={() => setTpTx(tx)} />}
+                </> : (me as any)?.is_owner ? <ThirdPartyTag onOpen={() => setTpTx(tx)} /> : undefined}
                 trailing={isExpense ? <IconButton icon={LinkSimple} title="Привязать к обязательству" size={36} iconSize={15}
                   color={creditorByZenTx.has(String(tx.id)) ? "#4A7C59" : "#C8C0B0"} onClick={e => { e.stopPropagation(); setLinkModal(tx); }} /> : undefined}
                 tint={isBiz ? "#FFFBF5" : undefined}
@@ -1085,6 +1095,9 @@ export default function ZenMoneyPage() {
                 </div>
                 <div style={{ fontSize: 10, color: "#A89070", paddingTop: 1 }}>
                   {tx.display_category || (tx.tags as string[])?.[0] || ""}
+                  {(me as any)?.is_owner && (
+                    <div><ThirdPartyTag mark={thirdParty.byTx.get(String(tx.id))} onOpen={() => setTpTx(tx)} /></div>
+                  )}
                 </div>
                 <div>
                   <div style={{
@@ -1110,6 +1123,10 @@ export default function ZenMoneyPage() {
               </div>
             );
           })}
+          {tpTx && (
+            <ThirdPartyModal tx={tpTx} mark={thirdParty.byTx.get(String(tpTx.id))}
+              people={thirdParty.people} onClose={() => setTpTx(null)} />
+          )}
           {linkModal && (
             <LinkZenModal
               tx={linkModal}

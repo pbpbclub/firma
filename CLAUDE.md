@@ -470,6 +470,18 @@ id/title/type/balance/archive), поэтому заведён свой реес�
   (две строки) туда не входит до стыковки пар — на экране это сказано.
 - ⚠️ Хуки — до условных `return` (React #310, поймано 23.09 на `useRef` после `if`).
 
+**«Чужие деньги» — транзит третьим лицам** (ТЗ Юры 23.09.2026): Юра получает рубли за
+человека и выдаёт их ему в Грузии. Пометка `zm_third_party` (production.db, PK = tx_id
+ZenMoney, `person`, `direction` received|given, `amount` NULL = вся нога / часть ноги,
+`amount_rub` — рубли для валютной выдачи). 🔒 По tx_id, не по получателю; это не категория
+трат, а не-трата (как `owner_draw`). Вычитается в `abroad.decorate` (целиком → `kind=
+third_party`) и в `zenmoney.report/cashflow` (`third_party.own_legs`). API (require_owner):
+`POST /api/third-party {tx_id, person, direction?, amount?, amount_rub?, note?}` (повтор —
+перезапись), `DELETE /api/third-party/{tx_id}`, `GET /api/third-party` → `people[]`
+(получено/выдано/`balance_rub`, `>0` — ещё отдать; без рублей у валютной выдачи —
+`rub_complete=false`, остаток по валютам) + `entries[]`. UI — `components/money/ThirdParty.tsx`
+(метка «чужие?» в лентах «Личных» и «Грузии», блок по людям над лентой).
+
 **Полный пересинк ZenMoney** — `scripts/resync_zenmoney.py` (по умолчанию проверка,
 пишет только с `--apply`). Единственная разрешённая Юрой запись в чужую базу: ровно
 `zm_meta.server_ts = 0`, дальше импорт делает их же скрипт. Отказывается работать,

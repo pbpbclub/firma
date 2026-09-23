@@ -473,6 +473,15 @@ export const workTypesApi = {
 
 // Заграничный контур: операции по картам региона, категории трат, правила.
 // Все ручки закрыты владельцем на сервере (privacy.require_owner).
+// «Чужие деньги» — транзит третьим лицам через личные карты (23.09.2026)
+export const thirdPartyApi = {
+  list: () => api.get("/third-party").then((r) => r.data),
+  mark: (body: { tx_id: string; person: string; direction?: string; amount?: number | null;
+                 amount_rub?: number | null; note?: string | null }) =>
+    api.post("/third-party", body).then((r) => r.data),
+  unmark: (txId: string) => api.delete(`/third-party/${encodeURIComponent(txId)}`).then((r) => r.data),
+};
+
 export const regionsApi = {
   list: () => api.get("/regions").then((r) => r.data),
   transactions: (code: string, params?: Record<string, string | number>) =>

@@ -5,6 +5,7 @@ from audit import audit
 from pydantic import BaseModel
 from db import get_zenmoney, get_analytics, get_production
 from privacy import require_owner
+import third_party
 from zm_scope import CURRENCY_SIGNS, scope_for
 import json
 import re
@@ -298,9 +299,16 @@ def get_report(month: Optional[str] = None, currency: Optional[str] = None,
 
         by_cat: dict[str, dict] = {}
         expenses = incomes = transfers = 0.0
+        marks = third_party.load_marks()
+        foreign = 0.0
         for r in rows:
             out_cur, in_cur = scope.row_currency(r, "outcome"), scope.row_currency(r, "income")
-            inc, out = r["income"] or 0, r["outcome"] or 0
+            # «Чужие деньги» — не доход и не трата Юры (ТЗ 23.09.2026)
+            inc, out = third_party.own_legs(r, marks)
+            if (inc, out) != (r["income"] or 0, r["outcome"] or 0):
+                foreign += 1
+            if not inc and not out:
+                continue
             if inc > 0 and out > 0:
                 if out_cur == currency:
                     transfers += out
@@ -325,6 +333,7 @@ def get_report(month: Optional[str] = None, currency: Optional[str] = None,
             "expenses": round(expenses, 2),
             "incomes": round(incomes, 2),
             "transfers": round(transfers, 2),
+            "third_party_count": int(foreign),
             "categories": categories,
         }
     finally:
@@ -341,11 +350,14 @@ def get_cashflow(months: int = Query(6, le=24), currency: Optional[str] = None,
     try:
         frag, fparams = scope.tx_sql()
         rows = conn.execute(
-            "SELECT date, income, outcome, income_account, outcome_account"
+            "SELECT id, date, income, outcome, income_account, outcome_account"
             " FROM zm_transactions WHERE deleted=0" + frag, list(fparams)).fetchall()
         agg: dict[str, dict] = {}
+        marks = third_party.load_marks()
         for r in rows:
-            inc, out = r["income"] or 0, r["outcome"] or 0
+            inc, out = third_party.own_legs(r, marks)   # чужие деньги — не доход/расход
+            if not inc and not out:
+                continue
             if inc > 0 and out > 0:
                 continue
             month = (r["date"] or "")[:7]

@@ -2529,3 +2529,34 @@ def ensure_abroad_infra_seed():
         conn.commit()
     finally:
         conn.close()
+
+
+def ensure_zm_third_party_schema():
+    """«Чужие деньги» — транзит третьим лицам через личные карты (ТЗ Юры 23.09.2026).
+
+    Юра получает рубли за человека и выдаёт их ему в Грузии. Без пометки такая пара
+    ног читается доходом Юры и затем его тратой. Пометка — по tx_id ZenMoney, а НЕ
+    по получателю (у того же получателя бывают и свои переводы). Отдельный вид
+    записи, не категория `abroad_categories`: это не трата вовсе.
+
+    `direction`: received — получено за человека (нога прихода), given — выдано ему
+    (нога расхода). `amount` NULL = вся нога; число — часть ноги (снял 500 ₾,
+    из них 300 — Жанне). `amount_rub` — рублёвый эквивалент выдачи в валюте, чтобы
+    остаток по человеку сводился в рублях; без него остаток — списком по валютам."""
+    conn = get_production()
+    try:
+        conn.execute("""CREATE TABLE IF NOT EXISTS zm_third_party (
+            tx_id      TEXT PRIMARY KEY,
+            person     TEXT NOT NULL,
+            direction  TEXT NOT NULL CHECK (direction IN ('received', 'given')),
+            amount     REAL CHECK (amount IS NULL OR amount > 0),
+            amount_rub REAL CHECK (amount_rub IS NULL OR amount_rub > 0),
+            note       TEXT,
+            created_by TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT
+        )""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_zm_third_party_person ON zm_third_party(person)")
+        conn.commit()
+    finally:
+        conn.close()

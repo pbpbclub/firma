@@ -57,7 +57,7 @@ def region_transactions(
     search: str | None = None,
     category: str | None = None,
     payee: str | None = None,
-    kind: str | None = Query(None, pattern="^(expense|income|transfer)$"),
+    kind: str | None = Query(None, pattern="^(expense|income|transfer|third_party)$"),
     amount_min: float | None = None,
     amount_max: float | None = None,
     limit: int = Query(300, le=2000),
