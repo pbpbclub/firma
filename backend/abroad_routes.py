@@ -51,6 +51,12 @@ def route_of(row, scope) -> str | None:
     out_acc = scope.account_of(row["outcome_account"])
     if not out_acc or out_acc.region is not None:
         return None                          # уходит не с домашнего счёта
+    # 🔒 Fail-closed по валюте ноги: сумма вывода везде показывается РУБЛЯМИ
+    # (`amount_rub`). Счёт без назначенной валюты региона не имеет (region NULL
+    # у всех, кого нет в реестре), и без этой проверки нерублёвая нога молча
+    # складывалась бы в рублёвый итог «вывод себе за границу».
+    if out_acc.currency != "RUB":
+        return None
     inc, out = row["income"] or 0, row["outcome"] or 0
     if out <= 0:
         return None
@@ -62,14 +68,27 @@ def route_of(row, scope) -> str | None:
     return _signature(row)                   # расход с приметой маршрута
 
 
-def outflows(rows, scope) -> list[dict]:
-    """Строки-выводы: {id, date, amount_rub, route, route_title, account, payee}."""
+def outflows(rows, scope, region: str | None = None) -> list[dict]:
+    """Строки-выводы: {id, date, amount_rub, route, route_title, account, payee}.
+
+    `region` — раздел страны. Кросс-строка знает страну назначения (счёт второй
+    ноги) и в чужой раздел не идёт. У строки-расхода (Avosend, Корона) страны
+    назначения в данных НЕТ — маршрут там сервис, а не страна, поэтому такие
+    строки остаются во всех разделах: сопоставление «маршрут → страна» — решение
+    Юры, а не догадка кода.
+
+    Строка без даты пропускается: она не ложится ни в один месяц, а по месяцам
+    считаются и итог, и разбивка."""
     out = []
     for r in rows:
         key = route_of(r, scope)
-        if not key:
+        if not key or not (r["date"] or ""):
+            continue
+        in_acc = scope.account_of(r["income_account"]) if (r["income"] or 0) > 0 else None
+        to_region = in_acc.region if in_acc else None
+        if region is not None and to_region is not None and to_region != region:
             continue
         out.append({"id": str(r["id"]), "date": r["date"], "amount_rub": round(r["outcome"] or 0, 2),
                     "route": key, "route_title": TITLES[key], "account": r["outcome_account"],
-                    "payee": r["payee"], "comment": r["comment"]})
+                    "payee": r["payee"], "comment": r["comment"], "to_region": to_region})
     return out

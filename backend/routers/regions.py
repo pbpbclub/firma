@@ -187,7 +187,10 @@ def region_topups(code: str, date_from: str | None = None, date_to: str | None =
                             " ORDER BY date DESC", (d_from, d_to)).fetchall()
     finally:
         conn.close()
-    out = abroad_routes.outflows(rows, scope)
+    # Ответ адресован стране: кросс-строка в ЧУЖУЮ страну сюда не идёт.
+    # Строки-расходы (Avosend, Корона, MS 9) страны назначения не несут —
+    # см. `abroad_routes.outflows`, признак `route_region_unknown` ниже.
+    out = abroad_routes.outflows(rows, scope, region=code)
     by_month: dict[str, dict] = {}
     routes: dict[str, dict] = {}
     for o in out:
@@ -210,6 +213,10 @@ def region_topups(code: str, date_from: str | None = None, date_to: str | None =
             "routes": sorted(routes.values(), key=lambda r: -r["total"]),
             "total": round(sum(o["amount_rub"] for o in out), 2),
             "route_titles": abroad_routes.TITLES,
+            # Сколько строк попало сюда без известной страны назначения: их
+            # маршрут — сервис перевода, и при втором разделе страны они
+            # покажутся в обоих. Экран обязан это сказать, а не молчать.
+            "route_region_unknown": sum(1 for o in out if o["to_region"] is None),
         },
         "inflows": abroad.topups(rows, scope, code),
     }

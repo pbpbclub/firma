@@ -16,7 +16,10 @@ def scope():
     acc = lambda i, t, cur, reg: Account(i, t, "ccard", 0.0, cur, reg, "public" if reg is None else "private",
                                          None, False)
     return Scope(owner=True, accounts=[acc("1", "Black", "RUB", None), acc("2", "Mir Cashback Card", "RUB", None),
-                                        acc("3", "MasterCard Mass", "RUB", None), acc("4", "GEL Solo", "GEL", "ge")])
+                                        acc("3", "MasterCard Mass", "RUB", None), acc("4", "GEL Solo", "GEL", "ge"),
+                                        # Счёт вне реестра: валюта неизвестна, страны нет
+                                        acc("5", "New Card", "unknown", None),
+                                        acc("6", "TRY Wallet", "TRY", "tr")])
 
 
 def row(out_acc, in_acc, outcome, income=0.0, payee=None, comment=None):
@@ -55,3 +58,31 @@ def test_ordinary_spend_and_foreign_spend_are_not_outflows(scope):
     import abroad_routes as ar
     assert ar.route_of(row("Black", "Black", 900, payee="Пятёрочка"), scope) is None
     assert ar.route_of(row("GEL Solo", "GEL Solo", 12, payee="SPAR"), scope) is None, "трата в Грузии — не вывод"
+
+
+def test_unconfigured_account_leg_is_not_rub_outflow(scope):
+    """Счёт без назначенной валюты — fail-closed: сумма вывода показывается
+    рублями, и нерублёвая нога в рублёвый итог попасть не может."""
+    import abroad_routes as ar
+    assert ar.route_of(row("New Card", "New Card", 16000, payee="Avosend"), scope) is None
+    assert ar.route_of(row("GEL Solo", "GEL Solo", 300, payee="Avosend"), scope) is None
+
+
+def test_outflows_skip_dateless_rows(scope):
+    import abroad_routes as ar
+    r = row("Black", "Black", 5000, payee="Avosend")
+    r["date"] = None
+    assert ar.outflows([r], scope) == []
+
+
+def test_outflows_region_keeps_only_its_country(scope):
+    """Кросс-строка в другую страну в раздел этой страны не идёт; строка-расход
+    страны назначения не несёт и остаётся (маршрут — сервис, а не страна)."""
+    import abroad_routes as ar
+    ge = row("Black", "GEL Solo", 1500, 45.5)
+    tr = row("Black", "TRY Wallet", 2000, 700)
+    svc = row("Black", "Black", 5000, payee="Avosend")
+    got = ar.outflows([ge, tr, svc], scope, region="ge")
+    assert [o["to_region"] for o in got] == ["ge", None]
+    assert [o["to_region"] for o in ar.outflows([ge, tr, svc], scope, region="tr")] == ["tr", None]
+    assert len(ar.outflows([ge, tr, svc], scope)) == 3
