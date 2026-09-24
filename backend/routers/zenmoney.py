@@ -15,6 +15,16 @@ from datetime import datetime, timedelta
 
 router = APIRouter()
 
+
+def _is_transfer(row) -> bool:
+    """Строка с двумя ногами — перевод/обмен между счетами.
+
+    🔒 Считается по СЫРЫМ суммам строки, а не по остатку после вычета чужих
+    денег (`third_party.own_legs`): помеченная нога обнуляется, и перевод
+    иначе переезжает в расходы (или доходы) на всю встречную сумму."""
+    return float(row["income"] or 0) > 0 and float(row["outcome"] or 0) > 0
+
+
 _CATEGORY_RU: dict[str, str] = {
     "Entertainment":       "Развлечения",
     "Food & Drink":        "Еда",
@@ -263,8 +273,12 @@ def get_transactions(
             # признак расхода во всём проекте (см. zm_scope.Scope.mask).
             d = scope.mask(r)
             d["currency"] = currency
-            d["outcome_currency"] = scope.row_currency(r, "outcome")
-            d["income_currency"] = scope.row_currency(r, "income")
+            if not d.get("masked"):
+                # У замаскированной кросс-строки валюты ног проставила сама
+                # маска (вторая нога — None). Пересчёт из сырой строки вернул
+                # бы наружу валюту приватной ноги.
+                d["outcome_currency"] = scope.row_currency(r, "outcome")
+                d["income_currency"] = scope.row_currency(r, "income")
             d["tags"] = json.loads(d.get("tags") or "[]")
             resolved = _resolve_payee((d.get("payee") or "").strip(), rules, [])
             zen_cat = d["tags"][0] if d["tags"] else ""
@@ -324,7 +338,10 @@ def get_report(month: Optional[str] = None, currency: Optional[str] = None,
             # Вывод себе за границу (Avosend, Корона, Узбекистан…) — перевод,
             # а не расход, даже если записан одной ногой (решение Юры 23.09.2026)
             abroad_route = abroad_routes.route_of(r, route_scope)
-            if (inc > 0 and out > 0) or abroad_route:
+            # 🔒 Форма строки (перевод / расход) — по СЫРЫМ ногам: помеченная
+            # чужой нога обнуляется в own_legs, и перевод иначе молча становился
+            # бы расходом на всю встречную сумму.
+            if _is_transfer(r) or abroad_route:
                 if out_cur == currency:
                     transfers += out
                 continue
@@ -374,7 +391,7 @@ def get_cashflow(months: int = Query(6, le=24), currency: Optional[str] = None,
             inc, out = third_party.own_legs(r, marks)   # чужие деньги — не доход/расход
             if not inc and not out:
                 continue
-            if (inc > 0 and out > 0) or abroad_routes.route_of(r, route_scope):
+            if _is_transfer(r) or abroad_routes.route_of(r, route_scope):
                 continue                      # переводы, в т.ч. вывод за границу — не расход
             month = (r["date"] or "")[:7]
             if not month:
