@@ -78,8 +78,8 @@ function daysBetween(a: Date, b: Date) {
   return Math.round((b.getTime() - a.getTime()) / 86_400_000);
 }
 
-export function HeroPanel({ freeCash, balance, taxes, debtors, dds, orders, isMobile }: {
-  freeCash: any; balance: any; taxes: any; debtors: any; dds: any; orders: any[]; isMobile: boolean;
+export function HeroPanel({ freeCash, balance, taxes, creditors, debtors, dds, orders, isMobile }: {
+  freeCash: any; balance: any; taxes: any; creditors: any; debtors: any; dds: any; orders: any[]; isMobile: boolean;
 }) {
   const navigate = useNavigate();
   const [reservesOpen, setReservesOpen] = useState(false);
@@ -254,6 +254,45 @@ export function HeroPanel({ freeCash, balance, taxes, debtors, dds, orders, isMo
               − фонды <b style={{ color: "#1A1A1A" }}>{fmt(fc?.funds_total ?? 0)}</b>
             </span>
           </div>
+          {/* Баланс: что имеем + что нам должны − что осталось потратить по сметам заказов
+              в работе (решение Юры 25.09.2026). «Осталось потратить» — plan_rest, план, а
+              не долг; сальдо «Мы должны» сюда НЕ прибавляется: начисления лицевого счёта
+              строятся из тех же строк обязательств, сумма посчитала бы один долг дважды. */}
+          {(() => {
+            const debt = debtors?.total ?? 0;
+            const rest = creditors?.plan_rest_total ?? 0;
+            const result = freeAll + debt - rest;
+            const scale = Math.max(Math.max(0, freeAll) + debt, rest, 1);
+            return (
+              <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid #F2EFE9" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+                  <span style={LABEL}>БАЛАНС</span>
+                  <span style={big(result < 0 ? "#8B3A3A" : "#1A1A1A", 20)}>{result < 0 ? "−" : ""}{fmt(Math.abs(result))}</span>
+                </div>
+                <SegBar height={6} total={scale} segments={[
+                  { value: Math.max(0, freeAll), color: "#4A7C59", label: `имеем ${fmt(freeAll)}` },
+                  { value: debt, color: "#98B8A1", label: `нам должны ${fmt(debt)}` },
+                ]} />
+                {/* Расход — той же шкалой от правого края «плюса»: где кончается красное,
+                    там и баланс */}
+                <div style={{ position: "relative", height: 6, marginTop: 3 }}>
+                  <div title={`осталось потратить ${fmt(rest)}`}
+                       style={{ position: "absolute", top: 0, height: 6, background: "#8B3A3A",
+                                right: `${(1 - (Math.max(0, freeAll) + debt) / scale) * 100}%`,
+                                width: `${rest / scale * 100}%`, transition: "width 0.7s" }} />
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 14px", marginTop: 8, fontSize: 11, color: "#6B6355", ...NUM }}>
+                  <span><span style={{ display: "inline-block", width: 8, height: 8, background: "#4A7C59", marginRight: 6 }} />
+                    имеем <b style={{ color: "#1A1A1A" }}>{fmt(freeAll)}</b></span>
+                  <span><span style={{ display: "inline-block", width: 8, height: 8, background: "#98B8A1", marginRight: 6 }} />
+                    + нам должны <b style={{ color: "#1A1A1A" }}>{fmt(debt)}</b></span>
+                  <span onClick={() => navigate("/debtors")} style={{ cursor: "pointer" }}>
+                    <span style={{ display: "inline-block", width: 8, height: 8, background: "#8B3A3A", marginRight: 6 }} />
+                    − осталось потратить по заказам <b style={{ color: "#1A1A1A" }}>{fmt(rest)}</b></span>
+                </div>
+              </div>
+            );
+          })()}
           {cardsQ.isError && (
             <div style={{ marginTop: 8, fontSize: 11, color: "#8B3A3A" }}>личные счета не загрузились — в сумме только р/с ИП</div>
           )}

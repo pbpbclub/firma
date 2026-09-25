@@ -43,7 +43,7 @@ export default function Dashboard() {
   const readiness = useQuery({ queryKey: ["estimates-readiness"], queryFn: estimatesApi.readiness });
   const pfSummary = useQuery({ queryKey: ["orders-plan-fact-summary", "active"],
                                queryFn: () => ordersApi.planFactSummary("active") });
-  const creditors = useQuery({ queryKey: ["creditors"], queryFn: () => financeApi.creditors() });
+  const creditors = useQuery({ queryKey: ["creditors"], queryFn: () => financeApi.creditors(), ...LIVE });
   // «Мы должны» — сальдо лицевых счетов, одно число на человека (ТЗ 03.09.2026).
   const ledger = useQuery({ queryKey: ["ledger-balances"], queryFn: () => ledgerApi.balances() });
   // A8: накладные месяца (аренда, расходники) и как они ложатся на заказы в работе
@@ -115,7 +115,7 @@ export default function Dashboard() {
 
       {/* Шапка: свободные деньги, деньги по месяцам, пульс, плитки-двери */}
       {!coreLoading && (
-        <HeroPanel freeCash={freeCash.data} balance={balance.data} taxes={taxes.data}
+        <HeroPanel freeCash={freeCash.data} balance={balance.data} taxes={taxes.data} creditors={creditors.data}
                    debtors={debtors.data} dds={dds.data} orders={activeOrders} isMobile={isMobile} />
       )}
 
