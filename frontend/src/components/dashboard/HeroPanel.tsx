@@ -352,7 +352,10 @@ export function HeroPanel({ freeCash, balance, taxes, creditors, debtors, dds, o
               <span style={{ width: 8, height: 8, background: "#8B3A3A", marginRight: 5 }} />р/с ИП</span>
             <span style={{ display: "inline-flex", alignItems: "center" }}><span style={{ width: 8, height: 8, background: "#98B8A1", marginRight: 5 }} />
               <span style={{ width: 8, height: 8, background: "#C99A9A", marginRight: 5 }} />личные</span>
-            <span>без переводов себе и вывода в Тбилиси</span>
+            <span title="личное и чужие деньги — по разметке фин-агента (zm_ignore)">
+              без переводов себе, вывода в Тбилиси и личного
+              {(mm.data?.ignored_current ?? 0) > 0 && <> · в этом месяце личного {fmt(mm.data.ignored_current)}</>}
+            </span>
           </div>
           {mm.data && (!mm.data.bank_ok || !mm.data.cards_ok) && (
             <div style={{ fontSize: 11, color: "#8B3A3A", marginTop: 6 }}>

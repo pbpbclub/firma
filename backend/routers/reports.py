@@ -497,6 +497,29 @@ def week_summary():
 
 # ── Деньги по месяцам: ИП и личные счета одним контуром (решение Юры 25.09.2026) ──
 
+ZM_IGNORE_FILE = "/opt/fin-agent/data/zm_ignore.json"
+
+
+def _zm_ignore() -> tuple[set[str], set[str]]:
+    """Список фин-агента «не бизнес» (`zm_ignore.json`): личные переводы, подарки,
+    трейдинг, чужие деньги через карту Юры. Строка — по `tx` (одна операция) либо по
+    получателю целиком. Разметку ведёт фин-агент (Юра 25.09.2026: «финагент знает»),
+    своего справочника не заводим. Нет файла — пустой список."""
+    import json
+    try:
+        with open(ZM_IGNORE_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return set(), set()
+    txs, payees = set(), set()
+    for e in data.get("payees", []):
+        if e.get("tx"):
+            txs.add(str(e["tx"]))
+        elif e.get("payee"):
+            payees.add(e["payee"].strip().lower())
+    return txs, payees
+
+
 def _self_patterns(conn) -> list[tuple[str, str]]:
     """Признак «перевод себе» — `payee_rules.entity_type='self'` (единственный)."""
     return [((r["pattern"] or "").lower(), r["match_type"] or "exact") for r in conn.execute(
@@ -515,6 +538,8 @@ def money_months(months: int = Query(7, ge=1, le=24), user=Depends(get_current_u
       получатель «себе» (`payee_rules` self), вывод в Тбилиси (список фин-агента,
       как «Себе в Тбилиси») и вывод по маршрутам (`abroad_routes`, как `/cashflow`)
       не считаются;
+    - строки из списка фин-агента «не бизнес» (`zm_ignore.json`: подарки, личные
+      переводы, трейдинг, чужие деньги) — ни приходом, ни тратой;
     - приход на личный счёт, которому нашёлся перевод «себе» с р/с ИП той же суммы
       в пределах трёх дней, — второй конец того же перевода («Прочие поступления»
       Сбера без получателя), не доход.
@@ -568,6 +593,8 @@ def money_months(months: int = Query(7, ge=1, le=24), user=Depends(get_current_u
     finally:
         conn.close()
     tbilisi = _tbilisi_patterns() or []
+    ign_tx, ign_payee = _zm_ignore()
+    ignored = 0.0
     scope = scope_for(user)
     service = scope_for(None, owner=True)
     cards_ok = True
@@ -596,6 +623,10 @@ def money_months(months: int = Query(7, ge=1, le=24), user=Depends(get_current_u
             continue
         payee = (r["payee"] or "").lower()
         text = f"{payee} | {(r['comment'] or '').lower()}"
+        if str(r["id"]) in ign_tx or payee.strip() in ign_payee:
+            if k == keys[-1]:
+                ignored += (inc or 0) + (out or 0)
+            continue                                   # не бизнес — по разметке фин-агента
         if any((mt == "exact" and payee == p) or (mt == "prefix" and payee.startswith(p))
                or (mt == "contains" and p in payee) for p, mt in selfp) or "некрасов юрий" in payee:
             continue                                   # себе
@@ -622,4 +653,5 @@ def money_months(months: int = Query(7, ge=1, le=24), user=Depends(get_current_u
         a["income"] = round(a["ip_income"] + a["cards_income"], 2)
         a["expense"] = round(a["ip_expense"] + a["cards_expense"], 2)
         out_rows.append(a)
-    return {"months": out_rows, "bank_ok": bank_ok, "cards_ok": cards_ok, "matched_ip_transfers": matched}
+    return {"months": out_rows, "bank_ok": bank_ok, "cards_ok": cards_ok, "matched_ip_transfers": matched,
+            "ignored_current": round(ignored, 2)}
