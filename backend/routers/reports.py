@@ -8,10 +8,11 @@ finance.get_debtors/get_creditors, сальдо подрядчиков — из 
 """
 from datetime import date, timedelta
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 
 import cards
+from auth import get_current_user
 from db import get_finance, get_production
 
 router = APIRouter()
@@ -492,3 +493,133 @@ def week_summary():
         "quarters": {"year": today.year, "current": (today.month - 1) // 3 + 1,
                      "items": _quarter_income(today.year)},
     }
+
+
+# ── Деньги по месяцам: ИП и личные счета одним контуром (решение Юры 25.09.2026) ──
+
+def _self_patterns(conn) -> list[tuple[str, str]]:
+    """Признак «перевод себе» — `payee_rules.entity_type='self'` (единственный)."""
+    return [((r["pattern"] or "").lower(), r["match_type"] or "exact") for r in conn.execute(
+        "SELECT pattern, match_type FROM payee_rules WHERE entity_type = 'self' AND pattern IS NOT NULL")]
+
+
+@router.get("/money-months")
+def money_months(months: int = Query(7, ge=1, le=24), user=Depends(get_current_user)):
+    """Поступило / потрачено по месяцам — р/с ИП и личные счета вместе, без Грузии,
+    тот же контур, что «Свободные деньги» на главной.
+
+    Между контурами деньги ходят сами к себе, и в сумме это не оборот:
+    - р/с ИП: переводы между своими (правило ДДС — `_not_transfer`) не считаются
+      ни приходом, ни расходом;
+    - личные: двуногие строки (перевод/обмен), чужие деньги (`third_party`),
+      получатель «себе» (`payee_rules` self), вывод в Тбилиси (список фин-агента,
+      как «Себе в Тбилиси») и вывод по маршрутам (`abroad_routes`, как `/cashflow`)
+      не считаются;
+    - приход на личный счёт, которому нашёлся перевод «себе» с р/с ИП той же суммы
+      в пределах трёх дней, — второй конец того же перевода («Прочие поступления»
+      Сбера без получателя), не доход.
+    Валюта — только рублёвые ноги: заграничные счета нерублёвые."""
+    import abroad_routes
+    import third_party
+    from db import get_zenmoney
+    from routers.finance import OWN_TRANSFER_SQL
+    from zm_scope import scope_for
+
+    today = date.today()
+    first = date(today.year, today.month, 1)
+    y, m = first.year, first.month - (months - 1)
+    while m <= 0:
+        m += 12; y -= 1
+    start = date(y, m, 1).isoformat()
+    keys = []
+    for i in range(months):
+        mm = m + i; yy = y + (mm - 1) // 12; mm = (mm - 1) % 12 + 1
+        keys.append(f"{yy}-{mm:02d}")
+    agg = {k: {"month": k, "ip_income": 0.0, "ip_expense": 0.0, "cards_income": 0.0, "cards_expense": 0.0}
+           for k in keys}
+
+    # р/с ИП — правила ДДС; отдельно переводы себе, чтобы погасить их второй конец
+    where, tparams = _not_transfer()
+    own_out: list[tuple[date, float]] = []
+    bank_ok = True
+    try:
+        fconn = get_finance()
+        try:
+            for r in fconn.execute(
+                    f"""SELECT substr(date, 1, 7) m, direction, SUM(amount) s FROM transactions
+                         WHERE date >= ?{where} GROUP BY m, direction""", [start] + tparams):
+                if r["m"] in agg:
+                    agg[r["m"]]["ip_income" if r["direction"] == "in" else "ip_expense"] += r["s"] or 0
+            for r in fconn.execute(
+                    f"""SELECT substr(date, 1, 10) d, amount FROM transactions
+                         WHERE direction = 'out' AND date >= date(?, '-5 days') AND {OWN_TRANSFER_SQL}""", [start]):
+                try:
+                    own_out.append((date.fromisoformat(r["d"]), float(r["amount"] or 0)))
+                except ValueError:
+                    pass
+        finally:
+            fconn.close()
+    except Exception:
+        bank_ok = False
+
+    conn = get_production()
+    try:
+        selfp = _self_patterns(conn)
+    finally:
+        conn.close()
+    tbilisi = _tbilisi_patterns() or []
+    scope = scope_for(user)
+    service = scope_for(None, owner=True)
+    cards_ok = True
+    matched = 0
+    try:
+        zconn = get_zenmoney()
+        try:
+            frag, fparams = scope.tx_sql()
+            rows = zconn.execute(
+                "SELECT id, date, income, outcome, income_account, outcome_account, payee, comment"
+                " FROM zm_transactions WHERE deleted = 0 AND date >= ?" + frag, [start] + list(fparams)).fetchall()
+        finally:
+            zconn.close()
+    except Exception:
+        rows, cards_ok = [], False
+    marks = third_party.load_marks()
+    used = [False] * len(own_out)
+    for r in sorted(rows, key=lambda r: r["date"] or ""):
+        k = (r["date"] or "")[:7]
+        if k not in agg:
+            continue
+        if (r["income"] or 0) > 0 and (r["outcome"] or 0) > 0:
+            continue                                   # перевод/обмен между счетами
+        inc, out = third_party.own_legs(r, marks)
+        if not inc and not out:
+            continue
+        payee = (r["payee"] or "").lower()
+        text = f"{payee} | {(r['comment'] or '').lower()}"
+        if any((mt == "exact" and payee == p) or (mt == "prefix" and payee.startswith(p))
+               or (mt == "contains" and p in payee) for p, mt in selfp) or "некрасов юрий" in payee:
+            continue                                   # себе
+        if out > 0 and scope.row_currency(r, "outcome") == "RUB":
+            if any(p in text for p in tbilisi) or abroad_routes.route_of(r, service):
+                continue                               # вывод за границу — не трата
+            agg[k]["cards_expense"] += out
+        elif inc > 0 and scope.row_currency(r, "income") == "RUB":
+            try:
+                d = date.fromisoformat(str(r["date"])[:10])
+            except ValueError:
+                d = None
+            hit = next((i for i, (od, oa) in enumerate(own_out)
+                        if not used[i] and d and abs(oa - inc) < 1 and 0 <= (d - od).days <= 3), None)
+            if hit is not None:
+                used[hit] = True; matched += 1
+                continue                               # второй конец перевода с р/с ИП
+            agg[k]["cards_income"] += inc
+
+    out_rows = []
+    for k in keys:
+        a = agg[k]
+        a = {kk: (round(v, 2) if isinstance(v, float) else v) for kk, v in a.items()}
+        a["income"] = round(a["ip_income"] + a["cards_income"], 2)
+        a["expense"] = round(a["ip_expense"] + a["cards_expense"], 2)
+        out_rows.append(a)
+    return {"months": out_rows, "bank_ok": bank_ok, "cards_ok": cards_ok, "matched_ip_transfers": matched}

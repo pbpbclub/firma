@@ -6,7 +6,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { zenmoneyApi } from "../../api";
+import { reportsApi, zenmoneyApi } from "../../api";
 import { MONO } from "../ui/Num";
 import { fmtMoney as fmt } from "../ui/format";
 import { debtColor } from "../ui/type";
@@ -45,6 +45,12 @@ function topSegments(rows: { label: string; value: number }[], shades: string[],
 }
 
 // Парные столбики «поступило / выбыло» по месяцам ДДС; текущий месяц — яркий.
+// Столбик — две части: снизу р/с ИП (насыщенный), сверху личные счета (светлый).
+const MONTH_PARTS = {
+  income: [["ip_income", "#4A7C59"], ["cards_income", "#98B8A1"]],
+  expense: [["ip_expense", "#8B3A3A"], ["cards_expense", "#C99A9A"]],
+} as const;
+
 function MonthBars({ rows, height }: { rows: any[]; height: number }) {
   const grow = useGrow();
   const max = Math.max(1, ...rows.flatMap(r => [r.income || 0, r.expense || 0]));
@@ -53,11 +59,16 @@ function MonthBars({ rows, height }: { rows: any[]; height: number }) {
     <div>
       <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height }}>
         {rows.map((r, i) => (
-          <div key={r.month} title={`${r.month}: поступило ${fmt(r.income || 0)}, выбыло ${fmt(r.expense || 0)}`}
+          <div key={r.month} title={`${r.month}\nпоступило ${fmt(r.income || 0)} (р/с ${fmt(r.ip_income || 0)} · личные ${fmt(r.cards_income || 0)})\nпотрачено ${fmt(r.expense || 0)} (р/с ${fmt(r.ip_expense || 0)} · личные ${fmt(r.cards_expense || 0)})`}
                style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "flex-end", gap: 2, height, opacity: i === last ? 1 : 0.45 }}>
-            {[["income", "#4A7C59"], ["expense", "#8B3A3A"]].map(([k, c]) => (
-              <div key={k} style={{ flex: 1, background: c, height: grow ? Math.max((r[k] || 0) > 0 ? 2 : 0, (r[k] || 0) / max * height) : 0,
-                                    transition: `height 0.7s cubic-bezier(.2,.7,.2,1) ${i * 40}ms` }} />
+            {(["income", "expense"] as const).map(k => (
+              <div key={k} style={{ flex: 1, display: "flex", flexDirection: "column-reverse", gap: 1,
+                                    height: grow ? Math.max((r[k] || 0) > 0 ? 2 : 0, (r[k] || 0) / max * height) : 0,
+                                    transition: `height 0.7s cubic-bezier(.2,.7,.2,1) ${i * 40}ms`, overflow: "hidden" }}>
+                {MONTH_PARTS[k].map(([part, c]) => (
+                  <div key={part} style={{ flexGrow: r[part] || 0, flexBasis: 0, background: c }} />
+                ))}
+              </div>
             ))}
           </div>
         ))}
@@ -104,9 +115,15 @@ export function HeroPanel({ freeCash, balance, taxes, creditors, debtors, dds, o
   const freeIp = Math.max(0, ipBal - held);
   const freeCards = Math.max(0, freeAll - freeIp);
   const freeNeg = freeAll < 0;
-  const monthIncome = dds?.current_month?.income ?? 0;
-  const monthExpense = dds?.current_month?.expense ?? 0;
-  const monthly: any[] = dds?.monthly_chart ?? [];
+  // Деньги по месяцам — ИП и личные счета вместе, как «Свободные деньги» (решение Юры
+  // 25.09.2026): с р/с деньги в основном уходят себе на карту, а тратятся с карт, и
+  // «выбыло» по одному р/с показывало 17 тыс. при реальных ~370.
+  const mm = useQuery({ queryKey: ["money-months"], queryFn: () => reportsApi.moneyMonths(7),
+                        refetchInterval: 5 * 60_000 });
+  const monthly: any[] = mm.data?.months ?? [];
+  const cur = monthly[monthly.length - 1];
+  const monthIncome = cur?.income ?? dds?.current_month?.income ?? 0;
+  const monthExpense = cur?.expense ?? dds?.current_month?.expense ?? 0;
 
   // Производство: собрано / ждём — по заказам в работе
   const prodPlan = orders.reduce((a, o) => a + (o.price_plan || 0), 0);
@@ -313,20 +330,35 @@ export function HeroPanel({ freeCash, balance, taxes, creditors, debtors, dds, o
         <div style={{ padding: pad, borderRight: isMobile ? "none" : "1px solid #EDEBE6",
                       borderBottom: isMobile ? "1px solid #F2EFE9" : "none", minWidth: 0, cursor: "pointer" }}
              onClick={() => navigate("/finance")}>
-          <div style={{ ...LABEL, marginBottom: 10 }}>ЭТОТ МЕСЯЦ · Р/С</div>
+          <div style={{ ...LABEL, marginBottom: 10 }}>ЭТОТ МЕСЯЦ · ИП + ЛИЧНЫЕ</div>
           <div style={{ display: "flex", gap: 18, marginBottom: 14, flexWrap: "wrap" }}>
             {[
-              { label: "поступило", v: monthIncome, c: "#4A7C59" },
-              { label: "выбыло", v: monthExpense, c: "#8B3A3A" },
-              { label: "итого", v: monthIncome - monthExpense, c: monthIncome - monthExpense >= 0 ? "#1A1A1A" : "#8B3A3A" },
+              { label: "поступило", v: monthIncome, c: "#4A7C59",
+                sub: cur ? `р/с ${fmt(cur.ip_income)} · личные ${fmt(cur.cards_income)}` : null },
+              { label: "потрачено", v: monthExpense, c: "#8B3A3A",
+                sub: cur ? `р/с ${fmt(cur.ip_expense)} · личные ${fmt(cur.cards_expense)}` : null },
+              { label: "итого", v: monthIncome - monthExpense, c: monthIncome - monthExpense >= 0 ? "#1A1A1A" : "#8B3A3A", sub: null },
             ].map(x => (
               <div key={x.label}>
                 <div style={{ fontSize: 10, color: "#A89070" }}>{x.label}</div>
                 <div style={{ fontSize: 15, fontWeight: 700, color: x.c, ...NUM }}>{fmt(x.v)}</div>
+                {x.sub && <div style={{ fontSize: 10, color: "#A89070", marginTop: 2, ...NUM }}>{x.sub}</div>}
               </div>
             ))}
           </div>
           <MonthBars rows={monthly} height={isMobile ? 56 : 64} />
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 12px", marginTop: 8, fontSize: 10, color: "#A89070" }}>
+            <span style={{ display: "inline-flex", alignItems: "center" }}><span style={{ width: 8, height: 8, background: "#4A7C59", marginRight: 5 }} />
+              <span style={{ width: 8, height: 8, background: "#8B3A3A", marginRight: 5 }} />р/с ИП</span>
+            <span style={{ display: "inline-flex", alignItems: "center" }}><span style={{ width: 8, height: 8, background: "#98B8A1", marginRight: 5 }} />
+              <span style={{ width: 8, height: 8, background: "#C99A9A", marginRight: 5 }} />личные</span>
+            <span>без переводов себе и вывода в Тбилиси</span>
+          </div>
+          {mm.data && (!mm.data.bank_ok || !mm.data.cards_ok) && (
+            <div style={{ fontSize: 11, color: "#8B3A3A", marginTop: 6 }}>
+              {!mm.data.bank_ok ? "выписка р/с не загрузилась" : "личные счета не загрузились"} — сумма неполная
+            </div>
+          )}
         </div>
 
         {/* Пульс — три спидометра вместо колец «Показатели» */}

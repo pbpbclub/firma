@@ -445,6 +445,8 @@ export const ledgerApi = {
 export const reportsApi = {
   // Неделя для главной — блоки недельного отчёта фин-агента числами Фирмы.
   week: () => api.get("/reports/week").then((r) => r.data),
+  // Поступило / потрачено по месяцам — р/с ИП и личные счета одним контуром, без Грузии.
+  moneyMonths: (months = 7) => api.get("/reports/money-months", { params: { months } }).then((r) => r.data),
   monthCard: (month?: string) =>
     api.post("/reports/month-card", {}, { params: month ? { month } : {}, responseType: "blob" })
        .then((r) => r.data),
