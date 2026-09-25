@@ -2,6 +2,7 @@
 // подпись под ней), но в дизайне Фирмы: тонкий штрих, трек #EDEBE6, без скруглений.
 // Цвет кодирует только порог (норма / выше / ниже), не величину — как и у него:
 // величину показывает стрелка, а цвет отвечает на один вопрос «всё в порядке?».
+import { useEffect, useState } from "react";
 import { MONO } from "./Num";
 
 export type GaugeTone = "accent" | "good" | "bad" | "muted";
@@ -9,13 +10,33 @@ const TONES: Record<GaugeTone, string> = {
   accent: "#E8592A", good: "#4A7C59", bad: "#8B3A3A", muted: "#C8C0B0",
 };
 
-export function Gauge({ frac, label, tone = "accent", size = 120 }: {
+// Стрелка «доезжает» от нуля до значения — только с `animate` (главная на мониторе);
+// в разделе страны спидометр статичный, как был.
+function useTween(target: number | null, on: boolean): number | null {
+  const [v, setV] = useState<number | null>(on ? 0 : target);
+  useEffect(() => {
+    if (!on || target == null) { setV(target); return; }
+    let raf = 0; const t0 = performance.now(); const from = 0;
+    const step = (t: number) => {
+      const k = Math.min(1, (t - t0) / 900);
+      const e = 1 - Math.pow(1 - k, 3);
+      setV(from + (target - from) * e);
+      if (k < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [target, on]);
+  return v;
+}
+
+export function Gauge({ frac, label, tone = "accent", size = 120, animate = false }: {
   frac: number | null | undefined;     // 0..1, null — «нет данных»: пустая дуга без стрелки
   label: string;                        // подпись под стрелкой («91%», «$101»)
   tone?: GaugeTone;
   size?: number;                        // ширина в px; высота — 0.62 от неё
+  animate?: boolean;
 }) {
-  const f = frac == null ? null : Math.max(0, Math.min(1, frac));
+  const f = useTween(frac == null ? null : Math.max(0, Math.min(1, frac)), animate);
   const th = Math.PI * (1 - (f ?? 0));
   const ex = 50 + 40 * Math.cos(th), ey = 50 - 40 * Math.sin(th);
   const nx = 50 + 30 * Math.cos(th), ny = 50 - 30 * Math.sin(th);

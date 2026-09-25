@@ -268,27 +268,65 @@ def _card_payouts(conn, date_from: str, date_to: str) -> float:
     return round(total, 2)
 
 
-def _abroad_by_day() -> dict[str, float] | None:
-    """Вывод себе за границу по дням, в рублях — по маршрутам (`abroad_routes`),
-    та же выборка, что `/finance/abroad-summary`. Отдаём только сумму."""
+TBILISI_FILE = "/opt/fin-agent/data/zm_tbilisi.json"
+
+
+def _tbilisi_patterns() -> list[str] | None:
+    """Список фин-агента «куда Юра выводит себе» (получатель/комментарий, подстрока
+    без регистра). Способы вывода знает и ведёт фин-агент (решение Юры 25.09.2026:
+    «финагент знает, как я вывожу») — своего справочника не заводим."""
+    import json
+    try:
+        with open(TBILISI_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return [p.strip().lower() for p in data.get("payees", []) if p and p.strip()]
+
+
+def _to_tbilisi_by_day() -> tuple[dict[str, float] | None, str]:
+    """«Себе в Тбилиси» по дням, в рублях — корзина `tbilisi` из
+    `weekly_report.personal_cards_flow`: рублёвая нога ушла с недолгового счёта,
+    это не перевод между своими счетами ZenMoney, получатель или комментарий
+    совпадает со списком фин-агента.
+
+    🔒 Раздел «Грузия» считает вывод по МАРШРУТАМ (`abroad_routes`) — это другой
+    вопрос («что пришло на карту страны»), и его здесь не трогаем. Прямой перевод
+    на BOG с 08.2026 лежит в ZenMoney двумя строками (рубли «IURII N.» и лари
+    «shps niu pheiment sistem»), маршрут рублёвую ногу не узнаёт, список — узнаёт.
+    Нет списка — фолбэк на маршруты, источник отдаётся в ответе."""
     import abroad_routes
     from db import get_zenmoney
     from zm_scope import scope_for
+    patterns = _tbilisi_patterns()
     try:
         conn = get_zenmoney()
     except Exception:
-        return None
+        return None, "unavailable"
     try:
-        rows = conn.execute("SELECT * FROM zm_transactions WHERE deleted = 0").fetchall()
+        rows = conn.execute("SELECT * FROM zm_transactions WHERE deleted = 0 AND outcome > 0").fetchall()
+        debt = {r[0] for r in conn.execute("SELECT title FROM zm_accounts WHERE type = 'debt'")}
     except Exception:
-        return None
+        return None, "unavailable"
     finally:
         conn.close()
+    scope = scope_for(None, owner=True)
     out: dict[str, float] = {}
-    for i in abroad_routes.outflows(rows, scope_for(None, owner=True)):
-        d = str(i["date"])[:10]
-        out[d] = out.get(d, 0) + i["amount_rub"]
-    return out
+    if patterns is None:
+        for i in abroad_routes.outflows(rows, scope):
+            d = str(i["date"])[:10]
+            out[d] = out.get(d, 0) + i["amount_rub"]
+        return out, "routes"
+    for r in rows:
+        if (r["income"] or 0) > 0 and r["income_account"] != r["outcome_account"]:
+            continue                                   # перевод между своими счетами
+        if r["outcome_account"] in debt or scope.row_currency(r, "outcome") != "RUB":
+            continue
+        text = f"{r['payee'] or ''} | {r['comment'] or ''}".lower()
+        if any(p in text for p in patterns):
+            d = str(r["date"] or "")[:10]
+            out[d] = out.get(d, 0) + float(r["outcome"] or 0)
+    return out, "fin_agent"
 
 
 def _weekly_income(weeks: int, monday: date) -> list[dict]:
@@ -412,7 +450,7 @@ def week_summary():
     finally:
         conn.close()
 
-    abroad_days = _abroad_by_day()
+    abroad_days, abroad_source = _to_tbilisi_by_day()
 
     def abroad_sum(a: date, b: date):
         if abroad_days is None:
@@ -443,6 +481,7 @@ def week_summary():
             "abroad": abroad_sum(monday, end),
             "balance": round(cur["income"] - cur["spent_projects"], 2),
             "prev": prev | {"abroad": abroad_sum(prev_from, prev_to)},
+            "abroad_source": abroad_source,
         },
         "weeks": _weekly_income(12, monday),
         "directions": dir_list,

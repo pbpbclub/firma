@@ -62,7 +62,7 @@ function MoneyBar({ label, value, prev, max, color }: {
 
 export function WeekPanel({ silent, isMobile }: { silent: any; isMobile: boolean }) {
   const navigate = useNavigate();
-  const q = useQuery({ queryKey: ["reports-week"], queryFn: reportsApi.week });
+  const q = useQuery({ queryKey: ["reports-week"], queryFn: reportsApi.week, refetchInterval: 5 * 60_000 });
   const w = q.data;
   if (!w) return null;
 
@@ -115,7 +115,7 @@ export function WeekPanel({ silent, isMobile }: { silent: any; isMobile: boolean
             </div>
           )}
           {/* Свои деньги переложены — ни плюс, ни минус недели, поэтому без полярности */}
-          <MoneyBar label="Себе за границу" value={m.abroad} prev={m.prev.abroad} max={max} color="#6B6355" />
+          <MoneyBar label="Себе в Тбилиси" value={m.abroad} prev={m.prev.abroad} max={max} color="#6B6355" />
         </div>
         <div style={cell}>
           <div style={SUB}>ПРИХОД ПО НЕДЕЛЯМ · 12 НЕДЕЛЬ</div>

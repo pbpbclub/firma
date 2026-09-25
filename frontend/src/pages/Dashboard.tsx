@@ -1,18 +1,17 @@
 import { fmtMoney as fmt } from "../components/ui/format";
 import { QueryError } from "../components/ui/QueryError";
 import { SkeletonRows } from "../components/ui/Loading";
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { financeApi, taxApi, ordersApi, reportsApi, estimatesApi, ledgerApi } from "../api";
 import { MONO } from "../components/ui/Num";
 import { DeadlinePill } from "../components/ui/Pill";
 import { POLARITY, debtColor } from "../components/ui/type";
-import { CircleProgress } from "../components/ui/CircleProgress";
 import { CardButton } from "../components/CardButton";
 import { OrderLink } from "../components/ui/links";
 import { useIsMobile, M } from "../components/ui/responsive";
 import { WeekPanel } from "../components/dashboard/WeekPanel";
+import { HeroPanel } from "../components/dashboard/HeroPanel";
 
 
 function ThinBar({ pct, color = "#E8592A" }: { pct: number; color?: string }) {
@@ -23,21 +22,24 @@ function ThinBar({ pct, color = "#E8592A" }: { pct: number; color?: string }) {
   );
 }
 
+// Главная висит на мониторе днём — цифры обновляются сами, без F5.
+const LIVE = { refetchInterval: 5 * 60_000 };
+
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [reservesOpen, setReservesOpen] = useState(false);
-  const freeCash = useQuery({ queryKey: ["free-cash"], queryFn: financeApi.freeCash });
-  const balance = useQuery({ queryKey: ["balance"], queryFn: financeApi.balance });
-  const taxes = useQuery({ queryKey: ["taxes"], queryFn: taxApi.summary });
-  const debtors = useQuery({ queryKey: ["debtors"], queryFn: financeApi.debtors });
-  const dds = useQuery({ queryKey: ["dds-summary"], queryFn: financeApi.summary });
+  const freeCash = useQuery({ queryKey: ["free-cash"], queryFn: financeApi.freeCash, ...LIVE });
+  const balance = useQuery({ queryKey: ["balance"], queryFn: financeApi.balance, ...LIVE });
+  const taxes = useQuery({ queryKey: ["taxes"], queryFn: taxApi.summary, ...LIVE });
+  const debtors = useQuery({ queryKey: ["debtors"], queryFn: financeApi.debtors, ...LIVE });
+  const dds = useQuery({ queryKey: ["dds-summary"], queryFn: financeApi.summary, ...LIVE });
   const orders = useQuery({
     queryKey: ["orders-active"],
     queryFn: () => ordersApi.list({ status: "in_production" }),
+    ...LIVE,
   });
   const byBrand = useQuery({ queryKey: ["finance-by-brand"], queryFn: financeApi.byBrand });
   // «Что делать» — бэкенд считал это давно, а лежало оно за двумя кликами внутри Заказов.
-  const silent = useQuery({ queryKey: ["orders-silent"], queryFn: ordersApi.silent });
+  const silent = useQuery({ queryKey: ["orders-silent"], queryFn: ordersApi.silent, ...LIVE });
   const readiness = useQuery({ queryKey: ["estimates-readiness"], queryFn: estimatesApi.readiness });
   const pfSummary = useQuery({ queryKey: ["orders-plan-fact-summary", "active"],
                                queryFn: () => ordersApi.planFactSummary("active") });
@@ -51,19 +53,9 @@ export default function Dashboard() {
   // по одному и дашборд выглядел как «всё по нулям».
   const failed = [freeCash, balance, taxes, debtors, dds, orders].find(q => q.isError);
 
-  const balanceTotal = balance.data?.total ?? 0;
-  const taxToPay = taxes.data?.tax_to_pay ?? 0;
   const debtTotal = debtors.data?.total ?? 0;
-  const monthIncome = dds.data?.current_month?.income ?? 0;
-  const monthExpense = dds.data?.current_month?.expense ?? 0;
   const activeOrders: any[] = orders.data ?? [];
-  const incomeYear = taxes.data?.income_year ?? 0;
 
-  const threshold300k = Math.min(100, (incomeYear / 300000) * 100);
-  const debtPct = (debtTotal + balanceTotal) > 0
-    ? Math.min(100, debtTotal / (debtTotal + balanceTotal) * 100) : 0;
-  const taxQuarter = taxes.data?.tax_quarter ?? 1;
-  const taxPaidPct = taxQuarter > 0 ? Math.min(100, ((taxQuarter - taxToPay) / taxQuarter) * 100) : 100;
 
   // Телефон: гаттер 16, подписи секций («ЭТОТ МЕСЯЦ», «ПО БРЕНДАМ») стопкой над
   // содержимым вместо колонки width:80 + gap:48 — из 358px они съедали 128.
@@ -106,6 +98,11 @@ export default function Dashboard() {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: isMobile ? "wrap" : undefined }}>
           <div style={{ fontSize: isMobile ? 22 : 26, fontWeight: 700, color: "#1A1A1A", letterSpacing: "-0.03em" }}>
             {new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })}
+            {freeCash.dataUpdatedAt > 0 && (
+              <span style={{ fontSize: 11, fontWeight: 400, color: "#A89070", letterSpacing: 0, marginLeft: 14 }}>
+                обновлено {new Date(freeCash.dataUpdatedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
+              </span>
+            )}
           </div>
           {/* Тот же срез, что финагент присылает в Telegram: деньги месяца, заказы, долги. */}
           <CardButton label="Срез за месяц"
@@ -116,98 +113,11 @@ export default function Dashboard() {
 
       {coreLoading && <SkeletonRows rows={9} cols={4} padding="18px 28px" />}
 
-      {/* Свободные деньги — ключевая цифра (остаток − резервы − фонды) */}
-      {(() => {
-        const fc = freeCash.data;
-        if (!fc) return null;
-        const neg = fc.negative;
-        return (
-          <div style={{ padding: "18px 28px", borderBottom: "1px solid #EDEBE6", background: neg ? "#FFF4EE" : "transparent" }}>
-            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-              <div>
-                <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 6 }}>
-                  СВОБОДНЫЕ ДЕНЬГИ
-                  {neg && <span style={{ color: "#8B3A3A", marginLeft: 8, textTransform: "none", letterSpacing: 0 }}>· тратится больше, чем свободно</span>}
-                </div>
-                <div style={{ fontSize: 30, fontWeight: 700, color: neg ? "#8B3A3A" : "#4A7C59", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>
-                  {fmt(fc.free)}
-                </div>
-              </div>
-              <div style={{ fontSize: 12, color: "#6B6355", fontFamily: MONO, fontVariantNumeric: "tabular-nums", textAlign: "right", lineHeight: 1.7 }}>
-                <div>остаток <b style={{ color: "#1A1A1A" }}>{fmt(fc.balance)}</b></div>
-                <div>− резервы <span
-                  onClick={() => fc.reserves.length && setReservesOpen(v => !v)}
-                  style={{ color: fc.reserved_total > 0 ? "#E8592A" : "#A89070", cursor: fc.reserves.length ? "pointer" : "default", borderBottom: fc.reserves.length ? "1px dashed #C8C0B0" : "none" }}
-                >{fmt(fc.reserved_total)}</span></div>
-                <div>− фонды <span style={{ color: fc.funds_total > 0 ? "#E8592A" : "#A89070" }}>{fmt(fc.funds_total)}</span></div>
-              </div>
-            </div>
-            {reservesOpen && fc.reserves.length > 0 && (
-              <div style={{ marginTop: 12, borderTop: "1px solid #EDEBE6", paddingTop: 10 }}>
-                {fc.reserves.map((r: any) => (
-                  <div key={r.order_id}
-                    onClick={() => navigate(`/orders/${r.order_id}`)}
-                    style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", cursor: "pointer", fontSize: 12, borderBottom: "1px solid #F2EFE9" }}
-                    onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")}
-                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
-                    <span style={{ color: "#1A1A1A" }}>{r.title}</span>
-                    <span style={{ color: "#E8592A", fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{fmt(r.amount)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      })()}
-
-      {/* 4 stat columns */}
-      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)", borderBottom: "1px solid #EDEBE6" }}>
-        {[
-          // Плитки — двери на свои экраны. До этого кликались только резервы.
-          { label: "НА СЧЕТАХ", value: fmt(balanceTotal), color: balanceTotal > 0 ? "#4A7C59" : "#8B3A3A", pct: 100, to: "/finance" },
-          { label: "ДЕБИТОРКА", value: fmt(debtTotal), color: debtColor(debtTotal, "in"), pct: debtPct, to: "/debtors" },
-          { label: "НАЛОГ К УПЛАТЕ", value: fmt(taxToPay), color: debtColor(taxToPay, "out"), pct: taxPaidPct, to: "/taxes" },
-          { label: "В ПРОИЗВОДСТВЕ", value: `${activeOrders.length} заказов`, color: "#1A1A1A", pct: Math.min(100, activeOrders.length * 10), to: "/orders" },
-        ].map((item, i) => (
-          <div key={item.label}
-            onClick={() => navigate(item.to)}
-            onMouseEnter={e => (e.currentTarget.style.background = "#FAF8F5")}
-            onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
-            style={{
-            padding: isMobile ? "14px 16px" : "20px 24px",
-            borderRight: (isMobile ? i % 2 === 0 : i < 3) ? "1px solid #EDEBE6" : "none",
-            borderBottom: isMobile && i < 2 ? "1px solid #EDEBE6" : "none",
-            cursor: "pointer",
-          }}>
-            <div style={{ fontSize: 10, color: "#A89070", letterSpacing: "0.06em", marginBottom: 10 }}>{item.label}</div>
-            <div style={{ fontSize: 20, fontWeight: 700, color: item.color, marginBottom: 14, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{item.value}</div>
-            <ThinBar pct={item.pct} color={item.color} />
-          </div>
-        ))}
-      </div>
-
-      {/* Month DDS */}
-      <div style={labeled}>
-        <div style={labelStyle}>ЭТОТ МЕСЯЦ</div>
-        <div style={{ display: "flex", gap: isMobile ? 16 : 48, flex: 1, width: isMobile ? "100%" : undefined }}>
-          {[
-            { label: "Поступило", value: fmt(monthIncome), color: "#4A7C59", pct: 100 },
-            { label: "Выбыло", value: fmt(monthExpense), color: "#8B3A3A", pct: monthIncome > 0 ? (monthExpense / monthIncome) * 100 : 0 },
-            {
-              label: "Итого",
-              value: fmt(monthIncome - monthExpense),
-              color: monthIncome - monthExpense >= 0 ? "#1A1A1A" : "#8B3A3A",
-              pct: monthIncome > 0 ? Math.abs(monthIncome - monthExpense) / monthIncome * 100 : 0,
-            },
-          ].map((item) => (
-            <div key={item.label} style={{ flex: 1 }}>
-              <div style={{ fontSize: 11, color: "#A89070", marginBottom: 6 }}>{item.label}</div>
-              <div style={{ fontSize: 17, fontWeight: 700, color: item.color, marginBottom: 10, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{item.value}</div>
-              <ThinBar pct={item.pct} color={item.color} />
-            </div>
-          ))}
-        </div>
-      </div>
+      {/* Шапка: свободные деньги, деньги по месяцам, пульс, плитки-двери */}
+      {!coreLoading && (
+        <HeroPanel freeCash={freeCash.data} balance={balance.data} taxes={taxes.data}
+                   debtors={debtors.data} dds={dds.data} orders={activeOrders} isMobile={isMobile} />
+      )}
 
       {/* Неделя — блоки недельного отчёта фин-агента: спидометры маржи, план/факт,
           «Молчат» с порогами, приход по неделям и кварталам */}
@@ -267,26 +177,6 @@ export default function Dashboard() {
           </div>
         );
       })()}
-
-      {/* Circular indicators */}
-      <div style={{ ...labeled, alignItems: isMobile ? "flex-start" : "center" }}>
-        <div style={{ ...labelStyle, paddingTop: 0 }}>ПОКАЗАТЕЛИ</div>
-        <div style={{ display: "flex", gap: isMobile ? 16 : 40, flexWrap: isMobile ? "wrap" : undefined }}>
-          {[
-            { label: "Порог 300к", pct: threshold300k, sub: fmt(incomeYear) },
-            { label: `Q${taxes.data?.quarter ?? "?"} налог`, pct: taxPaidPct, sub: taxToPay > 0 ? fmt(taxToPay) : "Покрыт" },
-            { label: "Долг/баланс", pct: debtPct, sub: fmt(debtTotal) },
-          ].map((item) => (
-            <div key={item.label} style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <CircleProgress pct={item.pct} />
-              <div>
-                <div style={{ fontSize: 11, color: "#A89070" }}>{item.label}</div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1A1A", marginTop: 2 }}>{item.sub}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
 
       {/* Debtors — деньги, которые нам должны (зелёная полярность) */}
       {(debtors.data?.items?.length ?? 0) > 0 && (
