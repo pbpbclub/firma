@@ -349,9 +349,13 @@ export function HeroPanel({ freeCash, balance, taxes, creditors, debtors, dds, o
               </span>
             ))}
           </div>
-          {mm.data && !mm.data.bank_ok && (
+          {mm.data && (!mm.data.bank_ok || !mm.data.cards_ok) && (
             <div style={{ fontSize: 11, color: "#8B3A3A", marginTop: 6 }}>
-              выписка р/с не загрузилась — сумма неполная
+              {!mm.data.bank_ok && !mm.data.cards_ok
+                ? "выписка р/с и личные карты не загрузились — суммы неполные"
+                : !mm.data.bank_ok
+                  ? "выписка р/с не загрузилась — сумма неполная"
+                  : "личные карты не загрузились — «потрачено» неполное"}
             </div>
           )}
         </div>

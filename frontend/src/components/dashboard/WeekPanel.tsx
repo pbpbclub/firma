@@ -116,6 +116,16 @@ export function WeekPanel({ silent, isMobile }: { silent: any; isMobile: boolean
           )}
           {/* Свои деньги переложены — ни плюс, ни минус недели, поэтому без полярности */}
           <MoneyBar label="Себе в Тбилиси" value={m.abroad} prev={m.prev.abroad} max={max} color="#6B6355" />
+          {/* Источник недоступен → цифра занижена, а не «денег не было» */}
+          {(m.bank_ok === false || m.cards_ok === false) && (
+            <div style={{ fontSize: 11, color: "#8B3A3A", marginTop: 4 }}>
+              {m.bank_ok === false && m.cards_ok === false
+                ? "выписка р/с и личные карты не загрузились — суммы неполные"
+                : m.bank_ok === false
+                  ? "выписка р/с не загрузилась — «пришло» неполное"
+                  : "личные карты не загрузились — «потрачено» неполное"}
+            </div>
+          )}
         </div>
         <div style={cell}>
           <div style={SUB}>ПРИХОД ПО НЕДЕЛЯМ · 12 НЕДЕЛЬ</div>

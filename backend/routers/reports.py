@@ -6,6 +6,7 @@ finance.get_debtors/get_creditors, сальдо подрядчиков — из 
 Свои запросы только к деньгам месяца (payments/expenses по датам и обороты
 банка) — их ни один существующий эндпоинт не отдаёт в разрезе месяца.
 """
+import logging
 from datetime import date, timedelta
 
 from fastapi import APIRouter, HTTPException, Query
@@ -15,6 +16,7 @@ import cards
 from db import get_finance, get_production
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 MONTHS_RU = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль",
              "август", "сентябрь", "октябрь", "ноябрь", "декабрь"]
@@ -193,7 +195,12 @@ def _income_week(conn, date_from: str, date_to: str) -> dict:
     """«Пришло» отчёта (`weekly_report.income_block_and_total`): платежи заказчиков
     по дате (р/с, наличные, личная карта) плюс приход из выписки, которому не нашлось
     платежа той же суммы (±1 ₽) — деньги пришли, но по заказу не разнесены.
-    Переводы между своими счетами выписки — не приход (правило ДДС)."""
+    Переводы между своими счетами выписки — не приход (правило ДДС).
+
+    🔒 Найденный платёж ПОТРЕБЛЯЕТСЯ (каждый гасит ровно один приход выписки): без
+    этого два одинаковых поступления гасились одним платежом, и «пришло» занижалось
+    ровно на повтор. На длинном окне (месяц у `money-months`) совпадение сумм —
+    частое, поэтому допуск ±1 ₽ работает только в паре с потреблением."""
     paid = [float(r["amount"] or 0) for r in conn.execute(
         "SELECT amount FROM payments WHERE date(paid_at) BETWEEN ? AND ?",
         (date_from, date_to)).fetchall()]
@@ -210,7 +217,15 @@ def _income_week(conn, date_from: str, date_to: str) -> dict:
             fconn.close()
     except Exception:
         return {"total": by_orders, "orders": by_orders, "unallocated": 0.0, "bank_unavailable": True}
-    loose = round(sum(b for b in bank if not any(abs(b - a) < 1 for a in paid)), 2)
+    free = sorted(paid)
+    loose = 0.0
+    for b in bank:
+        hit = next((i for i, a in enumerate(free) if abs(b - a) < 1), None)
+        if hit is None:
+            loose += b
+        else:
+            free.pop(hit)                              # платёж погасил этот приход
+    loose = round(loose, 2)
     return {"total": round(by_orders + loose, 2), "orders": by_orders, "unallocated": loose}
 
 
@@ -224,12 +239,16 @@ def _spent_projects(conn, date_from: str, date_to: str) -> float:
         (date_from, date_to)).fetchone()["s"] or 0, 2)
 
 
-def _card_payouts(conn, date_from: str, date_to: str) -> float:
+def _card_payouts(conn, date_from: str, date_to: str) -> tuple[float, bool]:
     """Выплаты мастерам с личных карт, которых в расходах нет (`weekly_report.
     personal_cards_flow`, корзина `masters`): проводка лицевого счёта, привязка
     фин-агента `zm_links` или получатель по `payee_rules` (entity_type=master).
     Перевод, уже стоящий расходом (`expenses.zenmoney_tx_id`), второй раз не идёт.
-    Только рублёвая нога: иностранные карты — не здесь."""
+    Только рублёвая нога: иностранные карты — не здесь.
+
+    Возвращает `(сумма, источник_доступен)`. 🔒 Второе значение обязательно:
+    недоступность `zenmoney.db` (или таблицы `zm_links` фин-агента) даёт 0.0, а
+    это молча занижает «потрачено» и в неделе, и в месяцах — отличить нечем."""
     from db import get_zenmoney
     from zm_scope import scope_for
     in_expenses = {r[0] for r in conn.execute(
@@ -246,14 +265,18 @@ def _card_payouts(conn, date_from: str, date_to: str) -> float:
                      FROM zm_transactions
                     WHERE deleted = 0 AND outcome > 0 AND date BETWEEN ? AND ?""",
                 (date_from, date_to)).fetchall()
+            links, links_ok = set(), True
             try:
                 links = {r[0] for r in zconn.execute("SELECT zm_tx_id FROM zm_links")}
             except Exception:
-                links = set()
+                links_ok = False                       # разметка фин-агента недоступна
         finally:
             zconn.close()
     except Exception:
-        return 0.0
+        logger.warning("_card_payouts: zenmoney.db недоступна (%s..%s)", date_from, date_to)
+        return 0.0, False
+    if not links_ok:
+        logger.warning("_card_payouts: zm_links недоступна (%s..%s)", date_from, date_to)
     scope = scope_for(None, owner=True)
     total = 0.0
     for r in rows:
@@ -265,7 +288,7 @@ def _card_payouts(conn, date_from: str, date_to: str) -> float:
         by_rule = any((kind == "contains" and pat in payee) or pat == payee for pat, kind in rules)
         if r["id"] in in_ledger or r["id"] in links or by_rule:
             total += float(r["outcome"] or 0)
-    return round(total, 2)
+    return round(total, 2), links_ok
 
 
 TBILISI_FILE = "/opt/fin-agent/data/zm_tbilisi.json"
@@ -440,10 +463,13 @@ def week_summary():
             lo, hi = a.isoformat(), b.isoformat()
             inc = _income_week(conn, lo, hi)
             exp = _spent_projects(conn, lo, hi)
-            cards = _card_payouts(conn, lo, hi)
+            cards, cards_ok = _card_payouts(conn, lo, hi)
             return {"income": inc["total"], "income_orders": inc["orders"],
                     "income_unallocated": inc["unallocated"],
-                    "spent_projects": round(exp + cards, 2), "spent_cards": cards}
+                    "spent_projects": round(exp + cards, 2), "spent_cards": cards,
+                    # Признаки неполноты: выписка р/с занижает «пришло», ZenMoney —
+                    # «потрачено». Ключи есть в ОБЕИХ ветках (и при успехе тоже).
+                    "bank_ok": not inc.get("bank_unavailable"), "cards_ok": cards_ok}
         cur, prev = money_of(monday, end), money_of(prev_from, prev_to)
         week_orders = _week_orders(conn, monday.isoformat(), end.isoformat())
         act_names = {r["code"]: r["name"] for r in conn.execute("SELECT code, name FROM activities")}
@@ -539,13 +565,15 @@ def money_months(months: int = Query(7, ge=1, le=24)):
         bank_ok = False
 
     out_rows = []
+    cards_ok = True
     conn = get_production()
     try:
         for key, lo, hi in windows:
             inc = _income_week(conn, lo, hi)
             bank_ok = bank_ok and not inc.get("bank_unavailable")
             firma = _spent_projects(conn, lo, hi)
-            cards = _card_payouts(conn, lo, hi)
+            cards, ok = _card_payouts(conn, lo, hi)
+            cards_ok = cards_ok and ok
             out_rows.append({
                 "month": key,
                 "income": inc["total"], "income_orders": inc["orders"],
@@ -555,4 +583,6 @@ def money_months(months: int = Query(7, ge=1, le=24)):
             })
     finally:
         conn.close()
-    return {"months": out_rows, "bank_ok": bank_ok}
+    # cards_ok — ZenMoney (выплаты мастерам с личных карт). Без него недоступность
+    # базы читается как «мастерам с карт не платили» и «потрачено» тихо занижено.
+    return {"months": out_rows, "bank_ok": bank_ok, "cards_ok": cards_ok}

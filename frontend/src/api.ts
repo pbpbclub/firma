@@ -446,7 +446,9 @@ export const ledgerApi = {
 export const reportsApi = {
   // Неделя для главной — блоки недельного отчёта фин-агента числами Фирмы.
   week: () => api.get("/reports/week").then((r) => r.data),
-  // Поступило / потрачено по месяцам — р/с ИП и личные счета одним контуром, без Грузии.
+  // Поступило / потрачено / выведено себе по месяцам — деньги ДЕЛА правилами недельного
+  // отчёта фин-агента (те же функции, что «Деньги за неделю»); bank_ok/cards_ok — признаки
+  // недоступности выписки р/с и ZenMoney: при false показанные суммы занижены.
   moneyMonths: (months = 7) => api.get("/reports/money-months", { params: { months } }).then((r) => r.data),
   monthCard: (month?: string) =>
     api.post("/reports/month-card", {}, { params: month ? { month } : {}, responseType: "blob" })
