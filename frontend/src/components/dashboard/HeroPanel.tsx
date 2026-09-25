@@ -84,13 +84,26 @@ export function HeroPanel({ freeCash, balance, taxes, debtors, dds, orders, isMo
   const navigate = useNavigate();
   const [reservesOpen, setReservesOpen] = useState(false);
   // Личные карты — итог домашнего рублёвого контура; скоуп бухгалтера ручка режет сама.
-  const cards = useQuery({ queryKey: ["zm-accounts-summary"], queryFn: () => zenmoneyApi.accountsSummary(),
+  const cardsQ = useQuery({ queryKey: ["zm-accounts-summary"], queryFn: () => zenmoneyApi.accountsSummary(),
                            refetchInterval: 5 * 60_000 });
-  const cardsRub = ((cards.data?.totals ?? []) as any[]).find(t => t.currency === "RUB")?.total ?? null;
+  const cardsRub = ((cardsQ.data?.totals ?? []) as any[]).find(t => t.currency === "RUB")?.total ?? null;
 
   const pad = isMobile ? "16px 16px" : "22px 28px";
   const fc = freeCash;
   const bal = balance?.total ?? 0;
+  // Свободные деньги — ИП и личные счета вместе, без заграничного контура (решение
+  // Юры 25.09.2026: «свободные деньги у меня на счетах ИП и на личных, кроме Грузии»).
+  // Личные — домашний рублёвый контур `/zenmoney/accounts-summary` (Грузия туда не
+  // входит по построению). Резервы и фонды вычитаются сначала из р/с ИП — это деньги
+  // дела; что не покрыл р/с, ложится на личные.
+  const cards = cardsRub ?? 0;
+  const ipBal = fc?.balance ?? 0;
+  const held = (fc?.reserved_total ?? 0) + (fc?.funds_total ?? 0);
+  const totalMoney = ipBal + cards;
+  const freeAll = totalMoney - held;
+  const freeIp = Math.max(0, ipBal - held);
+  const freeCards = Math.max(0, freeAll - freeIp);
+  const freeNeg = freeAll < 0;
   const monthIncome = dds?.current_month?.income ?? 0;
   const monthExpense = dds?.current_month?.expense ?? 0;
   const monthly: any[] = dds?.monthly_chart ?? [];
@@ -117,7 +130,10 @@ export function HeroPanel({ freeCash, balance, taxes, debtors, dds, orders, isMo
   const debtItems: any[] = debtors?.items ?? [];
   const debtTotal = debtors?.total ?? 0;
   const debtSegs = topSegments(debtItems.map(d => ({ label: d.customer_name || d.title || "—", value: d.debt || 0 })), SHADES_GREEN);
-  const accSegs = topSegments(((balance?.accounts ?? []) as any[]).map(a => ({ label: a.name, value: Math.max(0, a.balance || 0) })), SHADES_NEUTRAL);
+  const accSegs = topSegments([
+    ...((balance?.accounts ?? []) as any[]).map(a => ({ label: `${a.name} · ИП`, value: Math.max(0, a.balance || 0) })),
+    ...(cardsRub != null ? [{ label: "личные счета", value: Math.max(0, cardsRub) }] : []),
+  ], SHADES_NEUTRAL);
 
   const tileBase = {
     padding: isMobile ? "14px 16px" : "20px 24px", cursor: "pointer", minWidth: 0,
@@ -131,10 +147,10 @@ export function HeroPanel({ freeCash, balance, taxes, debtors, dds, orders, isMo
 
   const tiles = [
     {
-      key: "acc", label: "НА СЧЕТАХ", to: "/finance",
+      key: "acc", label: "НА СЧЕТАХ · ИП + ЛИЧНЫЕ", to: "/finance",
       body: (
         <>
-          <div style={big(bal > 0 ? "#1A1A1A" : "#8B3A3A")}>{fmt(bal)}</div>
+          <div style={big(bal + cards > 0 ? "#1A1A1A" : "#8B3A3A")}>{fmt(bal + cards)}</div>
           <SegBar segments={accSegs.map(s => ({ ...s, label: `${s.label}: ${fmt(s.value)}` }))} />
           <Legend items={accSegs} />
         </>
@@ -203,37 +219,43 @@ export function HeroPanel({ freeCash, balance, taxes, debtors, dds, orders, isMo
         {/* Свободные деньги — ключевая цифра (остаток − резервы − фонды) */}
         <div style={{ padding: pad, borderRight: isMobile ? "none" : "1px solid #EDEBE6",
                       borderBottom: isMobile ? "1px solid #F2EFE9" : "none",
-                      background: fc?.negative ? "#FFF4EE" : "transparent", minWidth: 0 }}>
+                      background: freeNeg ? "#FFF4EE" : "transparent", minWidth: 0 }}>
           <div style={{ ...LABEL, marginBottom: 8 }}>
             СВОБОДНЫЕ ДЕНЬГИ
-            {fc?.negative && <span style={{ color: "#8B3A3A", marginLeft: 8, letterSpacing: 0 }}>· тратится больше, чем свободно</span>}
+            <span style={{ letterSpacing: 0, marginLeft: 8, color: "#A89070" }}>· ИП и личные, без Грузии</span>
+            {freeNeg && <span style={{ color: "#8B3A3A", marginLeft: 8, letterSpacing: 0 }}>· тратится больше, чем свободно</span>}
           </div>
-          <div style={big(fc?.negative ? "#8B3A3A" : "#4A7C59", isMobile ? 30 : 36)}>{fmt(fc?.free ?? 0)}</div>
+          <div style={big(freeNeg ? "#8B3A3A" : "#4A7C59", isMobile ? 30 : 36)}>{fmt(freeAll)}</div>
           <div style={{ marginTop: 14 }}>
-            <SegBar height={8} total={Math.max(fc?.balance ?? 0, (fc?.reserved_total ?? 0) + (fc?.funds_total ?? 0))}
+            <SegBar height={8} total={Math.max(totalMoney, held)}
               segments={[
-                { value: Math.max(0, fc?.free ?? 0), color: "#4A7C59", label: `свободно ${fmt(fc?.free ?? 0)}` },
+                { value: freeIp, color: "#4A7C59", label: `свободно на р/с ИП ${fmt(freeIp)}` },
+                { value: freeCards, color: "#98B8A1", label: `свободно на личных ${fmt(freeCards)}` },
                 { value: fc?.reserved_total ?? 0, color: "#E8592A", label: `резервы ${fmt(fc?.reserved_total ?? 0)}` },
                 { value: fc?.funds_total ?? 0, color: "#B8860B", label: `фонды ${fmt(fc?.funds_total ?? 0)}` },
               ]} />
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 14px", marginTop: 8, fontSize: 11, color: "#6B6355", ...NUM }}>
-            <span>остаток <b style={{ color: "#1A1A1A" }}>{fmt(fc?.balance ?? 0)}</b></span>
+            <span>
+              <span style={{ display: "inline-block", width: 8, height: 8, background: "#4A7C59", marginRight: 6 }} />
+              р/с ИП <b style={{ color: "#1A1A1A" }}>{fmt(ipBal)}</b>
+            </span>
+            <span>
+              <span style={{ display: "inline-block", width: 8, height: 8, background: "#98B8A1", marginRight: 6 }} />
+              личные <b style={{ color: "#1A1A1A" }}>{cardsRub == null ? "—" : fmt(cardsRub)}</b>
+            </span>
             <span onClick={() => fc?.reserves?.length && setReservesOpen(v => !v)}
                   style={{ cursor: fc?.reserves?.length ? "pointer" : "default" }}>
               <span style={{ display: "inline-block", width: 8, height: 8, background: "#E8592A", marginRight: 6 }} />
-              резервы <b style={{ color: "#1A1A1A", borderBottom: fc?.reserves?.length ? "1px dashed #C8C0B0" : "none" }}>{fmt(fc?.reserved_total ?? 0)}</b>
+              − резервы <b style={{ color: "#1A1A1A", borderBottom: fc?.reserves?.length ? "1px dashed #C8C0B0" : "none" }}>{fmt(fc?.reserved_total ?? 0)}</b>
             </span>
             <span>
               <span style={{ display: "inline-block", width: 8, height: 8, background: "#B8860B", marginRight: 6 }} />
-              фонды <b style={{ color: "#1A1A1A" }}>{fmt(fc?.funds_total ?? 0)}</b>
+              − фонды <b style={{ color: "#1A1A1A" }}>{fmt(fc?.funds_total ?? 0)}</b>
             </span>
           </div>
-          {cardsRub != null && (
-            <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid #F2EFE9", fontSize: 12, color: "#6B6355", display: "flex", justifyContent: "space-between", ...NUM }}>
-              <span>+ на личных картах</span>
-              <b style={{ color: "#1A1A1A" }}>{fmt(cardsRub)}</b>
-            </div>
+          {cardsQ.isError && (
+            <div style={{ marginTop: 8, fontSize: 11, color: "#8B3A3A" }}>личные счета не загрузились — в сумме только р/с ИП</div>
           )}
           {reservesOpen && (fc?.reserves?.length ?? 0) > 0 && (
             <div style={{ marginTop: 10, borderTop: "1px solid #EDEBE6", paddingTop: 6 }}>
