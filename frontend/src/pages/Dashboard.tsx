@@ -24,7 +24,10 @@ export default function Dashboard() {
     queryFn: () => ordersApi.list({ status: "in_production" }),
     ...LIVE,
   });
-  const byBrand = useQuery({ queryKey: ["finance-by-brand"], queryFn: financeApi.byBrand });
+  // Проектные работы — отдельной строкой: это свой вид деятельности, а не часть pbpb
+  // (решение Юры 25.09.2026). Ключ под префиксом finance-by-brand — инвалидация из
+  // карточки бренда задевает и его.
+  const byBrand = useQuery({ queryKey: ["finance-by-brand", "split-design"], queryFn: () => financeApi.byBrand(true) });
   // «Что делать» — бэкенд считал это давно, а лежало оно за двумя кликами внутри Заказов.
   const silent = useQuery({ queryKey: ["orders-silent"], queryFn: ordersApi.silent, ...LIVE });
   const readiness = useQuery({ queryKey: ["estimates-readiness"], queryFn: estimatesApi.readiness });

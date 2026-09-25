@@ -675,13 +675,26 @@ def personal_spending():
     return {"categories": out, "total": round(sum(c["total"] for c in out), 2)}
 
 
+DESIGN_ROW = "Проектные работы"
+
+
 @router.get("/by-brand")
-def finance_by_brand():
-    """Доход/расход/прибыль по брендам (через заказы)."""
+def finance_by_brand(split_design: bool = Query(False, description="проектные работы отдельной строкой")):
+    """Доход/расход/прибыль по брендам (через заказы).
+
+    `split_design=1` (главная, решение Юры 25.09.2026): заказы `activity='design'` —
+    отдельная строка «Проектные работы», а не часть бренда (проекты идут под pbpb, но
+    это другой вид деятельности). Без параметра — как было: карточке бренда в вики
+    нужен бренд целиком."""
     conn = get_production()
     try:
         NO_BRAND = "Без бренда"
         agg: dict = {}
+
+        def key(row):
+            if split_design and (row["activity"] or "") == "design":
+                return DESIGN_ROW
+            return row["brand"]
 
         def slot(brand):
             b = brand or NO_BRAND
@@ -701,37 +714,37 @@ def finance_by_brand():
 
         # доход: платежи → заказ → бренд
         for r in conn.execute(
-            """SELECT o.brand AS brand, COALESCE(SUM(p.amount),0) AS s
+            """SELECT o.brand AS brand, o.activity AS activity, COALESCE(SUM(p.amount),0) AS s
                FROM payments p JOIN orders o ON o.id = p.order_id
-               GROUP BY o.brand""").fetchall():
-            slot(r["brand"])["income"] += r["s"] or 0
+               GROUP BY o.brand, o.activity""").fetchall():
+            slot(key(r))["income"] += r["s"] or 0
 
         # расход: факт заказа = expenses + НЕпокрытые ими обязательства.
         # Раньше считались только creditors.paid — ручные/разнесённые расходы
         # без обязательства в брендовый P&L не попадали вовсе.
         # Дедуп тот же, что в orders._plan_fact (инвариант «одна оплата = один факт»).
         for r in conn.execute(
-            """SELECT o.brand AS brand, COALESCE(SUM(e.amount),0) AS s
+            """SELECT o.brand AS brand, o.activity AS activity, COALESCE(SUM(e.amount),0) AS s
                FROM expenses e JOIN orders o ON o.id = e.order_id
-               GROUP BY o.brand""").fetchall():
-            slot(r["brand"])["expense"] += r["s"] or 0
+               GROUP BY o.brand, o.activity""").fetchall():
+            slot(key(r))["expense"] += r["s"] or 0
         for r in conn.execute(
-            """SELECT o.brand AS brand, COALESCE(SUM(c.paid),0) AS s
+            """SELECT o.brand AS brand, o.activity AS activity, COALESCE(SUM(c.paid),0) AS s
                FROM creditors c JOIN orders o ON o.id = c.order_id
                WHERE NOT EXISTS (
                  SELECT 1 FROM expenses e WHERE e.order_id = c.order_id AND (
                       e.creditor_id = c.id
                    OR (e.finance_tx_id  IS NOT NULL AND e.finance_tx_id  = c.finance_tx_id)
                    OR (e.zenmoney_tx_id IS NOT NULL AND e.zenmoney_tx_id = c.zenmoney_tx_id)))
-               GROUP BY o.brand""").fetchall():
-            slot(r["brand"])["expense"] += r["s"] or 0
+               GROUP BY o.brand, o.activity""").fetchall():
+            slot(key(r))["expense"] += r["s"] or 0
 
         # план по заказам
         for r in conn.execute(
-            """SELECT brand, COALESCE(SUM(price_plan),0) AS pp, COALESCE(SUM(cost_plan),0) AS cp,
+            """SELECT brand, activity, COALESCE(SUM(price_plan),0) AS pp, COALESCE(SUM(cost_plan),0) AS cp,
                       COUNT(*) AS cnt
-               FROM orders WHERE archived = 0 GROUP BY brand""").fetchall():
-            s = slot(r["brand"])
+               FROM orders WHERE archived = 0 GROUP BY brand, activity""").fetchall():
+            s = slot(key(r))
             s["price_plan"] += r["pp"] or 0
             s["cost_plan"] += r["cp"] or 0
             s["orders_count"] += r["cnt"] or 0
@@ -744,6 +757,9 @@ def finance_by_brand():
             v["price_plan"] = round(v["price_plan"], 2)
             v["cost_plan"] = round(v["cost_plan"], 2)
             v["color"] = brand_meta.get(b)
+            if b == DESIGN_ROW:
+                v["activity"] = "design"
+                v["color"] = "#6B6355"   # не бренд — нейтральный, чтобы не спорить с оранжевым MeRA
             result.append(v)
         # бренды с движением/планом вперёд, «Без бренда» в конец
         result.sort(key=lambda x: (x["brand"] == NO_BRAND, -(x["income"] + x["price_plan"])))

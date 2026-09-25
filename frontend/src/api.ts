@@ -147,7 +147,8 @@ export const financeApi = {
   freeCash: () => api.get("/finance/free-cash").then((r) => r.data),
   balanceAtDate: (date: string) =>
     api.get("/finance/balance-at-date", { params: { date } }).then((r) => r.data),
-  byBrand: () => api.get("/finance/by-brand").then((r) => r.data),
+  byBrand: (splitDesign = false) =>
+    api.get("/finance/by-brand", { params: splitDesign ? { split_design: 1 } : {} }).then((r) => r.data),
   recurring: () => api.get("/finance/recurring").then((r) => r.data),
   personalSpending: () => api.get("/finance/personal-spending").then((r) => r.data),
   // Сколько ушло себе за границу — в рублях, по месяцам и строками.

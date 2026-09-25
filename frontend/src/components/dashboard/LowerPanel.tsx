@@ -45,7 +45,9 @@ export function LowerPanel({ todo, byBrand, debtors, ledger, creditors, overhead
     onMouseLeave: (e: React.MouseEvent<HTMLElement>) => (e.currentTarget.style.background = "transparent"),
   };
 
-  const brands = (byBrand ?? []).filter(b => b.income || b.expense || b.price_plan);
+  // «Без бренда» на главной не показываем (Юра 25.09.2026: не актуально) — там
+  // случайные заказы без бренда, а не направление.
+  const brands = (byBrand ?? []).filter(b => b.brand !== "Без бренда" && (b.income || b.expense || b.price_plan));
   const brandMax = Math.max(1, ...brands.map(b => Math.max(b.income || 0, b.expense || 0)));
 
   const debtItems: any[] = debtors?.items ?? [];
@@ -121,7 +123,7 @@ export function LowerPanel({ todo, byBrand, debtors, ledger, creditors, overhead
             })}
           </div>
           <div style={right}>
-            <Head title="ПО БРЕНДАМ" right={
+            <Head title="ПО БРЕНДАМ И НАПРАВЛЕНИЯМ" right={
               <span style={{ fontSize: 10, color: "#A89070", display: "inline-flex", alignItems: "center", gap: 10 }}>
                 <span style={{ display: "inline-flex", alignItems: "center" }}><Swatch color="#C8C0B0" />расходы</span>
                 <span>цвет бренда — прибыль</span>
