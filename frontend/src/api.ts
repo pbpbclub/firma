@@ -443,6 +443,8 @@ export const ledgerApi = {
 
 // Срезы-карточки PDF: то, что финагент присылает в Telegram, кнопкой из веба.
 export const reportsApi = {
+  // Неделя для главной — блоки недельного отчёта фин-агента числами Фирмы.
+  week: () => api.get("/reports/week").then((r) => r.data),
   monthCard: (month?: string) =>
     api.post("/reports/month-card", {}, { params: month ? { month } : {}, responseType: "blob" })
        .then((r) => r.data),

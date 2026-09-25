@@ -12,6 +12,7 @@ import { CircleProgress } from "../components/ui/CircleProgress";
 import { CardButton } from "../components/CardButton";
 import { OrderLink } from "../components/ui/links";
 import { useIsMobile, M } from "../components/ui/responsive";
+import { WeekPanel } from "../components/dashboard/WeekPanel";
 
 
 function ThinBar({ pct, color = "#E8592A" }: { pct: number; color?: string }) {
@@ -207,6 +208,10 @@ export default function Dashboard() {
           ))}
         </div>
       </div>
+
+      {/* Неделя — блоки недельного отчёта фин-агента: спидометры маржи, план/факт,
+          «Молчат» с порогами, приход по неделям и кварталам */}
+      <WeekPanel silent={silent.data} isMobile={isMobile} />
 
       {/* Что горит: то, что требует решения. Ни одна из этих цифр не новая —
           они лежали за двумя кликами внутри Заказов и на главную не попадали. */}
