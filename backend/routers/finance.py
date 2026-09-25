@@ -757,6 +757,11 @@ def finance_by_brand(split_design: bool = Query(False, description="проект
             v["price_plan"] = round(v["price_plan"], 2)
             v["cost_plan"] = round(v["cost_plan"], 2)
             v["color"] = brand_meta.get(b)
+            # Ключ activity есть у КАЖДОЙ строки: у брендовых он None («не выделенный
+            # контур» — там смешаны все виды, а при split_design=0 и проектные тоже),
+            # у строки проектных работ — "design". Иначе фронт различал бы контуры по
+            # наличию ключа, а не по значению.
+            v["activity"] = None
             if b == DESIGN_ROW:
                 v["activity"] = "design"
                 v["color"] = "#6B6355"   # не бренд — нейтральный, чтобы не спорить с оранжевым MeRA
