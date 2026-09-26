@@ -191,7 +191,36 @@ def _week_window(today: date) -> tuple[date, date]:
     return today - timedelta(days=today.weekday()), today
 
 
-def _income_week(conn, date_from: str, date_to: str) -> dict:
+def _bank_income_rows(date_from: str, date_to: str) -> list[tuple[str, float]] | None:
+    """Приход выписки за период строками (дата, сумма); None — выписка недоступна.
+
+    Читается ОДИН раз на запрос и режется по окнам в памяти: `money-months`
+    зовёт «пришло» в цикле по месяцам, и открытие finance.db на каждый месяц —
+    до 24 подключений к чужой базе на один ответ."""
+    where, tparams = _not_transfer()
+    try:
+        conn = get_finance()
+    except Exception:
+        return None
+    try:
+        rows = conn.execute(
+            f"""SELECT substr(date, 1, 10) d, amount FROM transactions
+                 WHERE direction = 'in' AND date BETWEEN ? AND ?{where}""",
+            [date_from, date_to] + tparams).fetchall()
+    except Exception:
+        return None
+    finally:
+        conn.close()
+    return [(r["d"], float(r["amount"] or 0)) for r in rows]
+
+
+def _in_window(days: dict[str, float], date_from: str, date_to: str) -> float:
+    """Сумма подневной раскладки за окно (обе границы включительно)."""
+    return round(sum(v for d, v in days.items() if date_from <= d <= date_to), 2)
+
+
+def _income_week(conn, date_from: str, date_to: str,
+                 bank_rows: list[tuple[str, float]] | None) -> dict:
     """«Пришло» отчёта (`weekly_report.income_block_and_total`): платежи заказчиков
     по дате (р/с, наличные, личная карта) плюс приход из выписки, которому не нашлось
     платежа той же суммы (±1 ₽) — деньги пришли, но по заказу не разнесены.
@@ -200,23 +229,17 @@ def _income_week(conn, date_from: str, date_to: str) -> dict:
     🔒 Найденный платёж ПОТРЕБЛЯЕТСЯ (каждый гасит ровно один приход выписки): без
     этого два одинаковых поступления гасились одним платежом, и «пришло» занижалось
     ровно на повтор. На длинном окне (месяц у `money-months`) совпадение сумм —
-    частое, поэтому допуск ±1 ₽ работает только в паре с потреблением."""
+    частое, поэтому допуск ±1 ₽ работает только в паре с потреблением.
+
+    `bank_rows` — приход выписки за ВЕСЬ период запроса (`_bank_income_rows`),
+    здесь режется по окну; None — выписка недоступна."""
     paid = [float(r["amount"] or 0) for r in conn.execute(
         "SELECT amount FROM payments WHERE date(paid_at) BETWEEN ? AND ?",
         (date_from, date_to)).fetchall()]
     by_orders = round(sum(paid), 2)
-    where, tparams = _not_transfer()
-    try:
-        fconn = get_finance()
-        try:
-            bank = [float(r["amount"] or 0) for r in fconn.execute(
-                f"""SELECT amount FROM transactions
-                     WHERE direction = 'in' AND date BETWEEN ? AND ?{where}""",
-                [date_from, date_to] + tparams).fetchall()]
-        finally:
-            fconn.close()
-    except Exception:
+    if bank_rows is None:
         return {"total": by_orders, "orders": by_orders, "unallocated": 0.0, "bank_unavailable": True}
+    bank = [a for d, a in bank_rows if date_from <= d <= date_to]
     free = sorted(paid)
     loose = 0.0
     for b in bank:
@@ -239,16 +262,20 @@ def _spent_projects(conn, date_from: str, date_to: str) -> float:
         (date_from, date_to)).fetchone()["s"] or 0, 2)
 
 
-def _card_payouts(conn, date_from: str, date_to: str) -> tuple[float, bool]:
+def _card_payouts_by_day(conn, date_from: str, date_to: str) -> tuple[dict[str, float], bool]:
     """Выплаты мастерам с личных карт, которых в расходах нет (`weekly_report.
     personal_cards_flow`, корзина `masters`): проводка лицевого счёта, привязка
     фин-агента `zm_links` или получатель по `payee_rules` (entity_type=master).
     Перевод, уже стоящий расходом (`expenses.zenmoney_tx_id`), второй раз не идёт.
     Только рублёвая нога: иностранные карты — не здесь.
 
-    Возвращает `(сумма, источник_доступен)`. 🔒 Второе значение обязательно:
+    Возвращает `({дата: сумма}, источник_доступен)`. 🔒 Второе значение обязательно:
     недоступность `zenmoney.db` (или таблицы `zm_links` фин-агента) даёт 0.0, а
-    это молча занижает «потрачено» и в неделе, и в месяцах — отличить нечем."""
+    это молча занижает «потрачено» и в неделе, и в месяцах — отличить нечем.
+
+    Считается за ВЕСЬ период запроса один раз и режется по окнам (`_in_window`):
+    вызов на каждый месяц открывал zenmoney.db и заново перечитывал `payee_rules`,
+    `zm_links` и все tx-ссылки расходов."""
     from db import get_zenmoney
     from zm_scope import scope_for
     in_expenses = {r[0] for r in conn.execute(
@@ -261,7 +288,7 @@ def _card_payouts(conn, date_from: str, date_to: str) -> tuple[float, bool]:
         zconn = get_zenmoney()
         try:
             rows = zconn.execute(
-                """SELECT id, outcome, income, payee, outcome_account, income_account
+                """SELECT id, date, outcome, income, payee, outcome_account, income_account
                      FROM zm_transactions
                     WHERE deleted = 0 AND outcome > 0 AND date BETWEEN ? AND ?""",
                 (date_from, date_to)).fetchall()
@@ -274,11 +301,11 @@ def _card_payouts(conn, date_from: str, date_to: str) -> tuple[float, bool]:
             zconn.close()
     except Exception:
         logger.warning("_card_payouts: zenmoney.db недоступна (%s..%s)", date_from, date_to)
-        return 0.0, False
+        return {}, False
     if not links_ok:
         logger.warning("_card_payouts: zm_links недоступна (%s..%s)", date_from, date_to)
     scope = scope_for(None, owner=True)
-    total = 0.0
+    days: dict[str, float] = {}
     for r in rows:
         if (r["income"] or 0) > 0 and r["income_account"] != r["outcome_account"]:
             continue                                   # перевод между своими счетами
@@ -287,8 +314,9 @@ def _card_payouts(conn, date_from: str, date_to: str) -> tuple[float, bool]:
         payee = (r["payee"] or "").lower()
         by_rule = any((kind == "contains" and pat in payee) or pat == payee for pat, kind in rules)
         if r["id"] in in_ledger or r["id"] in links or by_rule:
-            total += float(r["outcome"] or 0)
-    return round(total, 2), links_ok
+            d = str(r["date"] or "")[:10]
+            days[d] = days.get(d, 0) + float(r["outcome"] or 0)
+    return days, links_ok
 
 
 TBILISI_FILE = "/opt/fin-agent/data/zm_tbilisi.json"
@@ -459,11 +487,15 @@ def week_summary():
 
     conn = get_production()
     try:
+        # Чужие базы читаются один раз на обе недели сразу, дальше — резка окнами.
+        bank_rows = _bank_income_rows(prev_from.isoformat(), end.isoformat())
+        card_days, cards_ok = _card_payouts_by_day(conn, prev_from.isoformat(), end.isoformat())
+
         def money_of(a: date, b: date) -> dict:
             lo, hi = a.isoformat(), b.isoformat()
-            inc = _income_week(conn, lo, hi)
+            inc = _income_week(conn, lo, hi, bank_rows)
             exp = _spent_projects(conn, lo, hi)
-            cards, cards_ok = _card_payouts(conn, lo, hi)
+            cards = _in_window(card_days, lo, hi)
             return {"income": inc["total"], "income_orders": inc["orders"],
                     "income_unallocated": inc["unallocated"],
                     "spent_projects": round(exp + cards, 2), "spent_cards": cards,
@@ -554,10 +586,14 @@ def money_months(months: int = Query(7, ge=1, le=24)):
     try:
         fconn = get_finance()
         try:
+            # 🔒 Верхняя граница та же, что у income/expense (`hi` последнего окна):
+            # без неё вывод себе в текущем месяце считался бы за ВЕСЬ календарный
+            # месяц, а остальные слагаемые строки — по сегодня.
             for r in fconn.execute(
                     f"""SELECT substr(date, 1, 7) m, SUM(amount) s FROM transactions
-                         WHERE direction = 'out' AND date >= ? AND {OWN_TRANSFER_SQL} GROUP BY m""",
-                    [windows[0][1]]):
+                         WHERE direction = 'out' AND date BETWEEN ? AND ?
+                           AND {OWN_TRANSFER_SQL} GROUP BY m""",
+                    [windows[0][1], windows[-1][2]]):
                 draws[r["m"]] = round(r["s"] or 0, 2)
         finally:
             fconn.close()
@@ -565,15 +601,16 @@ def money_months(months: int = Query(7, ge=1, le=24)):
         bank_ok = False
 
     out_rows = []
-    cards_ok = True
     conn = get_production()
     try:
+        # Выписка и ZenMoney читаются один раз на весь период запроса, а не на месяц.
+        bank_rows = _bank_income_rows(windows[0][1], windows[-1][2])
+        card_days, cards_ok = _card_payouts_by_day(conn, windows[0][1], windows[-1][2])
         for key, lo, hi in windows:
-            inc = _income_week(conn, lo, hi)
+            inc = _income_week(conn, lo, hi, bank_rows)
             bank_ok = bank_ok and not inc.get("bank_unavailable")
             firma = _spent_projects(conn, lo, hi)
-            cards, ok = _card_payouts(conn, lo, hi)
-            cards_ok = cards_ok and ok
+            cards = _in_window(card_days, lo, hi)
             out_rows.append({
                 "month": key,
                 "income": inc["total"], "income_orders": inc["orders"],
