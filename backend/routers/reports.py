@@ -191,12 +191,17 @@ def _week_window(today: date) -> tuple[date, date]:
     return today - timedelta(days=today.weekday()), today
 
 
-def _bank_income_rows(date_from: str, date_to: str) -> list[tuple[str, float]] | None:
-    """Приход выписки за период строками (дата, сумма); None — выписка недоступна.
+def _bank_income_rows(date_from: str, date_to: str) -> dict | None:
+    """Приход выписки за период: `{from, to, rows: [(дата, сумма)]}`; None —
+    выписка недоступна.
 
     Читается ОДИН раз на запрос и режется по окнам в памяти: `money-months`
     зовёт «пришло» в цикле по месяцам, и открытие finance.db на каждый месяц —
-    до 24 подключений к чужой базе на один ответ."""
+    до 24 подключений к чужой базе на один ответ.
+
+    🔒 Границы предрасчёта возвращаются вместе со строками: без них `_income_week`
+    не мог отличить «за это окно прихода не было» от «окно шире того, что
+    запрошено», и второе молча занижало «пришло» без признака неполноты."""
     where, tparams = _not_transfer()
     try:
         conn = get_finance()
@@ -211,7 +216,8 @@ def _bank_income_rows(date_from: str, date_to: str) -> list[tuple[str, float]] |
         return None
     finally:
         conn.close()
-    return [(r["d"], float(r["amount"] or 0)) for r in rows]
+    return {"from": date_from, "to": date_to,
+            "rows": [(r["d"], float(r["amount"] or 0)) for r in rows]}
 
 
 def _in_window(days: dict[str, float], date_from: str, date_to: str) -> float:
@@ -219,8 +225,7 @@ def _in_window(days: dict[str, float], date_from: str, date_to: str) -> float:
     return round(sum(v for d, v in days.items() if date_from <= d <= date_to), 2)
 
 
-def _income_week(conn, date_from: str, date_to: str,
-                 bank_rows: list[tuple[str, float]] | None) -> dict:
+def _income_week(conn, date_from: str, date_to: str, bank: dict | None) -> dict:
     """«Пришло» отчёта (`weekly_report.income_block_and_total`): платежи заказчиков
     по дате (р/с, наличные, личная карта) плюс приход из выписки, которому не нашлось
     платежа той же суммы (±1 ₽) — деньги пришли, но по заказу не разнесены.
@@ -231,18 +236,23 @@ def _income_week(conn, date_from: str, date_to: str,
     ровно на повтор. На длинном окне (месяц у `money-months`) совпадение сумм —
     частое, поэтому допуск ±1 ₽ работает только в паре с потреблением.
 
-    `bank_rows` — приход выписки за ВЕСЬ период запроса (`_bank_income_rows`),
-    здесь режется по окну; None — выписка недоступна."""
+    `bank` — предрасчёт прихода выписки за ВЕСЬ период запроса
+    (`_bank_income_rows`: строки и свои границы), здесь режется по окну;
+    None либо окно шире предрасчёта — «пришло» неполное, `bank_unavailable`."""
     paid = [float(r["amount"] or 0) for r in conn.execute(
         "SELECT amount FROM payments WHERE date(paid_at) BETWEEN ? AND ?",
         (date_from, date_to)).fetchall()]
     by_orders = round(sum(paid), 2)
-    if bank_rows is None:
+    if bank is None:
         return {"total": by_orders, "orders": by_orders, "unallocated": 0.0, "bank_unavailable": True}
-    bank = [a for d, a in bank_rows if date_from <= d <= date_to]
+    if date_from < bank["from"] or date_to > bank["to"]:
+        logger.warning("_income_week: окно %s..%s шире предрасчёта выписки %s..%s",
+                       date_from, date_to, bank["from"], bank["to"])
+        return {"total": by_orders, "orders": by_orders, "unallocated": 0.0, "bank_unavailable": True}
+    bank_in = [a for d, a in bank["rows"] if date_from <= d <= date_to]
     free = sorted(paid)
     loose = 0.0
-    for b in bank:
+    for b in bank_in:
         hit = next((i for i, a in enumerate(free) if abs(b - a) < 1), None)
         if hit is None:
             loose += b
@@ -488,12 +498,12 @@ def week_summary():
     conn = get_production()
     try:
         # Чужие базы читаются один раз на обе недели сразу, дальше — резка окнами.
-        bank_rows = _bank_income_rows(prev_from.isoformat(), end.isoformat())
+        bank_pre = _bank_income_rows(prev_from.isoformat(), end.isoformat())
         card_days, cards_ok = _card_payouts_by_day(conn, prev_from.isoformat(), end.isoformat())
 
         def money_of(a: date, b: date) -> dict:
             lo, hi = a.isoformat(), b.isoformat()
-            inc = _income_week(conn, lo, hi, bank_rows)
+            inc = _income_week(conn, lo, hi, bank_pre)
             exp = _spent_projects(conn, lo, hi)
             cards = _in_window(card_days, lo, hi)
             return {"income": inc["total"], "income_orders": inc["orders"],
@@ -604,10 +614,10 @@ def money_months(months: int = Query(7, ge=1, le=24)):
     conn = get_production()
     try:
         # Выписка и ZenMoney читаются один раз на весь период запроса, а не на месяц.
-        bank_rows = _bank_income_rows(windows[0][1], windows[-1][2])
+        bank_pre = _bank_income_rows(windows[0][1], windows[-1][2])
         card_days, cards_ok = _card_payouts_by_day(conn, windows[0][1], windows[-1][2])
         for key, lo, hi in windows:
-            inc = _income_week(conn, lo, hi, bank_rows)
+            inc = _income_week(conn, lo, hi, bank_pre)
             bank_ok = bank_ok and not inc.get("bank_unavailable")
             firma = _spent_projects(conn, lo, hi)
             cards = _in_window(card_days, lo, hi)
