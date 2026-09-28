@@ -732,7 +732,7 @@ def unapprove_set(set_id: str, body: Optional[UnapproveIn] = None):
             # что их когда-то и породила (_creditor_name_for_line).
             for c in conn.execute(f"""
                 SELECT c.id, c.name, c.prev_estimate_item_id, c.prev_estimate_line_id,
-                       COALESCE(el.line_total, ei.cost_total) AS prev_total,
+                       COALESCE(ROUND(el.line_total * COALESCE(ei.quantity, 1), 2), ei.cost_total) AS prev_total,
                        ei.title AS prev_item_title,
                        el.type AS prev_line_type, el.title AS prev_line_title,
                        el.master_id AS prev_line_master, el.contractor_name AS prev_line_contractor,
@@ -1546,7 +1546,7 @@ def repoint_obligations(conn, es) -> dict:
                 or pop(by_sum, (t, c["line_type"], round(c["old_line_total"] or 0, 2)))
             if hit:
                 item, ln = hit
-                total = round(ln["line_total"] or 0, 2)
+                total = _line_obligation_total(item, ln)
                 name, description, _mid = _creditor_name_for_line(conn, item, ln)
                 new_item, new_line = item["id"], ln["id"]
         else:
@@ -1579,6 +1579,14 @@ def repoint_obligations(conn, es) -> dict:
                   before_row=before.get(c["id"]))
             closed += 1
     return {"moved": moved, "closed": closed}
+
+
+def _line_obligation_total(item, line) -> float:
+    """Обязательство по строке = сумма строки × количество изделий позиции.
+    `line_total` — на одно изделие (себестоимость позиции = Σ строк × quantity,
+    см. пересчёт `cost_total`); без множителя Temple (ORD-047, подстолья × 8)
+    получил обязательство Малафееву 2 120,97 вместо 16 967,76 (28.09.2026)."""
+    return round((line["line_total"] or 0) * (item["quantity"] or 1), 2)
 
 
 def _find_master(conn, name: str) -> Optional[str]:
@@ -1642,7 +1650,7 @@ def _gen_obligations(conn, es) -> dict:
                 name, description, master_id = _creditor_name_for_line(conn, item, line)
                 if (line["contractor_name"] or "").strip() and not master_id:
                     unmatched.add(line["contractor_name"].strip())
-                amount = round(line["line_total"] or 0, 2)
+                amount = _line_obligation_total(item, line)
                 cid = str(uuid.uuid4())
                 conn.execute(
                     """INSERT INTO creditors

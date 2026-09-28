@@ -56,6 +56,14 @@ class TestGenSkipsInternal:
         res = _gen_obligations(db, _set(db))
         assert res["created"] == 1 and res["skipped_internal"] == 1   # «Башня» — позиция без состава, имя честное
 
+    def test_обязательство_строки_умножается_на_количество_позиции(self, db):
+        # line_total — на одно изделие: Temple, подстолья × 8 (ORD-047, 28.09.2026)
+        from routers.estimates import _gen_obligations
+        db.execute("UPDATE estimate_items SET quantity = 8 WHERE id = 'i-1'"); db.commit()
+        _line(db, "l-1", "i-1", "Сварка", master="m-1", total=2120.97)
+        _gen_obligations(db, _set(db))
+        assert tuple(db.execute("SELECT total, amount_plan FROM creditors").fetchone()) == (16967.76, 16967.76)
+
 
 class TestStaleInternal:
     def test_плашка_и_закрытие_с_причиной_internal(self, db):
