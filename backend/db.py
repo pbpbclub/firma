@@ -2560,3 +2560,25 @@ def ensure_zm_third_party_schema():
         conn.commit()
     finally:
         conn.close()
+
+
+def ensure_zm_unmerge_schema():
+    """Ручная расклейка строк ZenMoney (28.09.2026).
+
+    ZenMoney сам склеивает две посторонние операции в «перевод», если в один день
+    суммы на разных счетах совпадают по курсу: покупка по грузинской карте + кэшбэк
+    на рублёвой, приход Avosend в долларах + трата в лари. Направление «Грузия → РФ»
+    расклеивается всегда (решение Юры: туда деньги не ходят, `zm_merge.is_auto_split`),
+    склейку внутри карты от настоящего обмена по форме строки не отличить — её Юра
+    расклеивает сам, пометкой по tx_id. В чужую базу не пишем: пометка своя."""
+    conn = get_production()
+    try:
+        conn.execute("""CREATE TABLE IF NOT EXISTS zm_unmerged (
+            tx_id      TEXT PRIMARY KEY,
+            note       TEXT,
+            created_by TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        )""")
+        conn.commit()
+    finally:
+        conn.close()

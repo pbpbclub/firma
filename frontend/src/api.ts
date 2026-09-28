@@ -517,6 +517,11 @@ export const regionsApi = {
     api.post(`/regions/${code}/rules`, body).then((r) => r.data),
   deleteRule: (code: string, id: number) =>
     api.delete(`/regions/${code}/rules/${id}`).then((r) => r.data),
+  // Склейка ZenMoney: читать строку двумя операциями (трата + приход), а не обменом.
+  unmerge: (code: string, tx_id: string, note?: string) =>
+    api.post(`/regions/${code}/unmerge`, { tx_id, note }).then((r) => r.data),
+  remerge: (code: string, tx_id: string) =>
+    api.delete(`/regions/${code}/unmerge/${encodeURIComponent(tx_id)}`).then((r) => r.data),
 };
 
 // Курсы Нацбанка Грузии и сигнал обмена (личный заграничный контур).

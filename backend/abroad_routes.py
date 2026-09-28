@@ -22,6 +22,8 @@
 в данных, а не по сумме (то же правило, что `purpose='owner_draw'` у фирмы).
 """
 
+import zm_merge
+
 ROUTES = [
     # key, title, признаки (в payee или comment, нижний регистр)
     ("avosend",      "Avosend",               ("avosend",)),
@@ -46,8 +48,14 @@ def _signature(row) -> str | None:
     return None
 
 
-def route_of(row, scope) -> str | None:
-    """Маршрут вывода, если строка — вывод себе за границу; иначе None."""
+def route_of(row, scope, unmerged: dict | None = None) -> str | None:
+    """Маршрут вывода, если строка — вывод себе за границу; иначе None.
+
+    `unmerged` — ручные расклейки (`zm_merge.load_marks`). Расклеенная кросс-строка
+    «рубли → страна» читается одной ногой расхода: вывод она, только если у неё
+    есть примета маршрута, «прямым переводом» по форме строки её не назвать."""
+    if unmerged and zm_merge.is_split(row, scope, unmerged):
+        row = zm_merge.legs(row)[0]
     out_acc = scope.account_of(row["outcome_account"])
     if not out_acc or out_acc.region is not None:
         return None                          # уходит не с домашнего счёта
@@ -68,7 +76,7 @@ def route_of(row, scope) -> str | None:
     return _signature(row)                   # расход с приметой маршрута
 
 
-def outflows(rows, scope, region: str | None = None) -> list[dict]:
+def outflows(rows, scope, region: str | None = None, unmerged: dict | None = None) -> list[dict]:
     """Строки-выводы: {id, date, amount_rub, route, route_title, account, payee}.
 
     `region` — раздел страны. Кросс-строка знает страну назначения (счёт второй
@@ -80,11 +88,14 @@ def outflows(rows, scope, region: str | None = None) -> list[dict]:
     Строка без даты пропускается: она не ложится ни в один месяц, а по месяцам
     считаются и итог, и разбивка."""
     out = []
+    if unmerged is None:
+        unmerged = zm_merge.load_marks()
     for r in rows:
-        key = route_of(r, scope)
+        key = route_of(r, scope, unmerged)
         if not key or not (r["date"] or ""):
             continue
-        in_acc = scope.account_of(r["income_account"]) if (r["income"] or 0) > 0 else None
+        split = zm_merge.is_split(r, scope, unmerged)
+        in_acc = scope.account_of(r["income_account"]) if (r["income"] or 0) > 0 and not split else None
         to_region = in_acc.region if in_acc else None
         if region is not None and to_region is not None and to_region != region:
             continue

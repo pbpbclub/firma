@@ -57,7 +57,7 @@ def region_transactions(
     search: str | None = None,
     category: str | None = None,
     payee: str | None = None,
-    kind: str | None = Query(None, pattern="^(expense|income|transfer|third_party)$"),
+    kind: str | None = Query(None, pattern="^(expense|income|exchange|transfer|third_party)$"),
     payee_key: str | None = None,     # точный получатель (склейка по регистру) — окно расшифровки
     currency: str | None = None,      # валюта операции; «unknown» — не разделена
     weekday: int | None = Query(None, ge=0, le=6),   # 0 = понедельник
@@ -253,6 +253,9 @@ def region_summary(code: str, user=Depends(require_owner)):
         if a.configured:
             balances[a.currency] = round(balances.get(a.currency, 0) + (a.balance or 0), 2)
     usd = balances.get("USD", 0.0)
+    # Запас — по долларам ЗА ВЫЧЕТОМ минуса на лари: банк погасит его из них сам
+    brate = abroad.bank_rate(scope, code)
+    pos = abroad.usd_position(balances, reserve, brate["rate"])
 
     runway = None
     if split and ms["avg_month"] and main_cur in balances:
@@ -269,7 +272,9 @@ def region_summary(code: str, user=Depends(require_owner)):
         "currency": main_cur if split else None,
         "currency_split": split,
         "usd_balance": usd, "usd_reserve": reserve,
-        "reserve_pct": round(usd / reserve, 3) if reserve else None,
+        "usd_effective": pos["usd_effective"], "gel_debt": pos["gel_debt"],
+        "usd_for_debt": pos["usd_for_debt"], "bank_rate": brate,
+        "reserve_pct": round(max(pos["usd_effective"], 0) / reserve, 3) if reserve else None,
         "balances": balances,
         "runway_months": runway,
         "ambiguous_accounts": ambiguous,
@@ -363,3 +368,64 @@ def delete_rule(code: str, rule_id: int, user=Depends(require_owner)):
         return {"deleted": rule_id}
     finally:
         conn.close()
+
+
+# ── Склейки ZenMoney: ручная расклейка (28.09.2026) ──────────────────────────
+
+class UnmergeBody(BaseModel):
+    tx_id: str
+    note: str | None = None
+
+
+@router.post("/{code}/unmerge")
+def unmerge(code: str, body: UnmergeBody, user=Depends(require_owner)):
+    """Прочитать строку ZenMoney двумя операциями, а не переводом/обменом.
+
+    Только строка с двумя ногами, хотя бы одна из которых — на счёте региона: по
+    чужим строкам пометка из этого раздела не ставится. «Грузия → РФ» расклеена
+    уже автоматически (`zm_merge.is_auto_split`), пометка там не нужна."""
+    import zm_merge
+    from db import get_zenmoney
+    scope = scope_for(user)
+    titles = set(abroad.region_titles(scope, code))
+    z = get_zenmoney()
+    try:
+        row = z.execute("SELECT * FROM zm_transactions WHERE id = ? AND deleted = 0", (body.tx_id,)).fetchone()
+    finally:
+        z.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Операция не найдена")
+    if not zm_merge.two_legged(row):
+        raise HTTPException(status_code=400, detail="Это не перевод: у операции одна нога, расклеивать нечего")
+    if row["income_account"] not in titles and row["outcome_account"] not in titles:
+        raise HTTPException(status_code=400, detail="Операция не касается счетов этого раздела")
+    if zm_merge.is_auto_split(row, scope):
+        raise HTTPException(status_code=400, detail="Эта строка расклеивается автоматически")
+    conn = get_production()
+    try:
+        conn.execute("INSERT OR REPLACE INTO zm_unmerged (tx_id, note, created_by) VALUES (?, ?, ?)",
+                     (body.tx_id, body.note,
+                      (user or {}).get("email") if isinstance(user, dict) else getattr(user, "email", None)))
+        audit(conn, "zm_unmerged", body.tx_id, "create",
+              f"Расклеена склейка ZenMoney {row['date']}: {row['outcome']} {row['outcome_account']}"
+              f" → {row['income']} {row['income_account']}")
+        conn.commit()
+    finally:
+        conn.close()
+    return {"tx_id": body.tx_id, "unmerged": True}
+
+
+@router.delete("/{code}/unmerge/{tx_id}")
+def remerge(code: str, tx_id: str, user=Depends(require_owner)):
+    """Снять ручную расклейку — строка снова читается переводом/обменом."""
+    conn = get_production()
+    try:
+        row = conn.execute("SELECT * FROM zm_unmerged WHERE tx_id = ?", (tx_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Пометки нет")
+        conn.execute("DELETE FROM zm_unmerged WHERE tx_id = ?", (tx_id,))
+        audit(conn, "zm_unmerged", tx_id, "delete", "Склейка ZenMoney возвращена", before_row=row)
+        conn.commit()
+    finally:
+        conn.close()
+    return {"tx_id": tx_id, "unmerged": False}

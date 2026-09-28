@@ -176,11 +176,17 @@ def build(with_transactions: bool = True, scope=None) -> dict:
             if with_transactions:
                 import abroad_routes
                 from zm_scope import scope_for as _sf
+                import zm_merge
                 route_scope = _sf(None, owner=True)
+                unmerged = zm_merge.load_marks()
                 for r in zc.execute("SELECT id, payee, comment, income, outcome, income_account, outcome_account FROM zm_transactions WHERE deleted = 0").fetchall():
                     if scope is not None and not scope.visible(r):
                         continue
                     k = f"zen:{r['id']}"
+                    if zm_merge.is_split(r, route_scope, unmerged):
+                        # Склейка ZenMoney: две посторонние операции, не перевод.
+                        # Подписи «чем разнесено» у неё нет — как у обычной строки.
+                        continue
                     if (r["income"] or 0) > 0 and (r["outcome"] or 0) > 0:
                         # Перевод, пересекающий границу, подписывается отдельно:
                         # это вывод себе за границу, а не движение между картами.
@@ -188,7 +194,7 @@ def build(with_transactions: bool = True, scope=None) -> dict:
                         put("self_transfer", k,
                             label={"cross_out": ABROAD_LABEL, "cross_in": ABROAD_LABEL_IN}.get(
                                 kind, "Перевод между своими счетами"))
-                    elif route_scope is not None and abroad_routes.route_of(r, route_scope):
+                    elif route_scope is not None and abroad_routes.route_of(r, route_scope, unmerged):
                         put("self_transfer", k, label=ABROAD_LABEL)
                     elif is_self(r["payee"], selfp):
                         put("self_transfer", k, label="Пополнение с р/с ИП (вывод владельца)" if (r["income"] or 0) > 0 else "Перевод себе")

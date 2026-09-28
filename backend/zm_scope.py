@@ -41,6 +41,10 @@ CURRENCY_SIGNS = {"RUB": "₽", "GEL": "₾", "USD": "$", "EUR": "€", "TRY": "
 # подписи должна понимать, куда смотреть в остатке.
 ABROAD_LABEL = "Себе за границу"
 ABROAD_LABEL_IN = "Себе из-за границы"
+# Склейка ZenMoney (`zm_merge`): кросс-строка — не перевод, а две посторонние
+# операции. Бухгалтер видит свою ногу обычным поступлением / расходом.
+SPLIT_LABEL_IN = "Поступление"
+SPLIT_LABEL_OUT = "Расход"
 
 
 @dataclass(frozen=True)
@@ -235,7 +239,7 @@ class Scope:
             return True
         return self.classify(row) in ("public", "cross_out", "cross_in")
 
-    def mask(self, row) -> dict:
+    def mask(self, row, split: bool = False) -> dict:
         """Обезличенная публичная нога кросс-строки.
 
         🔒 Вызывать ТОЛЬКО на выходе, после классификации и после агрегатов.
@@ -246,6 +250,10 @@ class Scope:
 
         Что остаётся: дата и рублёвая сумма ухода. Что уходит: вторая нога,
         её счёт и валюта, курс, назначение платежа, категория.
+
+        `split` — строка оказалась склейкой ZenMoney (`zm_merge.is_split`): это не
+        перевод за границу, подпись нейтральная. Получатель и назначение всё
+        равно скрыты — неизвестно, какой из двух склеенных операций они принадлежат.
         """
         d = dict(row) if not isinstance(row, dict) else dict(row)
         kind = self.classify(row)
@@ -257,13 +265,16 @@ class Scope:
         else:
             d["outcome"], d["outcome_account"], d["outcome_currency"] = 0, None, None
             d["income_currency"] = self.row_currency(row, "income")
-        label = ABROAD_LABEL if kind == "cross_out" else ABROAD_LABEL_IN
+        if split:
+            label = SPLIT_LABEL_OUT if kind == "cross_out" else SPLIT_LABEL_IN
+        else:
+            label = ABROAD_LABEL if kind == "cross_out" else ABROAD_LABEL_IN
         d["payee"] = label
         d["comment"] = None
         d["tags"] = "[]"
         d["display_category"] = label
         d["masked"] = True
-        d["abroad"] = True
+        d["abroad"] = not split
         return d
 
     def filter_rows(self, rows) -> list:

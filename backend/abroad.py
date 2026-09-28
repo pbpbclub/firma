@@ -20,6 +20,7 @@ from collections import defaultdict
 
 from db import get_production, get_zenmoney
 import third_party
+import zm_merge
 
 CASH_COMMENT = "cash withdrawal"
 
@@ -149,38 +150,51 @@ def _known(cur: str) -> str | None:
     return None if cur == "unknown" else cur
 
 
-def decorate(rows: list[dict], scope, rules: list[dict], titles: list[str] | None = None) -> list[dict]:
+def _rate(out_amount: float, out_cur: str | None, in_amount: float, in_cur: str | None) -> dict | None:
+    """Курс обмена по-человечески: сколько лари за доллар (евро), а не наоборот.
+    Без лари в паре — сколько пришедшей валюты за единицу ушедшей."""
+    if not out_amount or not in_amount or not out_cur or not in_cur or out_cur == in_cur:
+        return None
+    if in_cur == "GEL":
+        return {"value": round(in_amount / out_amount, 4), "price_of": out_cur, "in": "GEL"}
+    if out_cur == "GEL":
+        return {"value": round(out_amount / in_amount, 4), "price_of": in_cur, "in": "GEL"}
+    return {"value": round(in_amount / out_amount, 4), "price_of": out_cur, "in": in_cur}
+
+
+def decorate(rows: list[dict], scope, rules: list[dict], titles: list[str] | None = None,
+             unmerged: dict | None = None) -> list[dict]:
     """Строка → вид для ленты: направление, сумма, валюта (если известна), категория.
+
+    Виды: `expense`, `income`, `exchange` (обе ноги на счетах региона — банк сам
+    меняет $ на ₾, когда лари уходят в минус), `transfer` (пополнение с домашнего
+    счёта), `third_party` (чужие деньги).
 
     🔒 У двуногой строки нога выбирается по ПРИНАДЛЕЖНОСТИ счёта региону, а не по
     знаку сумм. Пополнение грузинской карты с рублёвого счёта — одна строка
     (`ушло 9 511,50 ₽ с Райффайзена, пришло 300 ₾`): фиксированный `side='outcome'`
     подставлял бы в ленту региона рублёвую сумму, рублёвую валюту и чужой счёт.
     `titles` — названия счетов региона (`region_titles`); без них поведение прежнее.
+
+    🔒 Склейка ZenMoney (`zm_merge`) читается двумя операциями: нога на счёте
+    региона — обычной тратой или приходом, с пометкой `split` и `merged_with`
+    (что ZenMoney приклеил). Иначе покупка в Турции становится «переводом» и из
+    трат пропадает. `unmerged` — ручные пометки (по умолчанию из базы).
     """
     cats = {c["code"]: c["title"] for c in categories()}
     own = set(titles or [])
     marks = third_party.load_marks()
+    split_marks = zm_merge.load_marks() if unmerged is None else unmerged
     out = []
-    for r in rows:
+
+    def add(r, kind, amount, side, **extra):
         inc, out_ = r.get("income") or 0, r.get("outcome") or 0
         out_acc, in_acc = r.get("outcome_account"), r.get("income_account")
-        if inc > 0 and out_ > 0:
-            # Обе ноги свои (обмен внутри региона) либо региона не знаем — прежняя
-            # нога расхода; иначе берём ту, что принадлежит региону.
-            if own and in_acc in own and out_acc not in own:
-                kind, amount, side = "transfer", inc, "income"
-            else:
-                kind, amount, side = "transfer", out_, "outcome"
-        elif out_ > 0:
-            kind, amount, side = "expense", out_, "outcome"
-        else:
-            kind, amount, side = "income", inc, "income"
         # «Чужие деньги» (23.09.2026): помеченная часть ноги — не доход и не трата
         # Юры. Нога целиком чужая → вид `third_party`, в итоги не идёт никуда.
         mark = marks.get(str(r.get("id")))
         tp = None
-        if mark and third_party.SIDE[mark["direction"]] == side:
+        if mark and kind != "exchange" and third_party.SIDE[mark["direction"]] == side:
             tp_part = third_party.part(r, mark)
             tp = {"person": mark["person"], "direction": mark["direction"], "amount": tp_part}
             amount = round(amount - tp_part, 2)
@@ -193,6 +207,8 @@ def decorate(rows: list[dict], scope, rules: list[dict], titles: list[str] | Non
             tags = json.loads(r.get("tags") or "[]")
         except Exception:
             tags = []
+        acc_title = out_acc if side == "outcome" else in_acc
+        acc = scope.account_of(acc_title)
         out.append({
             "id": str(r.get("id")), "date": r.get("date"), "kind": kind,
             "amount": round(amount, 2),
@@ -200,17 +216,57 @@ def decorate(rows: list[dict], scope, rules: list[dict], titles: list[str] | Non
             "payee": r.get("payee"), "comment": r.get("comment"),
             "category": cat, "category_title": cats.get(cat) if cat else None,
             "zen_tag": tags[0] if tags else None,
-            "account": out_acc if side == "outcome" else in_acc,
+            "account": acc_title,
             # Счёт, с которого операция: пока три счёта BOG делят одно название,
             # он неоднозначен — экран пишет «валюта?», а не выбирает наугад.
-            "account_id": (scope.account_of(out_acc if side == "outcome" else in_acc) or Account0).id,
-            "account_ambiguous": scope.account_of(out_acc if side == "outcome" else in_acc) is None,
+            "account_id": (acc or Account0).id,
+            "account_ambiguous": acc is None,
             "third_party": tp,
             # Обе ноги как есть — окну пометки «чужие деньги» нужно выбрать ногу
             "income": inc, "outcome": out_,
+            "income_account": in_acc, "outcome_account": out_acc,
             "income_currency": _known(scope.row_currency(r, "income")),
             "outcome_currency": _known(scope.row_currency(r, "outcome")),
+            "leg": None, "split": None, "merged_with": None,
+            **extra,
         })
+
+    for r in rows:
+        r = dict(r)
+        inc, out_ = r.get("income") or 0, r.get("outcome") or 0
+        out_acc, in_acc = r.get("outcome_account"), r.get("income_account")
+        reason = zm_merge.split_reason(r, scope, split_marks) if own else None
+        if reason:
+            out_leg, in_leg = zm_merge.legs(r)
+            for leg, side, other_side in ((out_leg, "outcome", "income"), (in_leg, "income", "outcome")):
+                if (out_acc if side == "outcome" else in_acc) not in own:
+                    continue
+                other_acc = in_acc if other_side == "income" else out_acc
+                merged = {"account": other_acc, "side": other_side,
+                          "amount": round(inc if other_side == "income" else out_, 2),
+                          "currency": _known(scope.row_currency(r, other_side))}
+                add(leg, "expense" if side == "outcome" else "income",
+                    out_ if side == "outcome" else inc, side,
+                    leg=side, split=reason, merged_with=merged)
+            continue
+        if inc > 0 and out_ > 0:
+            if own and in_acc in own and out_acc in own:
+                # Обмен внутри карты: банк сам меняет доллары на лари. Не трата и
+                # не приход — показываем обе ноги и курс сделки.
+                out_cur = _known(scope.row_currency(r, "outcome"))
+                in_cur = _known(scope.row_currency(r, "income"))
+                add(r, "exchange", out_, "outcome", to_amount=round(inc, 2), to_currency=in_cur,
+                    rate=_rate(out_, out_cur, inc, in_cur))
+            elif own and in_acc in own and out_acc not in own:
+                add(r, "transfer", inc, "income")
+            else:
+                # Региона не знаем либо счёт второй ноги вне реестра — прежняя
+                # нога расхода (fail-closed: не расклеиваем без реестра).
+                add(r, "transfer", out_, "outcome")
+        elif out_ > 0:
+            add(r, "expense", out_, "outcome")
+        else:
+            add(r, "income", inc, "income")
     return out
 
 
@@ -511,13 +567,18 @@ TOPUP_SOURCES = {
 }
 
 
-def topup_source(row, scope, titles: set[str]) -> str | None:
+def topup_source(row, scope, titles: set[str], unmerged: dict | None = None) -> str | None:
     """Откуда пришли деньги на счёт страны. None — не пополнение: обмен внутри
     карты (обе ноги свои) либо не приход вовсе.
 
     «Без отправителя» — приход с пустым получателем. Так в выписке BOG ложатся
     зачисления сервисов (Золотая корона, Avosend): ZenMoney не знает отправителя,
-    и честнее назвать их так, чем приписать маршрут по совпадению суммы."""
+    и честнее назвать их так, чем приписать маршрут по совпадению суммы.
+
+    Склейка ZenMoney (`zm_merge`) читается одной приходной ногой: приход Avosend
+    $219,31, склеенный с тратой 589,05 ₾, — пополнение, а не обмен."""
+    if unmerged is not None and zm_merge.is_split(row, scope, unmerged):
+        row = zm_merge.legs(row)[1]
     inc, out = row["income"] or 0, row["outcome"] or 0
     if inc <= 0 or row["income_account"] not in titles:
         return None
@@ -538,9 +599,10 @@ def topup_source(row, scope, titles: set[str]) -> str | None:
 def topups(rows, scope, code: str) -> dict:
     """Пополнения по месяцам и источникам, отдельно по валютам прихода."""
     titles = set(region_titles(scope, code))
+    unmerged = zm_merge.load_marks()
     items, by_month = [], {}
     for r in rows:
-        src = topup_source(r, scope, titles)
+        src = topup_source(r, scope, titles, unmerged)
         if not src:
             continue
         cur = scope.currency_of(r["income_account"])
@@ -575,3 +637,56 @@ def topups(rows, scope, code: str) -> dict:
         "people": sorted(people.values(), key=lambda p: -p["total"]),
         "sources": TOPUP_SOURCES,
     }
+
+
+# ── Курс банка и минус на лари (28.09.2026) ──────────────────────────────────
+
+def bank_rate(scope, code: str, base: str = "USD", quote: str = "GEL", n: int = 5) -> dict:
+    """Курс, по которому банк на деле меняет `base` на `quote` при взаимозачёте:
+    медиана последних N обменов «счёт base → счёт quote» внутри карты.
+
+    Строки с комментарием (комиссия пакета Solo) не берём — там банк меняет по
+    своему курсу обслуживания. Вручную расклеенные — тоже: это не обмен.
+    Обменов нет — курс Нацбанка с признаком `source='nbg'`: лучше грубая оценка
+    с подписью, чем ноль."""
+    import statistics
+    base_t = {a.title for a in scope.accounts(include_cash=True, region=code)
+              if a.currency == base and not a.ambiguous}
+    quote_t = {a.title for a in scope.accounts(include_cash=True, region=code)
+               if a.currency == quote and not a.ambiguous}
+    rates: list[float] = []
+    if base_t and quote_t:
+        unmerged = zm_merge.load_marks()
+        bm, qm = ",".join("?" * len(base_t)), ",".join("?" * len(quote_t))
+        conn = get_zenmoney()
+        try:
+            rows = conn.execute(
+                f"SELECT id, income, outcome FROM zm_transactions WHERE deleted = 0"
+                f" AND outcome > 0 AND income > 0 AND outcome_account IN ({bm})"
+                f" AND income_account IN ({qm}) AND (comment IS NULL OR comment = '')"
+                f" ORDER BY date DESC, changed DESC LIMIT ?",
+                [*base_t, *quote_t, n * 3]).fetchall()
+        finally:
+            conn.close()
+        rates = [r["income"] / r["outcome"] for r in rows if str(r["id"]) not in unmerged][:n]
+    if rates:
+        return {"rate": round(statistics.median(rates), 4), "source": "bank", "samples": len(rates)}
+    import fx
+    sig = fx.signal(base, quote)
+    return {"rate": sig.get("rate"), "source": "nbg", "samples": 0}
+
+
+def usd_position(balances: dict, reserve: float, rate: float | None) -> dict:
+    """Сколько долларов по-настоящему свободно, если лари в минусе.
+
+    Банк гасит минус на лари из долларов сам — эти доллары уже заняты. Свободно =
+    доллары − минус лари по курсу банка − неснижаемый запас. Плюс на лари
+    доллары не увеличивает: это другие деньги, их никто не меняет обратно."""
+    usd = balances.get("USD", 0.0)
+    gel_debt = round(max(-(balances.get("GEL") or 0.0), 0.0), 2)
+    usd_for_debt = round(gel_debt / rate, 2) if gel_debt and rate else 0.0
+    effective = round(usd - usd_for_debt, 2)
+    return {"usd_balance": usd, "gel_debt": gel_debt, "usd_for_debt": usd_for_debt,
+            "usd_effective": effective, "usd_free": round(max(effective - reserve, 0), 2),
+            # Минус есть, а курса нет — «свободно» посчитано без него: экран обязан сказать
+            "debt_unpriced": bool(gel_debt and not rate)}

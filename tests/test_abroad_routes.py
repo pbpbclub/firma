@@ -72,7 +72,7 @@ def test_outflows_skip_dateless_rows(scope):
     import abroad_routes as ar
     r = row("Black", "Black", 5000, payee="Avosend")
     r["date"] = None
-    assert ar.outflows([r], scope) == []
+    assert ar.outflows([r], scope, unmerged={}) == []
 
 
 def test_outflows_region_keeps_only_its_country(scope):
@@ -82,7 +82,7 @@ def test_outflows_region_keeps_only_its_country(scope):
     ge = row("Black", "GEL Solo", 1500, 45.5)
     tr = row("Black", "TRY Wallet", 2000, 700)
     svc = row("Black", "Black", 5000, payee="Avosend")
-    got = ar.outflows([ge, tr, svc], scope, region="ge")
+    got = ar.outflows([ge, tr, svc], scope, region="ge", unmerged={})
     assert [o["to_region"] for o in got] == ["ge", None]
-    assert [o["to_region"] for o in ar.outflows([ge, tr, svc], scope, region="tr")] == ["tr", None]
-    assert len(ar.outflows([ge, tr, svc], scope)) == 3
+    assert [o["to_region"] for o in ar.outflows([ge, tr, svc], scope, region="tr", unmerged={})] == ["tr", None]
+    assert len(ar.outflows([ge, tr, svc], scope, unmerged={})) == 3

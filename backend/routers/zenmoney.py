@@ -8,6 +8,7 @@ from privacy import require_owner
 import third_party
 from zm_scope import ABROAD_LABEL, CURRENCY_SIGNS, scope_for
 import abroad_routes
+import zm_merge
 import json
 import re
 import subprocess
@@ -263,15 +264,19 @@ def get_transactions(
         rows = conn.execute(sql, params).fetchall()
         rules = _load_payee_rules()
         route_scope = scope_for(None, owner=True)
+        unmerged = zm_merge.load_marks()
         result = []
         for r in rows:
             if not scope.row_in_currency(r, currency):
                 continue
             if not scope.visible(r):
                 continue
+            split = zm_merge.is_split(r, route_scope, unmerged)
             # Маска — последним действием: она обнуляет вторую ногу, а это
             # признак расхода во всём проекте (см. zm_scope.Scope.mask).
-            d = scope.mask(r)
+            d = scope.mask(r, split=split)
+            if split:
+                d["unmerged"] = True
             d["currency"] = currency
             if not d.get("masked"):
                 # У замаскированной кросс-строки валюты ног проставила сама
@@ -283,7 +288,7 @@ def get_transactions(
             resolved = _resolve_payee((d.get("payee") or "").strip(), rules, [])
             zen_cat = d["tags"][0] if d["tags"] else ""
             d["display_category"] = resolved.get("category") or _CATEGORY_RU.get(zen_cat) or (zen_cat or None)
-            route = abroad_routes.route_of(r, route_scope)
+            route = abroad_routes.route_of(r, route_scope, unmerged)
             if route:
                 d["abroad"] = True
                 if scope.is_owner:
@@ -326,6 +331,7 @@ def get_report(month: Optional[str] = None, currency: Optional[str] = None,
         by_cat: dict[str, dict] = {}
         expenses = incomes = transfers = 0.0
         marks = third_party.load_marks()
+        unmerged = zm_merge.load_marks()
         foreign = 0.0
         for r in rows:
             out_cur, in_cur = scope.row_currency(r, "outcome"), scope.row_currency(r, "income")
@@ -337,11 +343,14 @@ def get_report(month: Optional[str] = None, currency: Optional[str] = None,
                 continue
             # Вывод себе за границу (Avosend, Корона, Узбекистан…) — перевод,
             # а не расход, даже если записан одной ногой (решение Юры 23.09.2026)
-            abroad_route = abroad_routes.route_of(r, route_scope)
+            abroad_route = abroad_routes.route_of(r, route_scope, unmerged)
+            # Склейка ZenMoney (кэшбэк на Black + покупка в Турции) — не перевод:
+            # обе ноги считаются сами по себе, каждая в своей валюте (`zm_merge`).
+            split = zm_merge.is_split(r, route_scope, unmerged)
             # 🔒 Форма строки (перевод / расход) — по СЫРЫМ ногам: помеченная
             # чужой нога обнуляется в own_legs, и перевод иначе молча становился
             # бы расходом на всю встречную сумму.
-            if _is_transfer(r) or abroad_route:
+            if (_is_transfer(r) and not split) or abroad_route:
                 if out_cur == currency:
                     transfers += out
                 continue
@@ -353,7 +362,9 @@ def get_report(month: Optional[str] = None, currency: Optional[str] = None,
                 slot = by_cat.setdefault(name, {"category": name, "total": 0.0, "count": 0})
                 slot["total"] += out
                 slot["count"] += 1
-            elif inc > 0 and in_cur == currency:
+            # Не `elif`: у расклеенной строки обе ноги живые. У обычной строки
+            # (не перевод) вторая нога нулевая — разницы нет.
+            if inc > 0 and in_cur == currency:
                 incomes += inc
 
         categories = sorted(({**c, "total": round(c["total"], 2)} for c in by_cat.values()),
@@ -387,18 +398,20 @@ def get_cashflow(months: int = Query(6, le=24), currency: Optional[str] = None,
         route_scope = scope_for(None, owner=True)
         agg: dict[str, dict] = {}
         marks = third_party.load_marks()
+        unmerged = zm_merge.load_marks()
         for r in rows:
             inc, out = third_party.own_legs(r, marks)   # чужие деньги — не доход/расход
             if not inc and not out:
                 continue
-            if _is_transfer(r) or abroad_routes.route_of(r, route_scope):
+            split = zm_merge.is_split(r, route_scope, unmerged)   # склейка ZenMoney — две операции
+            if (_is_transfer(r) and not split) or abroad_routes.route_of(r, route_scope, unmerged):
                 continue                      # переводы, в т.ч. вывод за границу — не расход
             month = (r["date"] or "")[:7]
             if not month:
                 continue
             if out > 0 and scope.row_currency(r, "outcome") == currency:
                 agg.setdefault(month, {"month": month, "expenses": 0.0, "incomes": 0.0})["expenses"] += out
-            elif inc > 0 and scope.row_currency(r, "income") == currency:
+            if inc > 0 and scope.row_currency(r, "income") == currency:
                 agg.setdefault(month, {"month": month, "expenses": 0.0, "incomes": 0.0})["incomes"] += inc
         out_rows = [{**v, "expenses": round(v["expenses"], 2), "incomes": round(v["incomes"], 2)}
                     for v in agg.values()]

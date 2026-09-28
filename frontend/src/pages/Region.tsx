@@ -7,7 +7,7 @@
 // официальный курс Нацбанка ≠ курс, по которому меняет банк, и это здесь сказано
 // прямо, а не спрятано в мелкий шрифт.
 import { useRef, useState } from "react";
-import { ArrowsClockwise } from "@phosphor-icons/react";
+import { ArrowsClockwise, LinkBreak, LinkSimple } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { fxApi, financeApi, regionsApi, zenmoneyApi } from "../api";
@@ -20,6 +20,8 @@ import { RowCard } from "../components/ui/RowCard";
 import { ColumnFilter, PeriodFilter, AmountFilter } from "../components/TableFilters";
 import { Modal } from "../components/ui/Modal";
 import { Gauge, type GaugeTone } from "../components/ui/Gauge";
+import { ActionChip } from "../components/ui/ActionChip";
+import { debtColor } from "../components/ui/type";
 import { ThirdPartyBlock, ThirdPartyModal, ThirdPartyTag, useThirdParty } from "../components/money/ThirdParty";
 
 const LABEL: React.CSSProperties = { fontSize: 10, color: "#A89070", letterSpacing: "0.06em" };
@@ -316,9 +318,11 @@ function SidePanel({ code, who, accounts, onGotoReserve }: {
                label={reserveFrac == null ? "—" : `${Math.round(reserveFrac * 100)}%`} />
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 15, fontWeight: 700, fontFamily: MONO }}>
-            {fmtAmount(sm?.usd_balance ?? 0, "USD")}
+            {fmtAmount(sm?.gel_debt ? sm.usd_effective : sm?.usd_balance ?? 0, "USD")}
           </div>
           <div style={{ fontSize: 11, color: "#6B6355", marginTop: 2, lineHeight: 1.5 }}>
+            {/* Минус на лари банк гасит из долларов сам — эти доллары уже заняты */}
+            {sm?.gel_debt ? <>с учётом минуса {fmtAmount(sm.gel_debt, "GEL")}<br /></> : null}
             {sm?.usd_reserve ? <>из {fmtAmount(sm.usd_reserve, "USD")} запаса</> : (
               <button type="button" onClick={onGotoReserve}
                 style={{ background: "none", border: "none", padding: 0, fontFamily: "inherit",
@@ -501,6 +505,14 @@ function FxTab({ who, signal, abroad, reserve, setReserve, saveReserve, reserveR
           <div style={{ marginTop: 10 }}>
             {[
               ["на долларовом счёте", fmtAmount(signal?.balances?.USD ?? 0, "USD"), "#1A1A1A"],
+              // Минус на лари банк сам погасит из долларов по своему курсу — эти доллары заняты
+              ...(signal?.gel_debt
+                ? [[`уйдёт на минус лари (−${fmtAmount(signal.gel_debt, "GEL")} по ${
+                      signal.bank_rate?.rate?.toLocaleString("ru-RU", { maximumFractionDigits: 3 }) ?? "?"}${
+                      signal.bank_rate?.source === "nbg" ? ", курс Нацбанка" : ""})`,
+                    signal.debt_unpriced ? "курс неизвестен" : `−${fmtAmount(signal.usd_for_debt, "USD")}`,
+                    debtColor(signal.usd_for_debt, "out")]]
+                : []),
               ["держу про запас", fmtAmount(signal?.usd_reserve ?? 0, "USD"), "#6B6355"],
               ["свободно", fmtAmount(signal?.usd_free ?? 0, "USD"), "#4A7C59"],
               ...(signal?.gel_if_converted
@@ -583,6 +595,8 @@ function TxTab({ code, who }: { code: string; who: string }) {
   const [assign, setAssign] = useState<{ payee: string; current: string | null } | null>(null);
   const thirdParty = useThirdParty(true);   // раздел и так только для владельца
   const [tpTx, setTpTx] = useState<any>(null);
+  // Склейка ZenMoney: строка, которую Юра хочет прочитать двумя операциями
+  const [unmergeTx, setUnmergeTx] = useState<any>(null);
 
   const { data: cats = [] } = useQuery({
     queryKey: ["region-cats", code, who], queryFn: () => regionsApi.categories(code, 12),
@@ -611,19 +625,34 @@ function TxTab({ code, who }: { code: string; who: string }) {
     },
   });
 
+  // Расклейка меняет траты, пополнения и запас — обновляем весь раздел, а не одну ленту
+  const refreshRegion = () => qc.invalidateQueries({
+    predicate: (q) => String(q.queryKey[0]).startsWith("region") || q.queryKey[0] === "fx-signal",
+  });
+  const unmerge = useMutation({
+    mutationFn: (txId: string) => regionsApi.unmerge(code, txId),
+    onSuccess: () => { refreshRegion(); setUnmergeTx(null); },
+  });
+  const remerge = useMutation({
+    mutationFn: (txId: string) => regionsApi.remerge(code, txId),
+    onSuccess: refreshRegion,
+  });
+
   const items: any[] = data?.items ?? [];
   const catTitles = ["Все", ...cats.map((c: any) => c.title)];
   const titleToCode = Object.fromEntries(cats.map((c: any) => [c.title, c.code]));
   const hasFilters = !!(search || category || kind || dateFrom || dateTo || amountMin || amountMax);
 
-  const KIND_RU: Record<string, string> = { expense: "трата", income: "приход", transfer: "перевод", third_party: "чужие" };
+  const KIND_RU: Record<string, string> = { expense: "трата", income: "приход", exchange: "обмен",
+                                            transfer: "перевод", third_party: "чужие" };
 
   return (
     <div style={{ marginTop: 18, maxWidth: 1000 }}>
       <ThirdPartyBlock people={thirdParty.people} />
       {/* Подвкладки направления */}
       <div style={{ display: "flex", gap: 6, marginBottom: 16, ...(isMobile ? M.tabStrip : null) }}>
-        {[["", "Все"], ["expense", "Траты"], ["income", "Приходы"], ["transfer", "Переводы"], ["third_party", "Чужие"]].map(([k, l]) => (
+        {[["", "Все"], ["expense", "Траты"], ["income", "Приходы"], ["exchange", "Обмены"], ["transfer", "Переводы"],
+          ["third_party", "Чужие"]].map(([k, l]) => (
           <button key={k} type="button" onClick={() => setKind(k)}
             style={{ padding: "4px 10px", fontSize: 11, fontFamily: "inherit", cursor: "pointer", flexShrink: 0,
                      border: `1px solid ${kind === k ? "#E8592A" : "#EDEBE6"}`,
@@ -688,7 +717,36 @@ function TxTab({ code, who }: { code: string; who: string }) {
 
       {items.map((t: any) => {
         const sign = t.kind === "income" || t.third_party?.direction === "received" && t.kind === "third_party" ? "+" : "−";
-        const color = t.kind === "income" ? "#4A7C59" : t.kind === "transfer" || t.kind === "third_party" ? "#6B6355" : "#1A1A1A";
+        const color = t.kind === "income" ? "#4A7C59"
+          : t.kind === "transfer" || t.kind === "third_party" || t.kind === "exchange" ? "#6B6355" : "#1A1A1A";
+        // Обмен банка: обе ноги — ушло и пришло, иначе видна только долларовая
+        const amountCell = t.kind === "exchange" ? (
+          <>
+            <div>−{fmtAmount(t.amount, t.currency)}</div>
+            <div style={{ fontSize: 11, color: "#4A7C59" }}>+{fmtAmount(t.to_amount, t.to_currency)}</div>
+          </>
+        ) : <>{sign}{fmtAmount(t.amount, t.currency)}</>;
+        const title = t.payee || (t.kind === "exchange"
+          ? `Обмен ${currencySign(t.currency)} → ${currencySign(t.to_currency)}` : "—");
+        const rateNote = t.kind === "exchange" && t.rate
+          ? `курс ${t.rate.value.toLocaleString("ru-RU", { maximumFractionDigits: 4 })} ${currencySign(t.rate.in)} за ${currencySign(t.rate.price_of)}`
+          : null;
+        // Что ZenMoney приклеил к этой операции (сама она — трата или приход)
+        const mw = t.merged_with;
+        const splitNote = t.split ? (
+          <div style={{ fontSize: 10, color: "#B8860B", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <span>склейка ZenMoney: {mw ? <>приклеено {mw.side === "income" ? "+" : "−"}{fmtAmount(mw.amount, mw.currency)} {mw.account}</> : null}</span>
+            {t.split === "manual" && (
+              <ActionChip icon={<LinkSimple size={12} />} label="склеить обратно" disabled={remerge.isPending}
+                onClick={() => remerge.mutate(String(t.id))} />
+            )}
+          </div>
+        ) : null;
+        const unmergeBtn = (t.kind === "exchange" || t.kind === "transfer") ? (
+          <ActionChip icon={<LinkBreak size={12} />} label="расклеить"
+            title="ZenMoney склеил две разные операции в одну — показать их отдельно"
+            onClick={() => setUnmergeTx(t)} />
+        ) : null;
         const tpTag = <ThirdPartyTag mark={thirdParty.byTx.get(String(t.id))} onOpen={() => setTpTx(t)} />;
         const catCell = t.kind === "third_party" ? tpTag : t.kind === "expense" ? (
           <button type="button" onClick={() => setAssign({ payee: (t.payee || "").trim(), current: t.category })}
@@ -699,6 +757,7 @@ function TxTab({ code, who }: { code: string; who: string }) {
           </button>
         ) : <span style={{ fontSize: 10, color: "#A89070" }}>{KIND_RU[t.kind]}</span>;
         const catWithMark = t.kind === "third_party" ? catCell : <>{catCell}<div>{tpTag}</div></>;
+        const key = `${t.id}:${t.leg ?? ""}`;
 
         const accCell = (
           <span style={{ fontSize: 10, color: "#6B6355", overflow: "hidden", textOverflow: "ellipsis",
@@ -713,31 +772,57 @@ function TxTab({ code, who }: { code: string; who: string }) {
         );
 
         return isMobile ? (
-          <RowCard key={t.id}
-            title={t.payee || t.comment || "—"}
+          <RowCard key={key}
+            title={t.payee || t.comment || title}
             sub={<>{String(t.date || "").slice(5)} · {t.account || "—"}
               {t.currency ? ` ${currencySign(t.currency)}` : t.account_ambiguous ? " · валюта?" : ""}
-              {t.comment && t.payee ? <> · {t.comment}</> : null}</>}
-            right={<span style={{ color }}>{sign}{fmtAmount(t.amount, t.currency)}</span>}
-            meta={catWithMark}
+              {t.comment && t.payee ? <> · {t.comment}</> : null}
+              {rateNote ? <> · {rateNote}</> : null}</>}
+            right={<span style={{ color }}>{amountCell}</span>}
+            meta={<>{catWithMark}{splitNote}</>}
+            trailing={unmergeBtn ?? undefined}
           />
         ) : (
-          <div key={t.id} style={{ display: "grid", gridTemplateColumns: TX_GRID, padding: "10px 0",
+          <div key={key} style={{ display: "grid", gridTemplateColumns: TX_GRID, padding: "10px 0",
                                    borderBottom: "1px solid #F2EFE9", alignItems: "baseline", gap: 12 }}>
             <div style={{ fontSize: 11, color: "#6B6355", fontFamily: MONO }}>{String(t.date || "").slice(5)}</div>
             <div>
-              <div style={{ fontSize: 12, color: "#1A1A1A" }}>{t.payee || "—"}</div>
+              <div style={{ fontSize: 12, color: "#1A1A1A" }}>{title}</div>
               {t.comment && <div style={{ fontSize: 10, color: "#A89070" }}>{t.comment}</div>}
+              {rateNote && <div style={{ fontSize: 10, color: "#A89070" }}>{rateNote}</div>}
+              {splitNote}
             </div>
             <div style={{ minWidth: 0 }}>{accCell}</div>
-            <div>{catWithMark}</div>
+            <div>{catWithMark}{unmergeBtn && <div style={{ marginTop: 4 }}>{unmergeBtn}</div>}</div>
             <div style={{ fontSize: 12, fontWeight: 500, fontFamily: MONO, textAlign: "right", color }}>
-              {sign}{fmtAmount(t.amount, t.currency)}
+              {amountCell}
             </div>
           </div>
         );
       })}
 
+      {unmergeTx && (
+        <Modal size="sm" eyebrow="РАСКЛЕИТЬ ОПЕРАЦИЮ" onClose={() => setUnmergeTx(null)}
+               onCancel={() => setUnmergeTx(null)} onSave={() => unmerge.mutate(String(unmergeTx.id))}
+               saveLabel="Расклеить" saving={unmerge.isPending}>
+          <div style={{ padding: "16px 24px 20px", fontSize: 12, color: "#6B6355", lineHeight: 1.6 }}>
+            ZenMoney иногда сливает две разные операции в один «перевод», если в один день суммы
+            совпали по курсу: например, приход Avosend в долларах и трату в лари. После расклейки
+            это будут две отдельные операции:
+            <div style={{ margin: "12px 0", fontFamily: MONO, color: "#1A1A1A" }}>
+              <div>трата −{fmtAmount(unmergeTx.outcome, unmergeTx.outcome_currency)} · {unmergeTx.outcome_account}</div>
+              <div style={{ color: "#4A7C59" }}>приход +{fmtAmount(unmergeTx.income, unmergeTx.income_currency)} · {unmergeTx.income_account}</div>
+            </div>
+            Настоящий обмен банка расклеивать не нужно: когда лари уходят в минус, банк сам меняет
+            доллары по своему курсу (около 2,55 ₾ за $). Вернуть склейку можно кнопкой в строке.
+            {unmerge.isError && (
+              <div style={{ marginTop: 8, color: "#8B3A3A" }}>
+                {(unmerge.error as any)?.response?.data?.detail || "Не получилось расклеить"}
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
       {tpTx && (
         <ThirdPartyModal tx={tpTx} mark={thirdParty.byTx.get(String(tpTx.id))}
           people={thirdParty.people} onClose={() => setTpTx(null)} />
@@ -867,7 +952,7 @@ function DrillModal({ code, who, drill, onClose }: { code: string; who: string; 
         </div>
         <div style={{ maxHeight: "55vh", overflowY: "auto", borderTop: "1px solid #EDEBE6" }}>
           {items.map((t: any) => (
-            <div key={t.id} style={{ display: "grid", gridTemplateColumns: "74px minmax(0,1fr) auto", gap: 12,
+            <div key={`${t.id}:${t.leg ?? ""}`} style={{ display: "grid", gridTemplateColumns: "74px minmax(0,1fr) auto", gap: 12,
                                      padding: "8px 0", borderBottom: "1px solid #F2EFE9", alignItems: "baseline" }}>
               <span style={{ fontSize: 11, color: "#6B6355", fontFamily: MONO }}>{String(t.date || "").slice(2, 10)}</span>
               <div style={{ minWidth: 0 }}>

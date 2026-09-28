@@ -84,7 +84,8 @@ def set_reserve(body: ReserveUpdate, user=Depends(require_owner)):
 def get_signal(user=Depends(require_owner)):
     """«Сегодня менять или подождать» + сколько долларов свободно.
 
-    Свободно = остаток доллара − неснижаемый запас. Остаток берём через линзу:
+    Свободно = остаток доллара − минус на лари (по курсу банка) − неснижаемый
+    запас. Остаток берём через линзу:
     счёт без назначенной валюты (или с неоднозначным названием) в расчёт не
     идёт — лучше промолчать, чем посоветовать менять несуществующие деньги."""
     refresh = _refresh_status()
@@ -108,13 +109,20 @@ def get_signal(user=Depends(require_owner)):
             continue
         balances[a.currency] = round(balances.get(a.currency, 0) + (a.balance or 0), 2)
 
-    usd = balances.get("USD", 0.0)
-    free = round(max(usd - reserve, 0), 2)
+    # Минус на лари банк гасит из долларов сам (решение Юры 28.09.2026: вычитать
+    # его из свободных по курсу, по которому банк на деле меняет) — эти доллары
+    # уже заняты, советовать их менять нельзя.
+    import abroad
+    brate = abroad.bank_rate(scope, "ge")
+    pos = abroad.usd_position(balances, reserve, brate["rate"])
+    free = pos["usd_free"]
     sig = fx.signal("USD", "GEL")
     sig.update({
         "balances": balances,
         "usd_reserve": reserve,
         "usd_free": free,
+        **{k: pos[k] for k in ("usd_effective", "gel_debt", "usd_for_debt", "debt_unpriced")},
+        "bank_rate": brate,
         "gel_if_converted": round(free * sig["rate"], 2) if sig.get("rate") else None,
         "unconfigured": unconfigured,
         "ambiguous": ambiguous,
