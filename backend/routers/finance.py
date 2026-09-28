@@ -1102,6 +1102,7 @@ class CreditorIn(BaseModel):
 class CreditorPatch(BaseModel):
     paid: Optional[float] = None
     total: Optional[float] = None
+    amount_plan: Optional[float] = None   # план строки (× количество позиции) — от него отклонение
     description: Optional[str] = None
     status: Optional[str] = None
     due_date: Optional[str] = None
