@@ -48,6 +48,10 @@ def test_service_refund_is_not_outflow(scope):
 def test_golden_crown_uzbekistan_and_cross_row(scope):
     import abroad_routes as ar
     assert ar.route_of(row("Mir Cashback Card", "Mir Cashback Card", 4968, comment="Золотая корона"), scope) == "golden_crown"
+    # комиссия Короны — та же строка «Себе на турецкую карту», не трата
+    assert ar.route_of(row("Mir Cashback Card", "Mir Cashback Card", 124.9,
+                           comment="Комиссия за перевод на KORONA/UNISTREAM/ECT с дебетовой карты"), scope) == "golden_crown"
+    assert ar.TITLES["golden_crown"].startswith("Себе на турецкую карту")
     assert ar.route_of(row("Black", "Black", 8110, payee="MS 9",
                            comment="Курс конвертации: 1 RUB - 147.4 UZS"), scope) == "uz_ms9"
     assert ar.route_of(row("Black", "GEL Solo", 1500, 45.5), scope) == "direct"
