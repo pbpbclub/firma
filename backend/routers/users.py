@@ -1,7 +1,10 @@
+from typing import Optional
+
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from auth import (
-    get_db, get_current_user, create_token, create_user, pwd_ctx
+    get_db, get_current_user, create_token, create_user, pwd_ctx,
+    create_service_token, SERVICE_AGENTS,
 )
 
 router = APIRouter()
@@ -125,5 +128,66 @@ def change_password(body: ChangePasswordRequest, current=Depends(get_current_use
         )
         conn.commit()
         return {"ok": True}
+    finally:
+        conn.close()
+
+
+# ── Сервисные токены агентов (ТЗ Юры 05.10.2026) ─────────────────────────────
+
+class ServiceTokenRequest(BaseModel):
+    agent: str
+    sub: str                      # учётка в users, чьими правами ходит агент
+    days: Optional[int] = Field(None, ge=1, le=3650)   # None — бессрочный
+    note: Optional[str] = None
+
+
+def _require_admin(current):
+    if current["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Только для администратора")
+
+
+@router.get("/service-tokens")
+def list_service_tokens(current=Depends(get_current_user)):
+    _require_admin(current)
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT jti, agent, sub, note, created_at, created_by, expires_at,"
+            " revoked_at, revoked_by FROM service_tokens ORDER BY created_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+@router.post("/service-tokens")
+def issue_service_token(body: ServiceTokenRequest, current=Depends(get_current_user)):
+    """Токен показывается ОДИН раз, в базе хранится только jti."""
+    _require_admin(current)
+    if body.agent not in SERVICE_AGENTS:
+        raise HTTPException(status_code=400,
+                            detail=f"agent: одно из {', '.join(SERVICE_AGENTS)}")
+    conn = get_db()
+    try:
+        if not conn.execute("SELECT 1 FROM users WHERE email = ?", (body.sub,)).fetchone():
+            raise HTTPException(status_code=400, detail=f"Учётки {body.sub} нет в users")
+    finally:
+        conn.close()
+    return create_service_token(body.agent, body.sub, body.days, body.note,
+                                created_by=current["email"])
+
+
+@router.delete("/service-tokens/{jti}")
+def revoke_service_token(jti: str, current=Depends(get_current_user)):
+    _require_admin(current)
+    conn = get_db()
+    try:
+        cur = conn.execute(
+            "UPDATE service_tokens SET revoked_at = datetime('now'), revoked_by = ?"
+            " WHERE jti = ? AND revoked_at IS NULL", (current["email"], jti))
+        conn.commit()
+        if not cur.rowcount:
+            raise HTTPException(status_code=404, detail="Нет живого токена с таким jti")
+        return {"ok": True, "jti": jti}
     finally:
         conn.close()

@@ -34,6 +34,12 @@
 
 Пользователь: yuranek@pbpb.club, роль admin.
 
+**Токены агентов — сервисные** (ТЗ Юры 05.10.2026, `auth.create_service_token`): JWT
+`typ=svc` с `jti` в `auth.db.service_tokens`, бессрочный или `--days N`, отзыв точечный
+без ротации секрета. Права = права учётки `sub`. Выпуск/список/отзыв —
+`backend/scripts/service_token.py issue|list|revoke` (ходит в `/api/auth/service-tokens`,
+admin). Сессии людей — прежние 30 дней. 401: `token expired` | `token revoked` | `Invalid token`.
+
 **Чужие базы — только чтение** (исключение: pay-поля подрядчиков в analytics пишутся
 best-effort, см. Задачу 18). Пишет в них фин-агент; веб читает короткими транзакциями
 с `close()` в `finally`.

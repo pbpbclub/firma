@@ -8,7 +8,7 @@ from typing import Optional
 from dotenv import load_dotenv
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from jose import JWTError, jwt
+from jose import ExpiredSignatureError, JWTError, jwt
 from passlib.context import CryptContext
 from starlette.concurrency import run_in_threadpool
 
@@ -22,7 +22,13 @@ SECRET_KEY = os.environ.get("FIRMA_SECRET_KEY") or ""
 if not SECRET_KEY:
     raise RuntimeError("FIRMA_SECRET_KEY отсутствует в /opt/firma/backend/.env")
 ALGORITHM = "HS256"
-TOKEN_EXPIRE_DAYS = 30
+TOKEN_EXPIRE_DAYS = 30  # пользовательские сессии; сервисные токены агентов — ниже
+
+# Сервисные токены агентов (ТЗ Юры 05.10.2026): 01.10 истёк 30-дневный FIRMA_TOKEN
+# фин-агента и 4 дня firma.py получал 401. Свой вид токена (typ=svc) — долгий или
+# бессрочный, каждый с jti в auth.db.service_tokens: отзыв точечный, без ротации
+# FIRMA_SECRET_KEY. Права — права пользователя sub, отдельной роли у токена нет.
+SERVICE_AGENTS = ("fin", "yos", "vendor", "mac", "sales")
 
 pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer = HTTPBearer()
@@ -41,6 +47,19 @@ def get_db():
             created_at TEXT DEFAULT (datetime('now'))
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS service_tokens (
+            jti TEXT PRIMARY KEY,
+            agent TEXT NOT NULL,
+            sub TEXT NOT NULL,
+            note TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            created_by TEXT,
+            expires_at TEXT,
+            revoked_at TEXT,
+            revoked_by TEXT
+        )
+    """)
     conn.commit()
     return conn
 
@@ -50,15 +69,61 @@ def create_token(email: str) -> str:
     return jwt.encode({"sub": email, "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
 
 
-def verify_token(credentials: HTTPAuthorizationCredentials = Depends(bearer)):
+def create_service_token(agent: str, sub: str, days: Optional[int] = None,
+                         note: Optional[str] = None, created_by: Optional[str] = None) -> dict:
+    """Выпуск токена агента. days=None — бессрочный (живёт до отзыва)."""
+    jti = secrets.token_urlsafe(16)
+    claims = {"sub": sub, "typ": "svc", "agent": agent, "jti": jti}
+    expires_at = None
+    if days:
+        exp = datetime.utcnow() + timedelta(days=days)
+        claims["exp"] = exp
+        expires_at = exp.strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_db()
     try:
-        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if not email:
-            raise HTTPException(status_code=401, detail="Invalid token")
-        return email
+        conn.execute(
+            "INSERT INTO service_tokens (jti, agent, sub, note, created_by, expires_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (jti, agent, sub, note, created_by, expires_at),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return {"jti": jti, "agent": agent, "sub": sub, "expires_at": expires_at,
+            "token": jwt.encode(claims, SECRET_KEY, algorithm=ALGORITHM)}
+
+
+def _service_token_live(jti: str) -> bool:
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT revoked_at FROM service_tokens WHERE jti = ?",
+                           (jti,)).fetchone()
+        return bool(row) and row["revoked_at"] is None
+    finally:
+        conn.close()
+
+
+def decode_token(raw: str) -> dict:
+    """Единая проверка JWT. detail различает причины — агенты по нему решают,
+    перевыпускать токен ('token expired') или звать человека (ротация секрета,
+    отзыв): 'token expired' | 'token revoked' | 'Invalid token'."""
+    try:
+        payload = jwt.decode(raw, SECRET_KEY, algorithms=[ALGORITHM])
+    except ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="token expired")
     except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+        raise HTTPException(status_code=401, detail="Invalid token")
+    if not payload.get("sub"):
+        raise HTTPException(status_code=401, detail="Invalid token")
+    if payload.get("typ") == "svc":
+        jti = payload.get("jti")
+        if not jti or not _service_token_live(jti):
+            raise HTTPException(status_code=401, detail="token revoked")
+    return payload
+
+
+def verify_token(credentials: HTTPAuthorizationCredentials = Depends(bearer)):
+    return decode_token(credentials.credentials)["sub"]
 
 
 def _load_user(email: str):

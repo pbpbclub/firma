@@ -17,10 +17,10 @@ import io
 import sqlite3
 import uuid
 
-from jose import JWTError, jwt
+
 from PIL import Image, UnidentifiedImageError
 
-from auth import ALGORITHM, SECRET_KEY, get_current_user
+from auth import decode_token, get_current_user
 from db import MEDIA_KINDS, MEDIA_ROOT, get_production
 
 router = APIRouter()
@@ -184,10 +184,7 @@ def file_auth(token: Optional[str] = Query(None), authorization: Optional[str] =
         raw = authorization.split(" ", 1)[1]
     if not raw:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    try:
-        jwt.decode(raw, SECRET_KEY, algorithms=[ALGORITHM])
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    decode_token(raw)
 
 
 @router.get("", dependencies=[Depends(get_current_user)])
