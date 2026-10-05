@@ -66,7 +66,16 @@ def main():
         print(res["token"])
     elif a.cmd == "list":
         for t in _call("GET", API):
-            state = f"отозван {t['revoked_at']}" if t["revoked_at"] else "живой"
+            # Состояние считает API (одна точка правды), CLI только подписывает.
+            st = t.get("state")
+            if st == "revoked":
+                state = f"отозван {t['revoked_at']}"
+            elif st == "expired":
+                state = "истёк"
+            elif st == "live":
+                state = "живой"
+            else:
+                state = "состояние неизвестно (старый API)"
             print(f"{t['jti']}  {t['agent']:<7} {t['sub']:<24} до {t['expires_at'] or '∞'}  "
                   f"{state}  {t['note'] or ''}")
     else:

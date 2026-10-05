@@ -151,9 +151,18 @@ def list_service_tokens(current=Depends(get_current_user)):
     _require_admin(current)
     conn = get_db()
     try:
+        # state считается из ВСЕХ полей, определяющих судьбу токена: истёкший
+        # expires_at — такой же «не работает», как отзыв, и человек обязан это
+        # видеть здесь, а не по 401 у агента (code_rules 05.10.2026).
+        # expires_at пишется в UTC («%Y-%m-%d %H:%M:%S»), datetime('now') — тоже UTC.
         rows = conn.execute(
             "SELECT jti, agent, sub, note, created_at, created_by, expires_at,"
-            " revoked_at, revoked_by FROM service_tokens ORDER BY created_at DESC"
+            " revoked_at, revoked_by,"
+            " CASE WHEN revoked_at IS NOT NULL THEN 'revoked'"
+            "      WHEN expires_at IS NOT NULL AND expires_at <= datetime('now')"
+            "           THEN 'expired'"
+            "      ELSE 'live' END AS state"
+            " FROM service_tokens ORDER BY created_at DESC"
         ).fetchall()
         return [dict(r) for r in rows]
     finally:
