@@ -18,7 +18,7 @@ CATALOG_LINE_COLUMNS = (
 
 
 def get_production():
-    conn = sqlite3.connect(PRODUCTION_DB)
+    conn = sqlite3.connect(PRODUCTION_DB, timeout=15)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
@@ -52,7 +52,7 @@ def _backup_production(tag: str):
 
 
 def get_finance():
-    conn = sqlite3.connect(FINANCE_DB)
+    conn = sqlite3.connect(FINANCE_DB, timeout=15)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -62,7 +62,7 @@ def get_analytics():
 
     Базу держит фин-агент; веб пишет в неё только best-effort (pay-поля мастеров).
     Все вызовы обязаны быть в try/except: падать из-за чужой БД нельзя."""
-    conn = sqlite3.connect(ANALYTICS_DB)
+    conn = sqlite3.connect(ANALYTICS_DB, timeout=15)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -92,7 +92,7 @@ def get_analytics_ro():
 
 
 def get_zenmoney():
-    conn = sqlite3.connect(ZENMONEY_DB)
+    conn = sqlite3.connect(ZENMONEY_DB, timeout=15)
     conn.row_factory = sqlite3.Row
     return conn
 

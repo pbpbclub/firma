@@ -441,7 +441,7 @@ def cmd_generate(args):
 def cmd_order(args):
     """Сгенерировать счёт по заказу из MES."""
     import sqlite3
-    mes = sqlite3.connect("/opt/ai-os/data/production.db")
+    mes = sqlite3.connect("/opt/ai-os/data/production.db", timeout=15)
     mes.row_factory = sqlite3.Row
 
     order = mes.execute("""

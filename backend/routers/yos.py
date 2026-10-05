@@ -30,7 +30,7 @@ FILE_NAMES = {
 
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS download_tokens (
             code TEXT PRIMARY KEY,
