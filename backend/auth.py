@@ -93,12 +93,33 @@ def create_service_token(agent: str, sub: str, days: Optional[int] = None,
             "token": jwt.encode(claims, SECRET_KEY, algorithm=ALGORITHM)}
 
 
+def _auth_ro(timeout: float = 15.0) -> sqlite3.Connection:
+    """Read-only соединение к auth.db для горячего пути аутентификации.
+
+    Схему поднимает `get_db()` один раз на старте (`init_admin` в main.py), и в
+    проверке отзыва её поднимать НЕЛЬЗЯ: проверка исполняется на КАЖДОМ запросе
+    с сервисным токеном (включая горячий `media.file_auth` за картинками), а
+    `get_db()` делает два CREATE TABLE и commit — то есть писателем становится
+    любой запрос агента, и конкурентная блокировка отдаёт 500 вместо штатного
+    401/200 (code_rules 05.10.2026). timeout — как у общих баз."""
+    conn = sqlite3.connect(f"file:{AUTH_DB}?mode=ro", uri=True, timeout=timeout)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
 def _service_token_live(jti: str) -> bool:
-    conn = get_db()
+    try:
+        conn = _auth_ro()
+    except sqlite3.Error as e:
+        # Fail-closed, но честной причиной: «не смогли проверить» — это не
+        # «отозван» (агент иначе выбросил бы рабочий токен) и не 200.
+        raise HTTPException(status_code=503, detail="token check unavailable") from e
     try:
         row = conn.execute("SELECT revoked_at FROM service_tokens WHERE jti = ?",
                            (jti,)).fetchone()
         return bool(row) and row["revoked_at"] is None
+    except sqlite3.Error as e:
+        raise HTTPException(status_code=503, detail="token check unavailable") from e
     finally:
         conn.close()
 

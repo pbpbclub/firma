@@ -37,6 +37,12 @@ ROUTES = [
 DIRECT = ("direct", "Прямой перевод на карту")
 TITLES = {k: t for k, t, _ in ROUTES} | {DIRECT[0]: DIRECT[1]}
 
+# Маршруты, чей заголовок сам говорит «Себе …»: приписка «Заграница ·» перед ним
+# не нужна. 🔒 Признак — ключ маршрута, а НЕ префикс заголовка: подпись Юра
+# переименовывает, и `title.startswith("Себе")` молча менял бы вид строки на
+# экране при правке текста (code_rules 05.10.2026).
+SELF_TITLED = {"golden_crown"}
+
 
 def _signature(row) -> str | None:
     text = f"{(row['payee'] or '')} | {(row['comment'] or '')}".lower()

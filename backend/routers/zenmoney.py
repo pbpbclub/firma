@@ -294,7 +294,9 @@ def get_transactions(
                 if scope.is_owner:
                     d["abroad_route"] = abroad_routes.TITLES[route]
                     title = abroad_routes.TITLES[route]
-                    d["display_category"] = title if title.startswith("Себе") else f"{ABROAD_LABEL} · {title}"
+                    d["display_category"] = (
+                        title if route in abroad_routes.SELF_TITLED
+                        else f"{ABROAD_LABEL} · {title}")
                 else:
                     # Маршрут, получатель и назначение — личный контур владельца
                     d["payee"], d["comment"], d["display_category"] = ABROAD_LABEL, None, ABROAD_LABEL
