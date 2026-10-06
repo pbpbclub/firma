@@ -30,6 +30,7 @@ import { CardButton } from "../components/CardButton";
 import { CompleteOrderButton } from "../components/order/CompleteOrderButton";
 import { MasterLink } from "../components/ui/links";
 import { OrderTimeline } from "../components/order/OrderTimeline";
+import { DossiersPanel } from "../components/order/DossiersPanel";
 
 // A1/A2 (ТЗ 24.08.2026): «чем закрыт расход». cash и пустое — обычная оплата,
 // бейджа не требует; остальное стоит отметить, иначе строка читается как выплата.
@@ -773,6 +774,10 @@ export default function OrderDetail() {
               })
             )}
           </div>
+
+          {/* Чертежи и ведомости конструктора — по изделиям, версиями (ТЗ YOS 06.10.2026).
+              Без комплектов секция не рисуется */}
+          <DossiersPanel orderId={id!} summary={order?.dossiers_summary} />
 
           {/* Резерв под материалы. У транзита материалов нет: себестоимость — это
               выплата контрагенту, откладывать «под закупку» нечего. */}

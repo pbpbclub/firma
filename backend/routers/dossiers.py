@@ -10,6 +10,10 @@
 Единственный вход — `POST /publish`. Файл, совпавший по sha256 с файлом прежней версии
 того же комплекта, — жёсткая ссылка: место не растёт, версия остаётся полным снимком.
 Клиент со стороны YOS — /opt/ai-os/tools/dossier.py.
+
+След — только audit_log (сущности `dossier` / `dossier_version`), его читает история
+заказа (`orders.order_timeline`). В `events` не пишем, хотя ТЗ п.7 просит: таблица из
+MES мёртвая, ленту по ней никто не строит.
 """
 import difflib
 import hashlib
@@ -343,11 +347,6 @@ def _unique_slug(conn, order_id: str, title: str) -> str:
     return slug
 
 
-def _event(conn, order_id: str, message: str):
-    conn.execute("INSERT INTO events (id, order_id, type, message) VALUES (?, ?, 'dossier', ?)",
-                 (str(uuid.uuid4()), order_id, message))
-
-
 @router.post("/publish", dependencies=_jwt)
 def publish(meta: str = Form(...), files: List[UploadFile] = File(...)):
     try:
@@ -454,7 +453,6 @@ def publish(meta: str = Form(...), files: List[UploadFile] = File(...)):
             conn.execute("UPDATE dossiers SET current_version_id = ?, updated_at = datetime('now') WHERE id = ?",
                          (vid, d["id"]))
         msg = f"{d['title']} v{number} опубликован" + (f": {note}" if note else "")
-        _event(conn, o["id"], msg)
         audit(conn, "dossier_version", vid, "create", msg)
         conn.commit()
     except BaseException:
@@ -523,7 +521,6 @@ def pin(dossier_id: str, body: dict = Body(...)):
         conn.execute("UPDATE dossiers SET current_version_id = ?, pinned = 1, updated_at = datetime('now') "
                      "WHERE id = ?", (v["id"], d["id"]))
         msg = f"{d['title']}: закреплена v{v['number']}"
-        _event(conn, d["order_id"], msg)
         audit(conn, "dossier", d["id"], "update", msg, before_row=d)
         conn.commit()
         return {"ok": True, "current_version_id": v["id"], "number": v["number"], "pinned": 1}
@@ -540,7 +537,6 @@ def unpin(dossier_id: str):
         conn.execute("UPDATE dossiers SET pinned = 0, current_version_id = ?, updated_at = datetime('now') "
                      "WHERE id = ?", (cur, d["id"]))
         msg = f"{d['title']}: закрепление снято"
-        _event(conn, d["order_id"], msg)
         audit(conn, "dossier", d["id"], "update", msg, before_row=d)
         conn.commit()
         return {"ok": True, "current_version_id": cur, "pinned": 0}
@@ -567,7 +563,6 @@ def withdraw(vid: str, body: dict = Body(default={})):
             conn.execute("UPDATE dossiers SET current_version_id = ?, updated_at = datetime('now') WHERE id = ?",
                          (cur, d["id"]))
         msg = f"{d['title']} v{v['number']} отозван" + (f": {note}" if note else "")
-        _event(conn, d["order_id"], msg)
         audit(conn, "dossier_version", vid, "status", msg, before_row=v)
         conn.commit()
         return {"ok": True, "current_version_id": cur}
@@ -648,7 +643,6 @@ def request_costing(vid: str, body: dict = Body(default={})):
         conn.execute("UPDATE dossier_versions SET costing_status = 'requested', costing_requested_at = datetime('now') "
                      "WHERE id = ?", (vid,))
         msg = f"{d['title']} v{v['number']}: отправлен на просчёт фину"
-        _event(conn, d["order_id"], msg)
         audit(conn, "dossier_version", vid, "status", msg, before_row=v)
         conn.commit()
         return {"ok": True, "costing_status": "requested", "sent": (r.stdout or "").strip()[:300]}
@@ -671,7 +665,6 @@ def costing_done(vid: str, body: dict = Body(...)):
         conn.execute("UPDATE dossier_versions SET costing_status = 'done', estimate_set_id = ? WHERE id = ?",
                      (sid, vid))
         msg = f"{d['title']} v{v['number']}: просчитан"
-        _event(conn, d["order_id"], msg)
         audit(conn, "dossier_version", vid, "status", msg, before_row=v)
         conn.commit()
         return {"ok": True, "costing_status": "done", "estimate_set_id": sid}

@@ -2107,6 +2107,18 @@ def order_timeline(order_id: str, limit: int = Query(50, le=200)):
                           JOIN estimate_sets s ON s.id = i.set_id
                          WHERE s.order_id = :oid)
                  UNION ALL
+                 SELECT a.id, a.created_at, a.action, a.entity_type, a.summary, 0
+                   FROM audit_log a
+                  WHERE a.entity_type = 'dossier' AND a.entity_id IN
+                        (SELECT id FROM dossiers WHERE order_id = :oid)
+                 UNION ALL
+                 SELECT a.id, a.created_at, a.action, a.entity_type, a.summary, 0
+                   FROM audit_log a
+                  WHERE a.entity_type = 'dossier_version' AND a.entity_id IN
+                        (SELECT v.id FROM dossier_versions v
+                          JOIN dossiers d ON d.id = v.dossier_id
+                         WHERE d.order_id = :oid)
+                 UNION ALL
                  SELECT a.id, a.created_at, a.action, a.entity_type, a.summary, 1
                    FROM audit_log a
                   WHERE a.action = 'delete'

@@ -91,3 +91,20 @@ def test_slug_and_filename():
     assert slugify("Стол волна") == "stol-volna"
     assert safe_filename("../../.ssh/key.pdf") == "key.pdf"
     assert safe_filename("..hidden.pdf") == "hidden.pdf"
+
+
+def test_timeline_shows_dossier_events(dz):
+    from routers.orders import order_timeline
+    s, r = pub(dz, [_f("сборка.pdf", b"A")], order="ORD-061", note="финал")
+    assert s == 201
+    dz.withdraw(r["version_id"], {"note": "ошибка"})
+    texts = [i["summary"] for i in order_timeline("o1", limit=50)["items"]]
+    assert "Стол волна v1 опубликован: финал" in texts
+    assert "Стол волна v1 отозван: ошибка" in texts
+    # events мёртвая — комплекты туда не пишут
+    from db import get_production
+    c = get_production()
+    try:
+        assert c.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 0
+    finally:
+        c.close()

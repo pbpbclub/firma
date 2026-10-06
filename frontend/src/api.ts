@@ -656,3 +656,20 @@ export const mediaApi = {
   fileUrl: (id: string) => `/api/media/${id}/file?token=${encodeURIComponent(getToken() || "")}`,
   thumbUrl: (id: string) => `/api/media/${id}/thumb?token=${encodeURIComponent(getToken() || "")}`,
 };
+
+// Комплекты конструктора (ТЗ YOS 06.10.2026): публикует только dossier.py YOS
+// (POST /dossiers/publish), интерфейс читает и переопределяет указатель руками.
+export const dossiersApi = {
+  listForOrder: (orderId: string) => api.get(`/orders/${orderId}/dossiers`).then((r) => r.data),
+  get: (id: string, all = false) => api.get(`/dossiers/${id}`, { params: { all: all ? 1 : 0 } }).then((r) => r.data),
+  version: (vid: string) => api.get(`/dossiers/versions/${vid}`).then((r) => r.data),
+  pin: (id: string, versionId: string) => api.post(`/dossiers/${id}/pin`, { version_id: versionId }).then((r) => r.data),
+  unpin: (id: string) => api.post(`/dossiers/${id}/unpin`, {}).then((r) => r.data),
+  withdraw: (vid: string, note: string) => api.post(`/dossiers/versions/${vid}/withdraw`, { note }).then((r) => r.data),
+  requestCosting: (vid: string) => api.post(`/dossiers/versions/${vid}/request-costing`, {}).then((r) => r.data),
+  toCatalog: (vid: string, mode: "upsert" | "create" = "upsert") =>
+    api.post(`/dossiers/versions/${vid}/to-catalog`, { mode }).then((r) => r.data),
+  // inline — превью pdf/png во вкладке; download=1 — сохранить под исходным именем
+  fileUrl: (fid: string, download = false) =>
+    `/api/dossiers/files/${fid}?token=${encodeURIComponent(getToken() || "")}${download ? "&download=1" : ""}`,
+};
