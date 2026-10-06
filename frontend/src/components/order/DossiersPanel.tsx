@@ -11,7 +11,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
-import { CaretRight, PushPin, FileText, DownloadSimple, ArrowSquareOut } from "@phosphor-icons/react";
+import { CaretRight, PushPin, FileText, DownloadSimple, ArrowSquareOut, FolderOpen } from "@phosphor-icons/react";
 import { dossiersApi } from "../../api";
 import { MONO } from "../ui/Num";
 import { Button } from "../ui/Button";
@@ -19,7 +19,26 @@ import { Modal } from "../ui/Modal";
 import { useIsMobile } from "../ui/responsive";
 
 const BY: Record<string, string> = { blender: "конструктор", yos: "YOS", yura: "Юра", firma: "Фирма" };
-const ROLE: Record<string, string> = { drawing: "чертёж", bom: "ведомость", model: "модель", render: "рендер", other: "прочее" };
+// Файлы в окне — группами по расширению (так их видит Юра), а не по role: роль конструктор
+// может задать явно, и она разойдётся с тем, что видно в имени файла
+const FILE_GROUPS: { title: string; exts: string[] }[] = [
+  { title: "ЧЕРТЕЖИ", exts: ["pdf"] },
+  { title: "ДЛЯ РЕЗКИ", exts: ["dxf", "dwg", "svg"] },
+  { title: "3D-МОДЕЛИ", exts: ["blend", "step", "stp", "glb", "dae"] },
+  { title: "РЕНДЕРЫ", exts: ["png", "jpg", "jpeg"] },
+  { title: "ВЕДОМОСТЬ И ПРОЧЕЕ", exts: [] },   // md csv xlsx json и всё остальное
+];
+
+function groupFiles(files: any[]) {
+  const ext = (n: string) => (n.includes(".") ? n.split(".").pop()!.toLowerCase() : "");
+  const last = FILE_GROUPS.length - 1;
+  const out = FILE_GROUPS.map(g => ({ title: g.title, files: [] as any[] }));
+  for (const f of files) {
+    const i = FILE_GROUPS.findIndex(g => g.exts.includes(ext(f.filename || "")));
+    out[i < 0 ? last : i].files.push(f);
+  }
+  return out.filter(g => g.files.length > 0);
+}
 const LINE_TYPE: Record<string, string> = { material: "материал", work: "работа", labor: "работа", service: "услуга", delivery: "доставка", other: "прочее" };
 
 const lbl: React.CSSProperties = { fontSize: 10, color: "#A89070", letterSpacing: "0.06em" };
@@ -214,7 +233,7 @@ function VersionBlock({ v, dossier, orderId, onChanged, onError, isCurrent }: {
 }) {
   const isMobile = useIsMobile();
   const [bomOpen, setBomOpen] = useState(false);
-  const [modal, setModal] = useState<null | "withdraw" | "costing" | "catalog">(null);
+  const [modal, setModal] = useState<null | "files" | "withdraw" | "costing" | "catalog">(null);
   const [reason, setReason] = useState("");
   const [catalogRes, setCatalogRes] = useState<any>(null);
   const withdrawn = v.status === "withdrawn";
@@ -260,29 +279,14 @@ function VersionBlock({ v, dossier, orderId, onChanged, onError, isCurrent }: {
       )}
       {isCurrent && v.note && <div style={{ fontSize: 12, color: "#1A1A1A", marginTop: 4, lineHeight: 1.5 }}>{v.note}</div>}
 
-      {/* Файлы версии: открыть — превью во вкладке, скачать — под исходным именем */}
-      <div style={{ marginTop: 6 }}>
-        {files.map(f => (
-          <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0", fontSize: 12, flexWrap: isMobile ? "wrap" : undefined }}>
-            <span style={{ ...chip, minWidth: 58, textAlign: "center" }}>{ROLE[f.role] || f.role}</span>
-            <FileText size={13} style={{ color: "#A89070", flexShrink: 0 }} />
-            <a href={dossiersApi.fileUrl(f.id)} target="_blank" rel="noreferrer"
-              style={{ color: "#1A1A1A", textDecoration: "none", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-              onMouseEnter={e => (e.currentTarget.style.textDecoration = "underline")}
-              onMouseLeave={e => (e.currentTarget.style.textDecoration = "none")}>
-              {f.filename}
-            </a>
-            <span style={{ fontSize: 11, color: "#A89070", fontFamily: MONO, whiteSpace: "nowrap" }}>{fmtBytes(f.bytes)}</span>
-            <a href={dossiersApi.fileUrl(f.id)} target="_blank" rel="noreferrer" title="Открыть"
-              style={{ color: "#6B6355", display: "inline-flex" }}><ArrowSquareOut size={14} /></a>
-            <a href={dossiersApi.fileUrl(f.id, true)} download={f.filename} title="Скачать"
-              style={{ color: "#6B6355", display: "inline-flex" }}><DownloadSimple size={14} /></a>
-          </div>
-        ))}
-      </div>
-
-      {/* Кнопки версии */}
+      {/* Кнопки версии. Файлы — за кнопкой: 16 строк в карточке заслоняли сам проект */}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+        {files.length > 0 && (
+          <Button size="sm" onClick={() => setModal("files")}
+            style={{ ...smallBtn, color: "#E8592A", border: "1px solid #E8592A" }}>
+            <FolderOpen size={13} /> Файлы · {files.length}
+          </Button>
+        )}
         {v.has_bom && (
           <Button size="sm" onClick={() => setBomOpen(o => !o)} style={smallBtn}>
             {bomOpen ? "Скрыть ведомость" : "Ведомость"}
@@ -353,6 +357,33 @@ function VersionBlock({ v, dossier, orderId, onChanged, onError, isCurrent }: {
         </div>
       )}
 
+      {modal === "files" && (
+        <Modal size="lg" eyebrow={`ФАЙЛЫ · «${dossier.title}» v${v.number}`} onClose={() => setModal(null)}>
+          <div style={bodyPad}>
+            {groupFiles(files).map((g, gi) => (
+              <div key={g.title} style={{ marginTop: gi ? 18 : 0 }}>
+                <div style={{ ...lbl, marginBottom: 6 }}>{g.title} <span style={{ color: "#6B6355" }}>· {g.files.length}</span></div>
+                {g.files.map(f => (
+                  <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", fontSize: 13, borderBottom: "1px solid #F2EFE9" }}>
+                    <FileText size={14} style={{ color: "#A89070", flexShrink: 0 }} />
+                    <a href={dossiersApi.fileUrl(f.id)} target="_blank" rel="noreferrer"
+                      style={{ color: "#1A1A1A", textDecoration: "none", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                      onMouseEnter={e => (e.currentTarget.style.textDecoration = "underline")}
+                      onMouseLeave={e => (e.currentTarget.style.textDecoration = "none")}>
+                      {f.filename}
+                    </a>
+                    <span style={{ fontSize: 11, color: "#A89070", fontFamily: MONO, whiteSpace: "nowrap" }}>{fmtBytes(f.bytes)}</span>
+                    <a href={dossiersApi.fileUrl(f.id)} target="_blank" rel="noreferrer" title="Открыть"
+                      style={{ color: "#6B6355", display: "inline-flex", padding: 4 }}><ArrowSquareOut size={15} /></a>
+                    <a href={dossiersApi.fileUrl(f.id, true)} download={f.filename} title="Скачать"
+                      style={{ color: "#6B6355", display: "inline-flex", padding: 4 }}><DownloadSimple size={15} /></a>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </Modal>
+      )}
       {modal === "withdraw" && (
         <Modal size="sm" eyebrow={`ОТОЗВАТЬ v${v.number}`} onClose={() => setModal(null)}
           onCancel={() => setModal(null)} onSave={() => withdraw.mutate()} saveLabel="Отозвать"
