@@ -2582,3 +2582,70 @@ def ensure_zm_unmerge_schema():
         conn.commit()
     finally:
         conn.close()
+
+
+DOSSIER_ROOT = Path("/opt/firma/data/dossier")
+
+
+def ensure_dossier_schema():
+    """Комплекты конструктора: финальные чертежи и ведомости изделия заказа
+    (ТЗ YOS 06.10.2026, docs/firma_tz_dossier.md в /opt/ai-os).
+
+    Комплект — изделие внутри заказа, версия — неизменяемый снимок всего комплекта
+    (файлы + ведомость строками). Версии не удаляются: ошибка — withdraw, старое —
+    история. `current_version_id` двигается на каждую новую версию, пока Юра не
+    закрепил другую (`pinned=1`). Файлы — /opt/firma/data/dossier/<ORD>/<slug>/vNN/."""
+    conn = get_production()
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS dossiers (
+              id                 TEXT PRIMARY KEY,
+              order_id           TEXT NOT NULL REFERENCES orders(id),
+              title              TEXT NOT NULL,
+              slug               TEXT NOT NULL,
+              catalog_item_id    TEXT REFERENCES catalog_items(id),
+              estimate_item_id   TEXT REFERENCES estimate_items(id),
+              current_version_id TEXT,
+              pinned             INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0,1)),
+              created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+              updated_at         TEXT
+            )""")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_dossiers_order_title "
+                     "ON dossiers(order_id, title COLLATE NOCASE)")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS dossier_versions (
+              id                   TEXT PRIMARY KEY,
+              dossier_id           TEXT NOT NULL REFERENCES dossiers(id),
+              number               INTEGER NOT NULL,
+              status               TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','withdrawn')),
+              note                 TEXT,
+              bom_json             TEXT,
+              bom_hash             TEXT,
+              files_hash           TEXT,
+              ext_key              TEXT UNIQUE,
+              published_by         TEXT NOT NULL CHECK (published_by IN ('blender','yos','yura','firma')),
+              published_at         TEXT NOT NULL DEFAULT (datetime('now')),
+              withdrawn_at         TEXT,
+              withdrawn_note       TEXT,
+              costing_status       TEXT NOT NULL DEFAULT 'none' CHECK (costing_status IN ('none','requested','done')),
+              costing_requested_at TEXT,
+              estimate_set_id      TEXT REFERENCES estimate_sets(id),
+              UNIQUE(dossier_id, number)
+            )""")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS dossier_files (
+              id         TEXT PRIMARY KEY,
+              version_id TEXT NOT NULL REFERENCES dossier_versions(id),
+              role       TEXT NOT NULL CHECK (role IN ('drawing','bom','model','render','other')),
+              filename   TEXT NOT NULL,
+              path       TEXT NOT NULL,
+              mime       TEXT,
+              bytes      INTEGER,
+              sha256     TEXT NOT NULL,
+              UNIQUE(version_id, filename)
+            )""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_dossier_versions_dossier ON dossier_versions(dossier_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_dossier_files_version ON dossier_files(version_id)")
+        conn.commit()
+    finally:
+        conn.close()

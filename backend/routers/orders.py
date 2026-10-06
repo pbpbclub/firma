@@ -1196,6 +1196,11 @@ def silent_orders(min_days: int = Query(SILENT_ASK, ge=0)):
     }
 
 
+def _dossiers_summary(conn, oid):
+    from routers.dossiers import dossiers_summary
+    return dossiers_summary(conn, oid)
+
+
 @router.get("/{order_id}")
 def get_order(order_id: str):
     conn = get_production()
@@ -1274,6 +1279,8 @@ def get_order(order_id: str):
             "price_plan": m["revenue"],
             "cost_plan": m["cost"],
             "price_plan_stored": order.get("price_plan"),   # что лежит в таблице
+            # Комплекты конструктора: «Стол волна v3 · 06.10; Лавка v1 · 02.10» (ТЗ YOS 06.10.2026)
+            "dossiers_summary": _dossiers_summary(conn, oid),
             "status_label": STATUS_LABELS.get(order["status"], order["status"]),
             "priority_label": PRIORITY_LABELS.get(order["priority"], order["priority"]),
             "paid_total": paid_total,

@@ -8,8 +8,9 @@ from db import ensure_customer_schema, ensure_payee_rules_schema, ensure_orders_
 from db import ensure_estimate_lines_internal_schema, ensure_creditors_repoint_schema, ensure_snoozes_schema
 from db import ensure_order_activity_schema, ensure_machine_usage_schema, ensure_activities_schema, ensure_machine_expense_guard, ensure_self_transfer_rules
 from db import ensure_zm_account_meta_schema, ensure_fx_rates_schema, ensure_abroad_categories_schema, ensure_abroad_infra_seed, ensure_zm_third_party_schema, ensure_zm_unmerge_schema
+from db import ensure_dossier_schema
 from routers import orders, finance, catalog, taxes, users, estimates, funds
-from routers import customers, masters, zenmoney, admin, payee_rules, yos, work_types, brands, business_units, materials, expenses, general_expenses, suppliers, payments, rates, costing, accountable, ledger, media, reports, machine_usage, activities, fx, regions, third_party
+from routers import customers, masters, zenmoney, admin, payee_rules, yos, work_types, brands, business_units, materials, expenses, general_expenses, suppliers, payments, rates, costing, accountable, ledger, media, reports, machine_usage, activities, fx, regions, third_party, dossiers
 
 app = FastAPI(title="Firma API", version="1.0")
 
@@ -57,6 +58,9 @@ app.include_router(costing.router, prefix="/api/estimates", tags=["costing"], **
 # Медиатека: раздача файлов идёт по токену из query (<img src>) — свой Depends
 # внутри роутера, поэтому глобальный protected здесь не навешиваем.
 app.include_router(media.router, prefix="/api/media", tags=["media"])
+# Комплекты: файлы — под file_auth (?token= для превью), остальное — под JWT в роутере
+app.include_router(dossiers.router, prefix="/api/dossiers", tags=["dossiers"])
+app.include_router(dossiers.orders_router, prefix="/api/orders", tags=["dossiers"], **protected)
 
 app.include_router(yos.router, prefix="/api/yos", tags=["yos"])
 
@@ -146,4 +150,5 @@ def startup():
     ensure_abroad_infra_seed()
     ensure_zm_third_party_schema()
     ensure_zm_unmerge_schema()
+    ensure_dossier_schema()
     ensure_paid_obligations_closed()
