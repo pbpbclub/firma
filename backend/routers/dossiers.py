@@ -275,13 +275,25 @@ def _publish_response(conn, v, d, *, created=False, warnings=None, replayed=Fals
     return JSONResponse(status_code=status, content=body)
 
 
-def _replay(conn, ext_key):
+def _replay(conn, ext_key, order_id: str, item: str):
+    """Повтор по клиентскому ключу — только в границах того же заказа и комплекта.
+
+    `ext_key` в схеме глобально уникален, поэтому совпадение ключа у ДРУГОГО изделия
+    вернуло бы 200 «replayed» с чужими dossier_id/version_id, а присланные файлы молча
+    не опубликовались бы. Расхождение — явный отказ, а не повтор.
+    """
     if not ext_key:
         return None
     v = conn.execute("SELECT * FROM dossier_versions WHERE ext_key = ?", (ext_key,)).fetchone()
     if not v:
         return None
     d = conn.execute("SELECT * FROM dossiers WHERE id = ?", (v["dossier_id"],)).fetchone()
+    if not d or d["order_id"] != order_id or _key(d["title"]) != _key(item):
+        o = _order_of(conn, d["order_id"]) if d else {}
+        return _err(409, "ext_key_taken",
+                    f"ext_key «{ext_key}» уже занят комплектом «{d['title'] if d else '?'}» "
+                    f"заказа {o.get('number') or o.get('id') or '?'} — возьми другой ключ",
+                    dossier_id=d["id"] if d else None, version_id=v["id"])
     return _publish_response(conn, v, d, replayed=True, status=200)
 
 
@@ -322,6 +334,13 @@ def _stage(files: List[UploadFile], roles: dict, staging: Path) -> List[dict]:
         staged.append({"filename": name, "role": role, "tmp": tmp, "bytes": size,
                        "sha256": h.hexdigest(), "mime": mime})
     return staged
+
+
+def _same_files(conn, version_id: str, staged: List[dict]) -> bool:
+    """Совпадают ли имена, роли и содержимое файлов версии с присланным набором."""
+    prev = {(f["filename"], f["role"], f["sha256"]) for f in conn.execute(
+        "SELECT filename, role, sha256 FROM dossier_files WHERE version_id = ?", (version_id,))}
+    return prev == {(f["filename"], f["role"], f["sha256"]) for f in staged}
 
 
 def _find_dossier(conn, order_id: str, item: str, new_item: bool):
@@ -378,7 +397,7 @@ def publish(meta: str = Form(...), files: List[UploadFile] = File(...)):
         o = resolve_order(conn, m.get("order"), m.get("project_dir"))
         if not o:
             raise HTTPException(400, f"Заказ не найден: {m.get('order') or m.get('project_dir') or '—'}")
-        hit = _replay(conn, ext_key)
+        hit = _replay(conn, ext_key, o["id"], item)
         if hit:
             return hit
 
@@ -391,7 +410,7 @@ def publish(meta: str = Form(...), files: List[UploadFile] = File(...)):
         # Номер версии и выбор комплекта — под одной блокировкой: два публикатора
         # не возьмут один номер и не заведут два комплекта на одно изделие.
         conn.execute("BEGIN IMMEDIATE")
-        hit = _replay(conn, ext_key)
+        hit = _replay(conn, ext_key, o["id"], item)
         if hit:
             conn.rollback()
             return hit
@@ -408,9 +427,14 @@ def publish(meta: str = Form(...), files: List[UploadFile] = File(...)):
                          (did, o["id"], item, _unique_slug(conn, o["id"], item)))
             d = conn.execute("SELECT * FROM dossiers WHERE id = ?", (did,)).fetchone()
         elif d["current_version_id"]:
-            cur = conn.execute("SELECT number, files_hash, bom_hash FROM dossier_versions WHERE id = ?",
+            cur = conn.execute("SELECT id, number, note, files_hash, bom_hash FROM dossier_versions WHERE id = ?",
                                (d["current_version_id"],)).fetchone()
-            if cur and cur["files_hash"] == fh and cur["bom_hash"] == bh:
+            # «Ничего не изменилось» — только если совпало ВСЁ, что хранит версия и видит
+            # человек: содержимое (files_hash), имена и роли файлов, ведомость, заметка.
+            # Хэш по одному содержимому превращал переименование файла или новую роль
+            # в молчаливый 409 без следа в журнале.
+            if cur and cur["files_hash"] == fh and cur["bom_hash"] == bh \
+                    and (cur["note"] or None) == note and _same_files(conn, cur["id"], staged):
                 conn.rollback()
                 return _err(409, "unchanged", f"Ничего не изменилось относительно v{cur['number']}",
                             number=cur["number"])
