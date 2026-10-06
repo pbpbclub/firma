@@ -53,8 +53,15 @@ export function DossiersPanel({ orderId, summary }: { orderId: string; summary?:
     queryKey: ["order-dossiers", orderId],
     queryFn: () => dossiersApi.listForOrder(orderId),
   });
-  const rows: any[] = Array.isArray(data) ? data : [];
-  if (rows.length === 0) return null;   // комплектов нет — секция не нужна
+  // Хук — до условного return (React #310)
+  const [showGone, setShowGone] = useState(false);
+  const all: any[] = Array.isArray(data) ? data : [];
+  // Комплект, у которого отозваны все версии (проба, ошибка), скрыт, как и отозванные
+  // версии: удалить его нельзя, а пустая карточка читалась бы как живое изделие
+  const gone = all.filter(d => !d.current && d.versions_total > 0 && d.withdrawn_total >= d.versions_total);
+  const rows = showGone ? all : all.filter(d => !gone.includes(d));
+  if (rows.length === 0 && gone.length === 0) return null;   // комплектов нет — секция не нужна
+  if (rows.length === 0 && !showGone) return null;            // одни отозванные — не шумим
 
   return (
     <div style={{ paddingTop: 18, marginBottom: 8 }}>
@@ -63,6 +70,12 @@ export function DossiersPanel({ orderId, summary }: { orderId: string; summary?:
         {summary && <span style={{ fontSize: 11, color: "#6B6355", fontFamily: MONO }}>{summary}</span>}
       </div>
       {rows.map(d => <DossierCard key={d.dossier_id} brief={d} orderId={orderId} />)}
+      {gone.length > 0 && (
+        <span onClick={() => setShowGone(v => !v)}
+          style={{ display: "inline-block", marginTop: 8, fontSize: 11, color: "#A89070", cursor: "pointer", textDecoration: "underline" }}>
+          {showGone ? "скрыть отозванные комплекты" : `отозванные комплекты (${gone.length})`}
+        </span>
+      )}
     </div>
   );
 }
