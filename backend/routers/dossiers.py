@@ -604,6 +604,11 @@ def patch_dossier(dossier_id: str, body: dict = Body(...)):
             title = re.sub(r"\s+", " ", str(body["title"] or "")).strip()
             if not title:
                 raise HTTPException(400, "пустое название")
+            # Уникальность названия держится на python-сравнении (_key): COLLATE NOCASE
+            # у ux_dossiers_order_title кириллицу не складывает. Поэтому проверка и
+            # UPDATE — под одной блокировкой, как в publish, иначе два переименования
+            # разойдутся в «Стол Волна» и «стол волна».
+            conn.execute("BEGIN IMMEDIATE")
             for r in conn.execute("SELECT id, title FROM dossiers WHERE order_id = ? AND id != ?",
                                   (d["order_id"], d["id"])):
                 if _key(r["title"]) == _key(title):
@@ -630,6 +635,8 @@ def patch_dossier(dossier_id: str, body: dict = Body(...)):
         conn.commit()
         return dict(conn.execute("SELECT * FROM dossiers WHERE id = ?", (d["id"],)).fetchone())
     finally:
+        if conn.in_transaction:
+            conn.rollback()   # 409/400 после BEGIN IMMEDIATE не держат запись блокировкой
         conn.close()
 
 

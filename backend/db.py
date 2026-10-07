@@ -2610,6 +2610,9 @@ def ensure_dossier_schema():
               created_at         TEXT NOT NULL DEFAULT (datetime('now')),
               updated_at         TEXT
             )""")
+        # NOCASE складывает только латиницу — кириллические «Стол» и «стол» для
+        # индекса разные. Настоящая проверка названия — `dossiers.py::_key`
+        # (casefold) под BEGIN IMMEDIATE; индекс остаётся вторым контуром.
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_dossiers_order_title "
                      "ON dossiers(order_id, title COLLATE NOCASE)")
         conn.execute("""
