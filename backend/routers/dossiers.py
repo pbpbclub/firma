@@ -23,7 +23,6 @@ import mimetypes
 import os
 import re
 import shutil
-import sqlite3
 import subprocess
 import uuid
 from pathlib import Path
@@ -157,13 +156,17 @@ def _version_row(v, cur_id, files) -> dict:
 
 def dossiers_summary(conn, order_id: str) -> Optional[str]:
     """«Стол волна v3 · 06.10; Лавка v1 · 02.10» — для карточки заказа и production.py order."""
-    try:
-        rows = conn.execute(
-            "SELECT d.title, v.number, v.published_at FROM dossiers d "
-            "JOIN dossier_versions v ON v.id = d.current_version_id "
-            "WHERE d.order_id = ? ORDER BY d.created_at", (order_id,)).fetchall()
-    except sqlite3.OperationalError:     # миграция ещё не прошла
+    # «Миграция ещё не прошла» определяем явной проверкой схемы: тем же
+    # sqlite3.OperationalError приходит «database is locked» общей production.db, и
+    # перехват превращал штатную блокировку в тихое «чертежей нет».
+    have = {r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('dossiers', 'dossier_versions')")}
+    if len(have) < 2:
         return None
+    rows = conn.execute(
+        "SELECT d.title, v.number, v.published_at FROM dossiers d "
+        "JOIN dossier_versions v ON v.id = d.current_version_id "
+        "WHERE d.order_id = ? ORDER BY d.created_at", (order_id,)).fetchall()
     parts = []
     for r in rows:
         dt = (r["published_at"] or "")[:10]
@@ -281,6 +284,12 @@ def _replay(conn, ext_key, order_id: str, item: str):
     `ext_key` в схеме глобально уникален, поэтому совпадение ключа у ДРУГОГО изделия
     вернуло бы 200 «replayed» с чужими dossier_id/version_id, а присланные файлы молча
     не опубликовались бы. Расхождение — явный отказ, а не повтор.
+
+    🔒 Принадлежность сверяется по неизменяемым id (order_id комплекта и id самого
+    комплекта), а НЕ по названию: `title` правится из интерфейса (PATCH), и штатный
+    повтор публикации со старым `item` получал 409 — клиенту оставалось завести дубль
+    под новым ключом. Ключ считается занятым чужим изделием только тогда, когда в
+    заказе есть ДРУГОЙ комплект с присланным названием.
     """
     if not ext_key:
         return None
@@ -288,7 +297,10 @@ def _replay(conn, ext_key, order_id: str, item: str):
     if not v:
         return None
     d = conn.execute("SELECT * FROM dossiers WHERE id = ?", (v["dossier_id"],)).fetchone()
-    if not d or d["order_id"] != order_id or _key(d["title"]) != _key(item):
+    other = None
+    if d and d["order_id"] == order_id:
+        other, _ = _find_dossier(conn, order_id, item, True)
+    if not d or d["order_id"] != order_id or (other and other["id"] != d["id"]):
         o = _order_of(conn, d["order_id"]) if d else {}
         return _err(409, "ext_key_taken",
                     f"ext_key «{ext_key}» уже занят комплектом «{d['title'] if d else '?'}» "
@@ -426,9 +438,15 @@ def publish(meta: str = Form(...), files: List[UploadFile] = File(...)):
             conn.execute("INSERT INTO dossiers (id, order_id, title, slug) VALUES (?, ?, ?, ?)",
                          (did, o["id"], item, _unique_slug(conn, o["id"], item)))
             d = conn.execute("SELECT * FROM dossiers WHERE id = ?", (did,)).fetchone()
-        elif d["current_version_id"]:
-            cur = conn.execute("SELECT id, number, note, files_hash, bom_hash FROM dossier_versions WHERE id = ?",
-                               (d["current_version_id"],)).fetchone()
+        else:
+            # Сверяем с ПОСЛЕДНЕЙ живой версией, а не с current_version_id: при pinned=1
+            # указатель держит старую версию руками Юры, и сравнение с ним давало сразу
+            # обе беды — молчаливый дубль поверх последней v3 и ложный 409 на совпадении
+            # с закреплённой v1, которая от актуальной отличается.
+            cur = conn.execute(
+                "SELECT id, number, note, files_hash, bom_hash FROM dossier_versions "
+                "WHERE dossier_id = ? AND status = 'active' ORDER BY number DESC LIMIT 1",
+                (d["id"],)).fetchone()
             # «Ничего не изменилось» — только если совпало ВСЁ, что хранит версия и видит
             # человек: содержимое (files_hash), имена и роли файлов, ведомость, заметка.
             # Хэш по одному содержимому превращал переименование файла или новую роль
