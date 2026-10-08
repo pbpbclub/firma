@@ -163,12 +163,18 @@ def dossiers_summary(conn, order_id: str) -> Optional[str]:
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('dossiers', 'dossier_versions')")}
     if len(have) < 2:
         return None
+    # LEFT JOIN: у комплекта со всеми отозванными версиями current_version_id = NULL
+    # (withdraw), и INNER JOIN убирал его из сводки целиком — карточка заказа читалась
+    # как «конструктор ничего не сдавал». Формулировка — как у production.py YOS.
     rows = conn.execute(
         "SELECT d.title, v.number, v.published_at FROM dossiers d "
-        "JOIN dossier_versions v ON v.id = d.current_version_id "
+        "LEFT JOIN dossier_versions v ON v.id = d.current_version_id "
         "WHERE d.order_id = ? ORDER BY d.created_at", (order_id,)).fetchall()
     parts = []
     for r in rows:
+        if r["number"] is None:
+            parts.append(f"{r['title']} — активных версий нет")
+            continue
         dt = (r["published_at"] or "")[:10]
         parts.append(f"{r['title']} v{r['number']}" + (f" · {dt[8:10]}.{dt[5:7]}" if len(dt) == 10 else ""))
     return "; ".join(parts) or None
@@ -278,7 +284,7 @@ def _publish_response(conn, v, d, *, created=False, warnings=None, replayed=Fals
     return JSONResponse(status_code=status, content=body)
 
 
-def _replay(conn, ext_key, order_id: str, item: str):
+def _replay(conn, ext_key, order_id: str, item: str, fh=None, bh=None):
     """Повтор по клиентскому ключу — только в границах того же заказа и комплекта.
 
     `ext_key` в схеме глобально уникален, поэтому совпадение ключа у ДРУГОГО изделия
@@ -288,8 +294,13 @@ def _replay(conn, ext_key, order_id: str, item: str):
     🔒 Принадлежность сверяется по неизменяемым id (order_id комплекта и id самого
     комплекта), а НЕ по названию: `title` правится из интерфейса (PATCH), и штатный
     повтор публикации со старым `item` получал 409 — клиенту оставалось завести дубль
-    под новым ключом. Ключ считается занятым чужим изделием только тогда, когда в
-    заказе есть ДРУГОЙ комплект с присланным названием.
+    под новым ключом.
+
+    🔒 Присланное название, которого в заказе нет вовсе, названием не разводится: это
+    либо переименованный комплект (штатный повтор), либо ключ, переиспользованный под
+    НОВОЕ изделие — второе и есть тот тихий сбой, из-за которого файлы не публикуются.
+    Различает только содержимое: до постановки файлов (`fh is None`) решать нечем —
+    возвращаем None, вызывающий поставит файлы и спросит повторно уже с отпечатками.
     """
     if not ext_key:
         return None
@@ -297,15 +308,24 @@ def _replay(conn, ext_key, order_id: str, item: str):
     if not v:
         return None
     d = conn.execute("SELECT * FROM dossiers WHERE id = ?", (v["dossier_id"],)).fetchone()
-    other = None
-    if d and d["order_id"] == order_id:
-        other, _ = _find_dossier(conn, order_id, item, True)
-    if not d or d["order_id"] != order_id or (other and other["id"] != d["id"]):
+
+    def taken():
         o = _order_of(conn, d["order_id"]) if d else {}
         return _err(409, "ext_key_taken",
                     f"ext_key «{ext_key}» уже занят комплектом «{d['title'] if d else '?'}» "
                     f"заказа {o.get('number') or o.get('id') or '?'} — возьми другой ключ",
                     dossier_id=d["id"] if d else None, version_id=v["id"])
+
+    if not d or d["order_id"] != order_id:
+        return taken()
+    if _key(d["title"]) != _key(item):
+        other, _ = _find_dossier(conn, order_id, item, True)
+        if other is not None and other["id"] != d["id"]:
+            return taken()
+        if fh is None:
+            return None
+        if v["files_hash"] != fh or v["bom_hash"] != bh:
+            return taken()
     return _publish_response(conn, v, d, replayed=True, status=200)
 
 
@@ -422,7 +442,7 @@ def publish(meta: str = Form(...), files: List[UploadFile] = File(...)):
         # Номер версии и выбор комплекта — под одной блокировкой: два публикатора
         # не возьмут один номер и не заведут два комплекта на одно изделие.
         conn.execute("BEGIN IMMEDIATE")
-        hit = _replay(conn, ext_key, o["id"], item)
+        hit = _replay(conn, ext_key, o["id"], item, fh, bh)
         if hit:
             conn.rollback()
             return hit
