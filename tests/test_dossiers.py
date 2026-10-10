@@ -34,9 +34,18 @@ def test_versions_pointer_dedup(dz, migrated):
                bom={"lines": [{"type": "material", "title": "фанера", "qty": 2}]}, ext_key="k1")
     assert s == 201 and r["number"] == 1 and r["is_current"] and r["created_dossier"]
     assert r["order"]["number"] == "ORD-061" and r["files"] == 2
-    # тот же ext_key — та же версия, ничего не пишется
-    s, r2 = pub(dz, [_f("x.pdf", b"Z")], order="ORD-061", ext_key="k1")
+    # тот же ext_key и тот же комплект — та же версия, ничего не пишется
+    s, r2 = pub(dz, [_f("сборка.pdf", b"A"), _f("bom.md", b"B")], order="ORD-061", ext_key="k1",
+                bom={"lines": [{"type": "material", "title": "фанера", "qty": 2}]})
     assert s == 200 and r2["replayed"] and r2["version_id"] == r["version_id"]
+    # тот же ext_key, но комплект ИЗМЕНЁН — не повтор, а занятый ключ (иначе правка
+    # молча не публикуется)
+    s, r2b = pub(dz, [_f("x.pdf", b"Z")], order="ORD-061", ext_key="k1")
+    assert s == 409 and r2b["code"] == "ext_key_taken"
+    # переименование файла содержимое не меняет — тоже не повтор
+    s, r2c = pub(dz, [_f("сборка2.pdf", b"A"), _f("bom.md", b"B")], order="ORD-061", ext_key="k1",
+                 bom={"lines": [{"type": "material", "title": "фанера", "qty": 2}]})
+    assert s == 409 and r2c["code"] == "ext_key_taken"
     # ничего не изменилось
     s, r3 = pub(dz, [_f("bom.md", b"B"), _f("сборка.pdf", b"A")], order="ORD-061",
                 bom={"lines": [{"qty": 2, "title": "фанера", "type": "material"}]})
@@ -70,6 +79,21 @@ def test_versions_pointer_dedup(dz, migrated):
     assert lst[0]["current"]["number"] == 2 and lst[0]["versions_total"] == 3 and lst[0]["withdrawn_total"] == 1
     assert dz.get_version(r["version_id"])["bom_json"]["lines"][0]["title"] == "фанера"
     assert dz.dossiers_summary(migrated, "o1").startswith("Стол волна v2 · ")
+
+
+def test_replay_survives_rename_even_with_new_item(dz):
+    """Комплект переименовали из интерфейса — повтор по тому же ключу остаётся повтором,
+    в том числе когда клиент шлёт new_item (там это лишь «не подсказывай похожие»)."""
+    s, r = pub(dz, [_f("лавка.pdf", b"L")], order="ORD-061", item="Лавка", ext_key="k9")
+    assert s == 201
+    dz.patch_dossier(r["dossier_id"], {"title": "Лавка дубовая"})
+    s, r2 = pub(dz, [_f("лавка.pdf", b"L")], order="ORD-061", item="Лавка", ext_key="k9",
+                new_item=True)
+    assert s == 200 and r2["replayed"] and r2["version_id"] == r["version_id"]
+    # а изменённая нагрузка под занятым ключом — отказ, даже после переименования
+    s, r3 = pub(dz, [_f("лавка.pdf", b"L2")], order="ORD-061", item="Лавка", ext_key="k9",
+                new_item=True)
+    assert s == 409 and r3["code"] == "ext_key_taken"
 
 
 def test_rejects_bad_input_and_cleans_up(dz, tmp_path):

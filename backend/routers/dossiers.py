@@ -284,7 +284,16 @@ def _publish_response(conn, v, d, *, created=False, warnings=None, replayed=Fals
     return JSONResponse(status_code=status, content=body)
 
 
-def _replay(conn, ext_key, order_id: str, item: str, fh=None, bh=None, new_item: bool = False):
+def _same_payload(conn, v, fh, bh, note, staged) -> bool:
+    """Один компаратор «та же версия» на все ветки: содержимое, имена, роли, ведомость,
+    заметка. Отдельный узкий хэш содержимого в ветке повтора давал второе, более слабое
+    определение той же версии — и переименованный файл проезжал как «replayed»."""
+    return (v["files_hash"] == fh and v["bom_hash"] == bh
+            and (v["note"] or None) == (note or None)
+            and _same_files(conn, v["id"], staged))
+
+
+def _replay(conn, ext_key, order_id: str, item: str, fh=None, bh=None, note=None, staged=None):
     """Повтор по клиентскому ключу — только в границах того же заказа и комплекта.
 
     `ext_key` в схеме глобально уникален, поэтому совпадение ключа у ДРУГОГО изделия
@@ -296,17 +305,21 @@ def _replay(conn, ext_key, order_id: str, item: str, fh=None, bh=None, new_item:
     повтор публикации со старым `item` получал 409 — клиенту оставалось завести дубль
     под новым ключом.
 
-    🔒 Повтор — это ТОТ ЖЕ комплект (отпечаток файлов и ведомости совпал). Ключ,
-    присланный с ИЗМЕНЁННЫМ комплектом (конструктор правит чертёж, `key` в meta не
-    сменил), повтором не считается: 200 «replayed» на него означал бы, что правка молча
-    не опубликована. Поэтому `files_hash`/`bom_hash` сверяются ВСЕГДА, а до постановки
-    файлов (`fh is None`) решать нечем — возвращаем None, вызывающий поставит файлы и
-    спросит повторно уже с отпечатками.
+    🔒 Повтор — это ТОТ ЖЕ комплект, и сверяется он ОДНИМ компаратором с веткой
+    «unchanged» (`_same_payload`): содержимое, имена и роли файлов, ведомость, заметка.
+    Узкого `files_hash` здесь не хватало — переименование файла, смена роли или заметки
+    содержимое не меняют, и правка получала 200 «replayed», то есть молча не
+    публиковалась. До постановки файлов (`fh is None`) решать нечем — возвращаем None,
+    вызывающий поставит файлы и спросит повторно уже с отпечатками.
 
     🔒 Присланное название, которого в заказе нет вовсе, названием не разводится: это
     либо переименованный комплект (штатный повтор), либо ключ, переиспользованный под
-    НОВОЕ изделие. Отпечаток их не различает (копия того же набора файлов), поэтому
-    решает явное намерение клиента: `new_item=true` — «это новое изделие», и ключ занят.
+    НОВОЕ изделие. Разводит их отпечаток нагрузки, а НЕ `new_item`: у клиента этот флаг
+    значит лишь «не подсказывай похожие названия» (`_find_dossier`), и штатный повтор с
+    `--new-item` после переименования комплекта получал 409 — оставалось завести дубль
+    под новым ключом. Намерение «это новое изделие» при занятом ключе объявляется
+    отдельным полем, когда понадобится; сейчас изменённая нагрузка под занятым ключом —
+    всегда отказ.
     """
     if not ext_key:
         return None
@@ -328,11 +341,9 @@ def _replay(conn, ext_key, order_id: str, item: str, fh=None, bh=None, new_item:
         other, _ = _find_dossier(conn, order_id, item, True)
         if other is not None and other["id"] != d["id"]:
             return taken()
-        if new_item:
-            return taken()
     if fh is None:
         return None
-    if v["files_hash"] != fh or v["bom_hash"] != bh:
+    if not _same_payload(conn, v, fh, bh, note, staged or []):
         return taken()
     return _publish_response(conn, v, d, replayed=True, status=200)
 
@@ -439,7 +450,7 @@ def publish(meta: str = Form(...), files: List[UploadFile] = File(...)):
             raise HTTPException(400, f"Заказ не найден: {m.get('order') or m.get('project_dir') or '—'}")
         # До постановки файлов отпечатков нет — этот проход ловит только явно чужой ключ
         # (другой заказ, другой комплект заказа) и отказывает ещё до приёма файлов.
-        hit = _replay(conn, ext_key, o["id"], item, new_item=bool(m.get("new_item")))
+        hit = _replay(conn, ext_key, o["id"], item)
         if hit:
             return hit
 
@@ -452,7 +463,7 @@ def publish(meta: str = Form(...), files: List[UploadFile] = File(...)):
         # Номер версии и выбор комплекта — под одной блокировкой: два публикатора
         # не возьмут один номер и не заведут два комплекта на одно изделие.
         conn.execute("BEGIN IMMEDIATE")
-        hit = _replay(conn, ext_key, o["id"], item, fh, bh, bool(m.get("new_item")))
+        hit = _replay(conn, ext_key, o["id"], item, fh, bh, note, staged)
         if hit:
             conn.rollback()
             return hit
@@ -480,9 +491,8 @@ def publish(meta: str = Form(...), files: List[UploadFile] = File(...)):
             # «Ничего не изменилось» — только если совпало ВСЁ, что хранит версия и видит
             # человек: содержимое (files_hash), имена и роли файлов, ведомость, заметка.
             # Хэш по одному содержимому превращал переименование файла или новую роль
-            # в молчаливый 409 без следа в журнале.
-            if cur and cur["files_hash"] == fh and cur["bom_hash"] == bh \
-                    and (cur["note"] or None) == note and _same_files(conn, cur["id"], staged):
+            # в молчаливый 409 без следа в журнале. Компаратор — общий с веткой повтора.
+            if cur and _same_payload(conn, cur, fh, bh, note, staged):
                 conn.rollback()
                 return _err(409, "unchanged", f"Ничего не изменилось относительно v{cur['number']}",
                             number=cur["number"])
