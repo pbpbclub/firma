@@ -96,6 +96,36 @@ def test_replay_survives_rename_even_with_new_item(dz):
     assert s == 409 and r3["code"] == "ext_key_taken"
 
 
+def test_replay_only_for_live_current_version(dz):
+    """Повтор — только если версия ключа и есть действующее состояние комплекта."""
+    # отозванная версия: 200 replayed оставлял комплект без активной версии
+    s, r = pub(dz, [_f("шкаф.pdf", b"S")], order="ORD-061", item="Шкаф", ext_key="k20")
+    assert s == 201
+    dz.withdraw(r["version_id"], {"note": "ошибка"})
+    s, r2 = pub(dz, [_f("шкаф.pdf", b"S")], order="ORD-061", item="Шкаф", ext_key="k20")
+    assert s == 409 and r2["code"] == "ext_key_taken" and "отозвана" in r2["detail"]
+    # историческая версия: откат к чертежу v1 под старым ключом не публикуется,
+    # а 200 replayed читался клиентом как «опубликовано» при указателе на v2
+    s, r3 = pub(dz, [_f("полка.pdf", b"P1")], order="ORD-061", item="Полка", ext_key="k21")
+    assert s == 201
+    s, r4 = pub(dz, [_f("полка.pdf", b"P2")], order="ORD-061", item="Полка")
+    assert s == 201 and r4["number"] == 2
+    s, r5 = pub(dz, [_f("полка.pdf", b"P1")], order="ORD-061", item="Полка", ext_key="k21")
+    assert s == 409 and r5["code"] == "ext_key_taken" and "актуальна v2" in r5["detail"]
+
+
+def test_replay_still_sends_costing(dz, monkeypatch):
+    """costing=true на ветке повтора не теряется (ранний return терял поручение фину)."""
+    sent = []
+    monkeypatch.setattr(dz, "request_costing", lambda vid, body: sent.append((vid, body)))
+    s, r = pub(dz, [_f("тумба.pdf", b"T")], order="ORD-061", item="Тумба", ext_key="k30")
+    assert s == 201 and sent == []
+    s, r2 = pub(dz, [_f("тумба.pdf", b"T")], order="ORD-061", item="Тумба", ext_key="k30",
+                costing=True)
+    assert s == 200 and r2["replayed"] and sent and sent[0][0] == r["version_id"]
+    assert any("поручение фину" in w for w in r2["warnings"])
+
+
 def test_rejects_bad_input_and_cleans_up(dz, tmp_path):
     with pytest.raises(HTTPException) as e:
         pub(dz, [_f("a.exe", b"A")], order="ORD-061")

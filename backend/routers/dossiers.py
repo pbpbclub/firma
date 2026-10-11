@@ -320,6 +320,14 @@ def _replay(conn, ext_key, order_id: str, item: str, fh=None, bh=None, note=None
     под новым ключом. Намерение «это новое изделие» при занятом ключе объявляется
     отдельным полем, когда понадобится; сейчас изменённая нагрузка под занятым ключом —
     всегда отказ.
+
+    🔒 Повтор отдаётся только тогда, когда найденная по ключу версия и есть ДЕЙСТВУЮЩЕЕ
+    состояние комплекта: она активна и последняя по порядку. Отозванная (`withdraw` —
+    «это ошибка») либо историческая версия значит «присланное не опубликовано», а 200
+    `replayed` клиент читает как «опубликовано»: комплект остаётся без активной версии
+    (находка 1) или указатель остаётся на поздней v3, хотя конструктор откатился к
+    чертежу v1 (находка 2). Новую версию под тем же ключом завести нельзя — `ext_key`
+    в схеме UNIQUE, — поэтому честный ответ здесь отказ с причиной, а не повтор.
     """
     if not ext_key:
         return None
@@ -328,11 +336,12 @@ def _replay(conn, ext_key, order_id: str, item: str, fh=None, bh=None, note=None
         return None
     d = conn.execute("SELECT * FROM dossiers WHERE id = ?", (v["dossier_id"],)).fetchone()
 
-    def taken():
+    def taken(why: Optional[str] = None):
         o = _order_of(conn, d["order_id"]) if d else {}
         return _err(409, "ext_key_taken",
                     f"ext_key «{ext_key}» уже занят комплектом «{d['title'] if d else '?'}» "
-                    f"заказа {o.get('number') or o.get('id') or '?'} — возьми другой ключ",
+                    f"заказа {o.get('number') or o.get('id') or '?'}"
+                    + (f" ({why})" if why else "") + " — возьми другой ключ",
                     dossier_id=d["id"] if d else None, version_id=v["id"])
 
     if not d or d["order_id"] != order_id:
@@ -341,11 +350,50 @@ def _replay(conn, ext_key, order_id: str, item: str, fh=None, bh=None, note=None
         other, _ = _find_dossier(conn, order_id, item, True)
         if other is not None and other["id"] != d["id"]:
             return taken()
+    if v["status"] != "active":
+        return taken(f"версия v{v['number']} отозвана, повтором её не вернуть")
+    last = conn.execute("SELECT number FROM dossier_versions WHERE dossier_id = ? AND status = 'active' "
+                        "ORDER BY number DESC LIMIT 1", (v["dossier_id"],)).fetchone()
+    if last and last["number"] != v["number"]:
+        return taken(f"ключ держит v{v['number']}, а актуальна v{last['number']}")
     if fh is None:
         return None
     if not _same_payload(conn, v, fh, bh, note, staged or []):
         return taken()
     return _publish_response(conn, v, d, replayed=True, status=200)
+
+
+def _finish_replay(hit: JSONResponse, m: dict) -> JSONResponse:
+    """Побочный эффект, запрошенный телом (`costing=true`), не теряется на ветке повтора.
+
+    Ранний `return` повтора стоял ДО блока `if m.get("costing")`: повтор публикации
+    с `--costing` отвечал 200 и молча не отправлял поручение фину, хотя клиент его
+    просил. Теперь поручение либо уходит, либо состояние названо в `warnings`.
+
+    🔒 Второй раз поручение не дублируем: `agent_msg --mode smart` — деньги, и у версии
+    с `costing_status` requested|done просчёт уже заказан. Отправляем только из `none`.
+    """
+    if hit.status_code != 200 or not m.get("costing"):
+        return hit
+    body = json.loads(hit.body)
+    vid = body.get("version_id")
+    warnings = list(body.get("warnings") or [])
+    conn = get_production()
+    try:
+        r = conn.execute("SELECT costing_status FROM dossier_versions WHERE id = ?", (vid,)).fetchone()
+    finally:
+        conn.close()
+    st = r["costing_status"] if r else None
+    if st == "none":
+        try:
+            request_costing(vid, {"note": (m.get("note") or "").strip() or None})
+            warnings.append("повтор: поручение фину на просчёт отправлено")
+        except HTTPException as e:
+            warnings.append(f"поручение фину не ушло: {e.detail}")
+    else:
+        warnings.append(f"повтор: просчёт этой версии уже «{st}» — поручение не дублируем")
+    body["warnings"] = warnings
+    return JSONResponse(status_code=hit.status_code, content=body)
 
 
 def _stage(files: List[UploadFile], roles: dict, staging: Path) -> List[dict]:
@@ -452,7 +500,7 @@ def publish(meta: str = Form(...), files: List[UploadFile] = File(...)):
         # (другой заказ, другой комплект заказа) и отказывает ещё до приёма файлов.
         hit = _replay(conn, ext_key, o["id"], item)
         if hit:
-            return hit
+            return _finish_replay(hit, m)
 
         DOSSIER_ROOT.mkdir(parents=True, exist_ok=True)
         staging = DOSSIER_ROOT / ".incoming" / uuid.uuid4().hex
@@ -465,8 +513,8 @@ def publish(meta: str = Form(...), files: List[UploadFile] = File(...)):
         conn.execute("BEGIN IMMEDIATE")
         hit = _replay(conn, ext_key, o["id"], item, fh, bh, note, staged)
         if hit:
-            conn.rollback()
-            return hit
+            conn.rollback()   # до поручения фину: своё соединение request_costing пишет само
+            return _finish_replay(hit, m)
         d, similar = _find_dossier(conn, o["id"], item, bool(m.get("new_item")))
         if d is None and similar:
             conn.rollback()
